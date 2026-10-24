@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { UserPlus, ArrowRight, Eye, EyeOff, Phone } from 'lucide-react'
+import { UserPlus, ArrowRight, Eye, EyeOff, } from 'lucide-react'
 import './Auth.css'
 
 const Register = () => {
