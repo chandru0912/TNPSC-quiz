@@ -1,0 +1,147 @@
+.mocktests {
+  width: 100%;
+  padding: 1rem 2rem 3rem;
+}
+
+.mocktests-container {
+  max-width: 1000px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.mocktests-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mocktests-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--gold-primary);
+}
+
+.mocktests-subtitle {
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.mocktests-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.mocktest-card {
+  padding: 1.75rem;
+  border-radius: var(--border-radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: var(--transition);
+}
+
+.mocktest-card:hover {
+  border-color: rgba(255, 215, 0, 0.4);
+}
+
+.mocktest-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.mocktest-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.mocktest-rating {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--gold-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.star-icon {
+  fill: var(--gold-primary);
+}
+
+.mocktest-stats {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.mocktest-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.mocktest-meta {
+  display: flex;
+}
+
+.difficulty-badge {
+  padding: 0.375rem 0.75rem;
+  border-radius: 50px;
+  border: 1px solid;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.mocktest-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--gradient-primary);
+  border: none;
+  color: var(--navy-deep);
+  border-radius: var(--border-radius);
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: var(--transition);
+  align-self: flex-start;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.mocktest-btn:hover {
+  box-shadow: var(--shadow-gold);
+  transform: translateY(-2px);
+}
+
+@media (max-width: 640px) {
+  .mocktests {
+    padding: 1rem;
+  }
+
+  .mocktest-card {
+    padding: 1.25rem;
+  }
+
+  .mocktest-header {
+    flex-direction: column;
+  }
+
+  .mocktest-btn {
+    width: 100%;
+    align-self: stretch;
+  }
+}
