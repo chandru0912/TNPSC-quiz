@@ -7,6 +7,7 @@ import {
   FileText,
   Clock,
   Layers,
+  Scroll,
   HelpCircle,
   Atom,
   Globe2,
@@ -53,9 +54,9 @@ const Group2UnitDetail = () => {
           <div className="empty-state glass">
             <h2>Unit Not Found</h2>
             <p>The requested TNPSC Group 2 & 2A syllabus unit does not exist.</p>
-            <Link to="/materials" className="btn btn-primary" style={{ marginTop: '1rem' }}>
+            <Link to="/materials?group=group2_2a" className="btn btn-primary" style={{ marginTop: '1rem' }}>
               <ArrowLeft size={16} />
-              <span>Back to Study Materials</span>
+              <span>Back to Group 2 & 2A</span>
             </Link>
           </div>
         </div>
@@ -74,7 +75,7 @@ const Group2UnitDetail = () => {
         <div className="unit-detail-breadcrumb">
           <Link to="/">Home</Link>
           <ChevronRight size={14} />
-          <Link to="/materials">Study Materials</Link>
+          <Link to="/materials?group=group2_2a">Study Materials</Link>
           <ChevronRight size={14} />
           <Link to={`/materials/group2/${subject.id}`}>{subject.title}</Link>
           <ChevronRight size={14} />
@@ -100,116 +101,177 @@ const Group2UnitDetail = () => {
             <span className="unit-pill-tag">{unit.unitNumber} • Official Syllabus</span>
             <span className="unit-hero-weightage">
               <HelpCircle size={14} />
-              {unit.questionCount} Questions in Exam
+              {unit.questionCount} Questions in Prelims
             </span>
           </div>
 
           <div className="unit-hero-main">
             <div className="unit-hero-icon">
-              <Icon size={38} />
+              <Icon size={30} />
             </div>
             <div className="unit-hero-title-group">
               <h1 className="unit-hero-title">{unit.title}</h1>
-              {unit.tamilTitle && <span className="unit-hero-tamil">{unit.tamilTitle}</span>}
-              <div className="unit-hero-meta">
-                <span>{chapterCount} Chapters</span>
-                <span>•</span>
-                <span>{lessonCount} Lessons & Practice MCQs</span>
-                <span>•</span>
-                <span>{unit.standard}</span>
-              </div>
+              {unit.tamilTitle && <span className="unit-hero-tamil-title">{unit.tamilTitle}</span>}
+            </div>
+          </div>
+
+          {/* Dynamic Metrics */}
+          <div className="unit-stats-strip">
+            <div className="unit-stat-item">
+              <BookOpen size={18} />
+              <span>
+                Chapters: <strong>{chapterCount}</strong>
+              </span>
+            </div>
+            <div className="unit-stat-item">
+              <Layers size={18} />
+              <span>
+                Total Lessons: <strong>{lessonCount}</strong>
+              </span>
+            </div>
+            <div className="unit-stat-item">
+              <Clock size={18} />
+              <span>
+                Standard: <strong>{unit.standard}</strong>
+              </span>
+            </div>
+
+            <div className="unit-hero-cta">
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate(`/materials/group2/${subject.id}/unit/${unit.id}/lessons`)}
+              >
+                <BookOpen size={18} />
+                <span>View Lessons & Notes</span>
+                <ChevronRight size={18} />
+              </button>
             </div>
           </div>
         </motion.div>
 
-        {/* Official Syllabus Scope Section */}
-        <div className="syllabus-scope-section glass">
-          <div className="syllabus-scope-header">
-            <FileText size={20} className="syllabus-scope-icon" />
-            <h2 className="syllabus-scope-title">Official Syllabus Scope (PDF Source)</h2>
+        {/* Official Syllabus Topics Box */}
+        <motion.div
+          className="official-syllabus-box glass"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+        >
+          <div className="syllabus-box-header">
+            <div className="syllabus-box-title">
+              <Scroll size={20} />
+              <span>Authoritative Syllabus Topics (TNPSC Code: 495)</span>
+            </div>
+            <span className="syllabus-source-badge">Official PDF Notification</span>
           </div>
-          <p className="syllabus-scope-sub">
-            The following topics are mandated by the official TNPSC Group 2 & 2A Preliminary notification:
-          </p>
-          <ul className="syllabus-topics-list">
-            {unit.officialTopics.map((topic, idx) => (
-              <li key={idx} className="syllabus-topic-item">
-                <span className="topic-bullet" />
-                <span>{topic}</span>
-              </li>
+
+          <div className="syllabus-topics-list">
+            {unit.officialTopics.map((topic, index) => (
+              <div key={index} className="syllabus-topic-item">
+                <span className="topic-bullet">§{index + 1}</span>
+                <p>{topic}</p>
+              </div>
             ))}
-          </ul>
-        </div>
+          </div>
+        </motion.div>
 
         {/* Standard-Wise Breakdown Section */}
-        <div className="unit-class-breakdown-section glass">
-          <div className="unit-class-breakdown-header">
-            <GraduationCap size={20} />
+        <div className="unit-class-breakdown-section glass" style={{ marginTop: '1.5rem', padding: '1.5rem 1.75rem', borderRadius: 'var(--border-radius)', border: '1px solid var(--border-color)', background: 'var(--surface-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+            <GraduationCap size={22} style={{ color: 'var(--gold-primary)' }} />
             <div>
-              <h3 className="breakdown-title">School Textbook Standards (6th to 12th)</h3>
-              <p className="breakdown-sub">
-                Explore school textbook notes and MCQs for {unit.unitNumber} by class:
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                School Textbook Standards (6th to 12th)
+              </h3>
+              <p style={{ margin: '0.2rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Explore school textbook notes and MCQs for {unit.unitNumber} by class standard:
               </p>
             </div>
           </div>
 
-          <div className="breakdown-pills-grid">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
             {standardClasses.map((cls) => (
               <button
                 key={cls.id}
                 type="button"
-                className="breakdown-pill-btn"
+                className="btn glass"
+                style={{ padding: '0.65rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.825rem', fontWeight: 600, color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', cursor: 'pointer' }}
                 onClick={() => navigate(`/materials/group2/${subject.id}/unit/${unit.id}/class/${cls.id}`)}
               >
-                <GraduationCap size={16} />
                 <span>{cls.label}</span>
-                <ChevronRight size={14} />
+                <ChevronRight size={14} style={{ color: 'var(--gold-primary)' }} />
               </button>
             ))}
           </div>
         </div>
 
-        {/* Chapters Stack */}
-        <div className="unit-chapters-section">
-          <div className="chapters-header">
-            <h2 className="chapters-section-title">Chapters in {unit.unitNumber}</h2>
-            <Link
-              to={`/materials/group2/${subject.id}/unit/${unit.id}/lessons`}
-              className="btn btn-primary"
-            >
-              <span>View All Lessons & Notes</span>
-              <ChevronRight size={16} />
-            </Link>
+        {/* Chapter Cards Section */}
+        <div className="chapters-section">
+          <div className="section-title-row">
+            <h2 className="section-heading">Structured Chapter Breakdown ({chapterCount} Chapters)</h2>
           </div>
 
           <div className="chapters-grid">
-            {unit.chapters.map((chapter) => (
-              <div key={chapter.id} className="chapter-card glass">
-                <div className="chapter-card-header">
+            {unit.chapters.map((chapter, index) => (
+              <motion.div
+                key={chapter.id}
+                className="chapter-card glass"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.15 + index * 0.05 }}
+              >
+                <div className="chapter-header">
                   <span className="chapter-badge">Chapter {chapter.chapterNumber}</span>
                   <span className="chapter-lesson-count">{chapter.lessons.length} Lessons</span>
                 </div>
-                <h3 className="chapter-title">{chapter.title}</h3>
-                {chapter.tamilTitle && <span className="chapter-sub-title">{chapter.tamilTitle}</span>}
 
-                <div className="chapter-lessons-preview">
+                <h3 className="chapter-title">{chapter.title}</h3>
+                {chapter.tamilTitle && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginTop: '-0.3rem', marginBottom: '0.6rem' }}>
+                    {chapter.tamilTitle}
+                  </span>
+                )}
+
+                <div className="chapter-lessons-list">
                   {chapter.lessons.map((lesson) => (
-                    <div key={lesson.id} className="chapter-lesson-item">
-                      <span className="lesson-dot" />
-                      <span className="lesson-name">{lesson.title}</span>
+                    <div
+                      key={lesson.id}
+                      className="chapter-lesson-row"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/materials/group2/${subject.id}/unit/${unit.id}/lessons`)}
+                    >
+                      <span className="lesson-code-tag">{lesson.lessonNumber}</span>
+                      <span className="lesson-row-title" title={lesson.title}>
+                        {lesson.title}
+                      </span>
+                      <span className="status-badge-awaiting">{lesson.practiceQuestions.length} MCQs</span>
                     </div>
                   ))}
                 </div>
-
-                <Link
-                  to={`/materials/group2/${subject.id}/unit/${unit.id}/lessons`}
-                  className="chapter-action-btn"
-                >
-                  <span>Open Chapter Notes</span>
-                  <ChevronRight size={16} />
-                </Link>
-              </div>
+              </motion.div>
             ))}
+          </div>
+        </div>
+
+        {/* Action Strip */}
+        <div className="unit-action-strip glass">
+          <div className="action-strip-info">
+            <span className="action-strip-title">Ready to study {unit.title}?</span>
+            <span className="action-strip-sub">
+              Access the complete lesson sequence or practice targeted MCQs for this unit.
+            </span>
+          </div>
+
+          <div className="action-strip-buttons">
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate(`/materials/group2/${subject.id}/unit/${unit.id}/lessons`)}
+            >
+              <FileText size={18} />
+              <span>View Lessons & Notes</span>
+            </button>
+            <Link to="/practice" className="btn btn-secondary">
+              <span>Practice Unit MCQs</span>
+            </Link>
           </div>
         </div>
       </div>

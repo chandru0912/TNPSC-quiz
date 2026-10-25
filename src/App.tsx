@@ -9,6 +9,14 @@ import Group1UnitDetail from './pages/Group1UnitDetail'
 import Group1Lessons from './pages/Group1Lessons'
 import Group1Aptitude from './pages/Group1Aptitude'
 import Group1UnitClass from './pages/Group1UnitClass'
+import Group2SubjectDetail from './pages/Group2SubjectDetail'
+import Group2UnitDetail from './pages/Group2UnitDetail'
+import Group2Lessons from './pages/Group2Lessons'
+import Group2UnitClass from './pages/Group2UnitClass'
+import Group4SubjectDetail from './pages/Group4SubjectDetail'
+import Group4UnitDetail from './pages/Group4UnitDetail'
+import Group4Lessons from './pages/Group4Lessons'
+import Group4UnitClass from './pages/Group4UnitClass'
 import MCQPractice from './pages/MCQPractice'
 import MockTests from './pages/MockTests'
 import PreviousPapers from './pages/PreviousPapers'
@@ -41,6 +49,16 @@ function App() {
             <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
             <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
             <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
+            <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
+            <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+            <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+            <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+            <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
+            <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
+            <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
+            <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
+            <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
+            <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
             <Route path="/school-materials" element={<SchoolMaterials />} />
             <Route path="/practice" element={<MCQPractice />} />
             <Route path="/mock-tests" element={<MockTests />} />

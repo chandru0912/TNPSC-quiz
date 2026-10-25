@@ -14,19 +14,18 @@ import {
   ArrowLeft,
   Sparkles,
   GraduationCap,
-  Calculator,
-  Languages,
 } from 'lucide-react'
 import {
+  group2Subjects,
   getGroup2SubjectById,
   getGroup2UnitChapterCount,
   getGroup2UnitLessonCount,
   getTotalGroup2SubjectChapters,
-  getTotalGroup2SubjectLessons,
   type Group2Unit,
 } from '../data/group2SyllabusData'
 import { standardClasses } from '../data/group2ClassSyllabusData'
 import './Group1GeneralStudies.css'
+import './StudyMaterials.css'
 
 const unitIcons: Record<number, any> = {
   1: Atom,
@@ -52,9 +51,9 @@ const Group2SubjectDetail = () => {
           <div className="empty-state glass" style={{ padding: '3rem', textAlign: 'center' }}>
             <h2>Subject Not Found</h2>
             <p>The requested TNPSC Group 2 & 2A syllabus subject does not exist.</p>
-            <Link to="/materials" className="btn btn-primary" style={{ marginTop: '1rem' }}>
+            <Link to="/materials?group=group2_2a" className="btn btn-primary" style={{ marginTop: '1rem' }}>
               <ArrowLeft size={16} />
-              <span>Back to Study Materials</span>
+              <span>Back to Group 2 & 2A</span>
             </Link>
           </div>
         </div>
@@ -64,7 +63,6 @@ const Group2SubjectDetail = () => {
 
   const totalQuestions = subject.questionCount
   const totalChapters = getTotalGroup2SubjectChapters(subject)
-  const totalLessons = getTotalGroup2SubjectLessons(subject)
 
   return (
     <div className="gs-page">
@@ -73,17 +71,30 @@ const Group2SubjectDetail = () => {
         <div className="gs-breadcrumb">
           <Link to="/">Home</Link>
           <ChevronRight size={14} />
-          <Link to="/materials">Study Materials</Link>
+          <Link to="/materials?group=group2_2a">Study Materials</Link>
           <ChevronRight size={14} />
-          <span className="active">TNPSC Group 2 & 2A: {subject.title}</span>
+          <span className="active">TNPSC Group 2 & 2A {subject.title}</span>
         </div>
 
         {/* Back Link */}
         <div>
-          <Link to="/materials" className="back-btn glass">
+          <Link to="/materials?group=group2_2a" className="back-btn glass" state={{ selectedGroup: 'group2_2a' }}>
             <ArrowLeft size={16} />
-            <span>Back to All Categories</span>
+            <span>Back to Group 2 & 2A</span>
           </Link>
+        </div>
+
+        {/* Subject Navigation Tabs (Order: General Studies, Aptitude and Mental Ability, General English, General Tamil) */}
+        <div className="group-tabs glass" style={{ marginBottom: '1.75rem' }}>
+          {group2Subjects.map((sub) => (
+            <button
+              key={sub.id}
+              className={`group-tab ${sub.id === subject.id ? 'active' : ''}`}
+              onClick={() => navigate(`/materials/group2/${sub.id}`)}
+            >
+              {sub.title} ({sub.questionCount} Qs)
+            </button>
+          ))}
         </div>
 
         {/* Main Header */}
@@ -100,15 +111,14 @@ const Group2SubjectDetail = () => {
             </span>
             <span className="gs-code-badge">Syllabus Code: 495</span>
             <span className="gs-badge">{subject.standard}</span>
-            <span className="gs-code-badge">{subject.partTag}</span>
           </div>
 
           <h1 className="gs-title">
-            {subject.title} <span className="gradient-text">({totalQuestions} Questions)</span>
+            {subject.partTag}: {subject.title} <span className="gradient-text">({totalQuestions} Questions)</span>
           </h1>
           <p className="gs-subtitle">
-            {subject.description} Explore all {subject.units.length} distinct curated Units, master core chapters,
-            and track lesson-wise progress mapped specifically to the official syllabus PDF.
+            Authoritative syllabus structure from the official TNPSC notification. Explore all {subject.units.length} distinct
+            curated Units, master core chapters, and track lesson-wise progress.
           </p>
         </motion.div>
 
@@ -161,48 +171,62 @@ const Group2SubjectDetail = () => {
             <div className="classes-heading-group">
               <div className="classes-title-badge">
                 <GraduationCap size={18} />
-                <span>TNPSC Group 2 & 2A Standard-Wise Syllabus</span>
+                <span>Samacheer Kalvi School Textbook Mapping</span>
               </div>
               <h2 className="classes-main-heading">Classes: 6th to 12th Standard</h2>
-              <p className="classes-sub-heading">
-                Click any standard below to view Samacheer Kalvi school textbook topics mapped to this subject:
+              <p className="classes-subheading">
+                Click any standard below to view Samacheer Kalvi textbook syllabus, or select a standard
+                directly under any Unit card below.
               </p>
             </div>
+            <span className="classes-count-badge">7 Standards</span>
           </div>
 
           <div className="class-cards-grid">
-            {standardClasses.map((cls) => (
-              <button
+            {standardClasses.map((cls, idx) => (
+              <motion.div
                 key={cls.id}
-                type="button"
                 className="class-card glass"
-                onClick={() => navigate(`/materials/group2/${subject.id}/class/${cls.id}`)}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: idx * 0.05 }}
+                whileHover={{ scale: 1.03, y: -4 }}
+                onClick={() => navigate(`/materials/group2/${subject.id}/unit/1/class/${cls.id}`)}
               >
                 <div className="class-card-top">
-                  <span className="class-badge-pill">{cls.shortLabel}</span>
-                  <ChevronRight size={16} className="class-card-arrow" />
+                  <span className="class-num-badge">{cls.id}th</span>
+                  <span className="class-badge-samacheer">Samacheer</span>
                 </div>
-                <div className="class-card-icon-box">
-                  <GraduationCap size={24} />
+
+                <div className="class-card-main">
+                  <div className="class-icon-circle">
+                    <GraduationCap size={22} />
+                  </div>
+                  <h3 className="class-card-title">{cls.label}</h3>
+                  <p className="class-card-desc">Units 1 to {subject.units.length} mapped textbook lessons</p>
                 </div>
-                <span className="class-card-title">{cls.label}</span>
-                <span className="class-card-sub">School Textbook Notes & MCQs</span>
-              </button>
+
+                <div className="class-card-cta">
+                  <span>Explore Class</span>
+                  <ChevronRight size={14} />
+                </div>
+              </motion.div>
             ))}
           </div>
         </section>
 
-        {/* Units Section Header */}
+        {/* Section Heading for Units */}
         <div className="units-section-header">
-          <div>
-            <h2 className="units-section-title">Official Syllabus Units ({subject.units.length} Units)</h2>
-            <p className="units-section-desc">
-              Select any Unit below to access its chapters, lessons, study notes, and MCQ practice questions:
+          <div className="units-header-left">
+            <h2 className="units-section-title">{subject.title} Units ({subject.standard})</h2>
+            <p className="units-section-sub">
+              Each unit maps all 7 standards (6th to 12th) plus the comprehensive syllabus outline.
             </p>
           </div>
+          <span className="units-total-badge">{subject.units.length} Official Units</span>
         </div>
 
-        {/* Units Grid */}
+        {/* Unit Cards Responsive Grid with Standard Selectors */}
         <div className="units-grid">
           {subject.units.map((unit: Group2Unit, index: number) => {
             const Icon = unitIcons[unit.id] || BookOpen
@@ -286,20 +310,21 @@ const Group2SubjectDetail = () => {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="unit-btn"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    navigate(`/materials/group2/${subject.id}/unit/${unit.id}/lessons`)
-                  }}
-                >
-                  <span>View Lessons & Notes</span>
+                <div className="unit-btn">
+                  <span>Explore Full {unit.unitNumber} Syllabus</span>
                   <ChevronRight size={16} />
-                </button>
+                </div>
               </motion.div>
             )
           })}
+        </div>
+
+        {/* Back Button */}
+        <div>
+          <Link to="/materials?group=group2_2a" className="back-btn glass" state={{ selectedGroup: 'group2_2a' }}>
+            <ArrowLeft size={16} />
+            <span>Back to Group 2 & 2A</span>
+          </Link>
         </div>
       </div>
     </div>

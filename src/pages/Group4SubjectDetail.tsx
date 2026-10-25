@@ -1,0 +1,334 @@
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import {
+  BookOpen,
+  ChevronRight,
+  Atom,
+  Globe2,
+  Landmark,
+  Scale,
+  TrendingUp,
+  ScrollText,
+  FileQuestion,
+  Layers,
+  ArrowLeft,
+  Sparkles,
+  GraduationCap,
+} from 'lucide-react'
+import {
+  group4Subjects,
+  getGroup4SubjectById,
+  getGroup4UnitChapterCount,
+  getGroup4UnitLessonCount,
+  getTotalGroup4SubjectChapters,
+  type Group4Unit,
+} from '../data/group4SyllabusData'
+import { standardClasses } from '../data/group4ClassSyllabusData'
+import './Group1GeneralStudies.css'
+import './StudyMaterials.css'
+
+const unitIcons: Record<number, any> = {
+  1: Atom,
+  2: Globe2,
+  3: Landmark,
+  4: Scale,
+  5: TrendingUp,
+  6: ScrollText,
+  7: Sparkles,
+}
+
+const Group4SubjectDetail = () => {
+  const { subjectId } = useParams<{ subjectId: string }>()
+  const navigate = useNavigate()
+
+  const activeSubjectId = (subjectId as 'general-studies' | 'aptitude' | 'general-tamil' | 'general-english') || 'general-studies'
+  const subject = getGroup4SubjectById(activeSubjectId)
+
+  if (!subject) {
+    return (
+      <div className="gs-page">
+        <div className="gs-container">
+          <div className="empty-state glass" style={{ padding: '3rem', textAlign: 'center' }}>
+            <h2>Subject Not Found</h2>
+            <p>The requested TNPSC Group 4 & VAO syllabus subject does not exist.</p>
+            <Link to="/materials?group=group4_vao" className="btn btn-primary" style={{ marginTop: '1rem' }}>
+              <ArrowLeft size={16} />
+              <span>Back to Group 4 & VAO</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const totalQuestions = subject.questionCount
+  const totalChapters = getTotalGroup4SubjectChapters(subject)
+
+  return (
+    <div className="gs-page">
+      <div className="gs-container">
+        {/* Breadcrumb Navigation */}
+        <div className="gs-breadcrumb">
+          <Link to="/">Home</Link>
+          <ChevronRight size={14} />
+          <Link to="/materials?group=group4_vao">Study Materials</Link>
+          <ChevronRight size={14} />
+          <span className="active">TNPSC Group 4 & VAO {subject.title}</span>
+        </div>
+
+        {/* Back Link */}
+        <div>
+          <Link to="/materials?group=group4_vao" className="back-btn glass" state={{ selectedGroup: 'group4_vao' }}>
+            <ArrowLeft size={16} />
+            <span>Back to Group 4 & VAO</span>
+          </Link>
+        </div>
+
+        {/* Subject Navigation Tabs (Order: General Studies, Aptitude and Mental Ability, General Tamil, General English) */}
+        <div className="group-tabs glass" style={{ marginBottom: '1.75rem' }}>
+          {group4Subjects.map((sub) => (
+            <button
+              key={sub.id}
+              className={`group-tab ${sub.id === subject.id ? 'active' : ''}`}
+              onClick={() => navigate(`/materials/group4/${sub.id}`)}
+            >
+              {sub.title} ({sub.questionCount} Qs)
+            </button>
+          ))}
+        </div>
+
+        {/* Main Header */}
+        <motion.div
+          className="gs-header"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <div className="gs-badge-row">
+            <span className="gs-badge">
+              <Sparkles size={14} />
+              TNPSC Group 4 & VAO Examination
+            </span>
+            <span className="gs-code-badge">Syllabus Code: 496</span>
+            <span className="gs-badge">{subject.standard}</span>
+          </div>
+
+          <h1 className="gs-title">
+            {subject.partTag}: {subject.title} <span className="gradient-text">({totalQuestions} Questions)</span>
+          </h1>
+          <p className="gs-subtitle">
+            Authoritative syllabus structure from the official TNPSC notification (Code: 496). Explore all {subject.units.length} distinct
+            curated Units, master core chapters, and track lesson-wise progress.
+          </p>
+        </motion.div>
+
+        {/* Dynamic Summary HUD */}
+        <div className="gs-summary-hud">
+          <div className="gs-hud-card glass">
+            <div className="gs-hud-icon">
+              <FileQuestion size={22} />
+            </div>
+            <div className="gs-hud-info">
+              <span className="gs-hud-value">{totalQuestions}</span>
+              <span className="gs-hud-label">Total Questions</span>
+            </div>
+          </div>
+
+          <div className="gs-hud-card glass">
+            <div className="gs-hud-icon">
+              <Layers size={22} />
+            </div>
+            <div className="gs-hud-info">
+              <span className="gs-hud-value">{subject.units.length} Units</span>
+              <span className="gs-hud-label">Syllabus Units</span>
+            </div>
+          </div>
+
+          <div className="gs-hud-card glass">
+            <div className="gs-hud-icon">
+              <BookOpen size={22} />
+            </div>
+            <div className="gs-hud-info">
+              <span className="gs-hud-value">{totalChapters}</span>
+              <span className="gs-hud-label">Structured Chapters</span>
+            </div>
+          </div>
+
+          <div className="gs-hud-card glass">
+            <div className="gs-hud-icon">
+              <GraduationCap size={22} />
+            </div>
+            <div className="gs-hud-info">
+              <span className="gs-hud-value">7 Classes</span>
+              <span className="gs-hud-label">6th to 12th Standard</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Classes: 6th to 12th Standard Top Section */}
+        <section className="classes-top-section glass">
+          <div className="classes-section-header">
+            <div className="classes-heading-group">
+              <div className="classes-title-badge">
+                <GraduationCap size={18} />
+                <span>Samacheer Kalvi School Textbook Mapping</span>
+              </div>
+              <h2 className="classes-main-heading">Classes: 6th to 12th Standard</h2>
+              <p className="classes-subheading">
+                Click any standard below to view Samacheer Kalvi textbook syllabus, or select a standard
+                directly under any Unit card below.
+              </p>
+            </div>
+            <span className="classes-count-badge">7 Standards</span>
+          </div>
+
+          <div className="class-cards-grid">
+            {standardClasses.map((cls, idx) => (
+              <motion.div
+                key={cls.id}
+                className="class-card glass"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: idx * 0.05 }}
+                whileHover={{ scale: 1.03, y: -4 }}
+                onClick={() => navigate(`/materials/group4/${subject.id}/unit/1/class/${cls.id}`)}
+              >
+                <div className="class-card-top">
+                  <span className="class-num-badge">{cls.id}th</span>
+                  <span className="class-badge-samacheer">Samacheer</span>
+                </div>
+
+                <div className="class-card-main">
+                  <div className="class-icon-circle">
+                    <GraduationCap size={22} />
+                  </div>
+                  <h3 className="class-card-title">{cls.label}</h3>
+                  <p className="class-card-desc">Units 1 to {subject.units.length} mapped textbook lessons</p>
+                </div>
+
+                <div className="class-card-cta">
+                  <span>Explore Class</span>
+                  <ChevronRight size={14} />
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+
+        {/* Section Heading for Units */}
+        <div className="units-section-header">
+          <div className="units-header-left">
+            <h2 className="units-section-title">{subject.title} Units ({subject.standard})</h2>
+            <p className="units-section-sub">
+              Each unit maps school textbook standards (6th to 12th) plus the comprehensive syllabus outline.
+            </p>
+          </div>
+          <span className="units-total-badge">{subject.units.length} Official Units</span>
+        </div>
+
+        {/* Unit Cards Responsive Grid with Standard Selectors */}
+        <div className="units-grid">
+          {subject.units.map((unit: Group4Unit, index: number) => {
+            const Icon = unitIcons[unit.id] || BookOpen
+            const chapterCount = getGroup4UnitChapterCount(unit)
+            const lessonCount = getGroup4UnitLessonCount(unit)
+
+            return (
+              <motion.div
+                key={unit.id}
+                className="unit-card glass"
+                initial={{ opacity: 0, y: 25 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, delay: index * 0.08 }}
+                whileHover={{ scale: 1.015, y: -4 }}
+                onClick={() => navigate(`/materials/group4/${subject.id}/unit/${unit.id}`)}
+              >
+                <div className="unit-top-row">
+                  <span className="unit-number-pill">{unit.unitNumber}</span>
+                  <span className="unit-q-count">{unit.questionCount} Questions</span>
+                </div>
+
+                <div className="unit-main-header">
+                  <div className="unit-icon-box">
+                    <Icon size={24} />
+                  </div>
+                  <div className="unit-title-group">
+                    <h2 className="unit-title">{unit.title}</h2>
+                    {unit.tamilTitle && <span className="unit-tamil-title">{unit.tamilTitle}</span>}
+                  </div>
+                </div>
+
+                <div className="unit-topics-preview">
+                  <span className="unit-topics-heading">Official Syllabus Scope:</span>
+                  <p className="unit-topics-snippet">
+                    {unit.officialTopics.slice(0, 3).join(' • ')}...
+                  </p>
+                </div>
+
+                <div className="unit-metrics">
+                  <div className="unit-metric">
+                    <BookOpen size={16} />
+                    <span>
+                      <strong className="unit-metric-bold">{chapterCount}</strong> Chapters
+                    </span>
+                  </div>
+                  <div className="unit-metric">
+                    <Layers size={16} />
+                    <span>
+                      <strong className="unit-metric-bold">{lessonCount}</strong> Lessons
+                    </span>
+                  </div>
+                </div>
+
+                {/* Class Selector under each Unit */}
+                <div
+                  className="unit-class-selector"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="unit-class-selector-header">
+                    <div className="unit-class-selector-title">
+                      <GraduationCap size={14} />
+                      <span>Select Class (6th to 12th Standard):</span>
+                    </div>
+                  </div>
+
+                  <div className="unit-class-pills-row">
+                    {standardClasses.map((cls) => (
+                      <button
+                        key={cls.id}
+                        type="button"
+                        className="unit-class-pill-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          navigate(`/materials/group4/${subject.id}/unit/${unit.id}/class/${cls.id}`)
+                        }}
+                        title={`Open ${unit.unitNumber} – ${cls.label}`}
+                      >
+                        {cls.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="unit-btn">
+                  <span>Explore Full {unit.unitNumber} Syllabus</span>
+                  <ChevronRight size={16} />
+                </div>
+              </motion.div>
+            )
+          })}
+        </div>
+
+        {/* Back Button */}
+        <div>
+          <Link to="/materials?group=group4_vao" className="back-btn glass" state={{ selectedGroup: 'group4_vao' }}>
+            <ArrowLeft size={16} />
+            <span>Back to Group 4 & VAO</span>
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default Group4SubjectDetail
