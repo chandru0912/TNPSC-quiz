@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { FileText, Download, Calendar, Eye } from 'lucide-react'
+import { FileText, Calendar, Eye } from 'lucide-react'
 import './PreviousPapers.css'
 
 const PreviousPapers = () => {
@@ -58,10 +58,6 @@ const PreviousPapers = () => {
                 <button className="table-action-btn">
                   <Eye size={16} />
                   <span>View</span>
-                </button>
-                <button className="table-action-btn table-action-primary">
-                  <Download size={16} />
-                  <span>Download</span>
                 </button>
               </div>
             </motion.div>
