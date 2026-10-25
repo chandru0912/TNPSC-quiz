@@ -2,18 +2,96 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* =========================================================
+   Ambient Glass Background Orbs & Mesh
+   ========================================================= */
+.ambient-glass-backdrop {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.ambient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.35;
+  will-change: transform;
+}
+
+.orb-gold {
+  width: 550px;
+  height: 550px;
+  background: radial-gradient(circle, rgba(255, 215, 0, 0.42) 0%, rgba(245, 158, 11, 0.15) 70%, transparent 100%);
+  top: -120px;
+  left: 20%;
+  animation: orbDrift 22s ease-in-out infinite alternate;
+}
+
+.orb-indigo {
+  width: 650px;
+  height: 650px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.35) 0%, rgba(99, 102, 241, 0.12) 70%, transparent 100%);
+  top: 35%;
+  right: -150px;
+  animation: orbDrift 28s ease-in-out infinite alternate-reverse;
+}
+
+.orb-cyan {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.28) 0%, rgba(16, 185, 129, 0.1) 70%, transparent 100%);
+  bottom: -100px;
+  left: -100px;
+  animation: orbDrift 25s ease-in-out infinite alternate;
+}
+
+.ambient-grid-mesh {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
 }
 
 .main-content {
   flex: 1;
   width: 100%;
+  position: relative;
+  z-index: 1;
 }
 
+/* =========================================================
+   Glass Footer
+   ========================================================= */
 .footer {
-  margin-top: 3rem;
-  padding: 2rem 1rem;
+  margin-top: 4rem;
+  padding: 2.5rem 1.5rem;
   border-top: 1px solid rgba(255, 215, 0, 0.2);
-  background: rgba(10, 15, 28, 0.5);
+  background: rgba(10, 15, 30, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  position: relative;
+  z-index: 10;
+}
+
+.footer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 215, 0, 0.6) 50%, transparent 100%);
 }
 
 .footer-content {
@@ -22,12 +100,46 @@
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.75rem;
   color: var(--text-secondary);
   font-size: 0.875rem;
+}
+
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.footer-logo {
+  font-size: 1.1rem;
+  font-weight: 700;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.footer-tag {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid rgba(255, 215, 0, 0.28);
+  color: var(--gold-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.footer-copy {
+  color: var(--text-secondary);
 }
 
 .footer-note {
   color: var(--gold-primary);
   font-size: 0.8125rem;
+  opacity: 0.9;
 }

@@ -143,7 +143,7 @@ const Dashboard = () => {
         <div className="sidebar-avatar">{userName.charAt(0)}</div>
         <div className="sidebar-profile-info">
           <span className="sidebar-profile-name">{userName}</span>
-          <span className="sidebar-profile-role">Group 2 Aspirant</span>
+          <span className="sidebar-profile-role">Group 2 & 2A Aspirant</span>
         </div>
       </div>
 
