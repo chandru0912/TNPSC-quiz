@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { FileText, CheckCircle2, XCircle, ArrowRight, RotateCcw, Timer, Filter, Layers } from 'lucide-react'
+import { FileText, CheckCircle2, XCircle, ArrowRight, RotateCcw, Timer, Layers } from 'lucide-react'
 import './MCQPractice.css'
 
 interface QuestionItem {
@@ -16,7 +16,6 @@ interface QuestionItem {
 
 const MCQPractice = () => {
   const [selectedGroup, setSelectedGroup] = useState<'group1' | 'group2_2a' | 'group4_vao'>('group1')
-  const [subFilter, setSubFilter] = useState<string>('all')
 
   const [currentQuestion, setCurrentQuestion] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
@@ -29,20 +28,6 @@ const MCQPractice = () => {
     { id: 'group2_2a' as const, name: 'TNPSC Group 2 & 2A' },
     { id: 'group4_vao' as const, name: 'TNPSC Group 4 & VAO' },
   ]
-
-  const subFiltersMap = {
-    group1: [],
-    group2_2a: [
-      { id: 'all', label: 'All Group 2 & 2A' },
-      { id: 'group2', label: 'Group 2 (Interview)' },
-      { id: 'group2a', label: 'Group 2A (Non-Interview)' },
-    ],
-    group4_vao: [
-      { id: 'all', label: 'All Group 4 & VAO' },
-      { id: 'group4', label: 'Group 4 (JA & Typist)' },
-      { id: 'vao', label: 'VAO (Village Admin)' },
-    ],
-  }
 
   const allQuestions: QuestionItem[] = [
     // --- TNPSC GROUP 1 QUESTIONS ---
@@ -217,13 +202,8 @@ const MCQPractice = () => {
     },
   ]
 
-  // Filter questions according to main exam category and sub-category
-  const filteredQuestions = allQuestions.filter((q) => {
-    if (q.category !== selectedGroup) return false
-    if (subFilter === 'all') return true
-    if (q.subCategory === 'both') return true
-    return q.subCategory === subFilter
-  })
+  // Filter questions according to main exam category
+  const filteredQuestions = allQuestions.filter((q) => q.category === selectedGroup)
 
   // Safe fallback if index exceeds filtered questions
   const activeQuestionIndex = Math.min(currentQuestion, Math.max(0, filteredQuestions.length - 1))
@@ -231,16 +211,6 @@ const MCQPractice = () => {
 
   const handleGroupSelect = (group: 'group1' | 'group2_2a' | 'group4_vao') => {
     setSelectedGroup(group)
-    setSubFilter('all')
-    setCurrentQuestion(0)
-    setSelectedAnswer(null)
-    setShowResult(false)
-    setScore(0)
-    setAnsweredQuestions(0)
-  }
-
-  const handleSubFilterSelect = (sub: string) => {
-    setSubFilter(sub)
     setCurrentQuestion(0)
     setSelectedAnswer(null)
     setShowResult(false)
@@ -279,7 +249,6 @@ const MCQPractice = () => {
   }
 
   const isLastQuestion = activeQuestionIndex === filteredQuestions.length - 1
-  const currentSubFilters = subFiltersMap[selectedGroup]
 
   return (
     <div className="practice">
@@ -314,25 +283,6 @@ const MCQPractice = () => {
           ))}
         </div>
 
-        {/* Sub-Filters for Combined Categories */}
-        {currentSubFilters.length > 0 && (
-          <div className="practice-sub-filters">
-            <span className="practice-sub-label">
-              <Filter size={14} />
-              Quiz Scope:
-            </span>
-            {currentSubFilters.map((sub) => (
-              <button
-                key={sub.id}
-                className={`practice-sub-btn ${subFilter === sub.id ? 'active' : ''}`}
-                onClick={() => handleSubFilterSelect(sub.id)}
-              >
-                {sub.label}
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* Stats HUD */}
         <div className="practice-stats">
           <div className="practice-stat-card glass">
@@ -357,7 +307,7 @@ const MCQPractice = () => {
         {questionItem && (
           <AnimatePresence mode="wait">
             <motion.div
-              key={`${selectedGroup}-${subFilter}-${activeQuestionIndex}`}
+              key={`${selectedGroup}-${activeQuestionIndex}`}
               className="question-card glass"
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}

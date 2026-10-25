@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GraduationCap, Clock, FileText, Users, Play, Star, Filter } from 'lucide-react'
+import { GraduationCap, Clock, FileText, Users, Play, Star } from 'lucide-react'
 import './MockTests.css'
 
 interface MockTestItem {
@@ -18,7 +18,6 @@ interface MockTestItem {
 
 const MockTests = () => {
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'group1' | 'group2_2a' | 'group4_vao'>('all')
-  const [subFilter, setSubFilter] = useState<string>('all')
 
   const categories = [
     { id: 'all' as const, name: 'All Mock Tests' },
@@ -26,21 +25,6 @@ const MockTests = () => {
     { id: 'group2_2a' as const, name: 'TNPSC Group 2 & 2A' },
     { id: 'group4_vao' as const, name: 'TNPSC Group 4 & VAO' },
   ]
-
-  const subFiltersMap: Record<string, { id: string; label: string }[]> = {
-    all: [],
-    group1: [],
-    group2_2a: [
-      { id: 'all', label: 'All Group 2 & 2A Tests' },
-      { id: 'group2', label: 'Group 2 (Interview Posts)' },
-      { id: 'group2a', label: 'Group 2A (Non-Interview Posts)' },
-    ],
-    group4_vao: [
-      { id: 'all', label: 'All Group 4 & VAO Tests' },
-      { id: 'group4', label: 'Group 4 (Junior Assistant / Typist)' },
-      { id: 'vao', label: 'VAO (Village Admin Special)' },
-    ],
-  }
 
   const mockTests: MockTestItem[] = [
     {
@@ -154,17 +138,11 @@ const MockTests = () => {
 
   const handleCategorySelect = (cat: 'all' | 'group1' | 'group2_2a' | 'group4_vao') => {
     setSelectedCategory(cat)
-    setSubFilter('all')
   }
 
   const filteredTests = mockTests.filter((test) => {
-    if (selectedCategory !== 'all' && test.category !== selectedCategory) return false
-    if (subFilter === 'all') return true
-    if (test.subCategory === 'both') return true
-    return test.subCategory === subFilter
+    return selectedCategory === 'all' || test.category === selectedCategory
   })
-
-  const currentSubFilters = subFiltersMap[selectedCategory] || []
 
   return (
     <div className="mocktests">
@@ -199,24 +177,6 @@ const MockTests = () => {
           ))}
         </div>
 
-        {/* Sub-Filters for Combined Categories */}
-        {currentSubFilters.length > 0 && (
-          <div className="mocktests-sub-filters">
-            <span className="mocktests-sub-label">
-              <Filter size={14} />
-              Stream Filter:
-            </span>
-            {currentSubFilters.map((sub) => (
-              <button
-                key={sub.id}
-                className={`mocktests-sub-btn ${subFilter === sub.id ? 'active' : ''}`}
-                onClick={() => setSubFilter(sub.id)}
-              >
-                {sub.label}
-              </button>
-            ))}
-          </div>
-        )}
 
         <div className="mocktests-grid">
           <AnimatePresence mode="wait">
