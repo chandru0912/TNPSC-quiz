@@ -1,0 +1,196 @@
+/* Trigger wrapper — the existing .dash-chip keeps its original look */
+.dash-date-wrap {
+  display: inline-flex;
+}
+
+.dash-date-trigger {
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.dash-date-trigger:hover {
+  border-color: rgba(255, 215, 0, 0.45);
+  color: var(--gold-primary);
+}
+
+.dash-date-trigger.is-open {
+  background: rgba(255, 215, 0, 0.14);
+  border-color: rgba(255, 215, 0, 0.5);
+  color: var(--gold-primary);
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.18);
+}
+
+.dash-date-trigger:focus-visible {
+  outline: 2px solid rgba(255, 215, 0, 0.7);
+  outline-offset: 2px;
+}
+
+/* Popover (portaled to <body>, fixed so it never clips) */
+.date-pop {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem;
+  border-radius: 16px;
+  background: linear-gradient(
+    160deg,
+    rgba(26, 34, 54, 0.98) 0%,
+    rgba(11, 17, 31, 0.99) 100%
+  );
+  border: 1px solid rgba(255, 215, 0, 0.28);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 215, 0, 0.06), 0 0 26px rgba(255, 215, 0, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transform-origin: top right;
+}
+
+.date-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.date-pop-title {
+  flex: 1;
+  text-align: center;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.date-pop-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(255, 215, 0, 0.06);
+  border: 1px solid rgba(255, 215, 0, 0.18);
+  color: var(--text-secondary);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.date-pop-nav:hover {
+  background: rgba(255, 215, 0, 0.16);
+  border-color: rgba(255, 215, 0, 0.45);
+  color: var(--gold-primary);
+  transform: translateY(-1px);
+}
+
+.date-pop-nav:active {
+  transform: translateY(0);
+}
+
+.date-pop-nav:focus-visible,
+.date-pop-day:focus-visible {
+  outline: 2px solid rgba(255, 215, 0, 0.7);
+  outline-offset: 2px;
+}
+
+.date-pop-weekdays,
+.date-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.date-pop-weekday {
+  text-align: center;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-bottom: 0.1rem;
+}
+
+.date-pop-day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #dbe6f5;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.date-pop-day:hover {
+  background: rgba(255, 215, 0, 0.12);
+  border-color: rgba(255, 215, 0, 0.28);
+  color: var(--gold-primary);
+  transform: translateY(-1px);
+}
+
+.date-pop-day.is-today {
+  border-color: rgba(255, 215, 0, 0.45);
+  color: var(--gold-primary);
+}
+
+.date-pop-day.is-selected {
+  background: linear-gradient(140deg, #ffe066 0%, #f0c040 100%);
+  border-color: rgba(255, 215, 0, 0.9);
+  color: #0a0f1c;
+  font-weight: 700;
+  box-shadow: 0 0 14px rgba(255, 215, 0, 0.42);
+}
+
+.date-pop-day.is-selected:hover {
+  color: #0a0f1c;
+}
+
+.date-pop-empty {
+  aspect-ratio: 1 / 1;
+}
+
+@media (max-width: 480px) {
+  .date-pop {
+    gap: 0.55rem;
+    padding: 0.85rem;
+  }
+
+  .date-pop-day {
+    font-size: 0.75rem;
+  }
+
+  .date-pop-weekday {
+    font-size: 0.5625rem;
+    letter-spacing: 0.03em;
+  }
+
+  .date-pop-nav {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-date-trigger,
+  .date-pop-nav,
+  .date-pop-day {
+    transition: none;
+  }
+
+  .date-pop-day:hover,
+  .date-pop-nav:hover {
+    transform: none;
+  }
+}

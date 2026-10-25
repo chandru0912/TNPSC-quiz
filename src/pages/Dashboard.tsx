@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import DateCalendarPopover from '../components/DateCalendarPopover'
 import {
   LayoutDashboard,
   BookOpen,
@@ -10,7 +11,6 @@ import {
   Archive,
   TrendingUp,
   Flame,
-  Calendar,
   Target,
   Trophy,
   Clock,
@@ -243,17 +243,7 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="dash-header-meta">
-            <div className="dash-chip">
-              <Calendar size={16} />
-              <span>
-                {new Date().toLocaleDateString('en-IN', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                })}
-              </span>
-            </div>
+            <DateCalendarPopover />
             <div className="dash-chip dash-chip-gold">
               <Flame size={16} />
               <span>7 day streak</span>
