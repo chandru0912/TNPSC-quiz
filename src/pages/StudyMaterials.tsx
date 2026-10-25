@@ -63,6 +63,7 @@ const StudyMaterials = () => {
     try {
       sessionStorage.setItem('tnpsc_selected_group', group)
     } catch {}
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
   }
 
   // Group 1 Metrics

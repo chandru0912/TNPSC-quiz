@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import ScrollToTop from './components/ScrollToTop'
 import Navbar from './components/Navbar'
 import Home from './pages/Home'
 import Dashboard from './pages/Dashboard'
@@ -27,6 +28,7 @@ import './App.css'
 function App() {
   return (
     <Router>
+      <ScrollToTop />
       <div className="app">
         {/* Ambient Glassmorphic Background Orbs & Mesh */}
         <div className="ambient-glass-backdrop" aria-hidden="true">

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -57,6 +57,12 @@ const Group2UnitClass = () => {
   const Icon = unitIcons[parsedUnitId] || BookOpen
   const lessons = data.lessons || []
   const hasLessons = lessons.length > 0
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    if (document.documentElement) document.documentElement.scrollTop = 0
+    if (document.body) document.body.scrollTop = 0
+  }, [activeSubjectId, parsedUnitId, parsedClassId])
 
   // Interactive Modal State
   const [activeModalLesson, setActiveModalLesson] = useState<Group2SchoolLesson | null>(null)

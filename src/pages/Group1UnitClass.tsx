@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -45,6 +46,12 @@ const Group1UnitClass = () => {
   const Icon = unitIcons[parsedUnitId] || BookOpen
   const lessons = data.lessons || []
   const hasLessons = lessons.length > 0
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    if (document.documentElement) document.documentElement.scrollTop = 0
+    if (document.body) document.body.scrollTop = 0
+  }, [parsedUnitId, parsedClassId])
 
   return (
     <div className="unit-class-page">

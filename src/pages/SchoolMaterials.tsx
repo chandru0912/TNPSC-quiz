@@ -1,6 +1,6 @@
 
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { BookOpen, ChevronRight, GraduationCap, ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -68,7 +68,17 @@ const SchoolMaterials = () => {
     },
   }
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    if (document.documentElement) document.documentElement.scrollTop = 0
+    if (document.body) document.body.scrollTop = 0
+  }, [selectedStandard, selectedSubject, selectedLesson])
+
   const handleBack = () => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    if (document.documentElement) document.documentElement.scrollTop = 0
+    if (document.body) document.body.scrollTop = 0
+
     if (selectedLesson !== null) {
       setSelectedLesson(null)
       setCurrentQuestion(0)
