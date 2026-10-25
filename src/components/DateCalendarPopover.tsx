@@ -20,7 +20,7 @@ type Position = { top: number; left: number; width: number }
  * The chip markup/label is unchanged — only behaviour was added.
  */
 const DateCalendarPopover = () => {
-  const today = useMemo(() => new Date(), [])
+  const [today] = useState(() => new Date())
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
 

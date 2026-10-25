@@ -8,6 +8,7 @@ import Group1GeneralStudies from './pages/Group1GeneralStudies'
 import Group1UnitDetail from './pages/Group1UnitDetail'
 import Group1Lessons from './pages/Group1Lessons'
 import Group1Aptitude from './pages/Group1Aptitude'
+import Group1UnitClass from './pages/Group1UnitClass'
 import MCQPractice from './pages/MCQPractice'
 import MockTests from './pages/MockTests'
 import PreviousPapers from './pages/PreviousPapers'
@@ -37,6 +38,8 @@ function App() {
             <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
             <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
             <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
+            <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+            <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
             <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
             <Route path="/school-materials" element={<SchoolMaterials />} />
             <Route path="/practice" element={<MCQPractice />} />

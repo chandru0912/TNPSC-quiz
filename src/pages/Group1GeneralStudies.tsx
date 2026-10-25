@@ -13,6 +13,7 @@ import {
   Layers,
   ArrowLeft,
   Sparkles,
+  GraduationCap,
 } from 'lucide-react'
 import {
   group1GeneralStudiesUnits,
@@ -20,8 +21,8 @@ import {
   getUnitLessonCount,
   getTotalGSQuestions,
   getTotalGSChapters,
-  getTotalGSLessons,
 } from '../data/group1SyllabusData'
+import { standardClasses } from '../data/group1ClassSyllabusData'
 import './Group1GeneralStudies.css'
 
 const unitIcons: Record<number, any> = {
@@ -37,7 +38,6 @@ const Group1GeneralStudies = () => {
   const navigate = useNavigate()
   const totalQuestions = getTotalGSQuestions() // 175
   const totalChapters = getTotalGSChapters()
-  const totalLessons = getTotalGSLessons()
 
   return (
     <div className="gs-page">
@@ -51,7 +51,15 @@ const Group1GeneralStudies = () => {
           <span className="active">TNPSC Group 1 General Studies</span>
         </div>
 
-        {/* Header */}
+        {/* Back Link */}
+        <div>
+          <Link to="/materials" className="back-btn glass">
+            <ArrowLeft size={16} />
+            <span>Back to All Categories</span>
+          </Link>
+        </div>
+
+        {/* Main Header */}
         <motion.div
           className="gs-header"
           initial={{ opacity: 0, y: 20 }}
@@ -110,16 +118,82 @@ const Group1GeneralStudies = () => {
 
           <div className="gs-hud-card glass">
             <div className="gs-hud-icon">
-              <Sparkles size={22} />
+              <GraduationCap size={22} />
             </div>
             <div className="gs-hud-info">
-              <span className="gs-hud-value">{totalLessons}</span>
-              <span className="gs-hud-label">Curated Lessons</span>
+              <span className="gs-hud-value">7 Classes</span>
+              <span className="gs-hud-label">6th to 12th Standard</span>
             </div>
           </div>
         </div>
 
-        {/* Six Unit Cards Responsive Grid */}
+        {/* ============================================================== */}
+        {/* REQUIREMENT: At the top of the General Studies page, add a     */}
+        {/* heading: "Classes: 6th to 12th Standard". Below that heading,  */}
+        {/* show seven separate clickable class cards: 6th Standard, 7th,  */}
+        {/* 8th, 9th, 10th, 11th, 12th.                                   */}
+        {/* ============================================================== */}
+        <section className="classes-top-section glass">
+          <div className="classes-section-header">
+            <div className="classes-heading-group">
+              <div className="classes-title-badge">
+                <GraduationCap size={18} />
+                <span>Samacheer Kalvi School Textbook Mapping</span>
+              </div>
+              <h2 className="classes-main-heading">Classes: 6th to 12th Standard</h2>
+              <p className="classes-subheading">
+                Click any standard below to view Samacheer Kalvi textbook syllabus, or select a standard
+                directly under any Unit card below.
+              </p>
+            </div>
+            <span className="classes-count-badge">7 Standards</span>
+          </div>
+
+          <div className="class-cards-grid">
+            {standardClasses.map((cls, idx) => (
+              <motion.div
+                key={cls.id}
+                className="class-card glass"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: idx * 0.05 }}
+                whileHover={{ scale: 1.03, y: -4 }}
+                onClick={() => navigate(`/materials/group1/unit/1/class/${cls.id}`)}
+              >
+                <div className="class-card-top">
+                  <span className="class-num-badge">{cls.id}th</span>
+                  <span className="class-badge-samacheer">Samacheer</span>
+                </div>
+
+                <div className="class-card-main">
+                  <div className="class-icon-circle">
+                    <GraduationCap size={22} />
+                  </div>
+                  <h3 className="class-card-title">{cls.label}</h3>
+                  <p className="class-card-desc">Units 1 to 6 mapped textbook lessons</p>
+                </div>
+
+                <div className="class-card-cta">
+                  <span>Explore Class</span>
+                  <ChevronRight size={14} />
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+
+        {/* Section Heading for the 6 General Studies Units */}
+        <div className="units-section-header">
+          <div className="units-header-left">
+            <h2 className="units-section-title">General Studies Units (Degree Standard)</h2>
+            <p className="units-section-sub">
+              Each unit maps all 7 standards (6th to 12th) plus the comprehensive syllabus outline.
+            </p>
+          </div>
+          <span className="units-total-badge">6 Official Units</span>
+        </div>
+
+        {/* Six Unit Cards Responsive Grid with Standard Selectors */}
         <div className="units-grid">
           {group1GeneralStudiesUnits.map((unit, index) => {
             const Icon = unitIcons[unit.id] || BookOpen
@@ -133,7 +207,7 @@ const Group1GeneralStudies = () => {
                 initial={{ opacity: 0, y: 25 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.45, delay: index * 0.08 }}
-                whileHover={{ scale: 1.02, y: -5 }}
+                whileHover={{ scale: 1.015, y: -4 }}
                 onClick={() => navigate(`/materials/group1/unit/${unit.id}`)}
               >
                 <div className="unit-top-row">
@@ -173,8 +247,43 @@ const Group1GeneralStudies = () => {
                   </div>
                 </div>
 
+                {/* ============================================================== */}
+                {/* REQUIREMENT: Each Unit must allow selecting one of the seven   */}
+                {/* classes. When a user clicks 6th Standard under Unit 1, open a  */}
+                {/* separate page for Unit 1 – 6th Standard. Same for 7th to 12th  */}
+                {/* across all units.                                              */}
+                {/* ============================================================== */}
+                <div
+                  className="unit-class-selector"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="unit-class-selector-header">
+                    <div className="unit-class-selector-title">
+                      <GraduationCap size={14} />
+                      <span>Select Class (6th to 12th Standard):</span>
+                    </div>
+                  </div>
+
+                  <div className="unit-class-pills-row">
+                    {standardClasses.map((cls) => (
+                      <button
+                        key={cls.id}
+                        type="button"
+                        className="unit-class-pill-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          navigate(`/materials/group1/unit/${unit.id}/class/${cls.id}`)
+                        }}
+                        title={`Open ${unit.unitNumber} – ${cls.label}`}
+                      >
+                        {cls.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="unit-btn">
-                  <span>Explore Unit Syllabus</span>
+                  <span>Explore Full {unit.unitNumber} Syllabus</span>
                   <ChevronRight size={16} />
                 </div>
               </motion.div>

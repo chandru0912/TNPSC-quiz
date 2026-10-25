@@ -119,7 +119,7 @@ const Dashboard = () => {
   const ringRadius = 52
   const ringCircumference = 2 * Math.PI * ringRadius
 
-  const SidebarContent = () => (
+  const sidebarContent = (
     <>
       <div className="sidebar-brand">
         <div className="sidebar-brand-mark">
@@ -188,7 +188,7 @@ const Dashboard = () => {
     <div className="dashboard-shell">
       {/* Desktop sidebar */}
       <aside className="dashboard-sidebar glass">
-        <SidebarContent />
+        {sidebarContent}
       </aside>
 
       {/* Mobile sidebar drawer */}
@@ -209,7 +209,7 @@ const Dashboard = () => {
               exit={{ x: '-100%' }}
               transition={{ type: 'tween', duration: 0.25 }}
             >
-              <SidebarContent />
+              {sidebarContent}
             </motion.aside>
           </>
         )}
