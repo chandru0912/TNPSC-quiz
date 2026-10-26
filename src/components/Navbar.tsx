@@ -30,7 +30,7 @@ const Navbar = () => {
     setActiveAuthSlide('none')
   }
 
-  // Close auth slide when resizing to desktop
+  // Ensure auth slide closes if resized to PC / desktop view
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth > 768) {
@@ -42,6 +42,8 @@ const Navbar = () => {
   }, [])
 
   const handleLoginClick = (e: React.MouseEvent) => {
+    // Only use slide toggle on mobile view (<= 768px)
+    // On PC / laptop browser, navigate normally to /login
     if (window.innerWidth <= 768) {
       e.preventDefault()
       setIsOpen(false)
@@ -52,6 +54,8 @@ const Navbar = () => {
   }
 
   const handleRegisterClick = (e: React.MouseEvent) => {
+    // Only use slide toggle on mobile view (<= 768px)
+    // On PC / laptop browser, navigate normally to /register
     if (window.innerWidth <= 768) {
       e.preventDefault()
       setIsOpen(false)
