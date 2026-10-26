@@ -45,8 +45,6 @@ const Home = () => {
     { icon: Clock, value: '24/7', label: 'Access' }
   ]
 
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
-
   return (
     <div className="home">
       {/* Hero Section */}
@@ -59,9 +57,9 @@ const Home = () => {
         <div className="hero-container">
           <motion.div 
             className="hero-content"
-            initial={{ opacity: 0, y: isMobile ? 15 : 30 }}
+            initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: isMobile ? 0.45 : 0.8 }}
+            transition={{ duration: 0.8 }}
           >
             <div className="hero-badge">
               <Zap size={16} />
@@ -93,9 +91,9 @@ const Home = () => {
           
           <motion.div 
             className="hero-visual"
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: isMobile ? 0.45 : 0.8, delay: isMobile ? 0.1 : 0.2 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
           >
             <div className="hero-card glass animate-float">
               <GraduationCap size={60} className="hero-card-icon" />
@@ -115,14 +113,10 @@ const Home = () => {
               <motion.div
                 key={index}
                 className="stat-card glass"
-                initial={{ opacity: 0, y: isMobile ? 12 : 20 }}
+                initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: isMobile ? 0.35 : 0.5,
-                  delay: isMobile ? Math.min(index * 0.05, 0.15) : index * 0.1,
-                  ease: [0.25, 1, 0.5, 1],
-                }}
-                viewport={{ once: true, amount: isMobile ? 0.2 : 0.5 }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+                viewport={{ once: true }}
               >
                 <Icon className="stat-icon" size={32} />
                 <div className="stat-info">
@@ -140,10 +134,10 @@ const Home = () => {
         <div className="features-container">
           <motion.div 
             className="section-header"
-            initial={{ opacity: 0, y: isMobile ? 12 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: isMobile ? 0.35 : 0.6, ease: [0.25, 1, 0.5, 1] }}
-            viewport={{ once: true, amount: isMobile ? 0.2 : 0.5 }}
+            transition={{ duration: 0.6 }}
+            viewport={{ once: true }}
           >
             <h2 className="section-title">
               Why Choose <span className="gradient-text">TNPSC Study Hub</span>
@@ -160,15 +154,11 @@ const Home = () => {
                 <motion.div
                   key={index}
                   className="feature-card glass"
-                  initial={{ opacity: 0, y: isMobile ? 14 : 30 }}
+                  initial={{ opacity: 0, y: 30 }}
                   whileInView={{ opacity: 1, y: 0 }}
-                  transition={{
-                    duration: isMobile ? 0.35 : 0.6,
-                    delay: isMobile ? Math.min(index * 0.05, 0.15) : index * 0.1,
-                    ease: [0.25, 1, 0.5, 1],
-                  }}
-                  viewport={{ once: true, amount: isMobile ? 0.2 : 0.5 }}
-                  whileHover={isMobile ? undefined : { scale: 1.02, y: -5 }}
+                  transition={{ duration: 0.6, delay: index * 0.1 }}
+                  viewport={{ once: true }}
+                  whileHover={{ scale: 1.02, y: -5 }}
                 >
                   <div className="feature-icon-wrapper">
                     <Icon className="feature-icon" size={28} />
@@ -187,10 +177,10 @@ const Home = () => {
         <div className="cta-container">
           <motion.div 
             className="cta-card glass animate-glow"
-            initial={{ opacity: 0, scale: isMobile ? 0.98 : 0.95 }}
+            initial={{ opacity: 0, scale: 0.95 }}
             whileInView={{ opacity: 1, scale: 1 }}
-            transition={{ duration: isMobile ? 0.35 : 0.6, ease: [0.25, 1, 0.5, 1] }}
-            viewport={{ once: true, amount: isMobile ? 0.2 : 0.5 }}
+            transition={{ duration: 0.6 }}
+            viewport={{ once: true }}
           >
             <h2 className="cta-title">Ready to Start Your TNPSC Journey?</h2>
             <p className="cta-subtitle">

@@ -493,15 +493,3 @@
     font-size: 1.75rem;
   }
 }
-
-/* Mobile Scroll Animation Performance */
-@media (max-width: 768px) {
-  .stat-card,
-  .feature-card,
-  .cta-card {
-    will-change: transform, opacity;
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-    transform: translateZ(0);
-  }
-}

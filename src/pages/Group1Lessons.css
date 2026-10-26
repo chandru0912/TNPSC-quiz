@@ -391,14 +391,6 @@
     width: 100%;
     justify-content: space-between;
   }
-
-  .chapter-block,
-  .lesson-full-card {
-    will-change: transform, opacity;
-    transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-  }
 }
 
 @media (max-width: 640px) {

@@ -264,17 +264,6 @@
   }
 }
 
-@media (max-width: 768px) {
-  .standard-card,
-  .subject-card,
-  .lesson-card {
-    will-change: transform, opacity;
-    transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-  }
-}
-
 @media (max-width: 640px) {
   .school-materials {
     padding: 1rem 1rem 3rem;

@@ -1001,16 +1001,3 @@
     font-size: 0.75rem;
   }
 }
-
-@media (max-width: 768px) {
-  .stat-tile,
-  .feature-card,
-  .panel,
-  .overview-ring-card {
-    will-change: transform, opacity;
-    transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-  }
-}
-

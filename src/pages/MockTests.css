@@ -273,15 +273,6 @@
   color: #060913;
 }
 
-@media (max-width: 768px) {
-  .mocktest-card {
-    will-change: transform, opacity;
-    transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-  }
-}
-
 @media (max-width: 640px) {
   .mocktests {
     padding: 1rem 1rem 3rem;

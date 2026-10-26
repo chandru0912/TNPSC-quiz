@@ -17,7 +17,6 @@ interface MockTestItem {
 }
 
 const MockTests = () => {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'group1' | 'group2_2a' | 'group4_vao'>('all')
 
   const categories = [
@@ -185,15 +184,11 @@ const MockTests = () => {
               <motion.div
                 key={test.id}
                 className="mocktest-card glass"
-                initial={{ opacity: 0, y: isMobile ? 10 : 20 }}
+                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: isMobile ? -10 : -20 }}
-                transition={{
-                  duration: isMobile ? 0.25 : 0.4,
-                  delay: isMobile ? Math.min(index * 0.02, 0.08) : index * 0.05,
-                  ease: [0.25, 1, 0.5, 1],
-                }}
-                whileHover={isMobile ? undefined : { scale: 1.01 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.4, delay: index * 0.05 }}
+                whileHover={{ scale: 1.01 }}
               >
                 <div className="mocktest-top-tags">
                   <span className="mocktest-category-tag">{test.categoryName}</span>

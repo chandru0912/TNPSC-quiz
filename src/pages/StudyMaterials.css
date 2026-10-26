@@ -1332,18 +1332,6 @@
   }
 }
 
-@media (max-width: 768px) {
-  .group1-main-card,
-  .group2-subject-card,
-  .subject-card,
-  .g2-lesson-card {
-    will-change: transform, opacity;
-    transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-  }
-}
-
 @media (max-width: 640px) {
   .materials {
     padding: 1rem 1rem 3rem;

@@ -15,7 +15,6 @@ import './Group1GeneralStudies.css'
 
 const Group1Aptitude = () => {
   const navigate = useNavigate()
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
 
   return (
     <div className="gs-page">
@@ -71,14 +70,10 @@ const Group1Aptitude = () => {
               <motion.div
                 key={unit.id}
                 className="unit-card glass"
-                initial={{ opacity: 0, y: isMobile ? 12 : 25 }}
+                initial={{ opacity: 0, y: 25 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: isMobile ? 0.3 : 0.45,
-                  delay: isMobile ? Math.min(index * 0.03, 0.1) : index * 0.1,
-                  ease: [0.25, 1, 0.5, 1],
-                }}
-                whileHover={isMobile ? undefined : { scale: 1.02, y: -4 }}
+                transition={{ duration: 0.45, delay: index * 0.1 }}
+                whileHover={{ scale: 1.02, y: -4 }}
               >
                 <div className="unit-top-row">
                   <span className="unit-number-pill">{unit.unitNumber}</span>

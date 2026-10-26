@@ -608,15 +608,6 @@
   .class-cards-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-
-  .class-card,
-  .unit-card,
-  .gs-hud-card {
-    will-change: transform, opacity;
-    transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-  }
 }
 
 @media (max-width: 640px) {

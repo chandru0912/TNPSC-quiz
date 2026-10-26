@@ -410,18 +410,6 @@
   }
 }
 
-@media (max-width: 768px) {
-  .unit-hero,
-  .official-syllabus-box,
-  .chapter-card,
-  .unit-action-strip {
-    will-change: transform, opacity;
-    transform: translateZ(0);
-    -webkit-backface-visibility: hidden;
-    backface-visibility: hidden;
-  }
-}
-
 @media (max-width: 640px) {
   .unit-detail-page {
     padding: 1rem 1rem 3rem;
