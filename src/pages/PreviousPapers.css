@@ -201,6 +201,13 @@
   .papers-table-row {
     min-width: 680px;
   }
+
+  .papers-table-row {
+    will-change: transform, opacity;
+    transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
 }
 
 @media (max-width: 640px) {

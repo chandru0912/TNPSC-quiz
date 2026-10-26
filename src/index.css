@@ -24,6 +24,13 @@ body {
   min-height: 100vh;
 }
 
+@media (max-width: 768px) {
+  body {
+    background-attachment: scroll;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 #root {
   min-height: 100vh;
   display: flex;

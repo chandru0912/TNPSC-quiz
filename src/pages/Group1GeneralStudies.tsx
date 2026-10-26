@@ -38,6 +38,7 @@ const Group1GeneralStudies = () => {
   const navigate = useNavigate()
   const totalQuestions = getTotalGSQuestions() // 175
   const totalChapters = getTotalGSChapters()
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
 
   return (
     <div className="gs-page">
@@ -154,10 +155,14 @@ const Group1GeneralStudies = () => {
               <motion.div
                 key={cls.id}
                 className="class-card glass"
-                initial={{ opacity: 0, y: 15 }}
+                initial={{ opacity: 0, y: isMobile ? 8 : 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, delay: idx * 0.05 }}
-                whileHover={{ scale: 1.03, y: -4 }}
+                transition={{
+                  duration: isMobile ? 0.25 : 0.35,
+                  delay: isMobile ? Math.min(idx * 0.02, 0.08) : idx * 0.05,
+                  ease: [0.25, 1, 0.5, 1],
+                }}
+                whileHover={isMobile ? undefined : { scale: 1.03, y: -4 }}
                 onClick={() => navigate(`/materials/group1/unit/1/class/${cls.id}`)}
               >
                 <div className="class-card-top">
@@ -204,10 +209,14 @@ const Group1GeneralStudies = () => {
               <motion.div
                 key={unit.id}
                 className="unit-card glass"
-                initial={{ opacity: 0, y: 25 }}
+                initial={{ opacity: 0, y: isMobile ? 12 : 25 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45, delay: index * 0.08 }}
-                whileHover={{ scale: 1.015, y: -4 }}
+                transition={{
+                  duration: isMobile ? 0.3 : 0.45,
+                  delay: isMobile ? Math.min(index * 0.03, 0.12) : index * 0.08,
+                  ease: [0.25, 1, 0.5, 1],
+                }}
+                whileHover={isMobile ? undefined : { scale: 1.015, y: -4 }}
                 onClick={() => navigate(`/materials/group1/unit/${unit.id}`)}
               >
                 <div className="unit-top-row">

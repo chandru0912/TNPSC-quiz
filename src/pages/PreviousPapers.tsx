@@ -13,6 +13,7 @@ interface PaperItem {
 }
 
 const PreviousPapers = () => {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'group1' | 'group2_2a' | 'group4_vao'>('all')
 
   const categories = [
@@ -84,10 +85,14 @@ const PreviousPapers = () => {
               <motion.div
                 key={paper.id}
                 className="papers-table-row"
-                initial={{ opacity: 0, x: -15 }}
+                initial={{ opacity: 0, x: isMobile ? -6 : -15 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -15 }}
-                transition={{ duration: 0.35, delay: index * 0.04 }}
+                exit={{ opacity: 0, x: isMobile ? -6 : -15 }}
+                transition={{
+                  duration: isMobile ? 0.22 : 0.35,
+                  delay: isMobile ? Math.min(index * 0.02, 0.06) : index * 0.04,
+                  ease: [0.25, 1, 0.5, 1],
+                }}
               >
                 <div className="table-col">
                   <div className="year-badge">

@@ -522,4 +522,14 @@
   .lessons-grid {
     grid-template-columns: 1fr;
   }
+
+  .lesson-card,
+  .unit-class-hero,
+  .unit-class-topics-box,
+  .class-switcher-bar {
+    will-change: transform, opacity;
+    transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
 }

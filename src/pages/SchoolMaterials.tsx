@@ -8,6 +8,7 @@ import './SchoolMaterials.css'
 
 const SchoolMaterials = () => {
   const navigate = useNavigate()
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
   const [selectedStandard, setSelectedStandard] = useState<number | null>(null)
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null)
   const [selectedLesson, setSelectedLesson] = useState<number | null>(null)
@@ -210,7 +211,18 @@ const SchoolMaterials = () => {
 
           <div className="lessons-list">
             {lessonsList.map((lesson, index) => (
-              <motion.div key={lesson.id} className="lesson-card glass" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.1 }} whileHover={{ scale: 1.01 }}>
+              <motion.div
+                key={lesson.id}
+                className="lesson-card glass"
+                initial={{ opacity: 0, x: isMobile ? -8 : -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{
+                  duration: isMobile ? 0.25 : 0.35,
+                  delay: isMobile ? Math.min(index * 0.02, 0.08) : index * 0.1,
+                  ease: [0.25, 1, 0.5, 1],
+                }}
+                whileHover={isMobile ? undefined : { scale: 1.01 }}
+              >
                 <div className="lesson-info">
                   <div className="lesson-number">{lesson.id}</div>
                   <div className="lesson-details">
@@ -240,7 +252,7 @@ const SchoolMaterials = () => {
     return (
       <div className="school-materials">
         <div className="school-container">
-          <motion.div className="school-header" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+          <motion.div className="school-header" initial={{ opacity: 0, y: isMobile ? 12 : 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: isMobile ? 0.3 : 0.5 }}>
             <button className="back-btn" onClick={handleBack}>
               <ArrowLeft size={20} />
               <span>Back to Standards</span>
@@ -254,7 +266,19 @@ const SchoolMaterials = () => {
 
           <div className="subjects-grid school-subjects">
             {subjects.map((subject, index) => (
-              <motion.div key={subject} className="subject-card glass" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }} whileHover={{ scale: 1.02, y: -5 }} onClick={() => setSelectedSubject(subject)}>
+              <motion.div
+                key={subject}
+                className="subject-card glass"
+                initial={{ opacity: 0, y: isMobile ? 10 : 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: isMobile ? 0.25 : 0.35,
+                  delay: isMobile ? Math.min(index * 0.02, 0.08) : index * 0.05,
+                  ease: [0.25, 1, 0.5, 1],
+                }}
+                whileHover={isMobile ? undefined : { scale: 1.02, y: -5 }}
+                onClick={() => setSelectedSubject(subject)}
+              >
                 <div className="subject-header">
                   <div className="subject-icon"><BookOpen size={28} /></div>
                   <h3 className="subject-name">{subject}</h3>
@@ -274,7 +298,7 @@ const SchoolMaterials = () => {
   return (
     <div className="school-materials">
       <div className="school-container">
-        <motion.div className="school-header" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+        <motion.div className="school-header" initial={{ opacity: 0, y: isMobile ? 12 : 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: isMobile ? 0.3 : 0.5 }}>
           <button className="back-btn" onClick={() => navigate('/materials')}>
             <ArrowLeft size={20} />
             <span>Back to TNPSC Materials</span>
@@ -288,7 +312,19 @@ const SchoolMaterials = () => {
 
         <div className="standards-grid">
           {standards.map((standard, index) => (
-            <motion.div key={standard.id} className="standard-card glass" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }} whileHover={{ scale: 1.05 }} onClick={() => setSelectedStandard(standard.id)}>
+            <motion.div
+              key={standard.id}
+              className="standard-card glass"
+              initial={{ opacity: 0, y: isMobile ? 10 : 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: isMobile ? 0.25 : 0.35,
+                delay: isMobile ? Math.min(index * 0.02, 0.08) : index * 0.05,
+                ease: [0.25, 1, 0.5, 1],
+              }}
+              whileHover={isMobile ? undefined : { scale: 1.05 }}
+              onClick={() => setSelectedStandard(standard.id)}
+            >
               <div className="standard-number">{standard.id}</div>
               <div className="standard-name">{standard.name}</div>
               <ChevronRight size={24} className="standard-arrow" />

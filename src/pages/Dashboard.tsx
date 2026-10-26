@@ -28,6 +28,7 @@ import {
 import './Dashboard.css'
 
 const Dashboard = () => {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
   const [userName] = useState('Student')
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -315,10 +316,14 @@ const Dashboard = () => {
                 <motion.div
                   key={stat.label}
                   className="stat-tile glass"
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: isMobile ? 10 : 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.1 + index * 0.05 }}
-                  whileHover={{ y: -4 }}
+                  transition={{
+                    duration: isMobile ? 0.3 : 0.5,
+                    delay: isMobile ? Math.min(0.05 + index * 0.02, 0.12) : 0.1 + index * 0.05,
+                    ease: [0.25, 1, 0.5, 1],
+                  }}
+                  whileHover={isMobile ? undefined : { y: -4 }}
                 >
                   <div className="stat-tile-top">
                     <span className="stat-tile-icon">
