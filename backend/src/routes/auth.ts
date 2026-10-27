@@ -104,6 +104,7 @@ function getEnvAdmins(): EnvAdmin[] {
 /**
  * POST /api/admin/login
  * Validates admin credentials against database and .env, then issues a secure token
+ * Environment variables take precedence to ensure production login works reliably
  */
 router.post('/login', async (req: Request, res: Response) => {
   const { username, password } = req.body;
@@ -118,9 +119,33 @@ router.post('/login', async (req: Request, res: Response) => {
   const cleanUser = String(username).trim();
   const cleanPass = String(password).trim();
 
-  await ensureAdminUsersTable();
+  try {
+    await ensureAdminUsersTable();
+  } catch (err: any) {
+    console.error('Admin table initialization error:', err.message);
+  }
 
-  // 1. Check in Database admin_users table
+  // 1. Check in Environment variables (.env) first for production reliability
+  const envAdmins = getEnvAdmins();
+  const envMatch = envAdmins.find(
+    (a) => a.username.toLowerCase() === cleanUser.toLowerCase() && a.password === cleanPass
+  );
+
+  if (envMatch) {
+    const token = generateAdminToken(envMatch.username, envMatch.name, envMatch.role);
+    return res.status(200).json({
+      status: 'success',
+      message: 'Admin authenticated successfully',
+      token,
+      user: {
+        username: envMatch.username,
+        name: envMatch.name,
+        role: envMatch.role,
+      },
+    });
+  }
+
+  // 2. Check in Database admin_users table
   try {
     const dbRes = await pool.query(
       'SELECT id, username, password, name, role FROM admin_users WHERE LOWER(username) = LOWER($1)',
@@ -146,26 +171,6 @@ router.post('/login', async (req: Request, res: Response) => {
     }
   } catch (err: any) {
     console.error('Error querying admin_users table:', err.message);
-  }
-
-  // 2. Check in Environment variables (.env)
-  const envAdmins = getEnvAdmins();
-  const envMatch = envAdmins.find(
-    (a) => a.username.toLowerCase() === cleanUser.toLowerCase() && a.password === cleanPass
-  );
-
-  if (envMatch) {
-    const token = generateAdminToken(envMatch.username, envMatch.name, envMatch.role);
-    return res.status(200).json({
-      status: 'success',
-      message: 'Admin authenticated successfully',
-      token,
-      user: {
-        username: envMatch.username,
-        name: envMatch.name,
-        role: envMatch.role,
-      },
-    });
   }
 
   return res.status(401).json({
