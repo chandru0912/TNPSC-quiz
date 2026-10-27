@@ -20,6 +20,7 @@ import {
   X,
   XCircle,
   RotateCcw,
+  Award,
 } from 'lucide-react'
 import {
   getGroup4UnitClassData,
@@ -262,47 +263,55 @@ const Group4UnitClass = () => {
 
           {hasLessons ? (
             <div className="lessons-grid">
-              {lessons.map((lesson: Group4SchoolLesson, index: number) => (
-                <motion.div
-                  key={lesson.id}
-                  className="lesson-card glass"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35, delay: index * 0.05 }}
-                >
-                  <div className="lesson-top-meta">
-                    <span className="lesson-num-badge">Lesson {lesson.lessonNumber}</span>
-                    {lesson.term && <span className="lesson-term-badge">{lesson.term}</span>}
-                    <span className="lesson-status-badge">
-                      <CheckCircle2 size={12} />
-                      {lesson.status}
-                    </span>
-                  </div>
+              {lessons.map((lesson: Group4SchoolLesson, index: number) => {
+                const practiceUrl = `/practice?group=group4_vao&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
+                  data.unitTitle
+                )}&lesson=${encodeURIComponent(lesson.title)}&classId=${data.classId}`
 
-                  <h3 className="lesson-title">{lesson.title}</h3>
+                return (
+                  <motion.div
+                    key={lesson.id}
+                    className="lesson-card glass"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, delay: index * 0.05 }}
+                  >
+                    <div className="lesson-top-meta">
+                      <span className="lesson-num-badge">Lesson {lesson.lessonNumber}</span>
+                      {lesson.term && <span className="lesson-term-badge">{lesson.term}</span>}
+                      <span className="lesson-status-badge">
+                        <CheckCircle2 size={12} />
+                        {lesson.status}
+                      </span>
+                    </div>
 
-                  {lesson.description && (
-                    <p className="lesson-desc">{lesson.description}</p>
-                  )}
+                    <h3 className="lesson-title">{lesson.title}</h3>
 
-                  <div className="lesson-action-row">
-                    <button
-                      className="lesson-read-btn"
-                      onClick={() => handleOpenLesson(lesson, 'notes')}
-                    >
-                      <FileQuestion size={15} />
-                      <span>Read Study Notes</span>
-                    </button>
-                    <button
-                      className="lesson-practice-btn"
-                      onClick={() => handleOpenLesson(lesson, 'quiz')}
-                    >
-                      <span>Practice MCQs</span>
-                      <ChevronRight size={14} />
-                    </button>
-                  </div>
-                </motion.div>
-              ))}
+                    {lesson.description && (
+                      <p className="lesson-desc">{lesson.description}</p>
+                    )}
+
+                    <div className="lesson-action-row">
+                      <button
+                        className="lesson-read-btn"
+                        onClick={() => handleOpenLesson(lesson, 'notes')}
+                        title={`Open interactive study notes for ${lesson.title}`}
+                      >
+                        <FileQuestion size={15} />
+                        <span>Read Study Notes</span>
+                      </button>
+                      <Link
+                        to={practiceUrl}
+                        className="lesson-practice-btn"
+                        title="Practice MCQs for this lesson"
+                      >
+                        <span>Practice MCQs</span>
+                        <ChevronRight size={14} />
+                      </Link>
+                    </div>
+                  </motion.div>
+                )
+              })}
             </div>
           ) : (
             <motion.div
@@ -447,6 +456,21 @@ const Group4UnitClass = () => {
                             </div>
                           ))}
                         </div>
+                      </div>
+
+                      <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+                        <Link
+                          to={`/practice?group=group4_vao&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
+                            data.unitTitle
+                          )}&lesson=${encodeURIComponent(activeModalLesson.title)}&classId=${data.classId}`}
+                          className="lesson-practice-btn"
+                          style={{ padding: '0.65rem 1.25rem', textDecoration: 'none' }}
+                          onClick={() => setActiveModalLesson(null)}
+                        >
+                          <Award size={16} />
+                          <span>Finish & Practice MCQs</span>
+                          <ChevronRight size={14} />
+                        </Link>
                       </div>
                     </div>
                   ) : (

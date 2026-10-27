@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus } from 'lucide-react'
+import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus, Shield } from 'lucide-react'
 import MobileAuthSlide, { type AuthSlideType } from './MobileAuthSlide'
 import './Navbar.css'
 
@@ -100,6 +100,15 @@ const Navbar = () => {
         </ul>
 
         <div className="nav-actions">
+          <Link
+            to="/admin"
+            className="nav-auth-btn nav-admin-btn"
+            title="Admin Portal"
+            onClick={closeMenu}
+          >
+            <Shield size={16} />
+            <span className="nav-auth-label">Admin</span>
+          </Link>
           <Link
             to="/login"
             className={`nav-auth-btn nav-login ${activeAuthSlide === 'login' ? 'active-toggle' : ''}`}

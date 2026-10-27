@@ -12,6 +12,9 @@
 // 3. General English
 // 4. General Tamil
 
+import { group2GeneralTamilUnits } from './generalTamilComprehensiveData'
+import { group2GeneralEnglishUnits } from './generalEnglishComprehensiveData'
+
 export interface Group2MCQ {
   id: string
   question: string
@@ -70,7 +73,6 @@ const generalStudiesSubject: Group2Subject = {
   id: 'general-studies',
   order: 1,
   title: 'General Studies',
-  tamilTitle: 'பொது அறிவு',
   partTag: 'Part A • Degree Standard',
   standard: 'Degree Standard',
   questionCount: 75,
@@ -80,9 +82,8 @@ const generalStudiesSubject: Group2Subject = {
   units: [
     {
       id: 1,
-      unitNumber: 'Unit I',
+      unitNumber: 'Unit 1',
       title: 'General Science',
-      tamilTitle: 'அலகு I: பொது அறிவியல்',
       questionCount: 5,
       standard: 'Degree Standard',
       officialTopics: [
@@ -98,7 +99,6 @@ const generalStudiesSubject: Group2Subject = {
           id: 'gs-u1-c1',
           chapterNumber: 1,
           title: 'Scientific Temper, Laws & Applied Physics',
-          tamilTitle: 'அறிவியல் உணர்வு, விதிகள் மற்றும் பயன்பாட்டு இயற்பியல்',
           lessons: [
             {
               id: 'gs-u1-c1-l1',
@@ -134,7 +134,6 @@ const generalStudiesSubject: Group2Subject = {
           id: 'gs-u1-c2',
           chapterNumber: 2,
           title: 'Chemical Substances, Life Sciences & Environment',
-          tamilTitle: 'வேதியியல் பொருட்கள், உயிரியல் மற்றும் சுற்றுச்சூழல்',
           lessons: [
             {
               id: 'gs-u1-c2-l1',
@@ -163,9 +162,8 @@ const generalStudiesSubject: Group2Subject = {
     },
     {
       id: 2,
-      unitNumber: 'Unit II',
+      unitNumber: 'Unit 2',
       title: 'Geography of India',
-      tamilTitle: 'அலகு II: இந்தியாவின் புவியியல்',
       questionCount: 5,
       standard: 'Degree Standard',
       officialTopics: [
@@ -179,7 +177,6 @@ const generalStudiesSubject: Group2Subject = {
           id: 'gs-u2-c1',
           chapterNumber: 1,
           title: 'Physical Features, Climate, Rivers & Resources',
-          tamilTitle: 'இயற்கை அமைவுகள், காலநிலை, ஆறுகள் மற்றும் வளங்கள்',
           lessons: [
             {
               id: 'gs-u2-c1-l1',
@@ -208,9 +205,8 @@ const generalStudiesSubject: Group2Subject = {
     },
     {
       id: 3,
-      unitNumber: 'Unit III',
+      unitNumber: 'Unit 3',
       title: 'History, Culture of India & National Movement',
-      tamilTitle: 'அலகு III: இந்தியாவின் வரலாறு, பண்பாடு மற்றும் தேசிய இயக்கம்',
       questionCount: 10,
       standard: 'Degree Standard',
       officialTopics: [
@@ -224,7 +220,6 @@ const generalStudiesSubject: Group2Subject = {
           id: 'gs-u3-c1',
           chapterNumber: 1,
           title: 'Ancient & Medieval India to National Renaissance',
-          tamilTitle: 'பண்டைய மற்றும் இடைக்கால இந்தியா முதல் தேசிய மறுமலர்ச்சி வரை',
           lessons: [
             {
               id: 'gs-u3-c1-l1',
@@ -253,9 +248,8 @@ const generalStudiesSubject: Group2Subject = {
     },
     {
       id: 4,
-      unitNumber: 'Unit IV',
+      unitNumber: 'Unit 4',
       title: 'Indian Polity',
-      tamilTitle: 'அலகு IV: இந்திய ஆட்சியியல்',
       questionCount: 15,
       standard: 'Degree Standard',
       officialTopics: [
@@ -269,7 +263,6 @@ const generalStudiesSubject: Group2Subject = {
           id: 'gs-u4-c1',
           chapterNumber: 1,
           title: 'Constitutional Foundations, Executive & Legislative Systems',
-          tamilTitle: 'அரசியலமைப்பு அடிப்படைகள் மற்றும் நிர்வாக முறைமை',
           lessons: [
             {
               id: 'gs-u4-c1-l1',
@@ -299,9 +292,8 @@ const generalStudiesSubject: Group2Subject = {
     },
     {
       id: 5,
-      unitNumber: 'Unit V',
+      unitNumber: 'Unit 5',
       title: 'Indian Economy & Development Administration in Tamil Nadu',
-      tamilTitle: 'அலகு V: இந்தியப் பொருளாதாரம் மற்றும் தமிழ்நாட்டில் வளர்ச்சி நிர்வாகம்',
       questionCount: 20,
       standard: 'Degree Standard',
       officialTopics: [
@@ -315,7 +307,6 @@ const generalStudiesSubject: Group2Subject = {
           id: 'gs-u5-c1',
           chapterNumber: 1,
           title: 'Macro Economy, NITI Aayog & Tamil Nadu Growth Model',
-          tamilTitle: 'பேரியல் பொருளாதாரம் மற்றும் தமிழ்நாட்டின் வளர்ச்சி மாதிரி',
           lessons: [
             {
               id: 'gs-u5-c1-l1',
@@ -344,9 +335,8 @@ const generalStudiesSubject: Group2Subject = {
     },
     {
       id: 6,
-      unitNumber: 'Unit VI',
+      unitNumber: 'Unit 6',
       title: 'History, Culture, Heritage & Socio-Political Movements in TN',
-      tamilTitle: 'அலகு VI: தமிழ்நாட்டின் வரலாறு, பண்பாடு, மரபு மற்றும் சமூக-அரசியல் இயக்கங்கள்',
       questionCount: 20,
       standard: 'Degree Standard',
       officialTopics: [
@@ -360,7 +350,6 @@ const generalStudiesSubject: Group2Subject = {
           id: 'gs-u6-c1',
           chapterNumber: 1,
           title: 'Archaeology, Thirukkural & Socio-Political Movements',
-          tamilTitle: 'தொல்லியல் கண்டுபிடிப்புகள், திருக்குறள் மற்றும் திராவிட இயக்கங்கள்',
           lessons: [
             {
               id: 'gs-u6-c1-l1',
@@ -405,7 +394,6 @@ const aptitudeSubject: Group2Subject = {
   id: 'aptitude',
   order: 2,
   title: 'Aptitude and Mental Ability',
-  tamilTitle: 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்',
   partTag: 'Part B • SSLC Standard',
   standard: 'SSLC Standard (10th Standard)',
   questionCount: 25,
@@ -415,9 +403,8 @@ const aptitudeSubject: Group2Subject = {
   units: [
     {
       id: 1,
-      unitNumber: 'Unit I',
+      unitNumber: 'Unit 1',
       title: 'Aptitude',
-      tamilTitle: 'அலகு I: திறனறிவு',
       questionCount: 15,
       standard: 'SSLC Standard',
       officialTopics: [
@@ -430,7 +417,6 @@ const aptitudeSubject: Group2Subject = {
           id: 'apt-u1-c1',
           chapterNumber: 1,
           title: 'Simplification, Percentage, HCF & LCM',
-          tamilTitle: 'சுருக்குதல், விழுக்காடு, மீப்பெரு பொதுக் காரணி மற்றும் மீச்சிறு பொது மடங்கு',
           lessons: [
             {
               id: 'apt-u1-c1-l1',
@@ -466,7 +452,6 @@ const aptitudeSubject: Group2Subject = {
           id: 'apt-u1-c2',
           chapterNumber: 2,
           title: 'Ratio, Interest, Mensuration & Time-Work',
-          tamilTitle: 'விகிதம், வட்டி, அளவியல் மற்றும் காலம்-வேலை',
           lessons: [
             {
               id: 'apt-u1-c2-l1',
@@ -495,9 +480,8 @@ const aptitudeSubject: Group2Subject = {
     },
     {
       id: 2,
-      unitNumber: 'Unit II',
+      unitNumber: 'Unit 2',
       title: 'Reasoning',
-      tamilTitle: 'அலகு II: காரணவியல்',
       questionCount: 10,
       standard: 'SSLC Standard',
       officialTopics: [
@@ -509,7 +493,6 @@ const aptitudeSubject: Group2Subject = {
           id: 'apt-u2-c1',
           chapterNumber: 1,
           title: 'Logical, Visual & Alpha-Numeric Reasoning',
-          tamilTitle: 'தருக்கவியல், காட்சி மற்றும் எண் எழுத்துக் காரணவியல்',
           lessons: [
             {
               id: 'apt-u2-c1-l1',
@@ -546,323 +529,13 @@ const generalEnglishSubject: Group2Subject = {
   id: 'general-english',
   order: 3,
   title: 'General English',
-  tamilTitle: 'பொது ஆங்கிலம்',
   partTag: 'Part C • SSLC Standard',
   standard: 'SSLC Standard (10th Standard)',
   questionCount: 100,
   description:
     'Complete SSLC language syllabus consisting of Grammar (25 Qs), Vocabulary (15 Qs), Writing Skills (10 Qs), Technical Terms (10 Qs), Reading Comprehension (20 Qs), Translation (5 Qs), and Literary Works (15 Qs).',
   accentColor: '#ec4899',
-  units: [
-    {
-      id: 1,
-      unitNumber: 'Unit I',
-      title: 'Grammar',
-      tamilTitle: 'அலகு I: இலக்கணம்',
-      questionCount: 25,
-      standard: 'SSLC Standard',
-      officialTopics: [
-        'Parts of speech, Concord, Tense, Active voice and passive voice',
-        'Types of sentences: Statement, Interrogative, Imperative, Exclamatory and transformations',
-        'Verbs, Main & Auxiliary, Regular/Irregular, Infinitives, Gerunds, Participles, Question tags',
-        'Sentence patterns, Simple/Compound/Complex, Phrases & clauses, Degrees of comparison, Direct & Indirect speech',
-      ],
-      chapters: [
-        {
-          id: 'ge-u1-c1',
-          chapterNumber: 1,
-          title: 'Parts of Speech, Concord, Tenses & Voices',
-          lessons: [
-            {
-              id: 'ge-u1-c1-l1',
-              lessonNumber: '1.1',
-              title: 'Subject-Verb Agreement, Active-Passive Voice & Tense Mastery',
-              duration: '40 mins',
-              keyConcepts: ['Rules of Concord', 'Passive Voice Formations', 'Simple/Continuous/Perfect Tenses', 'Question Tags (Positive statement = Negative tag)'],
-              studyNotes: [
-                'Subject-Verb Agreement: When two singular nouns are joined by "either...or" / "neither...nor", the verb agrees with the nearer subject.',
-                'Active into Passive Voice: The object of the active verb becomes the subject of the passive verb with appropriate auxiliary verb + V3 (Past Participle).',
-                'Question tags follow inversion: Affirmative sentences take negative tags ("She is reading, isn\'t she?"), and negative sentences take positive tags ("They haven\'t finished, have they?").',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'ge-q1',
-                  question: 'Choose the correct question tag: "You can speak Tamil fluently, ______?"',
-                  options: ['can\'t you', 'can you', 'do you', 'don\'t you'],
-                  correctAnswer: 0,
-                  explanation: 'The sentence is positive and uses the modal auxiliary "can", so the correct tag is the negative form "can\'t you?".',
-                },
-                {
-                  id: 'ge-q2',
-                  question: 'Identify the sentence pattern for: "They named the baby Dorothy."',
-                  options: ['S V O', 'S V IO DO', 'S V O C', 'S V A'],
-                  correctAnswer: 2,
-                  explanation: '"They" (Subject) "named" (Verb) "the baby" (Object) "Dorothy" (Complement). Hence S V O C.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 2,
-      unitNumber: 'Unit II',
-      title: 'Vocabulary',
-      tamilTitle: 'அலகு II: சொல்லகராதி',
-      questionCount: 15,
-      standard: 'SSLC Standard',
-      officialTopics: [
-        'Synonyms, Antonyms, Homonyms, Homophones, Collocations, Idioms & Phrases, Phrasal verbs',
-        'Spelling of words, Correct usage of words, One word substitution, Word creation',
-        'Singular and plural (including Zero plural), Derivatives, Abbreviations, British and American English, Figures of speech',
-      ],
-      chapters: [
-        {
-          id: 'ge-u2-c1',
-          chapterNumber: 1,
-          title: 'Idioms, Phrasal Verbs & Word Formations',
-          lessons: [
-            {
-              id: 'ge-u2-c1-l1',
-              lessonNumber: '2.1',
-              title: 'Phrasal Verbs, One-Word Substitutes & British/American Terms',
-              duration: '35 mins',
-              keyConcepts: ['Call off / Put off distinctions', 'Zero Plural nouns (sheep, deer, fish)', 'British vs American English (bonnet/hood, lift/elevator)'],
-              studyNotes: [
-                'Phrasal verbs combine a base verb with a preposition/adverb: "Call off" means cancel; "Put off" means postpone.',
-                'Zero plural nouns retain identical forms in singular and plural: sheep, deer, salmon, aircraft, offspring.',
-                'British vs American equivalents: Flat = Apartment, Biscuit = Cookie, Pavement = Sidewalk, Petrol = Gasoline, Boot = Trunk.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'ge-q3',
-                  question: 'What is the American English equivalent for the British term "Pavement"?',
-                  options: ['Highway', 'Sidewalk', 'Subway', 'Driveway'],
-                  correctAnswer: 1,
-                  explanation: 'The British English word "Pavement" corresponds to "Sidewalk" in American English.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 3,
-      unitNumber: 'Unit III',
-      title: 'Writing Skills',
-      tamilTitle: 'அலகு III: எழுதும் திறன்',
-      questionCount: 10,
-      standard: 'SSLC Standard',
-      officialTopics: [
-        'Letter writing (formal and informal) – Types of Letters',
-        'Jumbled sentences - Finding out the right order of sentences',
-        'Making queries, Inferences, Blanks, Substitutions',
-      ],
-      chapters: [
-        {
-          id: 'ge-u3-c1',
-          chapterNumber: 1,
-          title: 'Formal/Informal Correspondence & Sentence Ordering',
-          lessons: [
-            {
-              id: 'ge-u3-c1-l1',
-              lessonNumber: '3.1',
-              title: 'Official Letter Writing Conventions & Logical Sentence Sequencing',
-              duration: '30 mins',
-              keyConcepts: ['Subscription formats', 'Salutation rules', 'Chronological paragraph cohesion'],
-              studyNotes: [
-                'Formal letters to authorities or editors require "Yours faithfully" or "Yours truly", without an apostrophe in "Yours".',
-                'Informal letters to friends and family use informal subscriptions like "Yours affectionately" or "With love".',
-                'Sentence jumble strategy: locate the topic sentence containing the primary noun, followed by explanatory clauses and pronoun references.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'ge-q4',
-                  question: 'Which of the following is the grammatically correct complimentary close for a formal official letter?',
-                  options: ['Your\'s faithfully', 'Yours faithfully', 'Yours\' faithfully', 'Yours friendly'],
-                  correctAnswer: 1,
-                  explanation: '"Yours" is an independent possessive pronoun and must never take an apostrophe.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 4,
-      unitNumber: 'Unit IV',
-      title: 'Technical Terms',
-      tamilTitle: 'அலகு IV: தொழில்நுட்பக் கலைச்சொற்கள்',
-      questionCount: 10,
-      standard: 'SSLC Standard',
-      officialTopics: [
-        'Administrative Terms, Department related, General and Official terms',
-        'Official Correspondence (only basics)',
-      ],
-      chapters: [
-        {
-          id: 'ge-u4-c1',
-          chapterNumber: 1,
-          title: 'Administrative & Governance Terminology',
-          lessons: [
-            {
-              id: 'ge-u4-c1-l1',
-              lessonNumber: '4.1',
-              title: 'Official Departmental Jargon & Government Procedure Terms',
-              duration: '30 mins',
-              keyConcepts: ['Gazette', 'Memorandum', 'Ad-hoc', 'Quorum', 'Vesting'],
-              studyNotes: [
-                'Administrative vocabulary in government offices: "Gazette" is the official government public journal of legal records; "Quorum" is the minimum attendance required to conduct proceedings.',
-                '"Ad-hoc" signifies formed for a particular purpose only; "De jure" means by right according to law; "De facto" means in fact or practice.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'ge-q5',
-                  question: 'What is the term used to denote the minimum number of members required to validate proceedings of an official committee or assembly?',
-                  options: ['Plurality', 'Quorum', 'Consensus', 'Affidavit'],
-                  correctAnswer: 1,
-                  explanation: '"Quorum" designates the minimum number of voting members that must be present at a meeting of any body to make proceedings legally valid.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 5,
-      unitNumber: 'Unit V',
-      title: 'Reading Comprehension',
-      tamilTitle: 'அலகு V: வாசித்தல் – புரிந்து கொள்ளும் திறன்',
-      questionCount: 20,
-      standard: 'SSLC Standard',
-      officialTopics: [
-        'Unseen passages (News Paper, Headlines, Editorials, Government related News)',
-        'Question Types - Strong question, Weak question, Match the following, Sentence Completion, Ascertainment of facts',
-      ],
-      chapters: [
-        {
-          id: 'gs-u5-c1-en',
-          chapterNumber: 1,
-          title: 'Critical Passage Analysis & Fact Ascertainment',
-          lessons: [
-            {
-              id: 'ge-u5-c1-l1',
-              lessonNumber: '5.1',
-              title: 'Editorial Analysis, Inferences & Passage Answering Techniques',
-              duration: '35 mins',
-              keyConcepts: ['Central Idea identification', 'Direct vs Indirect Inferences', 'Tone of the Author'],
-              studyNotes: [
-                'Read the questions first before skimming the passage to prime your mind for dates, names, causal links, and conclusions.',
-                'Distinguish between factual statement questions (explicit text) and inference questions (derived meaning from context).',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'ge-q6',
-                  question: 'When asked for the "tone of the author" in an editorial analyzing civic infrastructure gaps, which term is most applicable?',
-                  options: ['Fictional', 'Critical and Analytical', 'Humorous', 'Sarcastic'],
-                  correctAnswer: 1,
-                  explanation: 'Editorials assessing policy failures or infrastructural issues maintain a critical and analytical perspective.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 6,
-      unitNumber: 'Unit VI',
-      title: 'Translation',
-      tamilTitle: 'அலகு VI: மொழிபெயர்ப்பு',
-      questionCount: 5,
-      standard: 'SSLC Standard',
-      officialTopics: [
-        'Word Translation, Sentence Translation',
-        'Tense related translation tasks, Tense / Voice related tasks',
-      ],
-      chapters: [
-        {
-          id: 'ge-u6-c1',
-          chapterNumber: 1,
-          title: 'Syntax Conversion & Word Equivalents',
-          lessons: [
-            {
-              id: 'ge-u6-c1-l1',
-              lessonNumber: '6.1',
-              title: 'English to Tamil Syntactic Transformation (SVO to SOV)',
-              duration: '30 mins',
-              keyConcepts: ['English SVO structure vs Tamil SOV structure', 'Idiomatic accuracy over verbatim translation'],
-              studyNotes: [
-                'English follows Subject + Verb + Object (SVO), while Tamil follows Subject + Object + Verb (SOV). Example: "He wrote a letter" (SVO) translates to "அவன் கடிதம் எழுதினான்" (SOV).',
-                'Avoid literal translation of idioms: "Once in a blue moon" translates idiomatically as "அரிதினும் அரிதாக", not word-for-word.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'ge-q7',
-                  question: 'Translate accurately into Tamil: "The meeting has been postponed."',
-                  options: ['கூட்டம் ரத்து செய்யப்பட்டது', 'கூட்டம் தள்ளிவைக்கப்பட்டுள்ளது', 'கூட்டம் முடிந்துவிட்டது', 'கூட்டம் தொடங்குகிறது'],
-                  correctAnswer: 1,
-                  explanation: '"Postponed" means தள்ளிவைக்கப்பட்டுள்ளது (put off to a future date), whereas "cancelled" means ரத்து செய்யப்பட்டது.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 7,
-      unitNumber: 'Unit VII',
-      title: 'Literary Works',
-      tamilTitle: 'அலகு VII: இலக்கியப் படைப்புகள் (பாடநூல்)',
-      questionCount: 15,
-      standard: 'SSLC Standard (School Textbooks)',
-      officialTopics: [
-        'Figures of Speech; Appreciation and Analysis of Poetry; Lines of Significance',
-        'Prescribed Poems: I Dream of Spices, The Crocodile, Teamwork, From a Railway Carriage, Stopping by Woods on a Snowy Evening, A Poison Tree, etc.',
-        'Prescribed Prose: His First Flight, The Night the Ghost Got In, The Attic, The Dying Detective, Water – The Elixir of Life, etc.',
-      ],
-      chapters: [
-        {
-          id: 'ge-u7-c1',
-          chapterNumber: 1,
-          title: 'Prescribed School Poems & Prose Works',
-          lessons: [
-            {
-              id: 'ge-u7-c1-l1',
-              lessonNumber: '7.1',
-              title: 'Robert Frost, Lewis Carroll, Liam O\'Flaherty & C.V. Raman Works',
-              duration: '45 mins',
-              keyConcepts: [
-                '"Stopping by Woods on a Snowy Evening" - Robert Frost',
-                '"Water - The Elixir of Life" - Sir C.V. Raman',
-                '"His First Flight" - Liam O\'Flaherty',
-                'Metaphor, Simile, Personification, Alliteration',
-              ],
-              studyNotes: [
-                'Robert Frost\'s iconic lines: "The woods are lovely, dark and deep, / But I have promises to keep, / And miles to go before I sleep." (Metaphor for life\'s responsibilities before death).',
-                'Sir C.V. Raman in "Water – The Elixir of Life" illustrates water as the true nectar of life holding the key to soil fertility, agriculture, and human survival.',
-                'Liam O\'Flaherty\'s "His First Flight" symbolizes courage and self-reliance, depicting a young seagull conquering fear to take flight.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'ge-q8',
-                  question: 'Who authored the renowned poem containing the lines: "The woods are lovely, dark and deep, But I have promises to keep, And miles to go before I sleep"?',
-                  options: ['William Wordsworth', 'Robert Frost', 'William Blake', 'John Masefield'],
-                  correctAnswer: 1,
-                  explanation: 'These famous lines conclude Robert Frost\'s poem "Stopping by Woods on a Snowy Evening".',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
+  units: group2GeneralEnglishUnits,
 }
 
 // -------------------------------------------------------------
@@ -879,322 +552,7 @@ const generalTamilSubject: Group2Subject = {
   description:
     'பத்தாம் வகுப்புத் தரத்திலான பொதுத்தமிழ் முழுப் பாடத்திட்டம்: அலகு 1 முதல் அலகு 7 வரை (இலக்கணம் 25 வினாக்கள், சொல்லகராதி 15 வினாக்கள், எழுதும் திறன் 15 வினாக்கள், கலைச் சொற்கள் 10 வினாக்கள், வாசித்தல் 15 வினாக்கள், மொழிபெயர்ப்பு 5 வினாக்கள், இலக்கியம் & தமிழறிஞர்கள் 15 வினாக்கள்).',
   accentColor: '#10b981',
-  units: [
-    {
-      id: 1,
-      unitNumber: 'அலகு I',
-      title: 'இலக்கணம்',
-      tamilTitle: 'அலகு I: இலக்கணம்',
-      questionCount: 25,
-      standard: 'பத்தாம் வகுப்புத் தரம்',
-      officialTopics: [
-        'எழுத்து: பிரித்து எழுதுதல் – சேர்த்து எழுதுதல் – சந்திப்பிழை – குறில், நெடில் வேறுபாடு – லகர, ளகர, ழகர வேறுபாடு – னகர, ணகர வேறுபாடு – ரகர, றகர வேறுபாடு – இனவெழுத்துகள் அறிதல் – சுட்டு எழுத்துகள் – வினா எழுத்துகள் – ஒருமைப் பன்மை அறிதல்',
-        'சொல்: வேர்ச்சொல் அறிதல் – வேர்ச்சொல்லில் இருந்து வினைமுற்று, வினையெச்சம், வினையாலணையும் பெயர், பெயரெச்சம் வகை அறிதல் – அயற்சொல் – தமிழ்ச்சொல், எதிர்ச்சொல் – வினைச்சொல் – எழுத்துப் பிழை, ஒற்றுப்பிழை அறிதல் – இரண்டு வினைச் சொற்களின் வேறுபாடு அறிதல்',
-      ],
-      chapters: [
-        {
-          id: 'gt-u1-c1',
-          chapterNumber: 1,
-          title: 'எழுத்திலக்கணம் மற்றும் சொல்லிலக்கணம்',
-          tamilTitle: 'எழுத்து & சொல் இலக்கண விதிகள்',
-          lessons: [
-            {
-              id: 'gt-u1-c1-l1',
-              lessonNumber: '1.1',
-              title: 'எழுத்து வேறுபாடுகள், வேர்ச்சொல் & எச்ச-முற்று வகைகள்',
-              duration: '40 நிமிடங்கள்',
-              keyConcepts: ['சுட்டு எழுத்துகள் (அ, இ, உ)', 'வினா எழுத்துகள் (எ, யா, ஆ, ஓ, ஏ)', 'வேர்ச்சொல் அறிதல்', 'பெயரெச்சம் (வந்த பையன்) vs வினையெச்சம் (வந்து போனான்)'],
-              studyNotes: [
-                'சுட்டு எழுத்துகள்: அ, இ, உ (அவன், இவள்). வினா எழுத்துகள்: எ, யா (மொழி முதலிலும்), ஆ, ஓ (மொழி இறுதியிலும்), ஏ (இருவழியிலும்).',
-                'வேர்ச்சொல் என்பது ஏவல் வினையாக அமையும்: "பாடினான்" என்பதன் வேர்ச்சொல் "பாடு"; "ஓடினான்" என்பதன் வேர்ச்சொல் "ஓடு".',
-                'பெயரெச்சம் என்பது பெயரைக் கொண்டு முடியும் எச்சவினை (எ.கா: படித்த மாணவன்). வினையெச்சம் என்பது வினையைக் கொண்டு முடியும் எச்சவினை (எ.கா: படித்து முடித்தான்).',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'gt-q1',
-                  question: '"கண்டான்" என்னும் சொல்லின் வேர்ச்சொல் யாது?',
-                  options: ['கண்', 'காண்', 'கண்ட', 'காணுதல்'],
-                  correctAnswer: 1,
-                  explanation: '"கண்டான்" என்பதன் மூல ஏவல் வினையான வேர்ச்சொல் "காண்" ஆகும்.',
-                },
-                {
-                  id: 'gt-q2',
-                  question: 'சொற்களில் வல்லினம் மிகும் இடங்களுள் சரியானது எது?',
-                  options: ['இரண்டாம் வேற்றுமை உருபாகிய "ஐ" வெளிப்படும் தொடரில் மிகும்', 'வினைத்தொகையில் வல்லினம் மிகும்', 'உம்மைத்தொகையில் வல்லினம் மிகும்', 'இரட்டைக்கிளவியில் மிகும்'],
-                  correctAnswer: 0,
-                  explanation: 'இரண்டாம் வேற்றுமை விரி (ஐ உருபு வெளிப்படும் தொடர்களில்) வல்லினம் கட்டாயம் மிகும். எ.கா: பாடத்தைப் படி, நிலவைக் கண்டான்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 2,
-      unitNumber: 'அலகு II',
-      title: 'சொல்லகராதி',
-      tamilTitle: 'அலகு II: சொல்லகராதி',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்புத் தரம்',
-      officialTopics: [
-        'எதிர்ச்சொல்லை எடுத்தெழுதுதல், ஓரெழுத்து ஒரு மொழி, உரிய பொருளைக் கண்டறிதல்',
-        'ஒருபொருள் தரும் பல சொற்கள், பொருந்தா சொல்லைக் கண்டறிதல், அகர வரிசைப்படி சொற்களைச் சீர்செய்தல்',
-        'கோடிட்ட இடத்தில் சரியான சொல்லைத் தேர்ந்தெடுத்து எழுதுதல், மரூஉப் பெயர்கள், பேச்சு வழக்கு திருத்தம்',
-      ],
-      chapters: [
-        {
-          id: 'gt-u2-c1',
-          chapterNumber: 1,
-          title: 'சொல் வளம், ஓரெழுத்து ஒருமொழி & அகரவரிசை',
-          lessons: [
-            {
-              id: 'gt-u2-c1-l1',
-              lessonNumber: '2.1',
-              title: '42 ஓரெழுத்து ஒருமொழிகள் & மரூஉப் பெயர்கள்',
-              duration: '35 நிமிடங்கள்',
-              keyConcepts: ['நன்னூல் கூறும் 42 ஓரெழுத்து ஒருமொழிகள்', 'ஆ-பசு, மா-பெரிய, கோ-அரசன்', 'மரூஉ: புதுச்சேரி-புதுவை, மயிலாப்பூர்-மயிலை'],
-              studyNotes: [
-                'நன்னூலார் பவணந்தி முனிவர் தமிழில் 42 ஓரெழுத்து ஒருமொழிகள் உள்ளதாகக் குறிப்பிடுகிறார் (நோ, து ஆகிய இரண்டும் மட்டுமே குறில்; ஏனைய 40 நெடில்கள்).',
-                'மரூஉ என்பது இலக்கண நெறியிலிருந்து மருவி வழங்கும் சொற்கள்: உதகை (உதகமண்டலம்), புதுவை (புதுச்சேரி), குடந்தை (கும்பகோணம்).',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'gt-q3',
-                  question: '"மா" என்னும் ஓரெழுத்து ஒருமொழி தரும் பொருள்களுள் பொருந்தாதது எது?',
-                  options: ['பெரிய', 'குதிரை', 'அரசன்', 'விலங்கு'],
-                  correctAnswer: 2,
-                  explanation: '"மா" என்றால் பெரிய, குதிரை, விலங்கு, அழகு முதலிய பொருள்களைத் தரும். "அரசன்" என்பதைக் குறிக்கும் ஓரெழுத்து ஒருமொழி "கோ" ஆகும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 3,
-      unitNumber: 'அலகு III',
-      title: 'எழுதும் திறன்',
-      tamilTitle: 'அலகு III: எழுதும் திறன்',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்புத் தரம்',
-      officialTopics: [
-        'சொற்களை ஒழுங்குபடுத்திச் சொற்றொடர் அமைத்தல் – செய்வினை, செயப்பாட்டு வினை – தன்வினை, பிறவினை',
-        'மரபுத் தமிழ்: திணை மரபு, பால் மரபு, காலம், இளமைப் பெயர், ஒலிமரபு, வினைமரபு, தொகை மரபு, நிறுத்தற்குறிகள்',
-      ],
-      chapters: [
-        {
-          id: 'gt-u3-c1',
-          chapterNumber: 1,
-          title: 'வினை வகைகள் மற்றும் தமிழ் மரபுத் தொடர்கள்',
-          lessons: [
-            {
-              id: 'gt-u3-c1-l1',
-              lessonNumber: '3.1',
-              title: 'செய்வினை-செயப்பாட்டு வினை, இளமைப் பெயர்கள் & ஒலி மரபுகள்',
-              duration: '35 நிமிடங்கள்',
-              keyConcepts: ['செய்வினை (எழுவாய்+செயப்படுபொருள்+வினை)', 'செயப்பாட்டு வினை (படு, பட்டது)', 'மரபு: நாய் குரைக்கும், யானை பிளிரும், சிங்கம் முழங்கும்'],
-              studyNotes: [
-                'ஒலி மரபுகள்: குயில் கூவும், மயில் அகவும், ஆந்தை அலறும், காகம் கரையும், சிங்கம் முழங்கும், குதிரை கனைக்கும்.',
-                'இளமைப் பெயர்கள்: பசு - கன்று; ஆடு - குட்டி; சிங்கம் - குருளை; புலி - பறழ்; யானை - கன்று; மான் - கன்று.',
-                'வினை மரபுகள்: சோறு உண், கூடை முடை, தண்ணீர் குடி, பால் பருகு, பூப்பறி, சுவர் எழுப்பு.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'gt-q4',
-                  question: 'விலங்குகளின் இளமைப் பெயர்களில் சரியான மரபுச் சொல் இணையைத் தேர்க:',
-                  options: ['புலி - குருளை', 'சிங்கம் - கன்று', 'புலி - பறழ்', 'ஆடு - கன்று'],
-                  correctAnswer: 2,
-                  explanation: 'புலியின் இளமைப் பெயர் "பறழ்" ஆகும் (புலிப்பறழ்). சிங்கத்தின் இளமைப்பெயர் "குருளை".',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 4,
-      unitNumber: 'அலகு IV',
-      title: 'கலைச் சொற்கள்',
-      tamilTitle: 'அலகு IV: கலைச் சொற்கள்',
-      questionCount: 10,
-      standard: 'பத்தாம் வகுப்புத் தரம்',
-      officialTopics: [
-        'பல்துறை சார்ந்த கலைச் சொற்கள் (அறிவியல், கல்வி, மருத்துவம், மேலாண்மை, சட்டம், புவியியல், தொழில்நுட்பம், ஊடகம், தகவல் தொழில்நுட்பம்)',
-      ],
-      chapters: [
-        {
-          id: 'gt-u4-c1',
-          chapterNumber: 1,
-          title: 'அறிவியல், கணினி & நிருவாகக் கலைச்சொற்கள்',
-          lessons: [
-            {
-              id: 'gt-u4-c1-l1',
-              lessonNumber: '4.1',
-              title: 'பாடநூல் கலைச்சொற்கள் களஞ்சியம்',
-              duration: '30 நிமிடங்கள்',
-              keyConcepts: ['Search engine - தேடுபொறி', 'Gene - மரபணு', 'Allergy - ஒவ்வாமை', 'Migration - வலசை', 'Nautical Mile - கடல் மைல்'],
-              studyNotes: [
-                'Search engine: தேடுபொறி; Artificial Intelligence: செயற்கை நுண்ணறிவு; Software: மென்பொருள்; Hardware: வன்பொருள்.',
-                'Gene: மரபணு; Allergy: ஒவ்வாமை; Migration: வலசை போதல்; Launch vehicle: ஏவூர்தி; Bio-technology: உயிரித் தொழில்நுட்பம்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'gt-q5',
-                  question: '"Migration" என்னும் ஆங்கிலக் கலைச்சொல்லிற்கு இணையான சரியான தமிழ்ச்சொல் எது?',
-                  options: ['இடப்பெயர்வு / வலசை', 'குடியேற்றம்', 'சுற்றுலா', 'பயணம்'],
-                  correctAnswer: 0,
-                  explanation: 'பறவைகள் மற்றும் உயிரினங்களின் பருவநிலை சார்ந்த இடம்பெயர்வுக்கு "வலசை போதல்" அல்லது "இடப்பெயர்வு" என்பது சரியான சொல்லாகும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 5,
-      unitNumber: 'அலகு V',
-      title: 'வாசித்தல் – புரிந்து கொள்ளும் திறன்',
-      tamilTitle: 'அலகு V: வாசித்தல் – புரிந்து கொள்ளும் திறன்',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்புத் தரம்',
-      officialTopics: [
-        'கொடுக்கப்பட்ட பத்தியிலிருந்து வினாக்களுக்கு விடையளித்தல் (செய்தித்தாள் தலையங்கம், முகப்புச் செய்திகள், கட்டுரைகள்)',
-        'உவமைத் தொடரின் பொருளறிதல், மரபுத் தொடரின் பொருளறிதல், பழமொழிகள்',
-      ],
-      chapters: [
-        {
-          id: 'gt-u5-c1',
-          chapterNumber: 1,
-          title: 'பத்தி வினாக்கள், உவமை மற்றும் மரபுத்தொடர்கள்',
-          lessons: [
-            {
-              id: 'gt-u5-c1-l1',
-              lessonNumber: '5.1',
-              title: 'உவமைத் தொடர் பொருளறிதல் & பத்தி விடை நுட்பங்கள்',
-              duration: '30 நிமிடங்கள்',
-              keyConcepts: ['இஞ்சி தின்ற குரங்கு போல - விழித்தல்', 'மடைதிறந்த வெள்ளம் போல - தடையின்றி பாய்தல்', 'தாமரை இலைத் தண்ணீர் போல - பற்றற்று இருத்தல்'],
-              studyNotes: [
-                'உவமைத் தொடர்களின் பயன்பாடு: "கிணற்றுத் தவளை போல" என்பது அறியாமை அல்லது உலகியல் அறிவு இல்லாதிருத்தலைக் குறிக்கும்.',
-                '"அத்தி பூத்தாற்போல" என்பது மிக அரிதாக நடக்கும் செயலைக் குறிக்கும்.',
-                '"தாமரை இலைத் தண்ணீர் போல" என்பது ஒட்டாமல் பற்றற்று இருத்தலைக் குறிக்கும்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'gt-q6',
-                  question: '"அத்தி பூத்தாற் போல" என்னும் உவமைத் தொடர் உணர்த்தும் பொருள் யாது?',
-                  options: ['அரிதான செயல்', 'எளிதான செயல்', 'தொடர்ச்சியான நிகழ்வு', 'பயனற்ற செயல்'],
-                  correctAnswer: 0,
-                  explanation: '"அத்தி பூத்தாற்போல" என்பது அரிதாக அல்லது மிகவும் எப்போதாவது காணப்பெறும் நிகழ்வைக் குறிக்கும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 6,
-      unitNumber: 'அலகு VI',
-      title: 'எளிய மொழி பெயர்ப்பு',
-      tamilTitle: 'அலகு VI: எளிய மொழி பெயர்ப்பு',
-      questionCount: 5,
-      standard: 'பத்தாம் வகுப்புத் தரம்',
-      officialTopics: [
-        'ஆங்கிலம் மற்றும் பிறமொழிச் சொற்களுக்கு இணையான தமிழ்ச் சொற்கள் அறிதல்',
-        'பயன்பாட்டில் உள்ள ஆங்கிலச் சொற்களை மொழிபெயர்த்தல் (pendrive, printer, computer, keyboard போன்றவை)',
-      ],
-      chapters: [
-        {
-          id: 'gt-u6-c1',
-          chapterNumber: 1,
-          title: 'நாள்தோறும் பயன்பாட்டு மொழிபெயர்ப்பு',
-          lessons: [
-            {
-              id: 'gt-u6-c1-l1',
-              lessonNumber: '6.1',
-              title: 'அலுவலகச் சாதனங்கள் மற்றும் ஆவணப் பெயர்கள் மொழிபெயர்ப்பு',
-              duration: '25 நிமிடங்கள்',
-              keyConcepts: ['Computer - கணினி', 'Keyboard - விசைப்பலகை', 'Pendrive - விரலி / நினைவகம்', 'Printer - அச்சுப்பொறி'],
-              studyNotes: [
-                'கணினி சார்ந்த மொழிபெயர்ப்பு: Pendrive = விரலி (விரலி நினைவகம்); Printer = அச்சுப்பொறி; Scanner = வருடி; Screen = திரை.',
-                'அரசு ஆவணங்கள்: File = கோப்பு; Circular = சுற்றறிக்கை; Order = ஆணை; Application = விண்ணப்பம்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'gt-q7',
-                  question: '"Pendrive" என்னும் சொல்லுக்கு இணையான சரியான தமிழ்ச்சொல் எது?',
-                  options: ['விரலி', 'சுட்டி', 'விசைப்பலகை', 'அச்சுப்பொறி'],
-                  correctAnswer: 0,
-                  explanation: '"Pendrive" என்பது விரலி நினைவகம் அல்லது விரலி என்று தமிழில் அழைக்கப்படுகிறது.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 7,
-      unitNumber: 'அலகு VII',
-      title: 'இலக்கியம், தமிழ் அறிஞர்களும், தமிழ்த்தொண்டும்',
-      tamilTitle: 'அலகு VII: இலக்கியம், தமிழ் அறிஞர்களும், தமிழ்த்தொண்டும்',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்புத் தரம் (பாடப் புத்தகங்கள்)',
-      officialTopics: [
-        'திருக்குறள் தொடர்பான செய்திகள் (இருபது அதிகாரங்கள் மட்டும்: ஒழுக்கமுடைமை, பொறையுடைமை, ஊக்கமுடைமை, விருந்தோம்பல், அறன் வலியுறுத்தல், ஈகை, பெரியாரைத் துணைக்கோடல், வினை செயல்வகை, அவையஞ்சாமை, கண்ணோட்டம், அன்புடைமை, கல்வி, நடுநிலைமை, கூடா ஒழுக்கம், கல்லாமை, செங்கோன்மை, பண்புடைமை, நட்பாராய்தல், புறங்கூறாமை, அருளுடைமை)',
-        'அறநூல் தொடர்பான செய்திகள்: நாலடியார், நான்மணிக்கடிகை, பழமொழி நானூறு, முதுமொழிக்காஞ்சி, திரிகடுகம், இன்னாநாற்பது, சிறுபஞ்சமூலம், ஏலாதி, அவ்வையார் பாடல்கள்',
-        'தமிழ் அறிஞர்களும் தமிழ்த்தொண்டும்: உ.வே.சா, பரிதிமாற்கலைஞர், தேவநேயப் பாவாணர், பாவலரேறு பெருஞ்சித்திரனார், ஜி.யு.போப், வீரமாமுனிவர், பாரதிதாசன், கண்ணதாசன், வேலுநாச்சியார் உள்ளிட்டோர்',
-      ],
-      chapters: [
-        {
-          id: 'gt-u7-c1',
-          chapterNumber: 1,
-          title: 'திருக்குறள், அறநூல்கள் மற்றும் தமிழ்ச் சான்றோர்கள்',
-          lessons: [
-            {
-              id: 'gt-u7-c1-l1',
-              lessonNumber: '7.1',
-              title: 'திருக்குறள் 20 அதிகாரங்கள், பதினெண்கீழ்க்கணக்கு & தமிழ் அறிஞர்கள்',
-              duration: '50 நிமிடங்கள்',
-              keyConcepts: [
-                'திருக்குறள் (1330 குறள்கள், 133 அதிகாரங்கள்)',
-                'நாலடியார் (சமண முனிவர்கள்)',
-                'உ.வே.சா (தமிழ் தாத்தா - ஏட்டுச் சுவடி பதிப்பு)',
-                'வீரமாமுனிவர் (தேம்பாவணி, சதுரகராதி)',
-                'ஜி.யு.போப் (திருக்குறள் & திருவாசகம் ஆங்கில மொழிபெயர்ப்பு)',
-              ],
-              studyNotes: [
-                'பாடத்திட்டத்தில் குறிப்பிடப்பட்டுள்ள 20 திருக்குறள் அதிகாரங்கள்: ஒழுக்கமுடைமை, பொறையுடைமை, ஊக்கமுடைமை, விருந்தோம்பல், அறன் வலியுறுத்தல், ஈகை, பெரியாரைத் துணைக்கோடல், வினை செயல்வகை, அவையஞ்சாமை, கண்ணோட்டம், அன்புடைமை, கல்வி, நடுநிலைமை, கூடா ஒழுக்கம், கல்லாமை, செங்கோன்மை, பண்புடைமை, நட்பாராய்தல், புறங்கூறாமை, அருளுடைமை.',
-                'பதினெண்கீழ்க்கணக்கு அறநூல்கள்: நாலடியார் (நாலும் இரண்டும் சொல்லுக்குறுதி - சமண முனிவர்கள்), திரிகடுகம் (நல்லாதனார் - சுக்கு, மிளகு, திப்பிலி), ஏலாதி & சிறுபஞ்சமூலம் (மருந்துப் பெயர்கள் அமைந்த நூல்கள்).',
-                'உ.வே.சாமிநாதையர் ஓலைச்சுவடிகளைத் தேடித் தேடி அச்சுவாகனமேற்றிப் பதிப்பித்ததால் "தமிழ்த்தாத்தா" எனப் போற்றப்படுகிறார்.',
-                'ஜி.யு.போப் திருக்குறளையும் திருவாசகத்தையும் ஆங்கிலத்தில் மொழிபெயர்த்தார்; தம் கல்லறையில் "ஒரு தமிழ் மாணவன் உறங்குகிறான்" என எழுதப் பணித்தார்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'gt-q8',
-                  question: 'திருக்குறளை ஆங்கிலத்தில் முழுமையாக மொழிபெயர்த்து வெளியிட்ட மேலைநாட்டுத் தமிழறிஞர் யார்?',
-                  options: ['வீரமாமுனிவர்', 'ஜி.யு.போப்', 'கால்டுவெல்', 'சீகன் பால்கு'],
-                  correctAnswer: 1,
-                  explanation: 'ஜி.யு.போப் (G.U. Pope) திருக்குறள் மற்றும் திருவாசகத்தை ஆங்கிலத்தில் மொழிபெயர்த்து உலகறியச் செய்தார்.',
-                },
-                {
-                  id: 'gt-q9',
-                  question: 'சுக்கு, மிளகு, திப்பிலி ஆகிய மூன்று மருந்துப் பொருள்களால் மனிதனின் உடற்பிணி தீர்வது போல, மும்மூன்று நீதிகளால் மனப்பிணி தீர்க்கும் நூல் எது?',
-                  options: ['சிறுபஞ்சமூலம்', 'திரிகடுகம்', 'ஏலாதி', 'ஆசாரக்கோவை'],
-                  correctAnswer: 1,
-                  explanation: 'நல்லாதனார் இயற்றிய "திரிகடுகம்" சுக்கு, மிளகு, திப்பிலி ஆகிய மூவகை மருந்துகளால் அறியாமை நீக்கும் நீதிகளைக் கூறுகிறது.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
+  units: group2GeneralTamilUnits,
 }
 
 // -------------------------------------------------------------

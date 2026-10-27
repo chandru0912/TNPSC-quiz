@@ -87,7 +87,7 @@ const Group1Aptitude = () => {
                   <div className="unit-title-group">
                     <h2 className="unit-title">{unit.title}</h2>
                     <span className="unit-tamil-title">
-                      {unit.id === 1 ? 'திறனறிவு (15 கேள்விகள்)' : 'காரணவியல் (10 கேள்விகள்)'}
+                      {unit.id === 1 ? 'Aptitude (15 Questions)' : 'Reasoning (10 Questions)'}
                     </span>
                   </div>
                 </div>

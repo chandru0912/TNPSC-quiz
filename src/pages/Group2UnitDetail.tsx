@@ -269,7 +269,10 @@ const Group2UnitDetail = () => {
               <FileText size={18} />
               <span>View Lessons & Notes</span>
             </button>
-            <Link to="/practice" className="btn btn-secondary">
+            <Link
+              to={`/practice?group=group2_2a&subjectId=${subject.id}&unitId=${unit.id}&unitTitle=${encodeURIComponent(unit.title)}`}
+              className="btn btn-secondary"
+            >
               <span>Practice Unit MCQs</span>
             </Link>
           </div>

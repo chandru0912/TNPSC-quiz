@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft,
   BookOpen,
   ChevronRight,
+  ChevronLeft,
   GraduationCap,
   Layers,
   Sparkles,
@@ -17,6 +18,10 @@ import {
   Clock,
   CheckCircle2,
   FileQuestion,
+  X,
+  BookMarked,
+  Lightbulb,
+  Award,
 } from 'lucide-react'
 import {
   getUnitClassData,
@@ -24,6 +29,7 @@ import {
   type SchoolLesson,
 } from '../data/group1ClassSyllabusData'
 import { group1GeneralStudiesUnits } from '../data/group1SyllabusData'
+import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
 import './Group1UnitClass.css'
 
 const unitIcons: Record<number, any> = {
@@ -47,11 +53,56 @@ const Group1UnitClass = () => {
   const lessons = data.lessons || []
   const hasLessons = lessons.length > 0
 
+  // Interactive Study Notes Modal State
+  const [activeReadingLesson, setActiveReadingLesson] = useState<SchoolLesson | null>(null)
+  const [currentSlideIndex, setCurrentSlideIndex] = useState<number>(0)
+
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
     if (document.documentElement) document.documentElement.scrollTop = 0
     if (document.body) document.body.scrollTop = 0
   }, [parsedUnitId, parsedClassId])
+
+  // Handle keyboard navigation in reader modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!activeReadingLesson) return
+      if (e.key === 'ArrowRight') {
+        setCurrentSlideIndex((prev) => Math.min(prev + 1, 3))
+      } else if (e.key === 'ArrowLeft') {
+        setCurrentSlideIndex((prev) => Math.max(prev - 1, 0))
+      } else if (e.key === 'Escape') {
+        setActiveReadingLesson(null)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeReadingLesson])
+
+  const openLessonNotes = (lesson: SchoolLesson) => {
+    setActiveReadingLesson(lesson)
+    setCurrentSlideIndex(0)
+  }
+
+  const closeLessonNotes = () => {
+    setActiveReadingLesson(null)
+    setCurrentSlideIndex(0)
+  }
+
+  const activeDeck: LessonNotesDeck | null = activeReadingLesson
+    ? getLessonNotes(
+        data.unitId,
+        data.classId,
+        data.unitNumber,
+        data.unitTitle,
+        data.classTitle,
+        data.subjectName,
+        activeReadingLesson
+      )
+    : null
+
+  const currentSlide = activeDeck ? activeDeck.slides[currentSlideIndex] : null
 
   return (
     <div className="unit-class-page">
@@ -209,51 +260,53 @@ const Group1UnitClass = () => {
 
           {hasLessons ? (
             <div className="lessons-grid">
-              {lessons.map((lesson: SchoolLesson, index: number) => (
-                <motion.div
-                  key={lesson.id}
-                  className="lesson-card glass"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35, delay: index * 0.05 }}
-                >
-                  <div className="lesson-top-meta">
-                    <span className="lesson-num-badge">Lesson {lesson.lessonNumber}</span>
-                    {lesson.term && <span className="lesson-term-badge">{lesson.term}</span>}
-                    <span className="lesson-status-badge">
-                      <CheckCircle2 size={12} />
-                      {lesson.status}
-                    </span>
-                  </div>
+              {lessons.map((lesson: SchoolLesson, index: number) => {
+                const practiceUrl = `/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
+                  data.unitTitle
+                )}&lesson=${encodeURIComponent(lesson.title)}&classId=${data.classId}`
 
-                  <h3 className="lesson-title">{lesson.title}</h3>
+                return (
+                  <motion.div
+                    key={lesson.id}
+                    className="lesson-card glass"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, delay: index * 0.05 }}
+                  >
+                    <div className="lesson-top-meta">
+                      <span className="lesson-num-badge">Lesson {lesson.lessonNumber}</span>
+                      {lesson.term && <span className="lesson-term-badge">{lesson.term}</span>}
+                      <span className="lesson-status-badge">
+                        <CheckCircle2 size={12} />
+                        {lesson.status}
+                      </span>
+                    </div>
 
-                  {lesson.description && (
-                    <p className="lesson-desc">{lesson.description}</p>
-                  )}
+                    <h3 className="lesson-title">{lesson.title}</h3>
 
-                  <div className="lesson-action-row">
-                    <button
-                      className="lesson-read-btn"
-                      onClick={() =>
-                        alert(
-                          `Notes for "${lesson.title}" (${data.classTitle}) are currently being loaded into your reader. You can also practice questions in MCQ Practice!`
-                        )
-                      }
-                    >
-                      <FileQuestion size={15} />
-                      <span>Read Study Notes</span>
-                    </button>
-                    <Link to="/practice" className="lesson-practice-btn">
-                      <span>Practice MCQs</span>
-                      <ChevronRight size={14} />
-                    </Link>
-                  </div>
-                </motion.div>
-              ))}
+                    {lesson.description && (
+                      <p className="lesson-desc">{lesson.description}</p>
+                    )}
+
+                    <div className="lesson-action-row">
+                      <button
+                        className="lesson-read-btn"
+                        onClick={() => openLessonNotes(lesson)}
+                        title={`Open interactive study notes for ${lesson.title}`}
+                      >
+                        <BookMarked size={15} />
+                        <span>Read Study Notes</span>
+                      </button>
+                      <Link to={practiceUrl} className="lesson-practice-btn" title="Practice MCQs for this lesson">
+                        <span>Practice MCQs</span>
+                        <ChevronRight size={14} />
+                      </Link>
+                    </div>
+                  </motion.div>
+                )
+              })}
             </div>
           ) : (
-            /* EXACT REQUIRED MESSAGE WHEN NO LESSONS: "Lessons coming soon." */
             <motion.div
               className="empty-lessons-box glass"
               initial={{ opacity: 0, scale: 0.98 }}
@@ -272,7 +325,10 @@ const Group1UnitClass = () => {
                 are currently being curated by subject experts according to the official TNPSC Group 1 syllabus.
               </p>
               <div className="empty-actions">
-                <Link to="/practice" className="btn btn-primary">
+                <Link
+                  to={`/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(data.unitTitle)}&classId=${data.classId}`}
+                  className="btn btn-primary"
+                >
                   <FileQuestion size={16} />
                   <span>Practice General Studies MCQs</span>
                 </Link>
@@ -293,6 +349,186 @@ const Group1UnitClass = () => {
           </Link>
         </div>
       </div>
+
+      {/* ============================================================== */}
+      {/* INTERACTIVE STUDY NOTES MODAL WITH SLIDE-BY-SLIDE READER FORMAT */}
+      {/* ============================================================== */}
+      <AnimatePresence>
+        {activeReadingLesson && activeDeck && currentSlide && (
+          <div className="slide-modal-overlay" onClick={closeLessonNotes}>
+            <motion.div
+              className="slide-modal-card glass"
+              initial={{ opacity: 0, scale: 0.92, y: 25 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 25 }}
+              transition={{ duration: 0.28, ease: 'easeOut' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Top Progress Header */}
+              <div className="slide-modal-header">
+                <div className="slide-modal-meta">
+                  <div className="slide-meta-badge-row">
+                    <span className="slide-pill-gold">
+                      <GraduationCap size={13} />
+                      {activeDeck.classTitle} {activeDeck.term ? `• ${activeDeck.term}` : ''}
+                    </span>
+                    <span className="slide-pill-cyan">{activeDeck.unitNumber}</span>
+                    <span className="slide-pill-muted">{activeDeck.subjectName}</span>
+                  </div>
+                  <h2 className="slide-modal-lesson-title">
+                    Lesson {activeReadingLesson.lessonNumber}: {activeReadingLesson.title}
+                  </h2>
+                </div>
+
+                <button
+                  className="slide-modal-close"
+                  onClick={closeLessonNotes}
+                  aria-label="Close Study Reader"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Slide Progress Indicator Bar */}
+              <div className="slide-progress-track">
+                <div
+                  className="slide-progress-fill"
+                  style={{ width: `${((currentSlideIndex + 1) / activeDeck.slides.length) * 100}%` }}
+                />
+              </div>
+
+              {/* Slide Sub-Header Controls */}
+              <div className="slide-nav-hud">
+                <div className="slide-counter-info">
+                  <span className="slide-badge-active">{currentSlide.badge}</span>
+                  <span className="slide-counter-text">
+                    Slide {currentSlideIndex + 1} of {activeDeck.slides.length}
+                  </span>
+                </div>
+
+                {/* Direct Dot Indicators */}
+                <div className="slide-dots-group">
+                  {activeDeck.slides.map((s, idx) => (
+                    <button
+                      key={idx}
+                      className={`slide-dot ${idx === currentSlideIndex ? 'active' : ''}`}
+                      onClick={() => setCurrentSlideIndex(idx)}
+                      title={`Jump to ${s.title}`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Main Slide Card Body */}
+              <div className="slide-viewport">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentSlideIndex}
+                    className="slide-content-stage"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <div className="slide-title-block">
+                      <h3 className="slide-main-heading">{currentSlide.title}</h3>
+                      {currentSlide.subtitle && (
+                        <p className="slide-subtitle">{currentSlide.subtitle}</p>
+                      )}
+                    </div>
+
+                    <div className="slide-body-block">
+                      <h4 className="slide-topic-heading">{currentSlide.content.heading}</h4>
+
+                      {currentSlide.content.paragraphs.map((para, pIdx) => (
+                        <p key={pIdx} className="slide-para-text">
+                          {para}
+                        </p>
+                      ))}
+
+                      {currentSlide.content.keyHighlights && currentSlide.content.keyHighlights.length > 0 && (
+                        <div className="slide-highlights-grid">
+                          {currentSlide.content.keyHighlights.map((kh, kIdx) => (
+                            <div key={kIdx} className="highlight-card">
+                              <span className="highlight-label">{kh.label}</span>
+                              <span className="highlight-text">{kh.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {currentSlide.content.bulletPoints && currentSlide.content.bulletPoints.length > 0 && (
+                        <div className="slide-bullets-card">
+                          {currentSlide.content.bulletPoints.map((bp, bIdx) => (
+                            <div key={bIdx} className="slide-bullet-item">
+                              <CheckCircle2 size={16} className="bullet-check-icon" />
+                              <span>{bp}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {currentSlide.content.factBox && (
+                        <div className="slide-fact-box">
+                          <Lightbulb size={20} className="fact-box-icon" />
+                          <div className="fact-box-text">
+                            <strong>High-Yield Takeaway:</strong> {currentSlide.content.factBox}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+
+              {/* Slide Reader Footer Navigation */}
+              <div className="slide-modal-footer">
+                <div className="footer-left">
+                  <button
+                    className="slide-nav-btn btn-prev"
+                    disabled={currentSlideIndex === 0}
+                    onClick={() => setCurrentSlideIndex((prev) => Math.max(prev - 1, 0))}
+                  >
+                    <ChevronLeft size={16} />
+                    <span>Previous Slide</span>
+                  </button>
+                </div>
+
+                <div className="footer-center">
+                  <span className="keyboard-tip">Tip: Use ◄ ► arrow keys to switch slides</span>
+                </div>
+
+                <div className="footer-right">
+                  {currentSlideIndex < activeDeck.slides.length - 1 ? (
+                    <button
+                      className="slide-nav-btn btn-next"
+                      onClick={() => setCurrentSlideIndex((prev) => Math.min(prev + 1, activeDeck.slides.length - 1))}
+                    >
+                      <span>Next Slide</span>
+                      <ChevronRight size={16} />
+                    </button>
+                  ) : (
+                    <button
+                      className="slide-action-finish-btn"
+                      onClick={() => {
+                        closeLessonNotes()
+                        navigate(
+                          `/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
+                            data.unitTitle
+                          )}&lesson=${encodeURIComponent(activeReadingLesson.title)}&classId=${data.classId}`
+                        )
+                      }}
+                    >
+                      <Award size={16} />
+                      <span>Finish & Practice MCQs</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

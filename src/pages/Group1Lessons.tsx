@@ -216,8 +216,13 @@ const Group1Lessons = () => {
                   <button
                     className="btn btn-primary"
                     onClick={() => {
+                      const lessonTitle = activeLesson.lesson.title
                       setActiveLesson(null)
-                      navigate('/practice')
+                      navigate(
+                        `/practice?group=group1&unitId=${unit.id}&unitTitle=${encodeURIComponent(
+                          unit.title
+                        )}&lesson=${encodeURIComponent(lessonTitle)}`
+                      )
                     }}
                   >
                     <FileQuestion size={16} />

@@ -80,7 +80,7 @@ const Group2SubjectDetail = () => {
         <div>
           <Link to="/materials?group=group2_2a" className="back-btn glass" state={{ selectedGroup: 'group2_2a' }}>
             <ArrowLeft size={16} />
-            <span>Back to Group 2 & 2A</span>
+            <span>Back to Study Materials</span>
           </Link>
         </div>
 
@@ -323,7 +323,7 @@ const Group2SubjectDetail = () => {
         <div>
           <Link to="/materials?group=group2_2a" className="back-btn glass" state={{ selectedGroup: 'group2_2a' }}>
             <ArrowLeft size={16} />
-            <span>Back to Group 2 & 2A</span>
+            <span>Back to Study Materials</span>
           </Link>
         </div>
       </div>

@@ -47,8 +47,11 @@
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  user-select: none;
 }
 
 .mocktests-tab {
@@ -298,10 +301,31 @@
 
   .mocktests-categories {
     width: 100%;
+    border-radius: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+    padding: 0.35rem;
+    box-sizing: border-box;
   }
 
   .mocktests-tab {
-    flex: 1 1 auto;
+    padding: 0.55rem 0.35rem;
+    font-size: 0.8rem;
     text-align: center;
+    border-radius: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 480px) {
+  .mocktests-categories {
+    grid-template-columns: 1fr;
+  }
+  .mocktests-tab {
+    font-size: 0.85rem;
+    padding: 0.6rem 1rem;
   }
 }

@@ -1,6 +1,8 @@
 // TNPSC Group 4 & VAO: Samacheer Kalvi School Textbook (6th to 10th/12th Standard) Syllabus Mapping
 // Mapped specifically to the official Group 4 & VAO Examination Syllabus (Code: 496)
 
+import { group2TamilRegistry } from './group2TamilData'
+
 export interface Group4SchoolLesson {
   id: string
   lessonNumber: string
@@ -49,7 +51,7 @@ export const group4ClassRegistry: Record<string, Group4UnitClassData> = {
     classId: 6,
     subjectTitle: 'General Studies',
     unitTitle: 'General Science',
-    unitNumber: 'Unit I',
+    unitNumber: 'Unit 1',
     classTitle: '6th Standard',
     standardNumber: 6,
     subjectName: 'Science (Samacheer Kalvi)',
@@ -207,7 +209,7 @@ export const group4ClassRegistry: Record<string, Group4UnitClassData> = {
     classId: 10,
     subjectTitle: 'General Studies',
     unitTitle: 'General Science',
-    unitNumber: 'Unit I',
+    unitNumber: 'Unit 1',
     classTitle: '10th Standard',
     standardNumber: 10,
     subjectName: '10th Standard Science',
@@ -314,6 +316,7 @@ export const group4ClassRegistry: Record<string, Group4UnitClassData> = {
       },
     ],
   },
+  ...group2TamilRegistry,
 }
 
 export const getGroup4UnitClassData = (

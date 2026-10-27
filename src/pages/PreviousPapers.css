@@ -89,7 +89,7 @@
 
 .papers-table-header {
   display: grid;
-  grid-template-columns: 120px 220px 1fr 120px 200px;
+  grid-template-columns: 110px 220px 1fr 110px 220px;
   background: rgba(255, 215, 0, 0.08);
   border-bottom: 1px solid rgba(255, 215, 0, 0.25);
 }
@@ -105,7 +105,7 @@
 
 .papers-table-row {
   display: grid;
-  grid-template-columns: 120px 220px 1fr 120px 200px;
+  grid-template-columns: 110px 220px 1fr 110px 220px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   transition: var(--transition);
 }
@@ -144,51 +144,226 @@
 
 .actions-col {
   display: flex;
-  gap: 0.6rem;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: nowrap;
 }
 
 .table-action-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
-  padding: 0.55rem 0.95rem;
-  background: rgba(22, 32, 58, 0.6);
-  border: 1px solid rgba(255, 215, 0, 0.22);
-  color: var(--text-secondary);
+  padding: 0.52rem 0.95rem;
+  background: rgba(22, 32, 58, 0.75);
+  border: 1px solid rgba(255, 215, 0, 0.28);
+  color: #f1f5f9;
   border-radius: 9999px;
   font-size: 0.8125rem;
   font-weight: 600;
-  transition: var(--transition);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
   backdrop-filter: blur(10px);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 84px;
 }
 
 .table-action-btn:hover {
-  background: rgba(255, 215, 0, 0.12);
+  background: rgba(255, 215, 0, 0.16);
   border-color: var(--gold-primary);
   color: var(--gold-primary);
-  box-shadow: 0 0 14px rgba(255, 215, 0, 0.2);
+  box-shadow: 0 0 14px rgba(255, 215, 0, 0.25);
   transform: translateY(-1px);
 }
 
 .table-action-primary {
-  background: var(--gradient-primary);
+  background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
   border-color: transparent;
   color: #060913;
-  box-shadow: 0 4px 14px rgba(255, 215, 0, 0.3);
+  box-shadow: 0 4px 14px rgba(255, 215, 0, 0.32);
+  font-weight: 700;
 }
 
 .table-action-primary:hover {
-  background: var(--gradient-primary);
-  box-shadow: 0 6px 20px rgba(255, 215, 0, 0.5);
+  background: linear-gradient(135deg, #ffe033 0%, #fbbf24 100%);
+  box-shadow: 0 6px 20px rgba(255, 215, 0, 0.55);
   transform: translateY(-2px);
   color: #060913;
+}
+
+/* Paper Preview Modal */
+.paper-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 7, 18, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 1000;
+}
+
+.paper-modal {
+  width: 100%;
+  max-width: 640px;
+  background: linear-gradient(165deg, rgba(20, 28, 52, 0.96) 0%, rgba(10, 15, 32, 0.98) 100%);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  border-radius: 20px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.75), 0 0 30px rgba(255, 215, 0, 0.15);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.paper-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 215, 0, 0.05);
+}
+
+.paper-modal-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.paper-modal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gold-primary);
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid rgba(255, 215, 0, 0.28);
+  padding: 0.2rem 0.65rem;
+  border-radius: 9999px;
+  width: fit-content;
+}
+
+.paper-modal-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0;
+}
+
+.paper-modal-close {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.paper-modal-close:hover {
+  background: rgba(255, 215, 0, 0.15);
+  color: var(--gold-primary);
+  border-color: var(--gold-primary);
+  transform: rotate(90deg);
+}
+
+.paper-modal-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.paper-modal-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.paper-meta-card {
+  background: rgba(14, 22, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 0.85rem;
+  text-align: center;
+}
+
+.paper-meta-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+}
+
+.paper-meta-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--gold-primary);
+}
+
+.paper-modal-section-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.paper-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.paper-breakdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+
+.paper-breakdown-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.paper-breakdown-tag {
+  color: var(--gold-primary);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.paper-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 15, 30, 0.5);
 }
 
 @media (max-width: 968px) {
   .papers-table-header,
   .papers-table-row {
-    grid-template-columns: 100px 180px 1fr 100px 180px;
+    grid-template-columns: 100px 190px 1fr 100px 200px;
   }
 }
 
@@ -199,7 +374,7 @@
   
   .papers-table-header,
   .papers-table-row {
-    min-width: 680px;
+    min-width: 740px;
   }
 }
 

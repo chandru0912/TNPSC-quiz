@@ -34,9 +34,8 @@ export interface SyllabusUnit {
 export const group1GeneralStudiesUnits: SyllabusUnit[] = [
   {
     id: 1,
-    unitNumber: 'Unit I',
+    unitNumber: 'Unit 1',
     title: 'General Science',
-    tamilTitle: 'அலகு I: பொது அறிவியல்',
     questionCount: 10,
     standard: 'Degree Standard',
     color: '#38bdf8',
@@ -230,9 +229,8 @@ export const group1GeneralStudiesUnits: SyllabusUnit[] = [
   },
   {
     id: 2,
-    unitNumber: 'Unit II',
+    unitNumber: 'Unit 2',
     title: 'Geography of India',
-    tamilTitle: 'அலகு II: இந்தியாவின் புவியியல்',
     questionCount: 10,
     standard: 'Degree Standard',
     color: '#10b981',
@@ -384,9 +382,8 @@ export const group1GeneralStudiesUnits: SyllabusUnit[] = [
   },
   {
     id: 3,
-    unitNumber: 'Unit III',
+    unitNumber: 'Unit 3',
     title: 'History, Culture of India, and Indian National Movement',
-    tamilTitle: 'அலகு III: இந்தியாவின் வரலாறு, பண்பாடு மற்றும் இந்திய தேசிய இயக்கம்',
     questionCount: 25,
     standard: 'Degree Standard',
     color: '#f59e0b',
@@ -551,9 +548,8 @@ export const group1GeneralStudiesUnits: SyllabusUnit[] = [
   },
   {
     id: 4,
-    unitNumber: 'Unit IV',
+    unitNumber: 'Unit 4',
     title: 'Indian Polity',
-    tamilTitle: 'அலகு IV: இந்திய ஆட்சியியல்',
     questionCount: 40,
     standard: 'Degree Standard',
     color: '#6366f1',
@@ -733,9 +729,8 @@ export const group1GeneralStudiesUnits: SyllabusUnit[] = [
   },
   {
     id: 5,
-    unitNumber: 'Unit V',
+    unitNumber: 'Unit 5',
     title: 'Indian Economy and Development Administration in Tamil Nadu',
-    tamilTitle: 'அலகு V: இந்தியப் பொருளாதாரம் மற்றும் தமிழ்நாட்டில் வளர்ச்சி நிர்வாகம்',
     questionCount: 50,
     standard: 'Degree Standard',
     color: '#ec4899',
@@ -923,9 +918,8 @@ export const group1GeneralStudiesUnits: SyllabusUnit[] = [
   },
   {
     id: 6,
-    unitNumber: 'Unit VI',
+    unitNumber: 'Unit 6',
     title: 'History, Culture, Heritage, and Socio-Political Movements in Tamil Nadu',
-    tamilTitle: 'அலகு VI: தமிழ்நாட்டின் வரலாறு, பண்பாடு, மரபு மற்றும் சமூக - அரசியல் இயக்கங்கள்',
     questionCount: 40,
     standard: 'Degree Standard',
     color: '#ffd700',
@@ -1115,7 +1109,7 @@ export interface AptitudeUnit {
 export const group1AptitudeUnits: AptitudeUnit[] = [
   {
     id: 1,
-    unitNumber: 'Unit I',
+    unitNumber: 'Unit 1',
     title: 'Aptitude',
     questionCount: 15,
     standard: 'SSLC Standard',
@@ -1134,7 +1128,7 @@ export const group1AptitudeUnits: AptitudeUnit[] = [
   },
   {
     id: 2,
-    unitNumber: 'Unit II',
+    unitNumber: 'Unit 2',
     title: 'Reasoning',
     questionCount: 10,
     standard: 'SSLC Standard',

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
   BookOpen,
@@ -52,10 +53,18 @@ const StudyMaterials = () => {
   // Derive active group directly from URL search params, router state, or session storage
   const selectedGroup: GroupId = groupFromUrl || groupFromState || getStoredGroup()
 
+  useEffect(() => {
+    if (selectedGroup) {
+      try {
+        sessionStorage.setItem('tnpsc_selected_group', selectedGroup)
+      } catch {}
+    }
+  }, [selectedGroup])
+
   const groups = [
     { id: 'group1' as const, name: 'TNPSC Group 1' },
     { id: 'group2_2a' as const, name: 'TNPSC Group 2 & 2A' },
-    { id: 'group4_vao' as const, name: 'TNPSC Group 4 & VAO' },
+    { id: 'group4_vao' as const, name: 'TNPSC Group 4' },
   ]
 
   const handleGroupChange = (group: GroupId) => {
@@ -514,7 +523,7 @@ const StudyMaterials = () => {
               </div>
 
               <p className="group1-card-desc">
-                Official TNPSC Group 4 & VAO General Studies syllabus covering General Science, Geography of India & TN,
+                Official TNPSC Group 4 General Studies syllabus covering General Science, Geography of India & TN,
                 History & Culture of India and INM, Indian Polity, Indian Economy & TN Dev Admin, and Tamil Nadu History/Heritage/Movements.
               </p>
 

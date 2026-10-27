@@ -6,6 +6,8 @@
 // Part C: Tamil Eligibility-cum-Scoring Test (100 Questions) / General English (100 Questions)
 // Total: 200 Questions / 300 Marks / 3 Hours
 
+import { group4GeneralTamilUnits } from './generalTamilComprehensiveData'
+
 export interface Group4MCQ {
   id: string
   question: string
@@ -64,7 +66,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
   id: 'general-studies',
   order: 1,
   title: 'General Studies',
-  tamilTitle: 'பொது அறிவு (பத்தாம் வகுப்புத் தரம்)',
   partTag: 'Part A • SSLC Standard',
   standard: 'SSLC Standard (75 Questions • 112.5 Marks)',
   questionCount: 75,
@@ -74,9 +75,8 @@ export const group4GeneralStudiesSubject: Group4Subject = {
   units: [
     {
       id: 1,
-      unitNumber: 'Unit I',
+      unitNumber: 'Unit 1',
       title: 'General Science',
-      tamilTitle: 'அலகு I: பொது அறிவியல்',
       questionCount: 5,
       standard: 'SSLC Standard (5 Questions)',
       officialTopics: [
@@ -91,7 +91,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u1-c1',
           chapterNumber: 1,
           title: 'Physics & Laws of Motion in Everyday Life',
-          tamilTitle: 'இயற்பியல் மற்றும் இயக்க விதிகள்',
           lessons: [
             {
               id: 'g4-gs-u1-c1-l1',
@@ -148,7 +147,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u1-c2',
           chapterNumber: 2,
           title: 'Chemistry & Everyday Substances',
-          tamilTitle: 'வேதியியல் மற்றும் அன்றாடப் பயன்பாடுகள்',
           lessons: [
             {
               id: 'g4-gs-u1-c2-l1',
@@ -177,7 +175,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u1-c3',
           chapterNumber: 3,
           title: 'Life Science, Physiology & Human Diseases',
-          tamilTitle: 'உயிரியல், மனித உடலியல் மற்றும் நோய்கள்',
           lessons: [
             {
               id: 'g4-gs-u1-c3-l1',
@@ -206,9 +203,8 @@ export const group4GeneralStudiesSubject: Group4Subject = {
     },
     {
       id: 2,
-      unitNumber: 'Unit II',
+      unitNumber: 'Unit 2',
       title: 'Geography',
-      tamilTitle: 'அலகு II: புவியியல்',
       questionCount: 5,
       standard: 'SSLC Standard (5 Questions)',
       officialTopics: [
@@ -223,7 +219,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u2-c1',
           chapterNumber: 1,
           title: 'Physical Geography, Monsoon & Rivers of India and TN',
-          tamilTitle: 'இயற்கை அமைப்புகள், பருவமழை மற்றும் நதிகள்',
           lessons: [
             {
               id: 'g4-gs-u2-c1-l1',
@@ -252,9 +247,8 @@ export const group4GeneralStudiesSubject: Group4Subject = {
     },
     {
       id: 3,
-      unitNumber: 'Unit III',
+      unitNumber: 'Unit 3',
       title: 'History, Culture of India & Indian National Movement',
-      tamilTitle: 'அலகு III: இந்தியாவின் வரலாறு, பண்பாடு மற்றும் இந்திய தேசிய இயக்கம்',
       questionCount: 10,
       standard: 'SSLC Standard (10 Questions)',
       officialTopics: [
@@ -268,7 +262,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u3-c1',
           chapterNumber: 1,
           title: 'Indus Valley, Guptas, Delhi Sultanate & South Indian Dynasties',
-          tamilTitle: 'சிந்து சமவெளி முதல் தென் இந்திய வரலாறு வரை',
           lessons: [
             {
               id: 'g4-gs-u3-c1-l1',
@@ -297,7 +290,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u3-c2',
           chapterNumber: 2,
           title: 'Indian National Movement & Leaders of Tamil Nadu',
-          tamilTitle: 'இந்திய தேசிய இயக்கம் மற்றும் விடுதலை வீரர்கள்',
           lessons: [
             {
               id: 'g4-gs-u3-c2-l1',
@@ -326,9 +318,8 @@ export const group4GeneralStudiesSubject: Group4Subject = {
     },
     {
       id: 4,
-      unitNumber: 'Unit IV',
+      unitNumber: 'Unit 4',
       title: 'Indian Polity',
-      tamilTitle: 'அலகு IV: இந்திய ஆட்சியியல்',
       questionCount: 15,
       standard: 'SSLC Standard (15 Questions)',
       officialTopics: [
@@ -343,7 +334,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u4-c1',
           chapterNumber: 1,
           title: 'Preamble, Fundamental Rights & Duties, DPSP',
-          tamilTitle: 'முகவுரை, அடிப்படை உரிமைகள் & கடமைகள்',
           lessons: [
             {
               id: 'g4-gs-u4-c1-l1',
@@ -372,7 +362,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u4-c2',
           chapterNumber: 2,
           title: 'Legislature, Executive, Judiciary & Panchayat Raj',
-          tamilTitle: 'சட்டமன்றம், நிர்வாகம், நீதித்துறை & உள்ளாட்சி',
           lessons: [
             {
               id: 'g4-gs-u4-c2-l1',
@@ -401,9 +390,8 @@ export const group4GeneralStudiesSubject: Group4Subject = {
     },
     {
       id: 5,
-      unitNumber: 'Unit V',
+      unitNumber: 'Unit 5',
       title: 'Indian Economy & Development Administration in Tamil Nadu',
-      tamilTitle: 'அலகு V: இந்தியப் பொருளாதாரம் மற்றும் தமிழகத்தில் வளர்ச்சி நிர்வாகம்',
       questionCount: 20,
       standard: 'SSLC Standard (20 Questions)',
       officialTopics: [
@@ -418,7 +406,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u5-c1',
           chapterNumber: 1,
           title: 'Planning, NITI Aayog, Fiscal Policy, RBI & GST',
-          tamilTitle: 'திட்டக்குழு, நிதி ஆயோக், ரிசர்வ் வங்கி மற்றும் ஜி.எஸ்.டி',
           lessons: [
             {
               id: 'g4-gs-u5-c1-l1',
@@ -447,7 +434,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u5-c2',
           chapterNumber: 2,
           title: 'Tamil Nadu Socio-Economic Model, Welfare & Healthcare',
-          tamilTitle: 'தமிழகத்தின் வளர்ச்சி மாதிரி மற்றும் நலத்திட்டங்கள்',
           lessons: [
             {
               id: 'g4-gs-u5-c2-l1',
@@ -476,9 +462,8 @@ export const group4GeneralStudiesSubject: Group4Subject = {
     },
     {
       id: 6,
-      unitNumber: 'Unit VI',
+      unitNumber: 'Unit 6',
       title: 'History, Culture, Heritage & Socio-Political Movements of Tamil Nadu',
-      tamilTitle: 'அலகு VI: தமிழ்நாட்டின் வரலாறு, பண்பாடு, மரபு மற்றும் சமூக - அரசியல் இயக்கங்கள்',
       questionCount: 20,
       standard: 'SSLC Standard (20 Questions)',
       officialTopics: [
@@ -491,7 +476,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u6-c1',
           chapterNumber: 1,
           title: 'Archaeological Excavations & Sangam Heritage',
-          tamilTitle: 'தொல்லியல் அகழாய்வுகள் & சங்க காலம்',
           lessons: [
             {
               id: 'g4-gs-u6-c1-l1',
@@ -520,7 +504,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u6-c2',
           chapterNumber: 2,
           title: 'Thirukkural & Secular Values',
-          tamilTitle: 'திருக்குறள் மற்றும் மதச்சார்பற்ற மாண்புகள்',
           lessons: [
             {
               id: 'g4-gs-u6-c2-l1',
@@ -549,7 +532,6 @@ export const group4GeneralStudiesSubject: Group4Subject = {
           id: 'g4-gs-u6-c3',
           chapterNumber: 3,
           title: 'Self-Respect Movement, Justice Party & Social Reformers',
-          tamilTitle: 'சுயமரியாதை இயக்கம், நீதிக்கட்சி & சீர்திருத்தங்கள்',
           lessons: [
             {
               id: 'g4-gs-u6-c3-l1',
@@ -586,7 +568,6 @@ export const group4AptitudeSubject: Group4Subject = {
   id: 'aptitude',
   order: 2,
   title: 'Aptitude and Mental Ability',
-  tamilTitle: 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும் (25 வினாக்கள்)',
   partTag: 'Part B • SSLC Standard',
   standard: 'SSLC Standard (25 Questions • 37.5 Marks)',
   questionCount: 25,
@@ -596,9 +577,8 @@ export const group4AptitudeSubject: Group4Subject = {
   units: [
     {
       id: 1,
-      unitNumber: 'Unit I',
+      unitNumber: 'Unit 1',
       title: 'Aptitude',
-      tamilTitle: 'அலகு I: திறனறிவு (15 கேள்விகள்)',
       questionCount: 15,
       standard: 'SSLC Standard (15 Questions)',
       officialTopics: [
@@ -611,7 +591,6 @@ export const group4AptitudeSubject: Group4Subject = {
           id: 'g4-apt-u1-c1',
           chapterNumber: 1,
           title: 'Simplification, Percentage, HCF & LCM',
-          tamilTitle: 'சுருக்குதல், விழுக்காடு, மீப்பெரு பொதுக்காரணி & மீச்சிறு பொதுமடங்கு',
           lessons: [
             {
               id: 'g4-apt-u1-c1-l1',
@@ -647,7 +626,6 @@ export const group4AptitudeSubject: Group4Subject = {
           id: 'g4-apt-u1-c2',
           chapterNumber: 2,
           title: 'Ratio, Interest, Mensuration & Time-Work',
-          tamilTitle: 'விகிதம், வட்டி, அளவியல் & காலமும் வேலையும்',
           lessons: [
             {
               id: 'g4-apt-u1-c2-l1',
@@ -676,9 +654,8 @@ export const group4AptitudeSubject: Group4Subject = {
     },
     {
       id: 2,
-      unitNumber: 'Unit II',
+      unitNumber: 'Unit 2',
       title: 'Reasoning',
-      tamilTitle: 'அலகு II: காரணவியல் (10 கேள்விகள்)',
       questionCount: 10,
       standard: 'SSLC Standard (10 Questions)',
       officialTopics: [
@@ -690,7 +667,6 @@ export const group4AptitudeSubject: Group4Subject = {
           id: 'g4-apt-u2-c1',
           chapterNumber: 1,
           title: 'Logical Puzzles, Dice & Visual Reasoning',
-          tamilTitle: 'தருக்கப் புதிர்கள், பகடை மற்றும் காட்சி காரணவியல்',
           lessons: [
             {
               id: 'g4-apt-u2-c1-l1',
@@ -718,7 +694,6 @@ export const group4AptitudeSubject: Group4Subject = {
           id: 'g4-apt-u2-c2',
           chapterNumber: 2,
           title: 'Alpha-Numeric Reasoning & Number Series',
-          tamilTitle: 'எண் மற்றும் எழுத்து வரிசை நுண்ணறிவு',
           lessons: [
             {
               id: 'g4-apt-u2-c2-l1',
@@ -761,380 +736,7 @@ export const group4GeneralTamilSubject: Group4Subject = {
   description:
     'அதிகாரப்பூர்வ TNPSC குரூப் 4 பாடத்திட்டம் (Code: 496): அலகு I இலக்கணம் (25 Qs), அலகு II சொல்லகராதி (15 Qs), அலகு III எழுதும் திறன் (15 Qs), அலகு IV கலைச் சொற்கள் (10 Qs), அலகு V வாசித்தல் புரிதல் (15 Qs), அலகு VI எளிய மொழி பெயர்ப்பு (5 Qs), அலகு VII இலக்கியம் & தமிழறிஞர்கள் (15 Qs).',
   accentColor: '#10b981',
-  units: [
-    {
-      id: 1,
-      unitNumber: 'அலகு I',
-      title: 'இலக்கணம் (Grammar)',
-      tamilTitle: 'அலகு I: இலக்கணம் (25 கேள்விகள்)',
-      questionCount: 25,
-      standard: 'பத்தாம் வகுப்புத் தரம் (25 Questions)',
-      officialTopics: [
-        'எழுத்து: பிரித்து எழுதுதல் – சேர்த்து எழுதுதல் – சந்திப்பிழை – குறில், நெடில் வேறுபாடு – லகர, ளகர, ழகர வேறுபாடு – னகர, ணகர வேறுபாடு – ரகர, றகர வேறுபாடு – இனவெழுத்துகள் அறிதல் – சுட்டு எழுத்துகள் – வினா எழுத்துகள் – ஒருமைப் பன்மை அறிதல்',
-        'சொல்: வேர்ச்சொல் அறிதல் – வேர்ச்சொல்லில் இருந்து வினைமுற்று, வினையெச்சம், வினையாலணையும் பெயர், பெயரெச்சம் வகை அறிதல் – அயற்சொல் – தமிழ்ச்சொல், எதிர்ச்சொல் – வினைச்சொல் – எழுத்துப் பிழை, ஒற்றுப்பிழை அறிதல் – இரண்டு வினைச் சொற்களின் வேறுபாடு அறிதல்',
-      ],
-      chapters: [
-        {
-          id: 'g4-gt-u1-c1',
-          chapterNumber: 1,
-          title: 'எழுத்து இலக்கணம் & ஒலி வேறுபாடுகள்',
-          tamilTitle: 'எழுத்துகள், சந்திப்பிழை & ஒருமை-பன்மை',
-          lessons: [
-            {
-              id: 'g4-gt-u1-c1-l1',
-              lessonNumber: '1.1',
-              title: 'எழுத்து வகைகள், இனவெழுத்துகள், சுட்டு & வினா எழுத்துகள்',
-              duration: '35 mins',
-              keyConcepts: ['குறில் - நெடில் மாத்திரை', 'இனவெழுத்துகள்', 'சுட்டு எழுத்துகள் (அ, இ, உ)', 'வினா எழுத்துகள் (எ, யா, ஆ, ஓ, ஏ)'],
-              studyNotes: [
-                'குறில் எழுத்திற்கு ஒரு மாத்திரை, நெடில் எழுத்திற்கு இரண்டு மாத்திரை, மெய்யெழுத்து மற்றும் ஆய்த எழுத்திற்கு அரை மாத்திரை.',
-                'சுட்டு எழுத்துகள்: அ, இ, உ (அவன், இவன், உவன்). வினா எழுத்துகள்: எ, யா (மொழிமுதல்), ஆ, ஓ (மொழிஇறுதி), ஏ (இருவழியும்).',
-                'லகர, ளகர, ழகர வேறுபாடு: கல் - பாறை, கள் - மது, கழ் - நீக்குதல்; அலி - பேடி, அளி - அருள், அழி - நாசம்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q1',
-                  question: 'தமிழில் சொல்லின் முதலில் மட்டுமே வரும் வினா எழுத்துகள் எவை?',
-                  options: ['ஆ, ஓ', 'எ, யா', 'ஏ', 'அ, இ'],
-                  correctAnswer: 1,
-                  explanation: 'எ, யா ஆகிய இரு எழுத்துகளும் சொல்லின் முதலில் மட்டுமே வினாப் பொருளைத் தரும் (எ.கா: எங்கு, யார்).',
-                },
-              ],
-            },
-          ],
-        },
-        {
-          id: 'g4-gt-u1-c2',
-          chapterNumber: 2,
-          title: 'சொல் இலக்கணம் & வேர்ச்சொல் மாற்றம்',
-          tamilTitle: 'வேர்ச்சொல், எச்சங்கள் & ஒற்றுப்பிழை நீக்குதல்',
-          lessons: [
-            {
-              id: 'g4-gt-u1-c2-l1',
-              lessonNumber: '2.1',
-              title: 'வேர்ச்சொல் அறிதல், வினைமுற்று, எச்சங்கள் மற்றும் ஒற்றுப்பிழை',
-              duration: '40 mins',
-              keyConcepts: ['வேர்ச்சொல் (ஏவல் வினை)', 'பெயரெச்சம் vs வினையெச்சம்', 'வினையாலணையும் பெயர்', 'வல்லினம் மிகும் மிகா இடங்கள்'],
-              studyNotes: [
-                '"சென்றான்" என்பதன் வேர்ச்சொல் "செல்". "படித்தான்" என்பதன் வேர்ச்சொல் "படி". வேர்ச்சொல் எப்போதும் ஏவலாகவே அமையும்.',
-                'பெயரெச்சம்: பெயரைக்கொண்டு முடியும் எச்சவினை (எ.கா: படித்த மாணவன்). வினையெச்சம்: வினையைக் கொண்டு முடியும் எச்சவினை (எ.கா: படித்துத் தேறினான்).',
-                'வினையாலணையும் பெயர்: ஒரு வினைமுற்று பெயர்த் தன்மையடைந்து வேற்றுமை உருபேற்று வருவது (எ.கா: பாடியவள், பொறுத்தார்).',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q2',
-                  question: '"கண்டான்" என்ற வினைமுற்றின் வேர்ச்சொல்லைக் கண்டறிக.',
-                  options: ['கண்டு', 'காண்', 'காணல்', 'கண்ட'],
-                  correctAnswer: 1,
-                  explanation: '"கண்டான்" என்னும் சொல்லின் ஏவல் பொருளுணர்த்தும் மூல வேர்ச்சொல் "காண்" ஆகும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 2,
-      unitNumber: 'அலகு II',
-      title: 'சொல்லகராதி (Vocabulary)',
-      tamilTitle: 'அலகு II: சொல்லகராதி (15 கேள்விகள்)',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்புத் தரம் (15 Questions)',
-      officialTopics: [
-        '(i) எதிர்actionசொல்லை எடுத்தெழுதுதல், ஓரெழுத்து ஒரு மொழி, உரிய பொருளைக் கண்டறிதல் – ஒருபொருள் தரும் பல சொற்கள், பொருந்தா சொல்லைக் கண்டறிதல், அகர வரிசைப்படி சொற்களைச் சீர்செய்தல்; ஒருபொருள் பன்மொழி – இருபொருள் குறிக்கும் சொற்கள் – பேச்சு வழக்கு, எழுத்து வழக்கு – சொல்லும் பொருளும் அறிதல் – ஒரு சொல்லிற்கு இணையான வேறு சொல் அறிதல்',
-        '(ii) கோடிட்ட இடத்தில் சரியான சொல்லைத் தேர்ந்தெடுத்து எழுதுதல் - பொருத்தமான பொருளைத் தெரிவு செய்தல் - ஊர்ப் பெயர்களின் மரூஉவை எழுதுக - பிழை திருத்துக (ஒரு - ஓர்) - பேச்சு வழக்குச் சொற்களுக்கு இணையான தூய தமிழ்ச் சொற்களை இணைத்தல்',
-        '(iii) பேச்சு வழக்குத் தொடர்களிலுள்ள பிழை திருத்தம் - சொற்களை இணைத்துப் புதிய சொல் உருவாக்குதல் - அடைப்புக்குள் உள்ள சொல்லைத் தகுந்த இடத்தில் சேர்த்தல் - பொருள் தரும் ஓர் எழுத்து - பல பொருள் தரும் ஒரு சொல்லைக் கூறுக',
-      ],
-      chapters: [
-        {
-          id: 'g4-gt-u2-c1',
-          chapterNumber: 1,
-          title: 'ஓரெழுத்து ஒருமொழி, அகரவரிசை & மரூஉப் பெயர்கள்',
-          tamilTitle: 'சொல்லும் பொருளும், அகரவரிசை & பேச்சுவழக்கு',
-          lessons: [
-            {
-              id: 'g4-gt-u2-c1-l1',
-              lessonNumber: '1.1',
-              title: 'நன்னூல் 42 ஓரெழுத்து ஒருமொழி, மரூஉ & தூய தமிழ்ச்சொற்கள்',
-              duration: '35 mins',
-              keyConcepts: ['ஓரெழுத்து ஒருமொழி 42 (நன்னூல்)', 'ஊர்ப்பெயர் மரூஉ', 'ஒரு - ஓர் விதி', 'பேச்சுவழக்குச் சொல் திருத்தம்'],
-              studyNotes: [
-                'நன்னூலார் 42 ஓரெழுத்து ஒருமொழிகளைக் குறிப்பிட்டுள்ளார். எ.கா: ஆ - பசு, மா - பெரிய/விலங்கு, தீ - நெருப்பு, கோ - அரசன், தை - மாதம்.',
-                'ஊர்ப்பெயர்களின் மரூஉ: புதுச்சேரி – புதுவை; திருச்சிராப்பள்ளி – திருச்சி; தஞ்சாவூர் – தஞ்சை; மயிலாப்பூர் – மயிலை; நாகப்பட்டினம் – நாகை.',
-                'உயிரெழுத்தில் தொடங்கும் சொல்லுக்கு முன் "ஓர்" வர வேண்டும் (எ.கா: ஓர் ஊர், ஓர் அரசன்). மெய்யெழுத்தில் தொடங்கும் சொல்லுக்கு முன் "ஒரு" வர வேண்டும் (எ.கா: ஒரு நாடு, ஒரு மரம்).',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q3',
-                  question: 'நன்னூலின்படி "மா" என்னும் ஓரெழுத்து ஒருமொழி குறிக்கும் பொருள் எது?',
-                  options: ['அரசன்', 'பெரிய / விலங்கு', 'நெருப்பு', 'பாதுகாப்பு'],
-                  correctAnswer: 1,
-                  explanation: '"மா" என்பது பெரிய, விலங்கு, திருமகள், அழகு, நில அளவு எனப் பல பொருள்களைத் தரும் ஓரெழுத்து ஒருமொழியாகும்.',
-                },
-                {
-                  id: 'g4-gt-q4',
-                  question: 'கீழ்க்கண்டவற்றுள் சரியான மரூஉப் பெயரைத் தேர்ந்தெடுக்க: மயிலாப்பூர் என்பதன் மரூஉ யாது?',
-                  options: ['மயிலை', 'மயிலாடுதுறை', 'மயிலா', 'மயூரம்'],
-                  correctAnswer: 0,
-                  explanation: 'மயிலாப்பூர் என்னும் ஊர்ப்பெயரின் மருவிய வடிவம் (மரூஉ) "மயிலை" ஆகும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 3,
-      unitNumber: 'அலகு III',
-      title: 'எழுதும் திறன் (Writing Skills)',
-      tamilTitle: 'அலகு III: எழுதும் திறன் (15 கேள்விகள்)',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்புத் தரம் (15 Questions)',
-      officialTopics: [
-        '(i) சொற்களை ஒழுங்குபடுத்திச் சொற்றொடர் அமைத்தல் – தொடர் வகைகள் – செய்வினை, செயப்பாட்டு வினை – தன்வினை, பிறவினை – ஒருமைப் பன்மை பிழையறிந்து சரியான தொடரறிதல்',
-        '(ii) மரபுத் தமிழ்: திணை மரபு - உயர்திணை, அஃறிணை; பால் மரபு: ஆண்பால், பெண்பால், பலர்பால், ஒன்றன்பால், பலவின்பால்; காலம், இளமைப் பெயர், ஒலிமரபு, வினைமரபு, தொகை மரபு; நிறுத்தற்குறிகள்',
-      ],
-      chapters: [
-        {
-          id: 'g4-gt-u3-c1',
-          chapterNumber: 1,
-          title: 'தொடர் வகைகள், மரபுத் தமிழ் & நிறுத்தற்குறிகள்',
-          tamilTitle: 'செய்வினை-செயப்பாட்டுவினை & திணை-பால் மரபு',
-          lessons: [
-            {
-              id: 'g4-gt-u3-c1-l1',
-              lessonNumber: '1.1',
-              title: 'செய்வினை-செயப்பாட்டு வினை, இளமைப் பெயர்கள் & ஒலி மரபு',
-              duration: '35 mins',
-              keyConcepts: ['செய்வினை (எழுவாய் முதன்மை)', 'செயப்பாட்டுவினை (செயப்படுபொருள் + பட்டது)', 'இளமைப் பெயர் மரபு', 'ஒலி & வினை மரபு'],
-              studyNotes: [
-                'செய்வினை: எழுவாய் செயலை நேரடியாகச் செய்வது (எ.கா: கயல்விழி மாலையைத் தொடுத்தாள்).',
-                'செயப்பாட்டுவினை: செயப்படுபொருள் முன்னிற்கும், "பட்டது/பெற்றது" வரும் (எ.கா: மாலை கயல்விழியால் தொடுக்கப்பட்டது).',
-                'இளமைப் பெயர்கள்: சிங்கம் – குருளை; புலி – பரழ்; மான் – கன்று; ஆடு – குட்டி; யானை – கன்று; குதிரை – குட்டி.',
-                'ஒலி மரபு: குயில் கூவும்; மயில் அகவும்; நரி ஊளையிடும்; ஆந்தை அலறும்; காகம் கரையும்; சிங்கம் முழங்கும்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q5',
-                  question: 'சிங்கத்தின் இளமைப் பெயர் யாது?',
-                  options: ['கன்று', 'குட்டி', 'குருளை', 'பரழ்'],
-                  correctAnswer: 2,
-                  explanation: 'சிங்கத்தின் இளமைப் பெயர் "சிங்கக் குருளை" ஆகும் (புலியின் இளமைப் பெயர் புலிப் பரழ்).',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 4,
-      unitNumber: 'அலகு IV',
-      title: 'கலைச் சொற்கள் (Technical Terms)',
-      tamilTitle: 'அலகு IV: கலைச் சொற்கள் (10 கேள்விகள்)',
-      questionCount: 10,
-      standard: 'பத்தாம் வகுப்புத் தரம் (10 Questions)',
-      officialTopics: [
-        'பல்துறை சார்ந்த கலைச் சொற்களை அதாவது அறிவியல், கல்வி, மருத்துவம், மேலாண்மை, சட்டம், புவியியல், தொழில்நுட்பம், ஊடகம், தகவல் தொழில்நுட்பம் உள்ளிட்ட பல்துறை சார்ந்த கலைச் சொல்லுக்கு நேரான தமிழ்ச் சொற்களை அறிந்திருக்க வேண்டும்',
-        'உதாரணம்: search engine – தேடு பொறி, வலசை – Migration, ஒவ்வாமை – Allergy, மரபணு – Gene, கடல் மைல் – Nautical Mile',
-      ],
-      chapters: [
-        {
-          id: 'g4-gt-u4-c1',
-          chapterNumber: 1,
-          title: 'அறிவியல், கணிப்பொறி & அலுவலகக் கலைச்சொற்கள்',
-          tamilTitle: 'பல்வேறு துறைசார்ந்த கலைச்சொல்லாக்கம்',
-          lessons: [
-            {
-              id: 'g4-gt-u4-c1-l1',
-              lessonNumber: '1.1',
-              title: 'பாடத்திட்டத்தில் உள்ள முக்கியக் கலைச்சொற்கள் & மொழிபெயர்ப்பு',
-              duration: '30 mins',
-              keyConcepts: ['கணிப்பொறி கலைச்சொற்கள்', 'மருத்துவம் & அறிவியல்', 'சட்டம் & நிருவாகம்'],
-              studyNotes: [
-                'Search Engine – தேடு பொறி; Browser – உலாவி; Migration – வலசை போதல்; Allergy – ஒவ்வாமை.',
-                'Gene – மரபணு; Nautical Mile – கடல் மைல்; Pendrive – விரலி / சேமிப்பகம்; Printer – அச்சுப்பொறி; Keyboard – விசைப்பலகை.',
-                'Artificial Intelligence – செயற்கை நுண்ணறிவு; Nanotechnology – மீநுண் தொழில்நுட்பம்; Patent – காப்புரிமை.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q6',
-                  question: '"Migration" என்ற ஆங்கிலச் சொல்லுக்கு இணையான தமிழ்ச் சொல் எது?',
-                  options: ['புலம்பெயர்தல்', 'வலசை போதல்', 'குடியேறுதல்', 'பயணித்தல்'],
-                  correctAnswer: 1,
-                  explanation: 'பறவைகள் மற்றும் விலங்குகளின் பருவகால இடப்பெயர்வுக்கு அதிகாரப்பூர்வ தமிழ் கலைச்சொல் "வலசை / வலசை போதல்" ஆகும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 5,
-      unitNumber: 'அலகு V',
-      title: 'வாசித்தல் – புரிந்து கொள்ளும் திறன்',
-      tamilTitle: 'அலகு V: வாசித்தல் – புரிந்து கொள்ளும் திறன் (15 கேள்விகள்)',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்புத் தரம் (15 Questions)',
-      officialTopics: [
-        'கொடுக்கப்பட்ட பத்தியிலிருந்து கேட்கப்பட்ட வினாக்களுக்கு சரியான விடையைத் தேர்ந்தெடுத்தல்',
-        'செய்தித்தாள் – தலையங்கம் – முகப்புச் செய்திகள் – அரசு சார்ந்த செய்திகள் – கட்டுரைகள் – இவற்றை வாசித்தல் - புரிந்து கொள்ளும் திறன்',
-        'உவமைத் தொடரின் பொருளறிதல் - மரபுத் தொடரின் பொருளறிதல் – பழமொழிகள் பொருளறிதல் – ஆவண உள்ளடக்கங்களைப் புரிந்து கொள்ளும் திறன்',
-      ],
-      chapters: [
-        {
-          id: 'g4-gt-u5-c1',
-          chapterNumber: 1,
-          title: 'பத்தி வினாக்கள், உவமைத் தொடர்கள் & பழமொழிகள்',
-          tamilTitle: 'உவமை, மரபுத்தொடர் & ஆவணப் புரிதல்',
-          lessons: [
-            {
-              id: 'g4-gt-u5-c1-l1',
-              lessonNumber: '1.1',
-              title: 'உவமைத் தொடர்கள், பழமொழிகள் மற்றும் செய்தி வாசிப்பு',
-              duration: '35 mins',
-              keyConcepts: ['உவமைத் தொடர் பொருள்', 'பழமொழிகள்', 'பத்தி வினா விடையளித்தல்'],
-              studyNotes: [
-                'அத்தி பூத்தாற்போல – அரிய செயல் / எளிதில் காண இயலாதது.',
-                'இலவு காத்த கிளி போல – ஏமாற்றம் அடைதல்; நகமும் சதையும் போல – பிரிக்க முடியாத ஒற்றுமை; குன்றின் மேலிட்ட விளக்கு போல – வெளிப்படையானது.',
-                'மடை திறந்த வெள்ளம் போல – தடையின்றி விரைந்து வருதல்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q7',
-                  question: '"அத்தி பூத்தாற்போல" என்ற உவமைத் தொடர் உணர்த்தும் பொருள் யாது?',
-                  options: ['அடிக்கடி நிகழ்தல்', 'அரிய செயல் / மிக அரிதாக நிகழ்வது', 'மகிழ்ச்சி அடைதல்', 'விரைந்து செயல்படுதல்'],
-                  correctAnswer: 1,
-                  explanation: 'அத்தி மரம் பூப்பது கண்களுக்குத் தெரிவதில்லை; எனவே அத்தி பூத்தாற்போல என்பது "அரிதான நிகழ்வு" என்பதாகும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 6,
-      unitNumber: 'அலகு VI',
-      title: 'எளிய மொழி பெயர்ப்பு (Translation)',
-      tamilTitle: 'அலகு VI: எளிய மொழி பெயர்ப்பு (5 கேள்விகள்)',
-      questionCount: 5,
-      standard: 'பத்தாம் வகுப்புத் தரம் (5 Questions)',
-      officialTopics: [
-        'ஆங்கிலம் மற்றும் பிறமொழிச் சொற்களுக்கு இணையான தமிழ்ச் சொற்கள் அறிதல் வேண்டும்',
-        'பயன்பாட்டில் உள்ள ஆங்கிலச் சொற்களை மொழிபெயர்த்தல் வேண்டும் (சான்று: pendrive, printer, computer, keyboard)',
-        'ஆவணங்களின் தலைப்பு – கோப்புகள் – கடிதங்கள் – மனுக்கள் – மொழிபெயர்ப்பு புரிந்து கொள்ளுதல்',
-      ],
-      chapters: [
-        {
-          id: 'g4-gt-u6-c1',
-          chapterNumber: 1,
-          title: 'அலுவலக ஆவணங்கள் & கடித மொழிபெயர்ப்பு',
-          tamilTitle: 'கோப்புகள், மனுக்கள் & தொழில்நுட்பக் கருவிகள்',
-          lessons: [
-            {
-              id: 'g4-gt-u6-c1-l1',
-              lessonNumber: '1.1',
-              title: 'அலுவலகத் தலைப்புகள், மனுக்கள், கோப்புகள் மொழிபெயர்ப்பு',
-              duration: '30 mins',
-              keyConcepts: ['File – கோப்பு', 'Petition – மனு', 'Circular – சுற்றறிக்கை', 'Memorandum – நினைவூட்டல்'],
-              studyNotes: [
-                'Official Letter – அலுவலகக் கடிதம்; Confidential – இரகசியமானது; Urgent – அவசரம்; Immediate – உடனடி.',
-                'Endorsement – மேலொப்பம் / மேலனுப்புகை; Acknowledgement – ஒப்புதல் கடிதம் / ஒப்புதல் அட்டை.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q8',
-                  question: '"Circular" என்ற அலுவலக ஆவணச் சொல்லுக்கு இணையான தமிழ்ச் சொல் எது?',
-                  options: ['மனு', 'சுற்றறிக்கை', 'அறிக்கை', 'விளம்பரம்'],
-                  correctAnswer: 1,
-                  explanation: 'Circular என்பதற்கு இணையான சரியான அலுவலகத் தமிழ்ச் சொல் "சுற்றறிக்கை" ஆகும்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 7,
-      unitNumber: 'அலகு VII',
-      title: 'இலக்கியம், தமிழ் அறிஞர்களும், தமிழ்த்தொண்டும்',
-      tamilTitle: 'அலகு VII: இலக்கியம் & தமிழறிஞர்கள் (15 கேள்விகள்)',
-      questionCount: 15,
-      standard: 'பத்தாம் வகுப்பு வரை (SSLC Standard - 15 Questions)',
-      officialTopics: [
-        'திருக்குறள் தொடர்பான செய்திகள் (இருபது அதிகாரங்கள் மட்டும்: ஒழுக்கமுடைமை, பொறையுடைமை, ஊக்கமுடைமை, விருந்தோம்பல், அறன் வலியுறுத்தல், ஈகை, பெரியாரைத் துணைக்கோடல், வினை செயல்வகை, அவையஞ்சாமை, கண்ணோட்டம், அன்புடைமை, கல்வி, நடுவுநிலைமை, கூடா ஒழுக்கம், கல்லாமை, செங்கோன்மை, பண்புடைமை, நட்பாராய்தல், புறங்கூறாமை, அருளுடைமை) - மேற்கோள்கள்',
-        'அறநூல் தொடர்பான செய்திகள் (நாலடியார், நான்மணிக்கடிகை, பழமொழி நானூறு, முதுமொழிக்காஞ்சி, திரிகடுகம், இன்னாநாற்பது, சிறுபஞ்சமூலம், ஏலாதி, அவ்வையார் பாடல்கள்)',
-        'தமிழின் தொன்மை, சிறப்பு, திராவிட மொழிகள் தொடர்பான செய்திகள்',
-        'உ.வே.சாமிநாத ஐயர், தெ.பொ.மீனாட்சி சுந்தரம், சி.இலக்குவனார் தமிழ்ப்பணி - தேவநேயப் பாவாணர், அகரமுதலி, பாவலரேறு பெருஞ்சித்திரனார், ஜி.யு.போப், வீரமாமுனிவர் தமிழ்த் தொண்டு',
-        'தமிழ்ச்சான்றோர் பற்றிய செய்திகள்: பாவேந்தர், டி.கே.சிதம்பரநாதர், தவத்திரு குன்றக்குடி அடிகளார், கண்ணதாசன், காயிதே மில்லத், தாரா பாரதி, வேலுநாச்சியார், பட்டுக்கோட்டை கல்யாணசுந்தரம், முடியரசன், தமிழ் ஒளி, உருத்திரங்கண்ணனார், கி.வா.ஜகந்நாதர், நாமக்கல் கவிஞர்',
-      ],
-      chapters: [
-        {
-          id: 'g4-gt-u7-c1',
-          chapterNumber: 1,
-          title: 'திருக்குறள் (20 அதிகாரங்கள்) & பதினெண்கீழ்க்கணக்கு அறநூல்கள்',
-          tamilTitle: 'அறநூல்கள், நீதி இலக்கியம் & மேற்கோள்கள்',
-          lessons: [
-            {
-              id: 'g4-gt-u7-c1-l1',
-              lessonNumber: '1.1',
-              title: '20 அதிகாரத் திருக்குறள் கருத்துகள், நாலடியார், பழமொழி நானூறு',
-              duration: '45 mins',
-              keyConcepts: ['ஒழுக்கமுடைமை', 'கல்வி & பண்புடைமை', 'நாலடியார் - சமண முனிவர்கள்', 'திரிகடுகம் - நல்லாதனார் (சுக்கு, மிளகு, திப்பிலி)'],
-              studyNotes: [
-                'பாடத்திட்டத்தில் உள்ள 20 அதிகாரங்கள்: ஒழுக்கமுடைமை, பொறையுடைமை, ஊக்கமுடைமை, விருந்தோம்பல், அறன் வலியுறுத்தல், ஈகை, பெரியாரைத் துணைக்கோடல், வினை செயல்வகை, அவையஞ்சாமை, கண்ணோட்டம், அன்புடைமை, கல்வி, நடுவுநிலைமை, கூடா ஒழுக்கம், கல்லாமை, செங்கோன்மை, பண்புடைமை, நட்பாராய்தல், புறங்கூறாமை, அருளுடைமை.',
-                'நாலடியார் சமண முனிவர்கள் பலரால் இயற்றப்பட்டது; நாலடி நானூறு, வேளாண் வேதம் என அழைக்கப்படுகிறது.',
-                'திரிகடுகம் நல்லாதனாரால் இயற்றப்பட்டது; சுக்கு, மிளகு, திப்பிலி ஆகிய மூன்றும் உடல்நோயைப் போக்குவது போல இதிலுள்ள மூன்று நீதிகள் அறியாமையைப் போக்கும்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q9',
-                  question: '"வேளாண் வேதம்" என்று போற்றப்படும் பதினெண்கீழ்க்கணக்கு அறநூல் எது?',
-                  options: ['திரிகடுகம்', 'நாலடியார்', 'பழமொழி நானூறு', 'இனியவை நாற்பது'],
-                  correctAnswer: 1,
-                  explanation: 'நாலடியார் "நாலடி நானூறு" மற்றும் "வேளாண் வேதம்" எனப் போற்றப்படுகிறது.',
-                },
-              ],
-            },
-          ],
-        },
-        {
-          id: 'g4-gt-u7-c2',
-          chapterNumber: 2,
-          title: 'தமிழறிஞர்கள், பாவேந்தர், தாராபாரதி & வேலுநாச்சியார்',
-          tamilTitle: 'தமிழ்த்தொண்டு, சான்றோர்கள் & பெண் விடுதலை',
-          lessons: [
-            {
-              id: 'g4-gt-u7-c2-l1',
-              lessonNumber: '2.1',
-              title: 'உ.வே.சா, ஜி.யு.போப், வீரமாமுனிவர், கண்ணதாசன் & வீரமங்கை வேலுநாச்சியார்',
-              duration: '45 mins',
-              keyConcepts: ['உ.வே.சா (தமிழ்த்தாத்தா)', 'வீரமாமுனிவர் - தேம்பாவணி & சதுரகராதி', 'ஜி.யு.போப் - திருக்குறள் ஆங்கில மொழிபெயர்ப்பு', 'வேலுநாச்சியார் - சிவகங்கை அரசி'],
-              studyNotes: [
-                'வீரமாமுனிவர் (கான்ஸ்டன்டைன் ஜோசப் பெஸ்கி) தமிழ் எழுத்துச் சீர்திருத்தம் செய்தார்; சதுரகராதி என்ற முதல் தமிழ் அகராதியைத் தொகுத்தார்.',
-                'ஜி.யு. போப் திருக்குறளையும் திருவாசகத்தையும் ஆங்கிலத்தில் மொழிபெயர்த்தார். தம் கல்லறையில் "ஒரு தமிழ் மாணவன்" என்று பொறிக்கச் சொன்னார்.',
-                'வீரமங்கை வேலுநாச்சியார் (1730–1796) பிரிட்டிஷ் கிழக்கிந்தியக் கம்பனியை எதிர்த்து ஆயுதமேந்திப் போராடி சிவகங்கை மண்ணை மீட்ட முதல் இந்தியப் பெண் அரசி ஆவார்.',
-              ],
-              practiceQuestions: [
-                {
-                  id: 'g4-gt-q10',
-                  question: 'ஆங்கிலேயரை எதிர்த்துப் போரிட்டு சிவகங்கையை மீட்ட முதல் இந்திய விடுதலைப் பெண் அரசி யார்?',
-                  options: ['ராணி மங்கம்மாள்', 'வேலுநாச்சியார்', 'அஞ்சலை அம்மாள்', 'தில்லையாடி வள்ளியம்மை'],
-                  correctAnswer: 1,
-                  explanation: 'வீரமங்கை வேலுநாச்சியார் 1780-ல் மருது சகோதரர்கள் மற்றும் ஹைதர் அலியின் உதவியுடன் ஆங்கிலேயரை வீழ்த்தி சிவகங்கையை மீட்டார்.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
+  units: group4GeneralTamilUnits,
 }
 
 // ============================================================================
@@ -1145,7 +747,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
   id: 'general-english',
   order: 4,
   title: 'General English',
-  tamilTitle: 'பகுதி இ: பொது ஆங்கிலம் (100 வினாக்கள் - மாற்றுத்திறனாளிகளுக்கு மட்டும்)',
   partTag: 'Part C • SSLC Standard',
   standard: 'SSLC Standard (100 Questions • 150 Marks)',
   questionCount: 100,
@@ -1155,9 +756,8 @@ export const group4GeneralEnglishSubject: Group4Subject = {
   units: [
     {
       id: 1,
-      unitNumber: 'Unit I',
+      unitNumber: 'Unit 1',
       title: 'Grammar',
-      tamilTitle: 'அலகு I: இலக்கணம் (25 கேள்விகள்)',
       questionCount: 25,
       standard: 'SSLC Standard (25 Questions)',
       officialTopics: [
@@ -1171,7 +771,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u1-c1',
           chapterNumber: 1,
           title: 'Parts of Speech, Concord, Tenses & Active/Passive Voice',
-          tamilTitle: 'சொல் வகைகள், காலங்கள் & செய்வினை-செயப்பாட்டுவினை',
           lessons: [
             {
               id: 'g4-ge-u1-c1-l1',
@@ -1200,9 +799,8 @@ export const group4GeneralEnglishSubject: Group4Subject = {
     },
     {
       id: 2,
-      unitNumber: 'Unit II',
+      unitNumber: 'Unit 2',
       title: 'Vocabulary',
-      tamilTitle: 'அலகு II: சொல்வளம் (15 கேள்விகள்)',
       questionCount: 15,
       standard: 'SSLC Standard (15 Questions)',
       officialTopics: [
@@ -1215,7 +813,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u2-c1',
           chapterNumber: 1,
           title: 'Synonyms, Antonyms, Homophones & Idioms',
-          tamilTitle: 'பொருளறிதல், எதிர்ச்சொல் & மரபுத்தொடர்கள்',
           lessons: [
             {
               id: 'g4-ge-u2-c1-l1',
@@ -1244,9 +841,8 @@ export const group4GeneralEnglishSubject: Group4Subject = {
     },
     {
       id: 3,
-      unitNumber: 'Unit III',
+      unitNumber: 'Unit 3',
       title: 'Writing Skills',
-      tamilTitle: 'அலகு III: எழுதும் திறன் (10 கேள்விகள்)',
       questionCount: 10,
       standard: 'SSLC Standard (10 Questions)',
       officialTopics: [
@@ -1258,7 +854,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u3-c1',
           chapterNumber: 1,
           title: 'Letter Writing & Sentence Rearrangement',
-          tamilTitle: 'கடித வகைகள் & தொடர் ஒழுங்கமைப்பு',
           lessons: [
             {
               id: 'g4-ge-u3-c1-l1',
@@ -1286,9 +881,8 @@ export const group4GeneralEnglishSubject: Group4Subject = {
     },
     {
       id: 4,
-      unitNumber: 'Unit IV',
+      unitNumber: 'Unit 4',
       title: 'Technical Terms',
-      tamilTitle: 'அலகு IV: அலுவலகக் கலைச்சொற்கள் (10 கேள்விகள்)',
       questionCount: 10,
       standard: 'SSLC Standard (10 Questions)',
       officialTopics: [
@@ -1299,7 +893,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u4-c1',
           chapterNumber: 1,
           title: 'Government Administration & Departmental Terms',
-          tamilTitle: 'நிருவாகக் கலைச்சொற்கள் & கடித முறைமை',
           lessons: [
             {
               id: 'g4-ge-u4-c1-l1',
@@ -1328,9 +921,8 @@ export const group4GeneralEnglishSubject: Group4Subject = {
     },
     {
       id: 5,
-      unitNumber: 'Unit V',
+      unitNumber: 'Unit 5',
       title: 'Reading Comprehension',
-      tamilTitle: 'அலகு V: வாசித்தல் புரிதல் (20 கேள்விகள்)',
       questionCount: 20,
       standard: 'SSLC Standard (20 Questions)',
       officialTopics: [
@@ -1342,7 +934,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u5-c1',
           chapterNumber: 1,
           title: 'Editorial Analysis & Fact Ascertainment',
-          tamilTitle: 'செய்திப் பத்தி வாசிப்பு & தகவலறிதல்',
           lessons: [
             {
               id: 'g4-ge-u5-c1-l1',
@@ -1370,9 +961,8 @@ export const group4GeneralEnglishSubject: Group4Subject = {
     },
     {
       id: 6,
-      unitNumber: 'Unit VI',
+      unitNumber: 'Unit 6',
       title: 'Translation',
-      tamilTitle: 'அலகு VI: மொழிபெயர்ப்பு (5 கேள்விகள்)',
       questionCount: 5,
       standard: 'SSLC Standard (5 Questions)',
       officialTopics: [
@@ -1383,7 +973,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u6-c1',
           chapterNumber: 1,
           title: 'Bilingual Translation Principles',
-          tamilTitle: 'ஆங்கிலம் - தமிழ் மொழிபெயர்ப்புப் பயிற்சிகள்',
           lessons: [
             {
               id: 'g4-ge-u6-c1-l1',
@@ -1411,9 +1000,8 @@ export const group4GeneralEnglishSubject: Group4Subject = {
     },
     {
       id: 7,
-      unitNumber: 'Unit VII',
+      unitNumber: 'Unit 7',
       title: 'Literary Works (SSLC Standard)',
-      tamilTitle: 'அலகு VII: இலக்கியப் படைப்புகள் (15 கேள்விகள்)',
       questionCount: 15,
       standard: 'SSLC Standard (15 Questions)',
       officialTopics: [
@@ -1427,7 +1015,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u7-c1',
           chapterNumber: 1,
           title: 'Prescribed Poems, Poets & Figures of Speech',
-          tamilTitle: 'பாடத்திட்டக் கவிதைகள், கவிஞர்கள் & நயங்கள்',
           lessons: [
             {
               id: 'g4-ge-u7-c1-l1',
@@ -1461,7 +1048,6 @@ export const group4GeneralEnglishSubject: Group4Subject = {
           id: 'g4-ge-u7-c2',
           chapterNumber: 2,
           title: 'Prescribed Prose Lessons & Renowned Authors',
-          tamilTitle: 'உரைநடைப் பாடங்கள் & சிறப்பு ஆசிரியர்கள்',
           lessons: [
             {
               id: 'g4-ge-u7-c2-l1',

@@ -17,13 +17,12 @@ interface MockTestItem {
 }
 
 const MockTests = () => {
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'group1' | 'group2_2a' | 'group4_vao'>('all')
+  const [selectedCategory, setSelectedCategory] = useState<'group1' | 'group2_2a' | 'group4'>('group1')
 
   const categories = [
-    { id: 'all' as const, name: 'All Mock Tests' },
     { id: 'group1' as const, name: 'TNPSC Group 1' },
     { id: 'group2_2a' as const, name: 'TNPSC Group 2 & 2A' },
-    { id: 'group4_vao' as const, name: 'TNPSC Group 4 & VAO' },
+    { id: 'group4' as const, name: 'TNPSC Group 4' },
   ]
 
   const mockTests: MockTestItem[] = [
@@ -136,12 +135,15 @@ const MockTests = () => {
     }
   }
 
-  const handleCategorySelect = (cat: 'all' | 'group1' | 'group2_2a' | 'group4_vao') => {
+  const handleCategorySelect = (cat: 'group1' | 'group2_2a' | 'group4') => {
     setSelectedCategory(cat)
   }
 
   const filteredTests = mockTests.filter((test) => {
-    return selectedCategory === 'all' || test.category === selectedCategory
+    if (selectedCategory === 'group1') return test.category === 'group1'
+    if (selectedCategory === 'group2_2a') return test.category === 'group2_2a'
+    if (selectedCategory === 'group4') return test.category === 'group4_vao'
+    return true
   })
 
   return (
@@ -160,7 +162,7 @@ const MockTests = () => {
             </span>
           </h1>
           <p className="mocktests-subtitle">
-            Full-length timed mock tests organized across TNPSC Group 1, Group 2 & 2A, and Group 4 & VAO
+            Full-length timed mock tests organized across TNPSC Group 1, TNPSC Group 2 & 2A, and TNPSC Group 4
           </p>
         </motion.div>
 

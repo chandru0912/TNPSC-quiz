@@ -94,11 +94,63 @@ const SchoolMaterials = () => {
     }
   }
 
+  const [dbQuestions, setDbQuestions] = useState<any[]>([])
+
+  useEffect(() => {
+    if (!selectedStandard) return
+    fetch(`/api/questions?classId=${selectedStandard}&limit=300`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.status === 'success' && Array.isArray(data?.data)) {
+          setDbQuestions(data.data)
+        }
+      })
+      .catch((err) => console.error('Failed to fetch school questions:', err))
+  }, [selectedStandard])
+
+  const getSubjectLessons = () => {
+    if (!selectedStandard || !selectedSubject) return []
+
+    // 1. Check if we have live questions from the database for this standard & subject
+    if (dbQuestions.length > 0) {
+      const filtered = dbQuestions.filter((q) => {
+        const qSub = (q.subject || '').toLowerCase()
+        const targetSub = selectedSubject.toLowerCase()
+        if (targetSub === 'science') {
+          return qSub.includes('science') || qSub.includes('physics') || qSub.includes('chemistry') || qSub.includes('biology')
+        }
+        if (targetSub === 'social science') {
+          return qSub.includes('social') || qSub.includes('history') || qSub.includes('geography') || qSub.includes('polity') || qSub.includes('economics')
+        }
+        return qSub.includes(targetSub) || targetSub.includes(qSub)
+      })
+
+      if (filtered.length > 0) {
+        // Group by lessonTitle
+        const lessonMap = new Map<string, any[]>()
+        filtered.forEach((q) => {
+          const title = q.lessonTitle || 'Core Lesson'
+          if (!lessonMap.has(title)) lessonMap.set(title, [])
+          lessonMap.get(title)!.push(q)
+        })
+
+        return Array.from(lessonMap.entries()).map(([title, qs], idx) => ({
+          id: idx + 1,
+          title,
+          questions: qs,
+        }))
+      }
+    }
+
+    // Fallback to static sample lessons if no questions uploaded for this standard/subject yet
+    const stdKey = selectedStandard.toString()
+    return lessons[stdKey]?.[selectedSubject] || []
+  }
+
   const getCurrentQuestions = () => {
     if (!selectedStandard || !selectedSubject || selectedLesson === null) return []
-    const stdKey = selectedStandard.toString()
-    const lessonsList = lessons[stdKey]?.[selectedSubject] || []
-    const lesson = lessonsList.find(l => l.id === selectedLesson)
+    const lessonsList = getSubjectLessons()
+    const lesson = lessonsList.find((l) => l.id === selectedLesson)
     return lesson?.questions || []
   }
 
@@ -191,8 +243,7 @@ const SchoolMaterials = () => {
   }
 
   if (selectedSubject && selectedStandard) {
-    const stdKey = selectedStandard.toString()
-    const lessonsList = lessons[stdKey]?.[selectedSubject] || []
+    const lessonsList = getSubjectLessons()
     return (
       <div className="school-materials">
         <div className="school-container">

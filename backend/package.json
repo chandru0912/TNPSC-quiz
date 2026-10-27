@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "nodemon --watch src --ext ts --exec tsx src/server.ts",
+    "dev": "nodemon --watch src --watch .env --ext ts,env --exec tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
@@ -15,12 +15,14 @@
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
-    "express": "^4.22.3"
+    "express": "^4.22.3",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.25",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
     "nodemon": "^3.1.14",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3"

@@ -23,6 +23,7 @@ import MockTests from './pages/MockTests'
 import PreviousPapers from './pages/PreviousPapers'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import Admin from './pages/Admin'
 import './App.css'
 
 function App() {
@@ -67,6 +68,7 @@ function App() {
             <Route path="/previous-papers" element={<PreviousPapers />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/admin" element={<Admin />} />
           </Routes>
         </main>
 

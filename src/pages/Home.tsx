@@ -98,7 +98,7 @@ const Home = () => {
             <div className="hero-card glass animate-float">
               <GraduationCap size={60} className="hero-card-icon" />
               <h3>All TNPSC Categories</h3>
-              <p>Group 1 • Group 2 & 2A • Group 4 & VAO</p>
+              <p>TNPSC Group 1 • TNPSC Group 2 & 2A • TNPSC Group 4</p>
             </div>
           </motion.div>
         </div>

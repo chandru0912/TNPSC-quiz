@@ -1,21 +1,92 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { FileText, CheckCircle2, XCircle, ArrowRight, RotateCcw, Timer, Layers } from 'lucide-react'
+import {
+  FileText,
+  CheckCircle2,
+  XCircle,
+  ArrowRight,
+  ArrowLeft,
+  RotateCcw,
+  Timer,
+  Layers,
+  Sparkles,
+  Filter,
+  X,
+  BookOpen,
+} from 'lucide-react'
 import './MCQPractice.css'
 
 interface QuestionItem {
   id: number | string
   category: 'group1' | 'group2_2a' | 'group4_vao'
   subCategory?: 'group2' | 'group2a' | 'group4' | 'vao' | 'both'
+  unitId?: number
+  classId?: number
+  subject?: string
+  lessonTitle?: string
+  topic?: string
+  difficulty?: 'Easy' | 'Medium' | 'Hard'
   tag: string
   question: string
   options: string[]
   correctAnswer: number
   explanation: string
+  sourceReference?: string
 }
 
 const MCQPractice = () => {
-  const [selectedGroup, setSelectedGroup] = useState<'group1' | 'group2_2a' | 'group4_vao'>('group1')
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const urlGroup = searchParams.get('group')
+  const urlSubjectId = searchParams.get('subjectId') || 'general-studies'
+  const urlUnitId = searchParams.get('unitId') ? parseInt(searchParams.get('unitId')!, 10) : null
+  const urlUnitTitle = searchParams.get('unitTitle')
+  const urlLesson = searchParams.get('lesson')
+  const urlTopic = searchParams.get('topic')
+  const urlClassId = searchParams.get('classId') ? parseInt(searchParams.get('classId')!, 10) : null
+
+  const [selectedGroup, setSelectedGroup] = useState<string>(
+    urlGroup || 'group1'
+  )
+  const [activeUnitFilter, setActiveUnitFilter] = useState<number | null>(urlUnitId)
+
+  const handleBackToStandard = () => {
+    // Navigate directly to the originating standard / class page without browser history stepping
+    if (selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a') {
+      if (urlUnitId && urlClassId) {
+        navigate(`/materials/group2/${urlSubjectId}/unit/${urlUnitId}/class/${urlClassId}`)
+      } else if (urlClassId) {
+        navigate(`/materials/group2/${urlSubjectId}/class/${urlClassId}`)
+      } else if (urlUnitId) {
+        navigate(`/materials/group2/${urlSubjectId}/unit/${urlUnitId}`)
+      } else {
+        navigate(`/materials/group2/${urlSubjectId}`)
+      }
+    } else if (selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao') {
+      if (urlUnitId && urlClassId) {
+        navigate(`/materials/group4/${urlSubjectId}/unit/${urlUnitId}/class/${urlClassId}`)
+      } else if (urlClassId) {
+        navigate(`/materials/group4/${urlSubjectId}/class/${urlClassId}`)
+      } else if (urlUnitId) {
+        navigate(`/materials/group4/${urlSubjectId}/unit/${urlUnitId}`)
+      } else {
+        navigate(`/materials/group4/${urlSubjectId}`)
+      }
+    } else {
+      // Group 1
+      if (urlUnitId && urlClassId) {
+        navigate(`/materials/group1/unit/${urlUnitId}/class/${urlClassId}`)
+      } else if (urlClassId) {
+        navigate(`/materials/group1/class/${urlClassId}`)
+      } else if (urlUnitId) {
+        navigate(`/materials/group1/unit/${urlUnitId}`)
+      } else {
+        navigate('/materials/group1/general-studies')
+      }
+    }
+  }
 
   const [currentQuestion, setCurrentQuestion] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
@@ -23,194 +94,144 @@ const MCQPractice = () => {
   const [score, setScore] = useState(0)
   const [answeredQuestions, setAnsweredQuestions] = useState(0)
 
+  // Live Database Questions & Connection State
+  const [dbQuestions, setDbQuestions] = useState<QuestionItem[]>([])
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true)
+  const [isUsingLiveBank, setIsUsingLiveBank] = useState<boolean>(false)
+  const [activeFilterNotice, setActiveFilterNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSelectedGroup(urlGroup || 'group1')
+    setActiveUnitFilter(urlUnitId)
+    setCurrentQuestion(0)
+    setSelectedAnswer(null)
+    setShowResult(false)
+    setScore(0)
+    setAnsweredQuestions(0)
+  }, [urlGroup, urlUnitId, urlClassId, urlLesson, urlTopic])
+
+  // Fetch directly from PostgreSQL Questions API with multi-tier progressive matching
+  useEffect(() => {
+    let isMounted = true
+    const fetchQuestions = async () => {
+      try {
+        const queryParams = new URLSearchParams()
+        if (selectedGroup) queryParams.set('category', selectedGroup)
+        if (activeUnitFilter) queryParams.set('unitId', activeUnitFilter.toString())
+        if (urlClassId) queryParams.set('classId', urlClassId.toString())
+        if (urlLesson) queryParams.set('lesson', urlLesson)
+        if (urlTopic) queryParams.set('topic', urlTopic)
+        if (urlSubjectId && urlSubjectId !== 'general-studies' && urlSubjectId !== 'all') {
+          queryParams.set('subject', urlSubjectId)
+        }
+        queryParams.set('limit', '300')
+
+        // 1. Primary Query: Exact Lesson + Class + Unit matching
+        let res = await fetch(`/api/questions?${queryParams.toString()}`)
+        let data = res.ok ? await res.json() : null
+        let questions: QuestionItem[] = (data?.status === 'success' && Array.isArray(data?.data)) ? data.data : []
+        let notice: string | null = null
+
+        // 2. Secondary Relaxation: If 0 questions found with both classId and lesson,
+        // retry matching the lesson across standards within the unit (accommodating flexible syllabus assignments)
+        if (questions.length === 0 && urlClassId && urlLesson) {
+          const relaxClassParams = new URLSearchParams(queryParams)
+          relaxClassParams.delete('classId')
+          const relaxRes = await fetch(`/api/questions?${relaxClassParams.toString()}`)
+          if (relaxRes.ok) {
+            const relaxData = await relaxRes.json()
+            if (relaxData.status === 'success' && Array.isArray(relaxData.data) && relaxData.data.length > 0) {
+              questions = relaxData.data
+              notice = `Found ${questions.length} questions for "${urlLesson}" across standards`
+            }
+          }
+        }
+
+        // 3. Tertiary Relaxation: If this exact lesson has no dedicated questions in DB yet,
+        // but an active unit is selected, pull available questions for the Unit so students can practice!
+        if (questions.length === 0 && activeUnitFilter) {
+          const fallbackParams = new URLSearchParams()
+          if (selectedGroup) fallbackParams.set('category', selectedGroup)
+          fallbackParams.set('unitId', activeUnitFilter.toString())
+          if (urlClassId) fallbackParams.set('classId', urlClassId.toString())
+          fallbackParams.set('limit', '300')
+
+          const fallbackRes = await fetch(`/api/questions?${fallbackParams.toString()}`)
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json()
+            if (fallbackData.status === 'success' && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
+              questions = fallbackData.data
+              notice = `Specific questions for "${urlLesson || 'this lesson'}" coming soon. Displaying ${questions.length} questions for Unit ${activeUnitFilter}.`
+            }
+          }
+        }
+
+        if (isMounted) {
+          if (questions.length > 0) {
+            // Deduplicate by question ID to ensure uniqueness
+            const unique = Array.from(
+              new Map(questions.map((q: QuestionItem) => [q.id, q])).values()
+            ) as QuestionItem[]
+            setDbQuestions(unique)
+            setIsUsingLiveBank(true)
+            setActiveFilterNotice(notice)
+          } else {
+            setDbQuestions([])
+            setIsUsingLiveBank(false)
+            setActiveFilterNotice(null)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch questions:', err)
+        if (isMounted) {
+          setDbQuestions([])
+          setIsUsingLiveBank(false)
+          setActiveFilterNotice(null)
+        }
+      } finally {
+        if (isMounted && isInitialLoading) {
+          setIsInitialLoading(false)
+        }
+      }
+    }
+
+    fetchQuestions()
+    return () => {
+      isMounted = false
+    }
+  }, [selectedGroup, activeUnitFilter, urlClassId, urlLesson, urlTopic, urlSubjectId])
+
   const groups = [
-    { id: 'group1' as const, name: 'TNPSC Group 1' },
-    { id: 'group2_2a' as const, name: 'TNPSC Group 2 & 2A' },
-    { id: 'group4_vao' as const, name: 'TNPSC Group 4 & VAO' },
+    { id: 'group1', name: 'TNPSC Group 1' },
+    { id: 'group2_2a', name: 'TNPSC Group 2 & 2A' },
+    { id: 'group4', name: 'TNPSC Group 4' },
   ]
 
-  const allQuestions: QuestionItem[] = [
-    // --- TNPSC GROUP 1 QUESTIONS ---
-    {
-      id: 'g1-q1',
-      category: 'group1',
-      tag: 'Group 1 • Polity & Centre-State',
-      question: 'Which committee was appointed by the Tamil Nadu Government in 1969 to examine Centre-State relations and suggest amendments for state autonomy?',
-      options: ['Sarkaria Commission', 'Rajamannar Committee', 'Punchhi Commission', 'Balwant Rai Mehta Committee'],
-      correctAnswer: 1,
-      explanation: 'The Dr. P.V. Rajamannar Committee was appointed by the Government of Tamil Nadu in September 1969 to enquire into Centre-State relations and recommend constitutional safeguards for state autonomy.',
-    },
-    {
-      id: 'g1-q2',
-      category: 'group1',
-      tag: 'Group 1 • Unit 8: History & Culture',
-      question: 'Under the Chola administrative system, the democratic election of village sabha members through the "Kudavolai" system is recorded in which famous stone inscription?',
-      options: ['Velvikudi Copper Plates', 'Uttiramerur Inscriptions', 'Sittannavasal Inscription', 'Tirumukkudal Inscription'],
-      correctAnswer: 1,
-      explanation: 'The Uttiramerur Inscriptions of Parantaka Chola I (dated 919 and 921 AD) in Kanchipuram district detail the qualifications, disqualifications, and election procedure for village committee members through the Kudavolai (pot-ticket) system.',
-    },
-    {
-      id: 'g1-q3',
-      category: 'group1',
-      tag: 'Group 1 • Unit 9: TN Administration',
-      question: 'According to NITI Aayog Sustainable Development Goals (SDG) India Index, Tamil Nadu has consistently retained top national performance primarily in which goal?',
-      options: ['Goal 1 (No Poverty) & Goal 3 (Good Health and Well-being)', 'Goal 14 (Life Below Water)', 'Goal 15 (Life on Land)', 'Goal 7 (Affordable and Clean Energy)'],
-      correctAnswer: 0,
-      explanation: 'Tamil Nadu ranks among the top states across India in NITI Aayog SDG Index for Goal 1 (Zero Poverty) and Goal 3 (Good Health and Well-being), supported by its comprehensive public distribution and health infrastructure.',
-    },
-    {
-      id: 'g1-q4',
-      category: 'group1',
-      tag: 'Group 1 • Constitution',
-      question: 'Which article of the Indian Constitution empowers Parliament to form a new state or alter the boundaries and names of existing states?',
-      options: ['Article 2', 'Article 3', 'Article 4', 'Article 5'],
-      correctAnswer: 1,
-      explanation: 'Article 3 empowers Parliament to form new states, increase or diminish the area of any state, and alter the boundaries or name of any existing state by ordinary legislative procedure.',
-    },
-    {
-      id: 'g1-q5',
-      category: 'group1',
-      tag: 'Group 1 • Socio-Political History',
-      question: 'Periyar E.V. Ramasamy founded the Self-Respect Movement (Suya Mariyadhai Iyakkam) in which year after parting from the Indian National Congress?',
-      options: ['1920', '1925', '1937', '1944'],
-      correctAnswer: 1,
-      explanation: 'Periyar E.V. Ramasamy started the Self-Respect Movement in 1925 at the Kanchipuram Congress Session after raising the demand for communal representation.',
-    },
-
-    // --- TNPSC GROUP 2 & 2A QUESTIONS ---
-    {
-      id: 'g2-q1',
-      category: 'group2_2a',
-      subCategory: 'both',
-      tag: 'Group 2 & 2A • State Administration',
-      question: 'In which year was the Tamil Nadu State Human Rights Commission (SHRC) established under the Protection of Human Rights Act 1993?',
-      options: ['1995', '1997', '2001', '2005'],
-      correctAnswer: 1,
-      explanation: 'The Tamil Nadu State Human Rights Commission was established on 17th April 1997 to inquire into human rights violations within the state.',
-    },
-    {
-      id: 'g2-q2',
-      category: 'group2_2a',
-      subCategory: 'both',
-      tag: 'Group 2 & 2A • Aptitude & Reasoning',
-      question: 'If the difference between Compound Interest and Simple Interest on a certain sum for 2 years at 10% per annum is ₹65, what is the principal sum?',
-      options: ['₹6,000', '₹6,500', '₹7,200', '₹5,500'],
-      correctAnswer: 1,
-      explanation: 'Difference for 2 years = P * (R / 100)^2. Here, 65 = P * (10 / 100)^2 = P * (1 / 100). Therefore, P = 65 * 100 = ₹6,500.',
-    },
-    {
-      id: 'g2-q3',
-      category: 'group2_2a',
-      subCategory: 'group2',
-      tag: 'Group 2 Interview • State Governance',
-      question: 'Who heads the administrative machinery and acts as the Principal Advisor to the Chief Minister in the Tamil Nadu Secretariat?',
-      options: ['Advocate General', 'Chief Secretary', 'Home Secretary', 'Director General of Police'],
-      correctAnswer: 1,
-      explanation: 'The Chief Secretary to the Government of Tamil Nadu is the administrative head of the state secretariat and chief advisor to the Chief Minister on all matters of state administration.',
-    },
-    {
-      id: 'g2-q4',
-      category: 'group2_2a',
-      subCategory: 'group2',
-      tag: 'Group 2 Interview • Welfare Schemes',
-      question: 'Under the "Kalaignar Magalir Urimai Thittam" launched by the Government of Tamil Nadu, what is the monthly financial assistance provided to eligible women heads of households?',
-      options: ['₹800', '₹1,000', '₹1,500', '₹2,000'],
-      correctAnswer: 1,
-      explanation: 'Kalaignar Magalir Urimai Thittam provides ₹1,000 per month directly into bank accounts of eligible women heads of households in Tamil Nadu.',
-    },
-    {
-      id: 'g2-q5',
-      category: 'group2_2a',
-      subCategory: 'group2a',
-      tag: 'Group 2A Non-Interview • Speed Reasoning',
-      question: 'Under the Right to Information (RTI) Act 2005, what is the normal statutory time limit for a Public Information Officer (PIO) to provide requested information?',
-      options: ['15 days', '30 days', '45 days', '60 days'],
-      correctAnswer: 1,
-      explanation: 'Under Section 7(1) of the RTI Act 2005, the Public Information Officer must provide information within 30 days of receiving the application (or within 48 hours if it concerns the life or liberty of a person).',
-    },
-    {
-      id: 'g2-q6',
-      category: 'group2_2a',
-      subCategory: 'group2a',
-      tag: 'Group 2A Non-Interview • General Tamil',
-      question: '‘எட்டுத்தொகை’ நூல்களுள் முதலாவதாக வைத்து எண்ணப்படும் நூல் எது?',
-      options: ['நற்றிணை', 'குறுந்தொகை', 'ஐங்குறுநூறு', 'பதிற்றுப்பத்து'],
-      correctAnswer: 0,
-      explanation: '"நற்றிணை நல்ல குறுந்தொகை ஐங்குறுநூறு ஒத்த பதிற்றுப்பத்து..." என்ற வெண்பா பாடல் மூலம் எட்டுத்தொகையுள் முதலாவதாக வைத்து எண்ணப்படுவது நற்றிணை ஆகும்.',
-    },
-
-    // --- TNPSC GROUP 4 & VAO QUESTIONS ---
-    {
-      id: 'g4-q1',
-      category: 'group4_vao',
-      subCategory: 'both',
-      tag: 'Group 4 & VAO • Pothu Tamil (SSLC)',
-      question: '"அகர முதல எழுத்தெல்லாம் ஆதி பகவன் முதற்றே உலகு" - இக்குறட்பாவில் அமைந்துள்ள அணி எது?',
-      options: ['உவமை அணி', 'எடுத்துக்காட்டு உவமை அணி', 'வேற்றுமை அணி', 'சொற்பொருள் பின்வருநிலையணி'],
-      correctAnswer: 1,
-      explanation: 'இக்குறளில் உவம உருபு மறைந்து வந்துள்ளதால் (போல), இது எடுத்துக்காட்டு உவமை அணி ஆகும்.',
-    },
-    {
-      id: 'g4-q2',
-      category: 'group4_vao',
-      subCategory: 'vao',
-      tag: 'VAO Special • Land Records & Revenue',
-      question: 'Which official village land record maintained by the Village Administrative Officer (VAO) records detailed month-wise crop cultivation, irrigation sources, and harvest details?',
-      options: ['Village Account No. 1 (A-Register)', 'Village Account No. 2 (Adangal / அடங்கல்)', 'Village Account No. 10 (Chitta / பட்டா சிட்டா)', 'Village Account No. 20'],
-      correctAnswer: 1,
-      explanation: 'Village Account No. 2 (Adangal / அடங்கல் பதிவேடு) is the primary crop record maintained by the VAO detailing crop names, survey numbers, extent cultivated, dry/wet classification, and irrigation source.',
-    },
-    {
-      id: 'g4-q3',
-      category: 'group4_vao',
-      subCategory: 'vao',
-      tag: 'VAO Special • Administration',
-      question: 'To which immediate supervisory officer does the Village Administrative Officer (VAO) submit daily reports and village administrative diaries?',
-      options: ['Tahsildar (வட்டாட்சியர்)', 'Revenue Inspector (வருவாய் ஆய்வாளர் - RI)', 'District Collector (மாவட்ட ஆட்சியர்)', 'Block Development Officer (வட்டார வளர்ச்சி அலுவலர்)'],
-      correctAnswer: 1,
-      explanation: 'The Revenue Inspector (RI / வருவாய் ஆய்வாளர்) of the Revenue Firka is the immediate reporting and supervisory officer for Village Administrative Officers (VAOs).',
-    },
-    {
-      id: 'g4-q4',
-      category: 'group4_vao',
-      subCategory: 'vao',
-      tag: 'VAO Special • Jamabandi',
-      question: 'What is the annual inspection and settlement of village revenue accounts conducted by the District Collector or designated officer termed in Tamil Nadu Revenue Administration?',
-      options: ['Azmaish', 'Jamabandi (ஜமாபந்தி)', 'Firkabandi', 'Dharbar'],
-      correctAnswer: 1,
-      explanation: 'Jamabandi (ஜமாபந்தி) is the annual audit and settlement of all village revenue accounts and land records conducted between May and June in Tamil Nadu taluks.',
-    },
-    {
-      id: 'g4-q5',
-      category: 'group4_vao',
-      subCategory: 'group4',
-      tag: 'Group 4 • General Studies & Polity',
-      question: 'Tamil Nadu Panchayati Raj Act was enacted in accordance with the 73rd Constitutional Amendment in which year?',
-      options: ['1992', '1994', '1996', '1998'],
-      correctAnswer: 1,
-      explanation: 'The Tamil Nadu Panchayats Act was enacted on 22nd April 1994, introducing a 3-tier Panchayati Raj system with reservation for women and SC/ST communities.',
-    },
-    {
-      id: 'g4-q6',
-      category: 'group4_vao',
-      subCategory: 'group4',
-      tag: 'Group 4 • Aptitude (SSLC Standard)',
-      question: 'Find the Greatest Common Divisor (GCD / HCF) of 18, 24, and 36:',
-      options: ['3', '6', '12', '72'],
-      correctAnswer: 1,
-      explanation: 'Factors of 18 = 2 * 3^2; factors of 24 = 2^3 * 3; factors of 36 = 2^2 * 3^2. Common prime factors are 2^1 * 3^1 = 6.',
-    },
-  ]
-
-  // Filter questions according to main exam category
-  const filteredQuestions = allQuestions.filter((q) => q.category === selectedGroup)
+  // Pure database questions (all mock fallback questions completely removed)
+  const filteredQuestions: QuestionItem[] = dbQuestions
 
   // Safe fallback if index exceeds filtered questions
   const activeQuestionIndex = Math.min(currentQuestion, Math.max(0, filteredQuestions.length - 1))
-  const questionItem = filteredQuestions[activeQuestionIndex] || filteredQuestions[0]
+  const questionItem = filteredQuestions[activeQuestionIndex]
 
-  const handleGroupSelect = (group: 'group1' | 'group2_2a' | 'group4_vao') => {
+  const handleGroupSelect = (group: string) => {
+    if (group === selectedGroup) return
     setSelectedGroup(group)
+    const newParams = new URLSearchParams(searchParams)
+    newParams.set('group', group)
+    setSearchParams(newParams, { replace: true })
+    setCurrentQuestion(0)
+    setSelectedAnswer(null)
+    setShowResult(false)
+    setScore(0)
+    setAnsweredQuestions(0)
+  }
+
+  const clearUnitFilter = () => {
+    setActiveUnitFilter(null)
+    const newParams = new URLSearchParams()
+    newParams.set('group', selectedGroup)
+    setSearchParams(newParams, { replace: true })
     setCurrentQuestion(0)
     setSelectedAnswer(null)
     setShowResult(false)
@@ -250,15 +271,83 @@ const MCQPractice = () => {
 
   const isLastQuestion = activeQuestionIndex === filteredQuestions.length - 1
 
+  // Format question tag nicely according to the selected examination group
+  const formatTag = (q: QuestionItem) => {
+    const groupName =
+      selectedGroup === 'group2_2a'
+        ? 'Group 2 & 2A'
+        : selectedGroup === 'group4_vao'
+        ? 'Group 4 & VAO'
+        : 'Group 1'
+
+    if (q.tag) {
+      return q.tag.replace(/^Group 1/i, groupName)
+    }
+    return `${groupName} • Unit ${q.unitId || 1}: ${q.subject || 'General Studies'}`
+  }
+
   return (
     <div className="practice">
       <div className="practice-container">
+        {/* Top-Left Back Navigation Bar */}
+        <div className="practice-top-bar">
+          <button
+            type="button"
+            className="back-btn glass back-materials-btn"
+            onClick={() => navigate('/materials')}
+            aria-label="Back to Study Materials"
+            title="Navigate directly to main Study Materials page"
+          >
+            <BookOpen size={16} />
+            <span>Back to Study Materials</span>
+          </button>
+
+          {urlClassId ? (
+            <button
+              type="button"
+              className="back-btn glass"
+              onClick={handleBackToStandard}
+              aria-label="Back to Standard"
+              title={urlClassId ? `Back to ${urlClassId}th Standard` : 'Back to Standard'}
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Standard</span>
+            </button>
+          ) : urlUnitId ? (
+            <button
+              type="button"
+              className="back-btn glass"
+              onClick={handleBackToStandard}
+              aria-label="Back to Unit"
+              title="Back to Unit"
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Unit</span>
+            </button>
+          ) : null}
+        </div>
+
         <motion.div
           className="practice-header"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
         >
+          <div className="practice-badge-row">
+            <span className="practice-badge">
+              <Sparkles size={14} />
+              <span>Interactive Examination Engine</span>
+            </span>
+            {isUsingLiveBank ? (
+              <span className="practice-code-badge live-connected">
+                <span className="live-dot">●</span>
+                <span>Live Database Connected ({filteredQuestions.length} Questions)</span>
+              </span>
+            ) : (
+              <span className="practice-code-badge">TNPSC Quizzes</span>
+            )}
+          </div>
+
           <h1 className="practice-title">
             <FileText size={32} />
             <span>
@@ -266,21 +355,65 @@ const MCQPractice = () => {
             </span>
           </h1>
           <p className="practice-subtitle">
-            Curated topic-wise questions organized by TNPSC Group 1, Group 2 & 2A, and Group 4 & VAO
+            Curated Samacheer Kalvi topic-wise questions organized by TNPSC Group 1, TNPSC Group 2 & 2A, and TNPSC Group 4
           </p>
         </motion.div>
 
+        {/* Active Filter HUD Banner when redirected from a Lesson, Unit, or Class */}
+        {(activeUnitFilter || urlClassId || urlLesson) && (
+          <motion.div
+            className="filter-notice-hud glass"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="filter-notice-left">
+              <Filter size={18} className="filter-icon" />
+              <div>
+                <span className="filter-title">
+                  Filtered Practice: {urlClassId ? `${urlClassId}th Standard • ` : ''}Unit {activeUnitFilter}
+                  {urlUnitTitle ? ` — ${decodeURIComponent(urlUnitTitle)}` : ''}
+                </span>
+                {urlLesson && (
+                  <span className="filter-lesson-text">
+                    Lesson Focus: <strong>{decodeURIComponent(urlLesson)}</strong>
+                  </span>
+                )}
+                {activeFilterNotice && (
+                  <span style={{ display: 'block', fontSize: '0.78rem', color: '#38bdf8', marginTop: '0.2rem' }}>
+                    ℹ️ {activeFilterNotice}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <button className="filter-clear-btn" onClick={clearUnitFilter} title="View all questions">
+              <X size={14} />
+              <span>Show All Questions</span>
+            </button>
+          </motion.div>
+        )}
+
         {/* Exam Category Tabs */}
         <div className="practice-categories glass">
-          {groups.map((group) => (
-            <button
-              key={group.id}
-              className={`practice-category-tab ${selectedGroup === group.id ? 'active' : ''}`}
-              onClick={() => handleGroupSelect(group.id)}
-            >
-              {group.name}
-            </button>
-          ))}
+          {groups.map((group) => {
+            const isActive =
+              group.id === 'group2_2a'
+                ? selectedGroup === 'group2_2a' || selectedGroup === 'group2' || selectedGroup === 'group2a'
+                : group.id === 'group4'
+                ? selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
+                : selectedGroup === 'group1'
+
+            return (
+              <button
+                key={group.id}
+                type="button"
+                className={`practice-category-tab ${isActive ? 'active' : ''}`}
+                onClick={() => handleGroupSelect(group.id)}
+              >
+                {group.name}
+              </button>
+            )
+          })}
         </div>
 
         {/* Stats HUD */}
@@ -288,7 +421,7 @@ const MCQPractice = () => {
           <div className="practice-stat-card glass">
             <Timer size={18} />
             <span>
-              Question {activeQuestionIndex + 1} of {filteredQuestions.length}
+              Question {filteredQuestions.length > 0 ? activeQuestionIndex + 1 : 0} of {filteredQuestions.length}
             </span>
           </div>
           <div className="practice-stat-card glass">
@@ -299,23 +432,37 @@ const MCQPractice = () => {
           </div>
           <div className="practice-stat-card glass">
             <Layers size={18} />
-            <span>{groups.find((g) => g.id === selectedGroup)?.name}</span>
+            <span>
+              {selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
+                ? 'TNPSC Group 2 & 2A'
+                : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
+                ? 'TNPSC Group 4'
+                : 'TNPSC Group 1'}
+            </span>
           </div>
         </div>
 
-        {/* Question Card */}
-        {questionItem && (
+        {/* Question Card / Empty State */}
+        {isInitialLoading ? (
+          <div className="empty-practice-state glass">
+            <div className="empty-icon-wrap">
+              <Timer size={36} className="empty-icon" />
+            </div>
+            <h3>Loading Practice Questions...</h3>
+            <p>Fetching syllabus-verified MCQs from the question bank.</p>
+          </div>
+        ) : questionItem ? (
           <AnimatePresence mode="wait">
             <motion.div
-              key={`${selectedGroup}-${activeQuestionIndex}`}
+              key={`question-${questionItem.id}`}
               className="question-card glass"
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.35 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
             >
               <div className="question-header">
-                <span className="question-category-tag">{questionItem.tag}</span>
+                <span className="question-category-tag">{formatTag(questionItem)}</span>
                 <span className="question-number">
                   Q {activeQuestionIndex + 1} of {filteredQuestions.length}
                 </span>
@@ -348,58 +495,144 @@ const MCQPractice = () => {
                       <span className="option-letter">{String.fromCharCode(65 + index)}</span>
                       <span className="option-text">{option}</span>
                       {showResult && index === questionItem.correctAnswer && (
-                        <CheckCircle2 size={20} className="option-icon" />
+                        <CheckCircle2 size={20} className="option-icon option-icon-correct" />
                       )}
                       {showResult && index === selectedAnswer && index !== questionItem.correctAnswer && (
-                        <XCircle size={20} className="option-icon" />
+                        <XCircle size={20} className="option-icon option-icon-wrong" />
                       )}
                     </button>
                   )
                 })}
               </div>
 
-              {showResult && (
-                <motion.div
-                  className="explanation"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4 }}
-                >
-                  <div className="explanation-header">
-                    <span className="explanation-title">Explanation</span>
-                  </div>
-                  <p className="explanation-text">{questionItem.explanation}</p>
-                </motion.div>
-              )}
-
+              {/* Action Buttons */}
               <div className="question-actions">
                 {!showResult ? (
                   <button
-                    className="btn btn-primary"
+                    className="btn btn-primary submit-btn"
                     onClick={handleSubmit}
                     disabled={selectedAnswer === null}
                   >
                     <span>Submit Answer</span>
+                    <ArrowRight size={18} />
                   </button>
                 ) : (
-                  <div className="action-group">
+                  <div className="next-action-group">
                     {!isLastQuestion ? (
-                      <button className="btn btn-primary" onClick={handleNext}>
+                      <button className="btn btn-primary next-btn" onClick={handleNext}>
                         <span>Next Question</span>
                         <ArrowRight size={18} />
                       </button>
                     ) : (
-                      <button className="btn btn-primary" onClick={handleReset}>
+                      <button className="btn btn-primary restart-btn" onClick={handleReset}>
                         <RotateCcw size={18} />
-                        <span>Restart Category Quiz</span>
+                        <span>Restart Quiz</span>
                       </button>
                     )}
                   </div>
                 )}
               </div>
+
+              {/* Explanation Card */}
+              {showResult && (
+                <motion.div
+                  className={`explanation-box ${
+                    selectedAnswer === questionItem.correctAnswer ? 'explanation-correct' : 'explanation-wrong'
+                  }`}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="explanation-header">
+                    <span className="explanation-status">
+                      {selectedAnswer === questionItem.correctAnswer ? 'Correct!' : 'Incorrect'}
+                    </span>
+                    <span className="correct-answer-label">
+                      Correct Answer: Option {String.fromCharCode(65 + questionItem.correctAnswer)}
+                    </span>
+                  </div>
+                  <p className="explanation-text">{questionItem.explanation}</p>
+                  {questionItem.sourceReference && (
+                    <div
+                      style={{
+                        marginTop: '0.75rem',
+                        fontSize: '0.85rem',
+                        color: '#94a3b8',
+                        borderTop: '1px dashed rgba(255,255,255,0.1)',
+                        paddingTop: '0.5rem',
+                      }}
+                    >
+                      <strong style={{ color: '#38bdf8' }}>Source Reference:</strong>{' '}
+                      {questionItem.sourceReference}
+                    </div>
+                  )}
+                </motion.div>
+              )}
             </motion.div>
           </AnimatePresence>
+        ) : (
+          <div className="empty-practice-state glass">
+            <div className="empty-icon-wrap">
+              <FileText size={36} className="empty-icon" />
+            </div>
+            <h3>No Practice MCQs Available</h3>
+            <p>
+              {urlLesson ? (
+                <>
+                  No questions found for <strong>{decodeURIComponent(urlLesson)}</strong> in{' '}
+                  {urlClassId ? `${urlClassId}th Standard ` : ''}Unit {activeUnitFilter}.
+                </>
+              ) : urlClassId ? (
+                <>
+                  No questions mapped yet for <strong>{urlClassId}th Standard</strong>
+                  {activeUnitFilter ? ` Unit ${activeUnitFilter}` : ''}.
+                </>
+              ) : activeUnitFilter ? (
+                <>
+                  No questions mapped yet for <strong>Unit {activeUnitFilter}</strong>.
+                </>
+              ) : (
+                <>No practice questions found for the selected examination filter.</>
+              )}
+            </p>
+            <div className="empty-actions">
+              {(activeUnitFilter || urlClassId || urlLesson) && (
+                <button className="btn btn-primary" onClick={clearUnitFilter}>
+                  <RotateCcw size={16} />
+                  <span>View All General Studies Questions</span>
+                </button>
+              )}
+              <button className="btn btn-secondary" onClick={() => navigate('/materials')}>
+                <BookOpen size={16} />
+                <span>Back to Study Materials</span>
+              </button>
+            </div>
+          </div>
         )}
+
+        {/* Back Link to General Studies */}
+        <div className="practice-footer-nav">
+          <Link
+            to={
+              selectedGroup === 'group2_2a'
+                ? `/materials/group2/${urlSubjectId}`
+                : selectedGroup === 'group4_vao'
+                ? `/materials/group4/${urlSubjectId}`
+                : '/materials/group1/general-studies'
+            }
+            className="back-btn glass"
+          >
+            <BookOpen size={16} />
+            <span>
+              Back to{' '}
+              {selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
+                ? 'TNPSC Group 2 & 2A Study Materials'
+                : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
+                ? 'TNPSC Group 4 Study Materials'
+                : 'Group 1 General Studies'}
+            </span>
+          </Link>
+        </div>
       </div>
     </div>
   )
