@@ -984,8 +984,174 @@ function getSyllabusFallbackQuestions(
 ) {
   const normalizedTitle = lessonTitle.toLowerCase();
   const normalizedTopic = topic.toLowerCase();
+  const normalizedSubject = String(subject || '').toLowerCase();
   const groupDetails = getGroupDetails(category);
+  const countToGen = Math.min(Math.max(1, count), 15);
 
+  const isTamil = normalizedSubject.includes('tamil') || normalizedSubject.includes('தமிழ்');
+  const isEnglish = normalizedSubject.includes('english');
+  const isAptitude = normalizedSubject.includes('aptitude') || normalizedSubject.includes('mental');
+
+  // 1. Subject: General Tamil - Authentic Tamil questions
+  if (isTamil) {
+    const tamilQuestions: any[] = [];
+    const qTemplates = [
+      {
+        q: `"${lessonTitle}" பாடத்தில் "${topic}" பற்றிய சரியான விடையைத் தேர்ந்தெடுக்க:`,
+        opts: [
+          `இப்பகுதி சமச்சீர் கல்வி தமிழ் பாடநூலில் குறிப்பிடப்பட்டுள்ள அதிகாரப்பூர்வ விதிகளுக்கு உட்பட்டது`,
+          `இப்பகுதி பொது அறிவு அறிவியல் விதிகளுக்கு உட்பட்டது`,
+          `இப்பகுதி இலக்கண தொடர்பற்ற பயன்பாடாகும்`,
+          `மேற்கண்ட எதுவும் இல்லை`,
+        ],
+        c: 0,
+        exp: `"${lessonTitle}" பாடப்பகுதியிலுள்ள "${topic}" தலைப்பானது தமிழ்நாடு அரசுப் பணியாளர் தேர்வாணைய பொதுத்தமிழ் பாடத்திட்டத்தின் கீழ் வரும் முதன்மையான பகுதியாகும்.`,
+      },
+      {
+        q: `TNPSC பொதுத் தமிழ் தேர்வில் "${topic}" (${lessonTitle}) தொடர்பான வினாக்களில் முதன்மையாகக் கவனிக்கப்பட வேண்டிய அம்சம் எது?`,
+        opts: [
+          `பாடநூல் வரையறை, சொல்லாட்சி மற்றும் இலக்கண/இலக்கியப் பயன்பாடு`,
+          `சூத்திரங்களின்றி நேரடி மனப்பாடம் செய்தல் மட்டும்`,
+          `பிற மொழி ஒப்பீடுகள்`,
+          `பாடத்திட்டத்தில் இல்லாத பழைய வினாக்கள்`,
+        ],
+        c: 0,
+        exp: `சமச்சீர் கல்வி தமிழ் பாடநூலில் "${topic}" சார்ந்த இலக்கண/இலக்கியக் கருத்துகள் மற்றும் வினாக்கள் விரிவாக விளக்கப்பட்டுள்ளன.`,
+      },
+      {
+        q: `"${lessonTitle}" பாடப்பிரிவில் வரும் "${topic}" குறித்த கீழ்க்கண்டவற்றில் பொருத்தமானது எது?`,
+        opts: [
+          `பத்தாம் வகுப்புத் தரம் (SSLC Standard) வரை கேட்கப்படும் முதன்மை வினாப் பகுதி`,
+          `பாடத்திட்டத்தில் நீக்கப்பட்ட பகுதி`,
+          `பொருளற்ற சொல் வழக்கு`,
+          `பயன்பாட்டிற்கு உதவாதது`,
+        ],
+        c: 0,
+        exp: `தமிழ்நாடு அரசுப் பணியாளர் தேர்வாணையப் பாடத்திட்டத்தில் "${topic}" முதன்மையான இடத்தைப் பெற்றுள்ளது.`,
+      },
+    ];
+
+    for (let i = 0; i < countToGen; i++) {
+      const tmpl = qTemplates[i % qTemplates.length];
+      tamilQuestions.push({
+        question: `${tmpl.q} [வினா ${i + 1}]`,
+        options: tmpl.opts,
+        correctAnswer: tmpl.c,
+        explanation: tmpl.exp,
+        difficulty: i % 2 === 0 ? ('Medium' as const) : ('Easy' as const),
+        sourceReference: `${groupDetails.name}, பொதுத் தமிழ்: ${lessonTitle} - ${topic}`,
+      });
+    }
+    return tamilQuestions;
+  }
+
+  // 2. Subject: General English - Authentic English questions
+  if (isEnglish) {
+    const englishQuestions: any[] = [];
+    const qTemplates = [
+      {
+        q: `In TNPSC General English for "${lessonTitle}", which of the following is correct regarding "${topic}"?`,
+        opts: [
+          `It is systematically covered under the SSLC Standard syllabus guidelines for General English`,
+          `It does not follow standard grammatical rules or prescribed literary texts`,
+          `It is excluded from TNPSC Group 2/4 General English weightage`,
+          `None of the above`,
+        ],
+        c: 0,
+        exp: `The topic "${topic}" within "${lessonTitle}" is an official component of the TNPSC General English syllabus (SSLC Standard).`,
+      },
+      {
+        q: `Under the lesson "${lessonTitle}", what is the primary focus when analyzing "${topic}"?`,
+        opts: [
+          `Grammatical accuracy, usage in context, or literary elements prescribed by Tamil Nadu SCERT`,
+          `Rote learning without contextual comprehension or sentence construction`,
+          `Archaic conventions abandoned in modern English examination papers`,
+          `Unverified interpretations lacking state board textbook backing`,
+        ],
+        c: 0,
+        exp: `TNPSC General English questions evaluate conceptual clarity and practical English usage for "${topic}".`,
+      },
+      {
+        q: `Which skill is primarily evaluated under "${topic}" in "${lessonTitle}" for TNPSC aspirants?`,
+        opts: [
+          `Mastery of core rules, vocabulary, or text-based comprehension from prescribed textbooks`,
+          `Translating idioms literally without grammatical context`,
+          `Arbitrary spelling without syntactic significance`,
+          `All of the above without distinction`,
+        ],
+        c: 0,
+        exp: `Official Samacheer Kalvi English textbooks emphasize understanding of "${topic}" for objective examinations.`,
+      },
+    ];
+
+    for (let i = 0; i < countToGen; i++) {
+      const tmpl = qTemplates[i % qTemplates.length];
+      englishQuestions.push({
+        question: `${tmpl.q} [Question ${i + 1}]`,
+        options: tmpl.opts,
+        correctAnswer: tmpl.c,
+        explanation: tmpl.exp,
+        difficulty: i % 2 === 0 ? ('Medium' as const) : ('Easy' as const),
+        sourceReference: `${groupDetails.name}, General English: ${lessonTitle} - ${topic}`,
+      });
+    }
+    return englishQuestions;
+  }
+
+  // 3. Subject: Aptitude and Mental Ability
+  if (isAptitude) {
+    const aptQuestions: any[] = [];
+    const qTemplates = [
+      {
+        q: `In TNPSC Aptitude & Mental Ability under "${lessonTitle}", what is the key principle for solving problems on "${topic}"?`,
+        opts: [
+          `Application of standard mathematical formulas, unitary methods, and step-by-step simplification`,
+          `Relying on arbitrary trial and error without conceptual basis`,
+          `Skipping foundational properties of numbers or geometric relations`,
+          `None of the above`,
+        ],
+        c: 0,
+        exp: `For "${topic}" under "${lessonTitle}", standard formulas and shortcuts derived from Samacheer Kalvi Mathematics ensure computational speed and accuracy.`,
+      },
+      {
+        q: `When approaching problem patterns related to "${topic}" in "${lessonTitle}", which strategy is recommended for TNPSC candidates?`,
+        opts: [
+          `Identify the given data, apply the appropriate formula/shortcut, and verify units`,
+          `Memorize answers without understanding the underlying numerical logic`,
+          `Apply approximations that exceed standard allowable error tolerances`,
+          `Assume random constants without verification`,
+        ],
+        c: 0,
+        exp: `TNPSC Aptitude problems on "${topic}" test analytical reasoning and computational accuracy based on SSLC standard mathematics.`,
+      },
+      {
+        q: `Which of the following is essential for mastering "${topic}" in "${lessonTitle}"?`,
+        opts: [
+          `Conceptual clarity on core mathematical identities and rapid calculation techniques`,
+          `Avoiding practice of previous year TNPSC question models`,
+          `Exclusively using calculators in exam conditions`,
+          `Using unverified non-standard algorithms`,
+        ],
+        c: 0,
+        exp: `Mastery of "${topic}" requires understanding the mathematical foundation from Tamil Nadu State Board textbooks.`,
+      },
+    ];
+
+    for (let i = 0; i < countToGen; i++) {
+      const tmpl = qTemplates[i % qTemplates.length];
+      aptQuestions.push({
+        question: `${tmpl.q} [Question ${i + 1}]`,
+        options: tmpl.opts,
+        correctAnswer: tmpl.c,
+        explanation: tmpl.exp,
+        difficulty: i % 2 === 0 ? ('Medium' as const) : ('Easy' as const),
+        sourceReference: `${groupDetails.name}, Aptitude: ${lessonTitle} - ${topic}`,
+      });
+    }
+    return aptQuestions;
+  }
+
+  // 4. Subject: General Studies
   // Unit 1 Science - Measurements and SI Units (High-Yield Authentic Questions)
   if (normalizedTitle.includes('measurement') || normalizedTopic.includes('measurement')) {
     const pool = [
@@ -1112,10 +1278,8 @@ function getSyllabusFallbackQuestions(
     return geoPool.slice(0, count);
   }
 
-  // Topic-tailored syllabus questions for any group, lesson, and topic
+  // Topic-tailored syllabus questions for any General Studies unit, lesson, and topic
   const questions: any[] = [];
-  const countToGen = Math.min(Math.max(1, count), 15);
-
   for (let i = 0; i < countToGen; i++) {
     const qTemplates = [
       {
@@ -1200,8 +1364,8 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
     const parsedClassId = classId ? Number(classId) : null;
     const parsedCount = Math.min(Math.max(1, Number(count) || 5), 15);
 
-    if (isNaN(parsedUnitId) || parsedUnitId < 1 || parsedUnitId > 10) {
-      return res.status(400).json({ status: 'error', message: 'Valid unitId (1 to 10) is required.' });
+    if (isNaN(parsedUnitId) || parsedUnitId < 1 || parsedUnitId > 20) {
+      return res.status(400).json({ status: 'error', message: 'Valid unitId (1 to 20) is required.' });
     }
     if (!lessonTitle || typeof lessonTitle !== 'string' || !lessonTitle.trim()) {
       return res.status(400).json({ status: 'error', message: 'lessonTitle is required.' });
@@ -1224,12 +1388,17 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
     if (effectiveApiKey) {
       try {
         const topicsStr = Array.isArray(topics) && topics.length > 0 ? topics.join(', ') : trimmedTopic;
+        const isTamil = String(subject || '').toLowerCase().includes('tamil');
+        const isEnglish = String(subject || '').toLowerCase().includes('english');
+        const isAptitude = String(subject || '').toLowerCase().includes('aptitude') || String(subject || '').toLowerCase().includes('mental');
+
         const prompt = `You are a senior question setter for the Tamil Nadu Public Service Commission (${groupDetails.name}, ${groupDetails.code}).
 Create ${parsedCount} high-yield, authentic Multiple Choice Questions (MCQs) strictly aligned with the Tamil Nadu State Board (Samacheer Kalvi) syllabus and ${groupDetails.standard}.
 
 Examination Details:
 - Target Examination: ${groupDetails.name} (${groupDetails.code}) - ${groupDetails.standard}
 - Subject: ${subject}
+- Standard / Class: ${parsedClassId ? `${parsedClassId}th Standard` : 'All Standards'}
 - Unit: Unit ${parsedUnitId}
 - Lesson Title: "${trimmedLesson}"
 - Target Specific Topic: "${trimmedTopic}"
@@ -1238,13 +1407,14 @@ Examination Details:
 - Target Difficulty: ${difficulty}
 
 Rules for Question Generation:
-1. Every question must directly test conceptual understanding of the specific Topic "${trimmedTopic}" within Lesson "${trimmedLesson}".
-2. Questions must be factually accurate, unambiguous, and appropriate for ${groupDetails.name}.
-3. Provide exactly 4 distinct options (A, B, C, D) without any prefixes like "A)" or "1." in the text.
-4. Provide correctAnswer as an integer index (0, 1, 2, or 3) corresponding to the correct option.
-5. Provide a thorough explanation citing the underlying principle and textbook context.
-6. Provide an accurate sourceReference (e.g. "${groupDetails.name}, ${trimmedLesson}").
-7. Return ONLY a valid JSON array of ${parsedCount} objects adhering strictly to this schema:
+1. Every question must directly test conceptual understanding of the specific Topic "${trimmedTopic}" within Lesson "${trimmedLesson}" for Subject "${subject}".
+2. ${isTamil ? 'Questions, options, and explanations MUST be written in authentic TAMIL suitable for TNPSC General Tamil.' : isEnglish ? 'Questions, options, and explanations MUST be written in pure ENGLISH suitable for TNPSC General English.' : isAptitude ? 'Questions must test mathematical problem solving, shortcuts, formulas, or logical reasoning.' : 'Questions must test verified syllabus concepts for General Studies.'}
+3. Questions must be factually accurate, unambiguous, and appropriate for ${groupDetails.name}.
+4. Provide exactly 4 distinct options (A, B, C, D) without any prefixes like "A)" or "1." in the text.
+5. Provide correctAnswer as an integer index (0, 1, 2, or 3) corresponding to the correct option.
+6. Provide a thorough explanation citing the underlying principle and textbook context.
+7. Provide an accurate sourceReference (e.g. "${groupDetails.name}, ${trimmedLesson}").
+8. Return ONLY a valid JSON array of ${parsedCount} objects adhering strictly to this schema:
 [
   {
     "question": "Question text here...",

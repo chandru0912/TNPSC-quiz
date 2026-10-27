@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { apiFetch } from '../utils/api'
 import {
   Shield,
   Search,
@@ -30,9 +31,11 @@ import './Admin.css'
 import {
   TNPSC_GROUPS,
   STANDARDS,
-  getUnitsForGroup,
-  getLessonsForUnit,
-  getTopicsForLesson,
+  getSubjectsForGroup,
+  getStandardsForSubject,
+  getUnitsForSubjectStandard,
+  getLessonsForSelection,
+  getTopicsForSelection,
 } from '../data/unifiedSyllabusRegistry'
 
 interface QuestionItem {
@@ -96,14 +99,15 @@ const Admin = () => {
   const [bulkParseError, setBulkParseError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
 
-  // Gemini AI Generator state (TNPSC Group, Standard, Unit, Lesson & Topic Cascading)
+  // Gemini AI Generator state (TNPSC Group, Subject, Standard, Unit, Lesson & Specific Topic Cascading)
   const [isAIGeneratorOpen, setIsAIGeneratorOpen] = useState(false)
   const [aiGroupId, setAiGroupId] = useState<'group1' | 'group2' | 'group4'>('group1')
+  const [aiSubjectId, setAiSubjectId] = useState<string>('general-studies')
   const [aiClassId, setAiClassId] = useState<number>(6)
-  const [aiUnitId, setAiUnitId] = useState(1)
-  const [aiLessonTitle, setAiLessonTitle] = useState('Measurements and SI Units')
-  const [aiTopic, setAiTopic] = useState('')
-  const [aiQuestionCount, setAiQuestionCount] = useState(5)
+  const [aiUnitId, setAiUnitId] = useState<number>(1)
+  const [aiLessonTitle, setAiLessonTitle] = useState<string>('Measurements and SI Units')
+  const [aiTopic, setAiTopic] = useState<string>('')
+  const [aiQuestionCount, setAiQuestionCount] = useState<number>(5)
   const [aiDifficulty, setAiDifficulty] = useState<'Medium' | 'Easy' | 'Hard' | 'Mixed'>('Medium')
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('tnpsc_gemini_api_key') || '')
   const [isAIGenerating, setIsAIGenerating] = useState(false)
@@ -114,39 +118,161 @@ const Admin = () => {
   const [aiUploadSuccess, setAiUploadSuccess] = useState<{ count: number; lessonTitle: string } | null>(null)
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null)
 
-  // Cascading syllabus data derived from unifiedSyllabusRegistry strictly with classId
-  const availableUnits = getUnitsForGroup(aiGroupId)
+  // ---------------------------------------------------------------------------
+  // 6-TIER CASCADING RESOLUTION: Group -> Subject -> Standard -> Unit -> Lesson -> Topic
+  // ---------------------------------------------------------------------------
+
+  // 1. Available subjects for selected Group
+  const availableSubjects = getSubjectsForGroup(aiGroupId)
+  const selectedSubjectObj = availableSubjects.find((s) => s.id === aiSubjectId) || availableSubjects[0]
+  const currentSubjectId = selectedSubjectObj?.id || 'general-studies'
+
+  // 2. Available standards for selected Group & Subject
+  const availableStandards = getStandardsForSubject(aiGroupId, currentSubjectId)
+  const selectedStandardObj = availableStandards.find((s) => s.id === aiClassId) || availableStandards[0]
+  const currentClassId = selectedStandardObj?.id || 6
+
+  // 3. Available units for selected Group, Subject, and Standard
+  const availableUnits = getUnitsForSubjectStandard(aiGroupId, currentSubjectId, currentClassId)
   const currentUnit = availableUnits.find((u) => u.id === aiUnitId) || availableUnits[0]
-  const availableLessons = currentUnit ? getLessonsForUnit(aiGroupId, currentUnit.id, aiClassId) : []
+  const currentUnitId = currentUnit?.id || 1
+
+  // 4. Available lessons for selected Group, Subject, Standard, and Unit
+  const availableLessons = getLessonsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId)
   const selectedLessonObj = availableLessons.find((l) => l.title === aiLessonTitle) || availableLessons[0]
+  const currentLessonTitle = selectedLessonObj?.title || ''
+
+  // 5. Available topics for selected Lesson
   const availableTopics = selectedLessonObj
-    ? getTopicsForLesson(aiGroupId, currentUnit?.id || 1, selectedLessonObj.title, aiClassId)
+    ? getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId, selectedLessonObj.title)
     : []
+  const selectedTopicObj = availableTopics.find((t) => t.name === aiTopic) || availableTopics[0]
+  const currentTopicName = selectedTopicObj?.name || ''
 
-  // Cascading synchronization: when Group changes, reset Unit if not present
+  // ---------------------------------------------------------------------------
+  // EXPLICIT DOWNSTREAM RESET HANDLERS
+  // ---------------------------------------------------------------------------
+
+  // 1. When Group changes: resets Subject, Standard, Unit, Lesson, and Topic
+  const handleGroupChange = (newGroupId: 'group1' | 'group2' | 'group4') => {
+    setAiGroupId(newGroupId)
+    const nextSubjects = getSubjectsForGroup(newGroupId)
+    const nextSubj = nextSubjects[0]?.id || 'general-studies'
+    setAiSubjectId(nextSubj)
+
+    const nextStandards = getStandardsForSubject(newGroupId, nextSubj)
+    const nextStd = nextStandards[0]?.id || 6
+    setAiClassId(nextStd)
+
+    const nextUnits = getUnitsForSubjectStandard(newGroupId, nextSubj, nextStd)
+    const nextUnit = nextUnits[0]?.id || 1
+    setAiUnitId(nextUnit)
+
+    const nextLessons = getLessonsForSelection(newGroupId, nextSubj, nextStd, nextUnit)
+    const nextLesson = nextLessons[0]?.title || ''
+    setAiLessonTitle(nextLesson)
+
+    const nextTopics = getTopicsForSelection(newGroupId, nextSubj, nextStd, nextUnit, nextLesson)
+    setAiTopic(nextTopics[0]?.name || '')
+  }
+
+  // 2. When Subject changes: resets Standard, Unit, Lesson, and Topic
+  const handleSubjectChange = (newSubj: string) => {
+    setAiSubjectId(newSubj)
+
+    const nextStandards = getStandardsForSubject(aiGroupId, newSubj)
+    const nextStd = nextStandards[0]?.id || 6
+    setAiClassId(nextStd)
+
+    const nextUnits = getUnitsForSubjectStandard(aiGroupId, newSubj, nextStd)
+    const nextUnit = nextUnits[0]?.id || 1
+    setAiUnitId(nextUnit)
+
+    const nextLessons = getLessonsForSelection(aiGroupId, newSubj, nextStd, nextUnit)
+    const nextLesson = nextLessons[0]?.title || ''
+    setAiLessonTitle(nextLesson)
+
+    const nextTopics = getTopicsForSelection(aiGroupId, newSubj, nextStd, nextUnit, nextLesson)
+    setAiTopic(nextTopics[0]?.name || '')
+  }
+
+  // 3. When Standard changes: resets Unit, Lesson, and Topic
+  const handleStandardChange = (newStd: number) => {
+    setAiClassId(newStd)
+
+    const nextUnits = getUnitsForSubjectStandard(aiGroupId, currentSubjectId, newStd)
+    const nextUnit = nextUnits[0]?.id || 1
+    setAiUnitId(nextUnit)
+
+    const nextLessons = getLessonsForSelection(aiGroupId, currentSubjectId, newStd, nextUnit)
+    const nextLesson = nextLessons[0]?.title || ''
+    setAiLessonTitle(nextLesson)
+
+    const nextTopics = getTopicsForSelection(aiGroupId, currentSubjectId, newStd, nextUnit, nextLesson)
+    setAiTopic(nextTopics[0]?.name || '')
+  }
+
+  // 4. When Unit changes: resets Lesson and Topic
+  const handleUnitChange = (newUnit: number) => {
+    setAiUnitId(newUnit)
+
+    const nextLessons = getLessonsForSelection(aiGroupId, currentSubjectId, currentClassId, newUnit)
+    const nextLesson = nextLessons[0]?.title || ''
+    setAiLessonTitle(nextLesson)
+
+    const nextTopics = getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, newUnit, nextLesson)
+    setAiTopic(nextTopics[0]?.name || '')
+  }
+
+  // 5. When Lesson changes: resets Topic
+  const handleLessonChange = (newLesson: string) => {
+    setAiLessonTitle(newLesson)
+
+    const nextTopics = getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId, newLesson)
+    setAiTopic(nextTopics[0]?.name || '')
+  }
+
+  // 6. When Topic changes
+  const handleTopicChange = (newTopic: string) => {
+    setAiTopic(newTopic)
+  }
+
+  // Defensive fallback synchronization effects
   useEffect(() => {
-    const units = getUnitsForGroup(aiGroupId)
-    if (units.length > 0 && !units.some((u) => u.id === aiUnitId)) {
-      setAiUnitId(units[0].id)
+    const subjects = getSubjectsForGroup(aiGroupId)
+    if (!subjects.some((s) => s.id === aiSubjectId)) {
+      setAiSubjectId(subjects[0]?.id || 'general-studies')
     }
-  }, [aiGroupId, aiUnitId])
+  }, [aiGroupId, aiSubjectId])
 
-  // Cascading synchronization: when Standard, Unit or Group changes, reset Lesson strictly
   useEffect(() => {
-    const lessons = getLessonsForUnit(aiGroupId, aiUnitId, aiClassId)
+    const standards = getStandardsForSubject(aiGroupId, currentSubjectId)
+    if (!standards.some((s) => s.id === aiClassId)) {
+      setAiClassId(standards[0]?.id || 6)
+    }
+  }, [aiGroupId, currentSubjectId, aiClassId])
+
+  useEffect(() => {
+    const units = getUnitsForSubjectStandard(aiGroupId, currentSubjectId, currentClassId)
+    if (!units.some((u) => u.id === aiUnitId)) {
+      setAiUnitId(units[0]?.id || 1)
+    }
+  }, [aiGroupId, currentSubjectId, currentClassId, aiUnitId])
+
+  useEffect(() => {
+    const lessons = getLessonsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId)
     if (lessons.length > 0) {
       if (!lessons.some((l) => l.title === aiLessonTitle)) {
         setAiLessonTitle(lessons[0].title)
       }
-    } else {
+    } else if (aiLessonTitle) {
       setAiLessonTitle('')
     }
-  }, [aiGroupId, aiClassId, aiUnitId, aiLessonTitle])
+  }, [aiGroupId, currentSubjectId, currentClassId, currentUnitId, aiLessonTitle])
 
-  // Cascading synchronization: when Lesson changes, sync Topic
   useEffect(() => {
     if (aiLessonTitle) {
-      const topics = getTopicsForLesson(aiGroupId, aiUnitId, aiLessonTitle, aiClassId)
+      const topics = getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId, aiLessonTitle)
       if (topics.length > 0) {
         if (!topics.some((t) => t.name === aiTopic)) {
           setAiTopic(topics[0].name)
@@ -154,10 +280,10 @@ const Admin = () => {
       } else {
         setAiTopic(`${aiLessonTitle}: Core Concepts`)
       }
-    } else {
+    } else if (aiTopic) {
       setAiTopic('')
     }
-  }, [aiGroupId, aiClassId, aiUnitId, aiLessonTitle, aiTopic])
+  }, [aiGroupId, currentSubjectId, currentClassId, currentUnitId, aiLessonTitle, aiTopic])
 
   // Save API key to localStorage when updated
   const handleApiKeyChange = (val: string) => {
@@ -169,17 +295,36 @@ const Admin = () => {
     }
   }
 
+  // Pre-generation validation
+  const isSubjectValid = availableSubjects.some((s) => s.id === currentSubjectId)
+  const isStandardValid = availableStandards.some((s) => s.id === currentClassId)
+  const isUnitValid = availableUnits.some((u) => u.id === currentUnitId)
+  const isLessonValid = Boolean(selectedLessonObj && selectedLessonObj.title)
+  const isTopicValid = Boolean(currentTopicName || (availableTopics.length > 0))
+  const isCountValid = aiQuestionCount >= 1 && aiQuestionCount <= 15
+  const isDifficultyValid = ['Medium', 'Easy', 'Hard', 'Mixed'].includes(aiDifficulty)
+
+  const isFormValid =
+    isSubjectValid &&
+    isStandardValid &&
+    isUnitValid &&
+    isLessonValid &&
+    isTopicValid &&
+    isCountValid &&
+    isDifficultyValid &&
+    !isAIGenerating
+
   // Generate AI Questions handler
   const handleGenerateAIQuestions = async () => {
-    if (!token) return
+    if (!token || !isFormValid) return
     setIsAIGenerating(true)
     setAiNotice(null)
     setAiUploadSuccess(null)
 
-    const activeTopic = aiTopic || (availableTopics[0]?.name) || `${aiLessonTitle}: Key Concepts`
+    const activeTopic = aiTopic || currentTopicName || (availableTopics[0]?.name) || `${currentLessonTitle}: Key Concepts`
 
     try {
-      const res = await fetch('/api/questions/ai-generate', {
+      const res = await apiFetch('/api/questions/ai-generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -187,12 +332,15 @@ const Admin = () => {
         },
         body: JSON.stringify({
           category: aiGroupId,
-          unitId: aiUnitId,
-          classId: aiClassId,
-          lessonTitle: aiLessonTitle,
+          subject: selectedSubjectObj.name,
+          subjectId: selectedSubjectObj.id,
+          classId: currentClassId,
+          unitId: currentUnitId,
+          unitTitle: currentUnit?.title,
+          lessonTitle: currentLessonTitle,
           topic: activeTopic,
+          topics: availableTopics.map((t) => t.name),
           description: selectedLessonObj?.description || '',
-          subject: currentUnit?.subjectName || 'General Studies',
           count: aiQuestionCount,
           difficulty: aiDifficulty,
           apiKey: geminiApiKey.trim() || undefined,
@@ -205,9 +353,10 @@ const Admin = () => {
         const taggedQuestions = data.questions.map((q: any) => ({
           ...q,
           category: aiGroupId,
-          unitId: aiUnitId,
-          classId: aiClassId,
-          lessonTitle: aiLessonTitle,
+          subject: selectedSubjectObj.name,
+          classId: currentClassId,
+          unitId: currentUnitId,
+          lessonTitle: currentLessonTitle,
           topic: activeTopic,
           selected: true,
         }))
@@ -229,10 +378,10 @@ const Admin = () => {
     if (!token || regeneratingIndex !== null) return
     setRegeneratingIndex(qIndex)
     const currentQ = aiGeneratedQuestions[qIndex]
-    const targetTopic = currentQ.topic || aiTopic || (availableTopics[0]?.name) || `${aiLessonTitle}: Key Concepts`
+    const targetTopic = currentQ.topic || aiTopic || currentTopicName || (availableTopics[0]?.name) || `${currentLessonTitle}: Key Concepts`
 
     try {
-      const res = await fetch('/api/questions/ai-regenerate-single', {
+      const res = await apiFetch('/api/questions/ai-regenerate-single', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -240,11 +389,11 @@ const Admin = () => {
         },
         body: JSON.stringify({
           category: currentQ.category || aiGroupId,
-          unitId: currentQ.unitId || aiUnitId,
-          classId: currentQ.classId || aiClassId,
-          lessonTitle: currentQ.lessonTitle || aiLessonTitle,
+          subject: currentQ.subject || selectedSubjectObj.name,
+          classId: currentQ.classId || currentClassId,
+          unitId: currentQ.unitId || currentUnitId,
+          lessonTitle: currentQ.lessonTitle || currentLessonTitle,
           topic: targetTopic,
-          subject: currentUnit?.subjectName || 'General Studies',
           difficulty: currentQ.difficulty || aiDifficulty,
           previousQuestion: currentQ.question,
           apiKey: geminiApiKey.trim() || undefined,
@@ -367,7 +516,7 @@ const Admin = () => {
 
     setIsAIUploading(true)
     try {
-      const res = await fetch('/api/questions/upload', {
+      const res = await apiFetch('/api/questions/upload', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -395,19 +544,15 @@ const Admin = () => {
 
   // Proceed to next lesson in syllabus
   const handleProceedToNextLesson = () => {
-    const currentIndex = availableLessons.findIndex((l) => l.title === aiLessonTitle)
+    const currentIndex = availableLessons.findIndex((l) => l.title === currentLessonTitle)
     if (currentIndex >= 0 && currentIndex + 1 < availableLessons.length) {
-      setAiLessonTitle(availableLessons[currentIndex + 1].title)
+      handleLessonChange(availableLessons[currentIndex + 1].title)
     } else {
       // Advance unit if possible
-      const unitIndex = availableUnits.findIndex((u) => u.id === aiUnitId)
+      const unitIndex = availableUnits.findIndex((u) => u.id === currentUnitId)
       if (unitIndex >= 0 && unitIndex + 1 < availableUnits.length) {
         const nextUnit = availableUnits[unitIndex + 1]
-        setAiUnitId(nextUnit.id)
-        const nextLessons = getLessonsForUnit(aiGroupId, nextUnit.id, aiClassId)
-        if (nextLessons.length > 0) {
-          setAiLessonTitle(nextLessons[0].title)
-        }
+        handleUnitChange(nextUnit.id)
       }
     }
     setAiGeneratedQuestions([])
@@ -421,12 +566,12 @@ const Admin = () => {
     setLoginError('')
     setIsLoggingIn(true)
     try {
-      const res = await fetch('/api/admin/login', {
+      const res = await apiFetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: usernameInput, password: passwordInput }),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (res.ok && data.token) {
         localStorage.setItem('tnpsc_admin_token', data.token)
         setToken(data.token)
@@ -435,8 +580,9 @@ const Admin = () => {
       } else {
         setLoginError(data.message || 'Invalid username or password')
       }
-    } catch {
-      setLoginError('Failed to connect to authentication server')
+    } catch (err) {
+      console.error('Admin login error:', err)
+      setLoginError('Failed to connect to authentication server. Please ensure the backend is reachable.')
     } finally {
       setIsLoggingIn(false)
     }
@@ -462,7 +608,7 @@ const Admin = () => {
       params.set('limit', pageSize.toString())
       params.set('offset', ((page - 1) * pageSize).toString())
 
-      const res = await fetch(`/api/questions/admin?${params.toString()}`, {
+      const res = await apiFetch(`/api/questions/admin?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.status === 401 || res.status === 403) {
@@ -495,15 +641,17 @@ const Admin = () => {
   const handleOpenAddModal = () => {
     const defaultGroup = 'group1'
     const defaultClassId = 6
-    const units = getUnitsForGroup(defaultGroup)
+    const subjects = getSubjectsForGroup(defaultGroup)
+    const defaultSubjectId = subjects[0]?.id || 'general_science'
+    const units = getUnitsForSubjectStandard(defaultGroup, defaultSubjectId, defaultClassId)
     const defaultUnitId = units[0]?.id || 1
-    const lessons = getLessonsForUnit(defaultGroup, defaultUnitId, defaultClassId)
-    const topics = lessons[0] ? getTopicsForLesson(defaultGroup, defaultUnitId, lessons[0].title, defaultClassId) : []
+    const lessons = getLessonsForSelection(defaultGroup, defaultSubjectId, defaultClassId, defaultUnitId)
+    const topics = lessons[0] ? getTopicsForSelection(defaultGroup, defaultSubjectId, defaultClassId, defaultUnitId, lessons[0].title) : []
     setEditingQuestion({
       category: defaultGroup,
       classId: defaultClassId,
       unitId: defaultUnitId,
-      subject: units[0]?.subjectName || 'General Science',
+      subject: subjects[0]?.name || units[0]?.subjectName || 'General Science',
       lessonTitle: lessons[0]?.title || '',
       topic: topics[0]?.name || '',
       difficulty: 'Medium',
@@ -556,7 +704,7 @@ const Admin = () => {
       const url = isUpdating ? `/api/questions/${editingQuestion.id}` : '/api/questions'
       const method = isUpdating ? 'PATCH' : 'POST'
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -583,7 +731,7 @@ const Admin = () => {
   const handleConfirmDelete = async () => {
     if (!isDeleting || !token) return
     try {
-      const res = await fetch(`/api/questions/${isDeleting.id}`, {
+      const res = await apiFetch(`/api/questions/${isDeleting.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -605,7 +753,7 @@ const Admin = () => {
     if (!token) return
     const newStatus = q.status === 'published' ? 'staging' : 'published'
     try {
-      const res = await fetch(`/api/questions/${q.id}`, {
+      const res = await apiFetch(`/api/questions/${q.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -707,7 +855,7 @@ const Admin = () => {
 
     setIsUploading(true)
     try {
-      const res = await fetch('/api/questions/upload', {
+      const res = await apiFetch('/api/questions/upload', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1171,7 +1319,7 @@ const Admin = () => {
 
               <form onSubmit={handleSaveQuestion}>
                 <div className="admin-modal-body">
-                  {/* Row 1: Group & Standard */}
+                  {/* Row 1: Group & Subject */}
                   <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
                     <div className="form-field">
                       <label>1. TNPSC Examination Group *</label>
@@ -1182,15 +1330,17 @@ const Admin = () => {
                         onChange={(e) => {
                           const newCat = e.target.value as any
                           const currentClassId = editingQuestion.classId || 6
-                          const units = getUnitsForGroup(newCat)
+                          const subjects = getSubjectsForGroup(newCat)
+                          const defaultSubjectId = subjects[0]?.id || 'general_science'
+                          const units = getUnitsForSubjectStandard(newCat, defaultSubjectId, currentClassId)
                           const defaultUnitId = units[0]?.id || 1
-                          const lessons = getLessonsForUnit(newCat, defaultUnitId, currentClassId)
-                          const topics = lessons[0] ? getTopicsForLesson(newCat, defaultUnitId, lessons[0].title, currentClassId) : []
+                          const lessons = getLessonsForSelection(newCat, defaultSubjectId, currentClassId, defaultUnitId)
+                          const topics = lessons[0] ? getTopicsForSelection(newCat, defaultSubjectId, currentClassId, defaultUnitId, lessons[0].title) : []
                           setEditingQuestion({
                             ...editingQuestion,
                             category: newCat,
                             unitId: defaultUnitId,
-                            subject: units[0]?.subjectName || 'General Studies',
+                            subject: subjects[0]?.name || units[0]?.subjectName || 'General Studies',
                             lessonTitle: lessons[0]?.title || '',
                             topic: topics[0]?.name || '',
                           })
@@ -1206,7 +1356,55 @@ const Admin = () => {
                     </div>
 
                     <div className="form-field">
-                      <label>2. Standard (6th to 12th) *</label>
+                      <label>2. Subject Selection *</label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        value={(() => {
+                          const currentCat = (editingQuestion.category as any) || 'group1'
+                          const currentSubj = editingQuestion.subject || ''
+                          const subjects = getSubjectsForGroup(currentCat)
+                          const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
+                          return subj?.name || currentSubj || ''
+                        })()}
+                        onChange={(e) => {
+                          const selectedSubjectName = e.target.value
+                          const currentCat = (editingQuestion.category as any) || 'group1'
+                          const currentClassId = editingQuestion.classId || 6
+                          const subjects = getSubjectsForGroup(currentCat)
+                          const subj = subjects.find((s: any) => s.name === selectedSubjectName) || subjects[0]
+                          const subjId = subj?.id || 'general_science'
+                          const units = getUnitsForSubjectStandard(currentCat, subjId, currentClassId)
+                          const defaultUnitId = units[0]?.id || 1
+                          const lessons = getLessonsForSelection(currentCat, subjId, currentClassId, defaultUnitId)
+                          const topics = lessons[0] ? getTopicsForSelection(currentCat, subjId, currentClassId, defaultUnitId, lessons[0].title) : []
+                          setEditingQuestion({
+                            ...editingQuestion,
+                            subject: selectedSubjectName,
+                            unitId: defaultUnitId,
+                            lessonTitle: lessons[0]?.title || '',
+                            topic: topics[0]?.name || '',
+                          })
+                        }}
+                        required
+                      >
+                        {(() => {
+                          const currentCat = (editingQuestion.category as any) || 'group1'
+                          const subjects = getSubjectsForGroup(currentCat)
+                          return subjects.map((s: any) => (
+                            <option key={s.id} value={s.name}>
+                              {s.name}
+                            </option>
+                          ))
+                        })()}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Standard & Unit */}
+                  <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                    <div className="form-field">
+                      <label>3. Standard (6th to 12th) *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -1215,8 +1413,12 @@ const Admin = () => {
                           const newClassId = parseInt(e.target.value, 10) || 6
                           const currentCat = (editingQuestion.category as any) || 'group1'
                           const currentUnitId = editingQuestion.unitId || 1
-                          const lessons = getLessonsForUnit(currentCat, currentUnitId, newClassId)
-                          const topics = lessons[0] ? getTopicsForLesson(currentCat, currentUnitId, lessons[0].title, newClassId) : []
+                          const currentSubj = editingQuestion.subject || ''
+                          const subjects = getSubjectsForGroup(currentCat)
+                          const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
+                          const subjId = subj?.id || 'general_science'
+                          const lessons = getLessonsForSelection(currentCat, subjId, newClassId, currentUnitId)
+                          const topics = lessons[0] ? getTopicsForSelection(currentCat, subjId, newClassId, currentUnitId, lessons[0].title) : []
                           setEditingQuestion({
                             ...editingQuestion,
                             classId: newClassId,
@@ -1239,7 +1441,7 @@ const Admin = () => {
                   {/* Row 2: Unit & Lesson Title */}
                   <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
                     <div className="form-field">
-                      <label>3. Unit (1 to 6) *</label>
+                      <label>4. Unit (1 to 6) *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -1248,35 +1450,52 @@ const Admin = () => {
                           const newUnitId = parseInt(e.target.value, 10) || 1
                           const currentCat = (editingQuestion.category as any) || 'group1'
                           const currentClassId = editingQuestion.classId || 6
-                          const units = getUnitsForGroup(currentCat)
-                          const unitObj = units.find((u) => u.id === newUnitId)
-                          const lessons = getLessonsForUnit(currentCat, newUnitId, currentClassId)
-                          const topics = lessons[0] ? getTopicsForLesson(currentCat, newUnitId, lessons[0].title, currentClassId) : []
+                          const currentSubj = editingQuestion.subject || ''
+                          const subjects = getSubjectsForGroup(currentCat)
+                          const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
+                          const subjId = subj?.id || 'general_science'
+                          const units = getUnitsForSubjectStandard(currentCat, subjId, currentClassId)
+                          const unitObj = units.find((u: any) => u.id === newUnitId)
+                          const lessons = getLessonsForSelection(currentCat, subjId, currentClassId, newUnitId)
+                          const topics = lessons[0] ? getTopicsForSelection(currentCat, subjId, currentClassId, newUnitId, lessons[0].title) : []
                           setEditingQuestion({
                             ...editingQuestion,
                             unitId: newUnitId,
-                            subject: unitObj?.subjectName || editingQuestion.subject || 'General Studies',
+                            subject: unitObj?.subjectName || subj?.name || editingQuestion.subject || 'General Studies',
                             lessonTitle: lessons[0]?.title || '',
                             topic: topics[0]?.name || '',
                           })
                         }}
                         required
                       >
-                        {getUnitsForGroup((editingQuestion.category as any) || 'group1').map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.unitNumber}: {u.title}
-                          </option>
-                        ))}
+                        {(() => {
+                          const currentCat = (editingQuestion.category as any) || 'group1'
+                          const currentClassId = editingQuestion.classId || 6
+                          const currentSubj = editingQuestion.subject || ''
+                          const subjects = getSubjectsForGroup(currentCat)
+                          const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
+                          const subjId = subj?.id || 'general_science'
+                          const units = getUnitsForSubjectStandard(currentCat, subjId, currentClassId)
+                          return units.map((u: any) => (
+                            <option key={u.id} value={u.id}>
+                              {u.unitNumber ? `${u.unitNumber}: ` : ''}{u.title}
+                            </option>
+                          ))
+                        })()}
                       </select>
                     </div>
 
                     <div className="form-field">
-                      <label>4. Lesson Title (Filtered by Std & Unit) *</label>
+                      <label>5. Lesson Title (Filtered by Std & Unit) *</label>
                       {(() => {
                         const currentCat = (editingQuestion.category as any) || 'group1'
                         const currentUnitId = editingQuestion.unitId || 1
                         const currentClassId = editingQuestion.classId || 6
-                        const availableEditLessons = getLessonsForUnit(currentCat, currentUnitId, currentClassId)
+                        const currentSubj = editingQuestion.subject || ''
+                        const subjects = getSubjectsForGroup(currentCat)
+                        const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
+                        const subjId = subj?.id || 'general_science'
+                        const availableEditLessons = getLessonsForSelection(currentCat, subjId, currentClassId, currentUnitId)
                         return (
                           <select
                             className="filter-select"
@@ -1284,7 +1503,7 @@ const Admin = () => {
                             value={editingQuestion.lessonTitle || ''}
                             onChange={(e) => {
                               const val = e.target.value
-                              const topics = getTopicsForLesson(currentCat, currentUnitId, val, currentClassId)
+                              const topics = getTopicsForSelection(currentCat, subjId, currentClassId, currentUnitId, val)
                               setEditingQuestion({
                                 ...editingQuestion,
                                 lessonTitle: val,
@@ -1294,13 +1513,13 @@ const Admin = () => {
                             required
                           >
                             <option value="" disabled>-- Select Lesson ({availableEditLessons.length} available) --</option>
-                            {availableEditLessons.map((l) => (
+                            {availableEditLessons.map((l: any) => (
                               <option key={l.id} value={l.title}>
-                                {l.lessonNumber} {l.title}
+                                {l.lessonNumber ? `${l.lessonNumber} ` : ''}{l.title}
                               </option>
                             ))}
                             {editingQuestion.lessonTitle &&
-                              !availableEditLessons.some((l) => l.title === editingQuestion.lessonTitle) && (
+                              !availableEditLessons.some((l: any) => l.title === editingQuestion.lessonTitle) && (
                                 <option value={editingQuestion.lessonTitle}>
                                   {editingQuestion.lessonTitle}
                                 </option>
@@ -1313,16 +1532,21 @@ const Admin = () => {
 
                   {/* Row 3: Specific Topic */}
                   <div className="form-field" style={{ marginBottom: '0.75rem' }}>
-                    <label>5. Specific Syllabus Topic *</label>
+                    <label>6. Specific Syllabus Topic *</label>
                     {(() => {
                       const currentCat = (editingQuestion.category as any) || 'group1'
                       const currentUnitId = editingQuestion.unitId || 1
                       const currentClassId = editingQuestion.classId || 6
-                      const availableEditTopics = getTopicsForLesson(
+                      const currentSubj = editingQuestion.subject || ''
+                      const subjects = getSubjectsForGroup(currentCat)
+                      const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
+                      const subjId = subj?.id || 'general_science'
+                      const availableEditTopics = getTopicsForSelection(
                         currentCat,
+                        subjId,
+                        currentClassId,
                         currentUnitId,
-                        editingQuestion.lessonTitle || '',
-                        currentClassId
+                        editingQuestion.lessonTitle || ''
                       )
                       if (availableEditTopics.length > 0) {
                         return (
@@ -1334,13 +1558,13 @@ const Admin = () => {
                             required
                           >
                             <option value="" disabled>-- Select Topic ({availableEditTopics.length} available) --</option>
-                            {availableEditTopics.map((t) => (
+                            {availableEditTopics.map((t: any) => (
                               <option key={t.id} value={t.name}>
                                 {t.name}
                               </option>
                             ))}
                             {editingQuestion.topic &&
-                              !availableEditTopics.some((t) => t.name === editingQuestion.topic) && (
+                              !availableEditTopics.some((t: any) => t.name === editingQuestion.topic) && (
                                 <option value={editingQuestion.topic}>{editingQuestion.topic}</option>
                               )}
                           </select>
@@ -1358,18 +1582,8 @@ const Admin = () => {
                     })()}
                   </div>
 
-                  {/* Row 4: Subject and Difficulty */}
+                  {/* Row 4: Difficulty */}
                   <div className="form-grid-2">
-                    <div className="form-field">
-                      <label>Subject</label>
-                      <input
-                        type="text"
-                        value={editingQuestion.subject || ''}
-                        onChange={(e) => setEditingQuestion({ ...editingQuestion, subject: e.target.value })}
-                        placeholder="General Science, Geography, History, etc."
-                        required
-                      />
-                    </div>
                     <div className="form-field">
                       <label>Difficulty</label>
                       <select
@@ -1660,12 +1874,12 @@ const Admin = () => {
                       Gemini AI Generator
                     </span>
                     <span className="ai-group-badge">
-                      {TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name} • {TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.code}
+                      {TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name} • {selectedSubjectObj?.name} • {selectedStandardObj?.label}
                     </span>
                   </div>
                   <h2 className="ai-modal-title">Syllabus-Wise MCQ Generator</h2>
                   <p className="ai-modal-subtitle">
-                    Select Group, Unit, Lesson & exact Topic to generate authentic syllabus MCQs with Google Gemini.
+                    Select Group, Subject, Standard, Unit, Lesson & exact Topic to generate authentic syllabus MCQs with Google Gemini.
                   </p>
                 </div>
                 <button
@@ -1739,7 +1953,7 @@ const Admin = () => {
                         <span className="ai-next-label">Next Lesson in Syllabus:</span>
                         <span className="ai-next-title">
                           {(() => {
-                            const curIdx = availableLessons.findIndex((l) => l.title === aiLessonTitle)
+                            const curIdx = availableLessons.findIndex((l) => l.title === currentLessonTitle)
                             if (curIdx >= 0 && curIdx + 1 < availableLessons.length) {
                               return `${availableLessons[curIdx + 1].lessonNumber} ${availableLessons[curIdx + 1].title}`
                             }
@@ -1755,22 +1969,23 @@ const Admin = () => {
                   </div>
                 )}
 
-                {/* 3. Syllabus 4-Tier Cascading Selector */}
+                {/* 3. Syllabus 6-Tier Cascading Selector */}
                 {!aiUploadSuccess && (
                   <div className="ai-section-box">
                     <h3 className="ai-section-title">
                       <Sparkles size={16} style={{ color: '#c084fc' }} />
-                      <span>Select Group, Unit, Lesson & Specific Topic</span>
+                      <span>Syllabus MCQ Configuration (1 to 6)</span>
                     </h3>
 
-                    <div className="ai-selection-grid-4">
-                      {/* Column 1: Mandatory TNPSC Group */}
+                    {/* Row 1: 1. TNPSC Group, 2. Subject Selection, 3. Standard */}
+                    <div className="ai-selection-tier-1">
+                      {/* 1. TNPSC Group */}
                       <div className="ai-field">
                         <label>1. TNPSC Group *</label>
                         <select
                           className="ai-select"
                           value={aiGroupId}
-                          onChange={(e) => setAiGroupId(e.target.value as any)}
+                          onChange={(e) => handleGroupChange(e.target.value as any)}
                         >
                           {TNPSC_GROUPS.map((g) => (
                             <option key={g.id} value={g.id}>
@@ -1780,29 +1995,48 @@ const Admin = () => {
                         </select>
                       </div>
 
-                      {/* Column 2: Standard (6th to 12th) */}
+                      {/* 2. Subject Selection (immediately after TNPSC Group and before Standard) */}
                       <div className="ai-field">
-                        <label>2. Standard (6th to 12th) *</label>
+                        <label>2. Subject Selection ({availableSubjects.length} Subjects) *</label>
                         <select
                           className="ai-select"
-                          value={aiClassId}
-                          onChange={(e) => setAiClassId(Number(e.target.value))}
+                          value={currentSubjectId}
+                          onChange={(e) => handleSubjectChange(e.target.value)}
                         >
-                          {STANDARDS.map((s) => (
+                          {availableSubjects.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* 3. Standard */}
+                      <div className="ai-field">
+                        <label>3. Standard ({availableStandards.length} Standards) *</label>
+                        <select
+                          className="ai-select"
+                          value={currentClassId}
+                          onChange={(e) => handleStandardChange(Number(e.target.value))}
+                        >
+                          {availableStandards.map((s) => (
                             <option key={s.id} value={s.id}>
                               {s.label}
                             </option>
                           ))}
                         </select>
                       </div>
+                    </div>
 
-                      {/* Column 3: Unit (Group-specific) */}
+                    {/* Row 2: 4. Unit, 5. Lesson Title */}
+                    <div className="ai-selection-tier-2" style={{ marginTop: '0.85rem' }}>
+                      {/* 4. Unit */}
                       <div className="ai-field">
-                        <label>3. Unit ({availableUnits.length} Units) *</label>
+                        <label>4. Unit ({availableUnits.length} Units) *</label>
                         <select
                           className="ai-select"
-                          value={aiUnitId}
-                          onChange={(e) => setAiUnitId(Number(e.target.value))}
+                          value={currentUnitId}
+                          onChange={(e) => handleUnitChange(Number(e.target.value))}
                         >
                           {availableUnits.map((u) => (
                             <option key={u.id} value={u.id}>
@@ -1812,16 +2046,16 @@ const Admin = () => {
                         </select>
                       </div>
 
-                      {/* Column 4: Lesson Title (Strictly filtered by selected Standard & Unit) */}
+                      {/* 5. Lesson Title */}
                       <div className="ai-field">
-                        <label>4. Lesson Title ({availableLessons.length} Lessons) *</label>
+                        <label>5. Lesson Title ({availableLessons.length} Lessons) *</label>
                         <select
                           className="ai-select"
-                          value={aiLessonTitle}
-                          onChange={(e) => setAiLessonTitle(e.target.value)}
+                          value={currentLessonTitle}
+                          onChange={(e) => handleLessonChange(e.target.value)}
                         >
                           {availableLessons.length === 0 ? (
-                            <option value="" disabled>No lessons mapped for this standard & unit</option>
+                            <option value="" disabled>No lessons mapped for this selection</option>
                           ) : (
                             availableLessons.map((l) => (
                               <option key={l.id} value={l.title}>
@@ -1833,19 +2067,24 @@ const Admin = () => {
                       </div>
                     </div>
 
-                    {/* Specific Topic Row */}
+                    {/* Row 3: 6. Specific Topic */}
                     <div className="ai-field" style={{ marginTop: '0.85rem' }}>
-                      <label>5. Specific Topic ({availableTopics.length} Topics)</label>
+                      <label>6. Specific Topic ({availableTopics.length} Topics) *</label>
                       <select
                         className="ai-select"
-                        value={aiTopic}
-                        onChange={(e) => setAiTopic(e.target.value)}
+                        value={currentTopicName}
+                        onChange={(e) => handleTopicChange(e.target.value)}
+                        disabled={availableTopics.length === 0}
                       >
-                        {availableTopics.map((t) => (
-                          <option key={t.id} value={t.name}>
-                            {t.name}
-                          </option>
-                        ))}
+                        {availableTopics.length === 0 ? (
+                          <option value="" disabled>No topics available</option>
+                        ) : (
+                          availableTopics.map((t) => (
+                            <option key={t.id} value={t.name}>
+                              {t.name}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
 
@@ -1857,10 +2096,13 @@ const Admin = () => {
                             {selectedLessonObj.lessonNumber ? `Lesson ${selectedLessonObj.lessonNumber}` : 'Selected Lesson'}
                           </span>
                           <span className="ai-lesson-pill">
-                            {currentUnit?.title}
+                            {selectedSubjectObj?.name}
                           </span>
                           <span className="ai-lesson-pill">
-                            {currentUnit?.subjectName}
+                            {selectedStandardObj?.label}
+                          </span>
+                          <span className="ai-lesson-pill">
+                            {currentUnit?.unitNumber ? `Unit ${currentUnit.unitNumber}` : currentUnit?.title}
                           </span>
                         </div>
                         <div className="ai-lesson-title-display">
@@ -1874,17 +2116,17 @@ const Admin = () => {
                         <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Target Topic:</span>
                           <span className="ai-tag-pill ai-tag-topic" style={{ fontSize: '0.78rem' }}>
-                            📌 {aiTopic || availableTopics[0]?.name || selectedLessonObj.title}
+                            📌 {currentTopicName || (availableTopics[0]?.name) || selectedLessonObj.title}
                           </span>
                         </div>
                       </div>
                     )}
 
-                    {/* Generation Settings */}
+                    {/* Generation Settings: 7. Questions Count, 8. Difficulty, 9. Generate Button */}
                     <div className="ai-generation-options">
                       <div className="ai-options-inline">
                         <div className="ai-field ai-field-compact">
-                          <label>Questions Count</label>
+                          <label>7. Questions Count</label>
                           <select
                             className="ai-select"
                             value={aiQuestionCount}
@@ -1897,7 +2139,7 @@ const Admin = () => {
                         </div>
 
                         <div className="ai-field ai-field-compact">
-                          <label>Difficulty</label>
+                          <label>8. Difficulty</label>
                           <select
                             className="ai-select"
                             value={aiDifficulty}
@@ -1914,13 +2156,13 @@ const Admin = () => {
                       <button
                         className="ai-generate-action-btn"
                         onClick={handleGenerateAIQuestions}
-                        disabled={isAIGenerating || !selectedLessonObj}
+                        disabled={!isFormValid || isAIGenerating}
                       >
                         <Sparkles size={18} className={isAIGenerating ? 'spin-icon' : ''} />
                         <span>
                           {isAIGenerating
                             ? 'Generating MCQs...'
-                            : `Generate ${aiQuestionCount} MCQs for ${aiGroupId.toUpperCase()}`}
+                            : `9. Generate ${aiQuestionCount} MCQs for ${selectedSubjectObj?.name || 'Subject'}`}
                         </span>
                       </button>
                     </div>

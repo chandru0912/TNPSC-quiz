@@ -6,6 +6,7 @@ import { unitClassRegistry } from './group1ClassSyllabusData'
 import { group2ClassRegistry } from './group2ClassSyllabusData'
 import { group2Subjects } from './group2SyllabusData'
 import { group4Subjects } from './group4SyllabusData'
+import { group4ClassRegistry } from './group4ClassSyllabusData'
 
 export interface TopicItem {
   id: string
@@ -576,3 +577,251 @@ export function getTopicsForLesson(
   const lesson = lessons.find((l) => l.title === lessonTitle) || getLessonsForUnit(groupId, unitId).find((l) => l.title === lessonTitle)
   return lesson?.topics || []
 }
+
+// ============================================================================
+// DYNAMIC 6-TIER SYLLABUS SELECTION ENGINE
+// Group -> Subject -> Standard -> Unit -> Lesson -> Specific Topic
+// ============================================================================
+
+export interface SyllabusSubjectConfig {
+  id: string
+  name: string
+  description?: string
+}
+
+export const GROUP_SUBJECTS: Record<'group1' | 'group2' | 'group4', SyllabusSubjectConfig[]> = {
+  // TNPSC Group 1: General Studies, Aptitude and Mental Ability
+  group1: [
+    { id: 'general-studies', name: 'General Studies' },
+    { id: 'aptitude', name: 'Aptitude and Mental Ability' },
+  ],
+  // TNPSC Group 2 / 2A: General Studies, Aptitude and Mental Ability, General English, General Tamil
+  group2: [
+    { id: 'general-studies', name: 'General Studies' },
+    { id: 'aptitude', name: 'Aptitude and Mental Ability' },
+    { id: 'general-english', name: 'General English' },
+    { id: 'general-tamil', name: 'General Tamil' },
+  ],
+  // TNPSC Group 4: General Studies, Aptitude and Mental Ability, General Tamil, General English
+  group4: [
+    { id: 'general-studies', name: 'General Studies' },
+    { id: 'aptitude', name: 'Aptitude and Mental Ability' },
+    { id: 'general-tamil', name: 'General Tamil' },
+    { id: 'general-english', name: 'General English' },
+  ],
+}
+
+/**
+ * Returns available subjects strictly configured for the chosen examination group.
+ */
+export function getSubjectsForGroup(groupId: 'group1' | 'group2' | 'group4'): SyllabusSubjectConfig[] {
+  return GROUP_SUBJECTS[groupId] || GROUP_SUBJECTS.group1
+}
+
+/**
+ * Returns standards available for the selected group and subject.
+ * - Group 4 is strictly SSLC standard (6th to 10th standard).
+ * - Aptitude across all exams is SSLC standard (6th to 10th standard).
+ * - General Studies, English, and Tamil for Group 1/2 cover 6th to 12th standard.
+ */
+export function getStandardsForSubject(
+  groupId: 'group1' | 'group2' | 'group4',
+  subjectId: string
+): { id: number; label: string; shortLabel: string }[] {
+  if (groupId === 'group4' || subjectId === 'aptitude') {
+    return STANDARDS.filter((s) => s.id >= 6 && s.id <= 10)
+  }
+  return STANDARDS
+}
+
+export interface SyllabusUnitOption {
+  id: number
+  unitNumber: string
+  title: string
+  subjectName: string
+}
+
+/**
+ * Returns the exact units mapped to the selected group, subject, and standard.
+ */
+export function getUnitsForSubjectStandard(
+  _groupId: 'group1' | 'group2' | 'group4',
+  subjectId: string,
+  classId: number
+): SyllabusUnitOption[] {
+  if (subjectId === 'general-studies') {
+    return [
+      { id: 1, unitNumber: 'Unit 1', title: 'General Science', subjectName: 'General Science' },
+      { id: 2, unitNumber: 'Unit 2', title: 'Geography of India', subjectName: 'Geography' },
+      { id: 3, unitNumber: 'Unit 3', title: 'History, Culture of India, and Indian National Movement', subjectName: 'History & INM' },
+      { id: 4, unitNumber: 'Unit 4', title: 'Indian Polity', subjectName: 'Indian Polity' },
+      { id: 5, unitNumber: 'Unit 5', title: 'Indian Economy and Development Administration in Tamil Nadu', subjectName: 'Economy & TN Admin' },
+      { id: 6, unitNumber: 'Unit 6', title: 'History, Culture, Heritage, and Socio-Political Movements in Tamil Nadu', subjectName: 'Tamil Nadu Heritage' },
+    ]
+  }
+
+  if (subjectId === 'aptitude') {
+    if (classId === 10) {
+      return [
+        { id: 1, unitNumber: 'Unit 1', title: 'Aptitude', subjectName: 'Aptitude and Mental Ability' },
+        { id: 2, unitNumber: 'Unit 2', title: 'Reasoning', subjectName: 'Aptitude and Mental Ability' },
+      ]
+    }
+    return [
+      { id: 1, unitNumber: 'Unit 1', title: 'Aptitude', subjectName: 'Aptitude and Mental Ability' },
+    ]
+  }
+
+  if (subjectId === 'general-english') {
+    return [
+      { id: 1, unitNumber: 'Unit 1', title: 'Grammar', subjectName: 'General English' },
+      { id: 2, unitNumber: 'Unit 2', title: 'Vocabulary', subjectName: 'General English' },
+      { id: 3, unitNumber: 'Unit 3', title: 'Writing Skills', subjectName: 'General English' },
+      { id: 4, unitNumber: 'Unit 4', title: 'Technical Terms', subjectName: 'General English' },
+      { id: 5, unitNumber: 'Unit 5', title: 'Reading Comprehension', subjectName: 'General English' },
+      { id: 6, unitNumber: 'Unit 6', title: 'Translation', subjectName: 'General English' },
+      { id: 7, unitNumber: 'Unit 7', title: 'Literary Works (SSLC Standard)', subjectName: 'General English' },
+    ]
+  }
+
+  if (subjectId === 'general-tamil') {
+    return [
+      { id: 1, unitNumber: 'அலகு 1', title: 'இலக்கணம் (Grammar)', subjectName: 'General Tamil' },
+      { id: 2, unitNumber: 'அலகு 2', title: 'செய்யுள் & சங்க இலக்கியம் (Classical Literature)', subjectName: 'General Tamil' },
+      { id: 3, unitNumber: 'அலகு 3', title: 'அற இலக்கியங்கள் & காப்பியங்கள் (Ethical Epics)', subjectName: 'General Tamil' },
+      { id: 4, unitNumber: 'அலகு 4', title: 'பக்தி இலக்கியம் & சிற்றிலக்கியங்கள் (Devotional Literature)', subjectName: 'General Tamil' },
+      { id: 5, unitNumber: 'அலகு 5', title: 'நவீன இலக்கியம் & உரைநடை (Modern Literature & Prose)', subjectName: 'General Tamil' },
+      { id: 6, unitNumber: 'அலகு 6', title: 'தமிழ் அறிஞர்களும் தமிழ்த் தொண்டும் (Scholars & Contributions)', subjectName: 'General Tamil' },
+      { id: 7, unitNumber: 'அலகு 7', title: 'கடித இலக்கியம், நாட்டுப்புறக் கலைகள் & பயன்பாட்டுத் தமிழ் (Applied Tamil)', subjectName: 'General Tamil' },
+    ]
+  }
+
+  return []
+}
+
+/**
+ * Returns raw syllabus class data by inspecting the relevant authoritative data registries.
+ */
+function resolveClassData(
+  groupId: 'group1' | 'group2' | 'group4',
+  subjectId: string,
+  classId: number,
+  unitId: number
+): { topics?: string[]; lessons?: any[]; subjectName?: string } | null {
+  // 1. Group 1 Specific Lookup
+  if (groupId === 'group1') {
+    if (subjectId === 'general-studies') {
+      const key = `${unitId}-${classId}`
+      if (unitClassRegistry[key]) return unitClassRegistry[key]
+    }
+    if (subjectId === 'aptitude') {
+      const key = `aptitude-${unitId}-${classId}`
+      if (group2ClassRegistry[key]) return group2ClassRegistry[key]
+    }
+  }
+
+  // 2. Group 4 Specific Lookup
+  if (groupId === 'group4') {
+    if (subjectId === 'general-studies') {
+      const key = `general-studies-${unitId}-${classId}`
+      if (group4ClassRegistry[key]) return group4ClassRegistry[key]
+      if (group2ClassRegistry[key]) return group2ClassRegistry[key]
+    }
+    if (subjectId === 'aptitude') {
+      const key = `aptitude-${unitId}-${classId}`
+      if (group2ClassRegistry[key]) return group2ClassRegistry[key]
+    }
+    if (subjectId === 'general-tamil') {
+      const key = `general-tamil-${unitId}-${classId}`
+      if (group4ClassRegistry[key]) return group4ClassRegistry[key]
+      if (group2ClassRegistry[key]) return group2ClassRegistry[key]
+    }
+    if (subjectId === 'general-english') {
+      const key = `general-english-${unitId}-${classId}`
+      if (group2ClassRegistry[key]) return group2ClassRegistry[key]
+    }
+  }
+
+  // 3. Group 2 & General Fallback Lookup
+  const key = `${subjectId}-${unitId}-${classId}`
+  if (group2ClassRegistry[key]) return group2ClassRegistry[key]
+
+  return null
+}
+
+/**
+ * Returns all valid lessons belonging to the exact Group, Subject, Standard, and Unit.
+ */
+export function getLessonsForSelection(
+  groupId: 'group1' | 'group2' | 'group4',
+  subjectId: string,
+  classId: number,
+  unitId: number
+): LessonItem[] {
+  const classData = resolveClassData(groupId, subjectId, classId, unitId)
+  if (!classData || !Array.isArray(classData.lessons) || classData.lessons.length === 0) {
+    return []
+  }
+
+  return classData.lessons.map((l: any, idx: number) => {
+    const topics: TopicItem[] = []
+
+    // 1. Extract topics from keyConcepts if present
+    if (Array.isArray(l.keyConcepts) && l.keyConcepts.length > 0) {
+      l.keyConcepts.forEach((kc: string, i: number) => {
+        topics.push({ id: `${l.id}-kc-${i + 1}`, name: kc })
+      })
+    }
+
+    // 2. Match relevant class-level topics to this lesson
+    if (Array.isArray(classData.topics) && classData.topics.length > 0) {
+      const words = String(l.title || '')
+        .toLowerCase()
+        .split(/[\s,:-]+/)
+        .filter((w) => w.length > 3)
+
+      const matched = classData.topics.filter((t) =>
+        words.some((w) => t.toLowerCase().includes(w))
+      )
+
+      matched.forEach((mt: string, i: number) => {
+        if (!topics.some((existing) => existing.name === mt)) {
+          topics.push({ id: `${l.id}-ct-${i + 1}`, name: mt })
+        }
+      })
+    }
+
+    // 3. Fallback topics if none derived
+    if (topics.length === 0) {
+      topics.push({ id: `${l.id}-t1`, name: `${l.title}: Core Principles & Definitions` })
+      topics.push({ id: `${l.id}-t2`, name: `${l.title}: Analytical & Practical Applications` })
+    }
+
+    return {
+      id: l.id || `l-${subjectId}-${unitId}-${classId}-${idx + 1}`,
+      lessonNumber: l.lessonNumber || `1.${idx + 1}`,
+      title: l.title,
+      description: l.description,
+      subjectName: classData.subjectName || subjectId,
+      classId,
+      topics,
+    }
+  })
+}
+
+/**
+ * Returns only specific topics strictly mapped to the chosen lesson.
+ * Never mixes topics from other lessons, subjects, or standards.
+ */
+export function getTopicsForSelection(
+  groupId: 'group1' | 'group2' | 'group4',
+  subjectId: string,
+  classId: number,
+  unitId: number,
+  lessonTitle: string
+): TopicItem[] {
+  const lessons = getLessonsForSelection(groupId, subjectId, classId, unitId)
+  const found = lessons.find((l) => l.title === lessonTitle) || lessons[0]
+  return found?.topics || []
+}
+
