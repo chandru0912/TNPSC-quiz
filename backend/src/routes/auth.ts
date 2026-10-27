@@ -60,7 +60,9 @@ export async function ensureAdminUsersTable() {
 }
 
 // Auto-initialize on module load
-ensureAdminUsersTable().catch(console.error);
+ensureAdminUsersTable().catch((err) => {
+  console.error('Admin table initialization failed on startup:', err.message);
+});
 
 interface EnvAdmin {
   username: string;
