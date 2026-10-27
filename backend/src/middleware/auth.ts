@@ -5,14 +5,16 @@ const SECRET = process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_
 
 export interface AdminPayload {
   username: string;
-  role: 'admin';
+  name?: string;
+  role: string;
   exp: number;
 }
 
-export function generateAdminToken(username: string): string {
+export function generateAdminToken(username: string, name?: string, role: string = 'admin'): string {
   const payload: AdminPayload = {
     username,
-    role: 'admin',
+    name: name || username,
+    role,
     exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
   };
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');

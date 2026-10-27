@@ -26,6 +26,8 @@ import {
   Check,
   Bot,
   RefreshCcw,
+  Users,
+  UserPlus,
 } from 'lucide-react'
 import './Admin.css'
 import {
@@ -63,13 +65,41 @@ interface AdminMetrics {
   publishedCount: number
 }
 
+interface AdminUserItem {
+  id: number
+  username: string
+  name: string
+  role: string
+  source: 'database' | 'env'
+  createdAt?: string | null
+}
+
 const Admin = () => {
   // Auth state
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('tnpsc_admin_token'))
+  const [adminUser, setAdminUser] = useState<{ id?: number; username: string; name?: string; role?: string } | null>(() => {
+    try {
+      const saved = localStorage.getItem('tnpsc_admin_user')
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      return null
+    }
+  })
   const [usernameInput, setUsernameInput] = useState('')
   const [passwordInput, setPasswordInput] = useState('')
   const [loginError, setLoginError] = useState('')
   const [isLoggingIn, setIsLoggingIn] = useState(false)
+
+  // Multiple Admin Accounts Management Modal state
+  const [isUsersModalOpen, setIsUsersModalOpen] = useState(false)
+  const [adminUsersList, setAdminUsersList] = useState<AdminUserItem[]>([])
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false)
+  const [newAdminUsername, setNewAdminUsername] = useState('')
+  const [newAdminPassword, setNewAdminPassword] = useState('')
+  const [newAdminName, setNewAdminName] = useState('')
+  const [newAdminRole, setNewAdminRole] = useState<'admin' | 'editor' | 'reviewer' | 'super_admin'>('admin')
+  const [isCreatingUser, setIsCreatingUser] = useState(false)
+  const [userActionError, setUserActionError] = useState<string | null>(null)
 
   // Data & Filters
   const [questions, setQuestions] = useState<QuestionItem[]>([])
@@ -574,6 +604,10 @@ const Admin = () => {
       const data = await res.json().catch(() => ({}))
       if (res.ok && data.token) {
         localStorage.setItem('tnpsc_admin_token', data.token)
+        if (data.user) {
+          localStorage.setItem('tnpsc_admin_user', JSON.stringify(data.user))
+          setAdminUser(data.user)
+        }
         setToken(data.token)
         setUsernameInput('')
         setPasswordInput('')
@@ -590,8 +624,108 @@ const Admin = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('tnpsc_admin_token')
+    localStorage.removeItem('tnpsc_admin_user')
     setToken(null)
+    setAdminUser(null)
   }
+
+  // Fetch all admin accounts (DB + .env)
+  const fetchAdminUsers = async () => {
+    if (!token) return
+    setIsLoadingUsers(true)
+    setUserActionError(null)
+    try {
+      const res = await apiFetch('/api/admin/users', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.users) {
+        setAdminUsersList(data.users)
+      } else {
+        setUserActionError(data.message || 'Failed to load admin accounts')
+      }
+    } catch {
+      setUserActionError('Network error while loading admin accounts')
+    } finally {
+      setIsLoadingUsers(false)
+    }
+  }
+
+  // Create a new admin account
+  const handleCreateAdminUser = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!token) return
+    setIsCreatingUser(true)
+    setUserActionError(null)
+    try {
+      const res = await apiFetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          username: newAdminUsername,
+          password: newAdminPassword,
+          name: newAdminName,
+          role: newAdminRole,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        showToast('success', `Admin account "${newAdminUsername}" created successfully!`)
+        setNewAdminUsername('')
+        setNewAdminPassword('')
+        setNewAdminName('')
+        setNewAdminRole('admin')
+        fetchAdminUsers()
+      } else {
+        setUserActionError(data.message || 'Failed to create admin account')
+      }
+    } catch {
+      setUserActionError('Network error while creating admin account')
+    } finally {
+      setIsCreatingUser(false)
+    }
+  }
+
+  // Delete an admin account
+  const handleDeleteAdminUser = async (id: number, username: string) => {
+    if (!token) return
+    if (!window.confirm(`Are you sure you want to delete admin account "${username}"?`)) return
+    try {
+      const res = await apiFetch(`/api/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        showToast('success', `Admin account "${username}" deleted`)
+        fetchAdminUsers()
+      } else {
+        showToast('error', data.message || 'Failed to delete admin account')
+      }
+    } catch {
+      showToast('error', 'Network error while deleting admin account')
+    }
+  }
+
+  // Auto-sync session user profile
+  useEffect(() => {
+    if (token) {
+      apiFetch('/api/admin/verify', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.status === 'success' && data.user) {
+            setAdminUser(data.user)
+            localStorage.setItem('tnpsc_admin_user', JSON.stringify(data.user))
+          }
+        })
+        .catch(() => {})
+    }
+  }, [token])
 
   // Fetch Questions
   const fetchQuestions = useCallback(async () => {
@@ -985,8 +1119,22 @@ const Admin = () => {
           <div className="admin-profile-group">
             <span className="admin-user-pill">
               <Shield size={14} style={{ color: 'var(--gold-primary)' }} />
-              Admin
+              <span>{adminUser?.name || adminUser?.username || 'Admin'}</span>
+              {adminUser?.role && (
+                <span className="admin-pill-role-tag">{adminUser.role.replace('_', ' ')}</span>
+              )}
             </span>
+            <button
+              className="admin-users-mgmt-btn"
+              onClick={() => {
+                setIsUsersModalOpen(true)
+                fetchAdminUsers()
+              }}
+              title="Manage Multiple Admin Accounts"
+            >
+              <Users size={14} />
+              <span>Admin Accounts</span>
+            </button>
             <button className="admin-logout-btn" onClick={handleLogout} title="Log out of Admin Portal">
               <LogOut size={14} />
               <span>Sign Out</span>
@@ -1073,6 +1221,17 @@ const Admin = () => {
               <button className="admin-btn admin-btn-secondary" onClick={() => setIsBulkModalOpen(true)}>
                 <Upload size={16} />
                 <span>Bulk Upload</span>
+              </button>
+              <button
+                className="admin-btn admin-btn-secondary"
+                onClick={() => {
+                  setIsUsersModalOpen(true)
+                  fetchAdminUsers()
+                }}
+                title="Manage Admin Logins"
+              >
+                <Users size={16} />
+                <span>Admin Users</span>
               </button>
               <button className="admin-btn admin-btn-secondary" onClick={fetchQuestions} title="Refresh table data">
                 <RefreshCw size={15} className={isLoading ? 'spin-icon' : ''} />
@@ -1848,6 +2007,229 @@ const Admin = () => {
                 >
                   <Upload size={16} />
                   <span>{isUploading ? 'Uploading to Staging...' : 'Upload to Staging'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Multiple Admin Accounts Management Modal */}
+      <AnimatePresence>
+        {isUsersModalOpen && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal admin-users-modal-container"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              {/* Header */}
+              <div className="admin-modal-header">
+                <div className="admin-modal-header-info">
+                  <div className="admin-badge-row">
+                    <span className="admin-badge">
+                      <Users size={13} />
+                      Access Control
+                    </span>
+                    <span className="admin-badge" style={{ borderColor: 'rgba(56, 189, 248, 0.3)', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)' }}>
+                      {adminUsersList.length} Active Accounts
+                    </span>
+                  </div>
+                  <h2 className="admin-modal-title">Admin Account Management</h2>
+                  <p className="admin-modal-subtitle">
+                    Configure multiple administrators, editors, and syllabus reviewers with distinct login credentials.
+                  </p>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => setIsUsersModalOpen(false)}
+                  aria-label="Close modal"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="admin-modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+                {userActionError && (
+                  <div className="admin-toast-error" style={{ padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.88rem' }}>
+                    <AlertTriangle size={16} />
+                    <span>{userActionError}</span>
+                  </div>
+                )}
+
+                <div className="admin-users-grid-layout">
+                  {/* Left: Registered Admin Accounts List */}
+                  <div className="admin-users-list-card">
+                    <div className="admin-users-list-header">
+                      <div className="admin-users-list-title">
+                        <Shield size={16} style={{ color: 'var(--gold-primary)' }} />
+                        <span>Registered Admin Logins</span>
+                      </div>
+                      <button
+                        className="admin-btn admin-btn-secondary"
+                        style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                        onClick={fetchAdminUsers}
+                        title="Refresh accounts"
+                      >
+                        <RefreshCw size={13} className={isLoadingUsers ? 'spin-icon' : ''} />
+                        <span>Refresh</span>
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {isLoadingUsers && adminUsersList.length === 0 ? (
+                        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          Loading admin accounts...
+                        </div>
+                      ) : adminUsersList.length === 0 ? (
+                        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          No admin accounts found.
+                        </div>
+                      ) : (
+                        adminUsersList.map((usr) => {
+                          const isRoot = usr.username.toLowerCase() === 'admin'
+                          const isEnv = usr.source === 'env'
+                          return (
+                            <div key={`${usr.source}-${usr.id}-${usr.username}`} className="admin-user-card-item">
+                              <div className="admin-user-info-left">
+                                <div className="admin-user-avatar">
+                                  {usr.name ? usr.name.charAt(0).toUpperCase() : usr.username.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="admin-user-meta">
+                                  <div className="admin-user-name">
+                                    <span>{usr.name}</span>
+                                    <span
+                                      className={`admin-user-tag ${
+                                        usr.role === 'super_admin'
+                                          ? 'admin-user-tag-super'
+                                          : usr.role === 'reviewer'
+                                          ? 'admin-user-tag-reviewer'
+                                          : usr.role === 'editor'
+                                          ? 'admin-user-tag-editor'
+                                          : 'admin-user-tag-admin'
+                                      }`}
+                                    >
+                                      {usr.role.replace('_', ' ')}
+                                    </span>
+                                  </div>
+                                  <div className="admin-user-sub">
+                                    <span>@{usr.username}</span>
+                                    <span>•</span>
+                                    <span className="admin-user-tag admin-user-tag-env">
+                                      {isEnv ? '.env Config' : 'Database'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <button
+                                  className="admin-user-delete-btn"
+                                  onClick={() => handleDeleteAdminUser(usr.id, usr.username)}
+                                  disabled={isRoot || isEnv}
+                                  title={
+                                    isRoot
+                                      ? 'Root admin cannot be deleted'
+                                      : isEnv
+                                      ? 'Configured via .env file'
+                                      : 'Delete admin account'
+                                  }
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: Add New Admin Form */}
+                  <div className="admin-user-create-card">
+                    <div className="admin-user-create-title">
+                      <UserPlus size={16} style={{ color: '#38bdf8' }} />
+                      <span>Create New Admin Login</span>
+                    </div>
+
+                    <form onSubmit={handleCreateAdminUser} className="admin-user-form">
+                      <div className="form-field">
+                        <label>Display Name *</label>
+                        <input
+                          type="text"
+                          className="filter-select"
+                          style={{ width: '100%', padding: '0.65rem' }}
+                          placeholder="e.g. Chandru (Lead Editor)"
+                          value={newAdminName}
+                          onChange={(e) => setNewAdminName(e.target.value)}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-field">
+                        <label>Username *</label>
+                        <input
+                          type="text"
+                          className="filter-select"
+                          style={{ width: '100%', padding: '0.65rem' }}
+                          placeholder="e.g. chandru_admin"
+                          value={newAdminUsername}
+                          onChange={(e) => setNewAdminUsername(e.target.value)}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-field">
+                        <label>Password *</label>
+                        <input
+                          type="password"
+                          className="filter-select"
+                          style={{ width: '100%', padding: '0.65rem' }}
+                          placeholder="Min 6 characters"
+                          value={newAdminPassword}
+                          onChange={(e) => setNewAdminPassword(e.target.value)}
+                          required
+                        />
+                      </div>
+
+                      <div className="form-field">
+                        <label>Role / Permissions *</label>
+                        <select
+                          className="filter-select"
+                          style={{ width: '100%', padding: '0.65rem' }}
+                          value={newAdminRole}
+                          onChange={(e) => setNewAdminRole(e.target.value as any)}
+                        >
+                          <option value="admin">Administrator (Full Access)</option>
+                          <option value="editor">Editor (Questions & Staging)</option>
+                          <option value="reviewer">Reviewer (Syllabus & Quality)</option>
+                          <option value="super_admin">Super Administrator</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="admin-btn admin-btn-primary"
+                        style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }}
+                        disabled={isCreatingUser}
+                      >
+                        <UserPlus size={16} />
+                        <span>{isCreatingUser ? 'Creating Account...' : 'Create Admin Account'}</span>
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="admin-modal-footer">
+                <button
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setIsUsersModalOpen(false)}
+                >
+                  Close
                 </button>
               </div>
             </motion.div>

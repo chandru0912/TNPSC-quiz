@@ -31,6 +31,18 @@ export async function runMigration() {
       );
     `);
 
+    // 2. Create admin_users table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'admin',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // 2. Create indices for high-performance querying
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_questions_category_unit_status 
