@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useScrollLock } from '../hooks/useScrollLock'
+
 import {
   ArrowLeft,
   BookOpen,
@@ -72,6 +74,10 @@ const Group2UnitClass = () => {
   const [activeModalTab, setActiveModalTab] = useState<'notes' | 'quiz'>('notes')
   const [currentSlideIndex, setCurrentSlideIndex] = useState<number>(0)
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({})
+
+  // Lock background scroll when interactive lesson modal is open
+  useScrollLock(Boolean(activeModalLesson))
+
 
 
   // Handle keyboard navigation in reader modal

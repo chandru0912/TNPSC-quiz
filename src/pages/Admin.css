@@ -840,6 +840,8 @@
   justify-content: center;
   padding: 1.5rem 1rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   color-scheme: dark !important;
 }
 
@@ -852,8 +854,9 @@
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 30px rgba(255, 215, 0, 0.08);
   display: flex;
   flex-direction: column;
-  max-height: calc(90vh - 1rem);
+  max-height: min(90vh, calc(100dvh - 2rem));
   overflow: hidden;
+  overscroll-behavior: contain;
   margin: auto;
   color-scheme: dark !important;
 }
@@ -895,6 +898,8 @@
 .admin-modal-body {
   padding: 1.75rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -1362,11 +1367,13 @@
 .ai-modal-container {
   max-width: 1060px !important;
   width: 96% !important;
-  max-height: 92vh !important;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-sizing: border-box;
+  height: min(92vh, calc(100dvh - 2rem)) !important;
+  max-height: min(92vh, calc(100dvh - 2rem)) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  overscroll-behavior: contain !important;
+  box-sizing: border-box !important;
   border: 1px solid rgba(139, 92, 246, 0.35) !important;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(124, 58, 237, 0.25) !important;
 }
@@ -1380,6 +1387,7 @@
   background: rgba(15, 23, 42, 0.85);
   box-sizing: border-box;
   width: 100%;
+  flex-shrink: 0 !important;
 }
 
 .ai-modal-header-info {
@@ -1439,15 +1447,44 @@
 
 .ai-modal-body {
   padding: 1.5rem 1.75rem;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #a855f7 rgba(15, 23, 42, 0.8) !important;
+  scrollbar-gutter: stable;
 }
+
+.ai-modal-body::-webkit-scrollbar {
+  width: 10px !important;
+  display: block !important;
+}
+
+.ai-modal-body::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.8) !important;
+  border-radius: 6px !important;
+}
+
+.ai-modal-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #c084fc 0%, #a855f7 100%) !important;
+  border-radius: 6px !important;
+  border: 2px solid rgba(15, 23, 42, 0.8) !important;
+}
+
+.ai-modal-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #d8b4fe 0%, #c084fc 100%) !important;
+}
+
 
 /* API Key Card / Status */
 .ai-api-card {
@@ -1550,7 +1587,7 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible !important;
 }
 
 .ai-section-title {
@@ -2253,58 +2290,267 @@
   }
 }
 
-@media (max-width: 820px) {
+/* ==========================================================================
+   Mobile & Responsive Scrolling & Layout for Gemini AI Question Generator
+   ========================================================================== */
+
+/* Up to 850px: Adapt controls into columns so no fields or buttons get pushed off-screen */
+@media (max-width: 850px) {
   .ai-generation-options {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.85rem;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.85rem !important;
+    width: 100% !important;
   }
 
   .ai-options-inline {
-    width: 100%;
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.75rem !important;
+    align-items: stretch !important;
   }
 
   .ai-field-compact {
-    flex: 1 1 100%;
-    max-width: 100%;
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 auto !important;
   }
 
   .ai-generate-action-btn {
-    width: 100%;
+    width: 100% !important;
+    white-space: normal !important;
+    text-align: center !important;
+    min-height: 44px !important;
+    height: auto !important;
   }
 
   .ai-batch-bar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.85rem;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.85rem !important;
   }
 
   .ai-batch-left {
-    justify-content: space-between;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
   }
 
   .ai-options-grid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }
 
-@media (max-width: 640px) {
+/* Up to 768px: Mobile viewport modal bounding, scroll container, and backdrop lock */
+@media (max-width: 768px) {
+  /* Parent backdrop: eliminate outer scroll trap and negative coordinate clipping */
+  .admin-modal-backdrop:has(.ai-modal-container),
+  .admin-modal-backdrop.ai-modal-backdrop {
+    padding: 0 !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    overflow: hidden !important;
+    height: 100% !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100% !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+  }
+
+  /* Modal container: fill mobile viewport with strict flex column and bounded max-height */
+  .ai-modal-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100% !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-top: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    box-shadow: none !important;
+  }
+
+  /* Compact sticky header so body has maximum vertical space on small screens */
+  .ai-modal-header {
+    flex-shrink: 0 !important;
+    padding: 0.85rem 1rem !important;
+    padding-top: max(0.85rem, env(safe-area-inset-top, 0)) !important;
+    gap: 0.5rem;
+  }
+
+  .ai-badge-row {
+    gap: 0.35rem;
+  }
+
+  .ai-header-badge,
+  .ai-group-badge {
+    font-size: 0.68rem !important;
+    padding: 0.2rem 0.5rem !important;
+  }
+
+  .ai-modal-title {
+    font-size: 1.15rem !important;
+    line-height: 1.25 !important;
+  }
+
+  .ai-modal-subtitle {
+    font-size: 0.775rem !important;
+    line-height: 1.35 !important;
+  }
+
+  /* The primary scrollable panel container with guaranteed permanent visible scrollbar */
+  .ai-modal-body {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: scroll !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    touch-action: pan-y !important;
+    overscroll-behavior: contain !important;
+    padding: 1rem 0.85rem 4.5rem !important;
+    gap: 1.15rem !important;
+    scrollbar-width: thin !important;
+    scrollbar-color: #c084fc rgba(15, 23, 42, 0.85) !important;
+    scrollbar-gutter: stable;
+  }
+
+  .ai-modal-body::-webkit-scrollbar {
+    width: 10px !important;
+    display: block !important;
+  }
+
+  .ai-modal-body::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.9) !important;
+    border-radius: 6px !important;
+  }
+
+  .ai-modal-body::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #c084fc 0%, #a855f7 100%) !important;
+    border-radius: 6px !important;
+    border: 2px solid rgba(15, 23, 42, 0.9) !important;
+  }
+
+  /* Footer fixed at bottom with safe-area padding for home indicators */
+  .ai-modal-container .admin-modal-footer {
+    flex-shrink: 0 !important;
+    padding: 0.75rem 1rem !important;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0)) !important;
+    background: rgba(13, 21, 39, 0.96) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
+    justify-content: flex-end !important;
+  }
+
+  .ai-modal-container .admin-modal-footer .admin-btn {
+    font-size: 0.825rem !important;
+    padding: 0.5rem 0.85rem !important;
+  }
+
+  /* Mobile layout adaptations for internal controls */
   .ai-selection-grid-4 {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.75rem !important;
   }
 
   .ai-selection-grid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.75rem !important;
+  }
+
+  .ai-selection-tier-1 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.75rem !important;
+  }
+
+  .ai-selection-tier-2 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.75rem !important;
+  }
+
+  .ai-api-input-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .ai-api-input {
+    width: 100%;
+  }
+
+  .ai-api-link {
+    align-self: flex-start;
+  }
+
+  .ai-card-top-bar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.5rem !important;
+  }
+
+  .ai-card-actions {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+}
+
+/* Up to 540px: Strict 1-column layout for small mobile screens (no side-by-side squeezing) */
+@media (max-width: 540px) {
+  .ai-options-inline {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem !important;
   }
 
   .ai-modal-header {
-    padding: 1.25rem 1rem;
+    padding: 0.75rem 0.75rem !important;
+  }
+
+  .ai-modal-title {
+    font-size: 1.05rem !important;
+  }
+
+  .ai-modal-subtitle {
+    font-size: 0.75rem !important;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .ai-modal-body {
-    padding: 1rem;
-    gap: 1.15rem;
+    padding: 0.85rem 0.65rem 4.5rem !important;
+    gap: 1rem !important;
+  }
+
+  .ai-section-box {
+    padding: 0.85rem !important;
+  }
+
+  .ai-lesson-card {
+    padding: 0.75rem !important;
+  }
+
+  .ai-preview-card {
+    padding: 0.85rem 0.75rem !important;
+  }
+
+  .ai-modal-container .admin-modal-footer .admin-btn {
+    width: 100% !important;
   }
 }
 

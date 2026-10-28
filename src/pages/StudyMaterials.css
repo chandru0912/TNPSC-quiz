@@ -1032,12 +1032,15 @@
   justify-content: center;
   z-index: 1000;
   padding: 1.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .g2-modal {
   width: 100%;
   max-width: 860px;
-  max-height: 88vh;
+  max-height: min(88vh, calc(100dvh - 2rem));
   border-radius: var(--border-radius-lg);
   background: linear-gradient(155deg, rgba(22, 34, 66, 0.94) 0%, rgba(10, 16, 32, 0.96) 100%);
   border: 1px solid rgba(255, 215, 0, 0.28);
@@ -1045,7 +1048,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior: contain;
 }
+
 
 .g2-modal-head {
   padding: 1.35rem 1.6rem;
@@ -1136,11 +1141,14 @@
 .g2-modal-scroll {
   padding: 1.6rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
   flex: 1;
 }
+
 
 /* Study Notes Styles */
 .g2-notes-box {

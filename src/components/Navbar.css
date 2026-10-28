@@ -273,7 +273,12 @@
     border-bottom: 1px solid rgba(255, 215, 0, 0.25);
     border-top: 1px solid rgba(255, 215, 0, 0.12);
     box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6);
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
+
 
   .nav-menu.active {
     transform: translateY(0);

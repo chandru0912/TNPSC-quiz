@@ -514,12 +514,15 @@
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .slide-modal-card {
   width: 100%;
   max-width: 860px;
-  max-height: 90vh;
+  max-height: min(90vh, calc(100dvh - 2rem));
   display: flex;
   flex-direction: column;
   background: linear-gradient(160deg, rgba(20, 28, 52, 0.96) 0%, rgba(9, 14, 28, 0.98) 100%);
@@ -527,8 +530,10 @@
   border-radius: var(--border-radius-lg);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), 0 0 32px rgba(255, 215, 0, 0.08);
   overflow: hidden;
+  overscroll-behavior: contain;
   position: relative;
 }
+
 
 /* Top Progress Track */
 .slide-progress-track {
@@ -690,9 +695,12 @@
 .slide-viewport {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 1.5rem 1.75rem;
   scroll-behavior: smooth;
 }
+
 
 .slide-content-stage {
   display: flex;

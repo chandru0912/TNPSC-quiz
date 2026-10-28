@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { User, UserPlus, Eye, EyeOff, ArrowRight, X } from 'lucide-react'
+import { useScrollLock } from '../hooks/useScrollLock'
 import './MobileAuthSlide.css'
 
 export type AuthSlideType = 'none' | 'login' | 'register'
@@ -19,6 +20,9 @@ const MobileAuthSlide = ({
   onSwitchToLogin,
   onSwitchToRegister,
 }: MobileAuthSlideProps) => {
+  // Lock background page scroll strictly while the auth slide/drawer is open
+  useScrollLock(activeSlide !== 'none')
+
   // Login form state
   const [loginData, setLoginData] = useState({ email: '', password: '' })
   const [loginShowPassword, setLoginShowPassword] = useState(false)
@@ -43,7 +47,7 @@ const MobileAuthSlide = ({
     confirmPassword?: string
   }>({})
 
-  // Lock body scroll and listen for Escape key when popup is open
+  // Listen for Escape key when popup is open
   useEffect(() => {
     if (activeSlide === 'none') return
 
@@ -53,15 +57,12 @@ const MobileAuthSlide = ({
       }
     }
 
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
-
     return () => {
-      document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [activeSlide, onClose])
+
 
   const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   const validateMobile = (mobile: string) => /^[6-9]\d{9}$/.test(mobile)

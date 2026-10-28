@@ -26,10 +26,15 @@ import {
   BarChart3,
 } from 'lucide-react'
 import './Dashboard.css'
+import { useScrollLock } from '../hooks/useScrollLock'
+
 
 const Dashboard = () => {
   const [userName] = useState('Student')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Lock background scroll when mobile sidebar drawer is open
+  useScrollLock(sidebarOpen)
 
   const sidebarLinks = [
     { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },

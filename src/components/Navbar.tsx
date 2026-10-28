@@ -2,12 +2,16 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus, Shield } from 'lucide-react'
 import MobileAuthSlide, { type AuthSlideType } from './MobileAuthSlide'
+import { useScrollLock } from '../hooks/useScrollLock'
 import './Navbar.css'
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false)
   const [activeAuthSlide, setActiveAuthSlide] = useState<AuthSlideType>('none')
   const location = useLocation()
+
+  // Lock background scroll when mobile hamburger navigation menu is open
+  useScrollLock(isOpen)
 
   const navLinks = [
     { path: '/', label: 'Home', icon: Home },

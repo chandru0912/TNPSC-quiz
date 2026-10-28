@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useScrollLock } from '../hooks/useScrollLock'
 import {
   ChevronRight,
   ArrowLeft,
@@ -38,6 +39,10 @@ const Group2Lessons = () => {
   } | null>(null)
   const [modalTab, setModalTab] = useState<'notes' | 'quiz'>('notes')
   const [quizAnswers, setQuizAnswers] = useState<Record<string, number>>({})
+
+  // Lock background scroll when lesson modal is open
+  useScrollLock(Boolean(activeLesson))
+
 
   if (!subject || !unit) {
     return (

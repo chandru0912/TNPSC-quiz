@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { FileText, Calendar, Eye, Download, X, Award, CheckCircle, BookOpen } from 'lucide-react'
+import { useScrollLock } from '../hooks/useScrollLock'
 import './PreviousPapers.css'
 
 interface PaperItem {
@@ -15,6 +16,9 @@ interface PaperItem {
 const PreviousPapers = () => {
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'group1' | 'group2_2a' | 'group4'>('all')
   const [previewPaper, setPreviewPaper] = useState<PaperItem | null>(null)
+
+  // Lock background scrolling while paper preview modal is open
+  useScrollLock(Boolean(previewPaper))
 
   const categories = [
     { id: 'all' as const, name: 'All Papers' },

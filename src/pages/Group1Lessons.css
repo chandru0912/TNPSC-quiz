@@ -243,6 +243,9 @@
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .lesson-modal {
@@ -259,9 +262,12 @@
   gap: 1.5rem;
   padding: 2.25rem;
   position: relative;
-  max-height: 90vh;
+  max-height: min(90vh, calc(100dvh - 2rem));
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
+
 
 .modal-head {
   display: flex;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { apiFetch } from '../utils/api'
+import { useScrollLock } from '../hooks/useScrollLock'
 import {
   Shield,
   Search,
@@ -135,6 +136,16 @@ const Admin = () => {
 
   // Gemini AI Generator state (TNPSC Group, Subject, Standard, Unit, Lesson & Specific Topic Cascading)
   const [isAIGeneratorOpen, setIsAIGeneratorOpen] = useState(false)
+
+  // Lock background page scrolling strictly when any admin modal is open
+  const hasOpenAdminModal =
+    isUsersModalOpen ||
+    isEditModalOpen ||
+    Boolean(isDeleting) ||
+    isBulkModalOpen ||
+    isAIGeneratorOpen
+  useScrollLock(hasOpenAdminModal)
+
   const [aiGroupId, setAiGroupId] = useState<'group1' | 'group2' | 'group4'>('group1')
   const [aiSubjectId, setAiSubjectId] = useState<string>('general-studies')
   const [aiClassId, setAiClassId] = useState<number>(6)
@@ -2452,7 +2463,7 @@ const Admin = () => {
       {/* Gemini AI Question Generator Modal */}
       <AnimatePresence>
         {isAIGeneratorOpen && (
-          <div className="admin-modal-backdrop">
+          <div className="admin-modal-backdrop ai-modal-backdrop">
             <motion.div
               className="admin-modal ai-modal-container"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -2489,7 +2500,22 @@ const Admin = () => {
               </div>
 
               {/* Body */}
-              <div className="ai-modal-body">
+              <div
+                className="ai-modal-body"
+                style={{
+                  overflowY: 'scroll',
+                  overflowX: 'hidden',
+                  WebkitOverflowScrolling: 'touch',
+                  flex: '1 1 0%',
+                  minHeight: 0,
+                  overscrollBehavior: 'contain',
+                  touchAction: 'pan-y',
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: '#c084fc rgba(15, 23, 42, 0.85)',
+                  scrollbarGutter: 'stable',
+                }}
+              >
+
                 {/* 1. API Key Config Card */}
                 <div className="ai-api-card">
                   <div className="ai-api-header">

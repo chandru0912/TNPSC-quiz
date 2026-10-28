@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useScrollLock } from '../hooks/useScrollLock'
 import {
   ChevronRight,
   ArrowLeft,
@@ -29,6 +30,10 @@ const Group1Lessons = () => {
     chapterTitle: string
     chapterNumber: number
   } | null>(null)
+
+  // Lock background scroll when lesson modal is open
+  useScrollLock(Boolean(activeLesson))
+
 
   if (!unit) {
     return (

@@ -918,11 +918,14 @@
     left: 0;
     bottom: 0;
     height: 100vh;
-    max-height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
     width: 280px;
     z-index: 300;
     border-radius: 0 var(--border-radius-lg) var(--border-radius-lg) 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar-overlay {
@@ -932,7 +935,10 @@
     background: rgba(3, 6, 13, 0.66);
     backdrop-filter: blur(2px);
     z-index: 290;
+    overscroll-behavior: contain;
+    touch-action: none;
   }
+
 
   .sidebar-close {
     display: inline-flex;

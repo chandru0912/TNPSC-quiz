@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useScrollLock } from '../hooks/useScrollLock'
+
 import {
   ArrowLeft,
   BookOpen,
@@ -56,6 +58,10 @@ const Group1UnitClass = () => {
   // Interactive Study Notes Modal State
   const [activeReadingLesson, setActiveReadingLesson] = useState<SchoolLesson | null>(null)
   const [currentSlideIndex, setCurrentSlideIndex] = useState<number>(0)
+
+  // Lock background scroll when slide reader modal is open
+  useScrollLock(Boolean(activeReadingLesson))
+
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
