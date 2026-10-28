@@ -2,7 +2,7 @@ export const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string) ||
   (import.meta.env.VITE_API_URL as string) ||
   (import.meta.env.VITE_BACKEND_URL as string) ||
-  '';
+  (import.meta.env.DEV ? '' : 'https://tnpsc-quiz-jwkl.vercel.app');
 
 export function getApiUrl(path: string): string {
   if (path.startsWith('http')) {

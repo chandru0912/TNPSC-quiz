@@ -18,6 +18,21 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // Routes
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    status: 'online',
+    service: 'TNPSC Quiz Backend API',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/api/health',
+      dbHealth: '/api/db-health',
+      adminAuth: '/api/admin/login',
+      questions: '/api/questions',
+    },
+  });
+});
+
 app.use('/api/admin', authRouter);
 app.use('/api/questions', questionsRouter);
 
@@ -54,3 +69,5 @@ app.get('/api/db-health', async (_req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+export default app;
