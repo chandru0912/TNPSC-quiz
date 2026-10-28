@@ -73,10 +73,10 @@ interface EnvAdmin {
 
 function getEnvAdmins(): EnvAdmin[] {
   const admins: EnvAdmin[] = [];
-  const primaryUser = process.env.ADMIN_USERNAME || 'admin';
-  const primaryPass = process.env.ADMIN_PASSWORD || 'tnpscadmin2026';
+  const primaryUser = (process.env.ADMIN_USERNAME || 'admin').trim();
+  const primaryPass = (process.env.ADMIN_PASSWORD || 'tnpscadmin2026').trim();
   admins.push({
-    username: primaryUser.trim(),
+    username: primaryUser,
     password: primaryPass,
     name: 'Super Admin',
     role: 'super_admin',
@@ -148,6 +148,7 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 
   // 2. Check in Database admin_users table
+  let dbError: string | null = null;
   try {
     const dbRes = await pool.query(
       'SELECT id, username, password, name, role FROM admin_users WHERE LOWER(username) = LOWER($1)',
@@ -176,7 +177,16 @@ router.post('/login', async (req: Request, res: Response) => {
       console.warn('Admin login failed: user not found in DB and not in env');
     }
   } catch (err: any) {
-    console.error('Error querying admin_users table:', err.message);
+    dbError = err.message || 'Database connection error';
+    console.error('Error querying admin_users table during login:', err.message);
+  }
+
+  if (dbError) {
+    return res.status(503).json({
+      status: 'error',
+      message: 'Database service is currently unavailable. Please verify the database connection configuration.',
+      dbStatus: 'disconnected',
+    });
   }
 
   return res.status(401).json({

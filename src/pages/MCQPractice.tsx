@@ -14,7 +14,11 @@ import {
   Filter,
   X,
   BookOpen,
+  Award,
+  Trophy,
+  BarChart2,
 } from 'lucide-react'
+import { apiFetch } from '../utils/api'
 import './MCQPractice.css'
 
 interface QuestionItem {
@@ -93,6 +97,9 @@ const MCQPractice = () => {
   const [showResult, setShowResult] = useState(false)
   const [score, setScore] = useState(0)
   const [answeredQuestions, setAnsweredQuestions] = useState(0)
+  const [isQuizCompleted, setIsQuizCompleted] = useState(false)
+  const [isReviewMode, setIsReviewMode] = useState(false)
+  const [userAnswers, setUserAnswers] = useState<Record<number, { selected: number; isCorrect: boolean }>>({})
 
   // Live Database Questions & Connection State
   const [dbQuestions, setDbQuestions] = useState<QuestionItem[]>([])
@@ -108,6 +115,9 @@ const MCQPractice = () => {
     setShowResult(false)
     setScore(0)
     setAnsweredQuestions(0)
+    setIsQuizCompleted(false)
+    setIsReviewMode(false)
+    setUserAnswers({})
   }, [urlGroup, urlUnitId, urlClassId, urlLesson, urlTopic])
 
   // Fetch directly from PostgreSQL Questions API with multi-tier progressive matching
@@ -127,7 +137,7 @@ const MCQPractice = () => {
         queryParams.set('limit', '300')
 
         // 1. Primary Query: Exact Lesson + Class + Unit matching
-        let res = await fetch(`/api/questions?${queryParams.toString()}`)
+        let res = await apiFetch(`/api/questions?${queryParams.toString()}`)
         let data = res.ok ? await res.json() : null
         let questions: QuestionItem[] = (data?.status === 'success' && Array.isArray(data?.data)) ? data.data : []
         let notice: string | null = null
@@ -137,7 +147,7 @@ const MCQPractice = () => {
         if (questions.length === 0 && urlClassId && urlLesson) {
           const relaxClassParams = new URLSearchParams(queryParams)
           relaxClassParams.delete('classId')
-          const relaxRes = await fetch(`/api/questions?${relaxClassParams.toString()}`)
+          const relaxRes = await apiFetch(`/api/questions?${relaxClassParams.toString()}`)
           if (relaxRes.ok) {
             const relaxData = await relaxRes.json()
             if (relaxData.status === 'success' && Array.isArray(relaxData.data) && relaxData.data.length > 0) {
@@ -156,7 +166,7 @@ const MCQPractice = () => {
           if (urlClassId) fallbackParams.set('classId', urlClassId.toString())
           fallbackParams.set('limit', '300')
 
-          const fallbackRes = await fetch(`/api/questions?${fallbackParams.toString()}`)
+          const fallbackRes = await apiFetch(`/api/questions?${fallbackParams.toString()}`)
           if (fallbackRes.ok) {
             const fallbackData = await fallbackRes.json()
             if (fallbackData.status === 'success' && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
@@ -225,6 +235,9 @@ const MCQPractice = () => {
     setShowResult(false)
     setScore(0)
     setAnsweredQuestions(0)
+    setIsQuizCompleted(false)
+    setIsReviewMode(false)
+    setUserAnswers({})
   }
 
   const clearUnitFilter = () => {
@@ -237,28 +250,74 @@ const MCQPractice = () => {
     setShowResult(false)
     setScore(0)
     setAnsweredQuestions(0)
+    setIsQuizCompleted(false)
+    setIsReviewMode(false)
+    setUserAnswers({})
   }
 
   const handleAnswerSelect = (index: number) => {
-    if (showResult) return
+    if (showResult || isReviewMode) return
     setSelectedAnswer(index)
   }
 
   const handleSubmit = () => {
     if (selectedAnswer === null || !questionItem) return
+    const isCorrect = selectedAnswer === questionItem.correctAnswer
     setShowResult(true)
-    setAnsweredQuestions(answeredQuestions + 1)
-    if (selectedAnswer === questionItem.correctAnswer) {
-      setScore(score + 1)
+    setAnsweredQuestions((prev) => prev + 1)
+    if (isCorrect) {
+      setScore((prev) => prev + 1)
     }
+    setUserAnswers((prev) => ({
+      ...prev,
+      [activeQuestionIndex]: { selected: selectedAnswer, isCorrect },
+    }))
   }
 
   const handleNext = () => {
     if (activeQuestionIndex < filteredQuestions.length - 1) {
-      setCurrentQuestion(activeQuestionIndex + 1)
-      setSelectedAnswer(null)
-      setShowResult(false)
+      const nextIndex = activeQuestionIndex + 1
+      setCurrentQuestion(nextIndex)
+      const prevAnswer = userAnswers[nextIndex]
+      if (prevAnswer !== undefined) {
+        setSelectedAnswer(prevAnswer.selected)
+        setShowResult(true)
+      } else {
+        setSelectedAnswer(null)
+        setShowResult(false)
+      }
     }
+  }
+
+  const handlePrev = () => {
+    if (activeQuestionIndex > 0) {
+      const prevIndex = activeQuestionIndex - 1
+      setCurrentQuestion(prevIndex)
+      const prevAnswer = userAnswers[prevIndex]
+      if (prevAnswer !== undefined) {
+        setSelectedAnswer(prevAnswer.selected)
+        setShowResult(true)
+      } else {
+        setSelectedAnswer(null)
+        setShowResult(false)
+      }
+    }
+  }
+
+  const handleFinishQuiz = () => {
+    setIsQuizCompleted(true)
+    setIsReviewMode(false)
+  }
+
+  const handleStartReview = () => {
+    setIsReviewMode(true)
+    setCurrentQuestion(0)
+    setShowResult(true)
+    setSelectedAnswer(userAnswers[0]?.selected ?? null)
+  }
+
+  const handleBackToScorecard = () => {
+    setIsReviewMode(false)
   }
 
   const handleReset = () => {
@@ -267,6 +326,9 @@ const MCQPractice = () => {
     setShowResult(false)
     setScore(0)
     setAnsweredQuestions(0)
+    setIsQuizCompleted(false)
+    setIsReviewMode(false)
+    setUserAnswers({})
   }
 
   const isLastQuestion = activeQuestionIndex === filteredQuestions.length - 1
@@ -442,8 +504,98 @@ const MCQPractice = () => {
           </div>
         </div>
 
-        {/* Question Card / Empty State */}
-        {isInitialLoading ? (
+        {/* Question Card / Scorecard / Empty State */}
+        {isQuizCompleted && !isReviewMode ? (
+          <motion.div
+            className="quiz-completion-card glass"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.35 }}
+          >
+            <div className="completion-trophy-wrap">
+              <Trophy size={48} className="completion-trophy-icon" />
+            </div>
+
+            <div className="completion-header">
+              <span className="completion-badge">
+                <Sparkles size={14} />
+                <span>Assessment Completed</span>
+              </span>
+              <h2 className="completion-title">Quiz Completed!</h2>
+              <p className="completion-subtitle">
+                {selectedGroup === 'group2_2a'
+                  ? 'TNPSC Group 2 & 2A'
+                  : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
+                  ? 'TNPSC Group 4 & VAO'
+                  : 'TNPSC Group 1'}
+                {activeUnitFilter ? ` • Unit ${activeUnitFilter}` : ''}
+                {urlLesson ? ` • ${decodeURIComponent(urlLesson)}` : ''}
+              </p>
+            </div>
+
+            {/* Score Ring Display */}
+            <div className="completion-score-box">
+              <div className="score-ring">
+                <span className="score-numbers">
+                  {score} <span className="score-total">/ {filteredQuestions.length}</span>
+                </span>
+                <span className="score-percentage-pill">
+                  {Math.round((score / Math.max(1, filteredQuestions.length)) * 100)}% Accuracy
+                </span>
+              </div>
+              <div className="score-evaluation-text">
+                {Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 80 ? (
+                  <span className="eval-outstanding">🌟 Outstanding Performance! Excellent preparation for TNPSC prelims.</span>
+                ) : Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 60 ? (
+                  <span className="eval-good">🎯 Good Job! Review the missed questions to reinforce key concepts.</span>
+                ) : (
+                  <span className="eval-practice">📖 Keep Practicing! Read the syllabus study notes and re-attempt.</span>
+                )}
+              </div>
+            </div>
+
+            {/* Metrics Breakdown Grid */}
+            <div className="completion-stats-grid">
+              <div className="completion-stat-tile glass stat-correct">
+                <CheckCircle2 size={22} className="stat-icon-correct" />
+                <div>
+                  <span className="stat-num">{score}</span>
+                  <span className="stat-label">Correct</span>
+                </div>
+              </div>
+              <div className="completion-stat-tile glass stat-incorrect">
+                <XCircle size={22} className="stat-icon-wrong" />
+                <div>
+                  <span className="stat-num">{Math.max(0, answeredQuestions - score)}</span>
+                  <span className="stat-label">Incorrect</span>
+                </div>
+              </div>
+              <div className="completion-stat-tile glass stat-total">
+                <BarChart2 size={22} className="stat-icon-total" />
+                <div>
+                  <span className="stat-num">{filteredQuestions.length}</span>
+                  <span className="stat-label">Total Questions</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Primary Action Buttons */}
+            <div className="completion-actions">
+              <button className="btn btn-secondary review-answers-btn" onClick={handleStartReview}>
+                <FileText size={18} />
+                <span>Review All Answers</span>
+              </button>
+              <button className="btn btn-primary retake-btn" onClick={handleReset}>
+                <RotateCcw size={18} />
+                <span>Retake Quiz</span>
+              </button>
+              <button className="btn btn-secondary back-mats-btn" onClick={() => navigate('/materials')}>
+                <BookOpen size={18} />
+                <span>Back to Study Materials</span>
+              </button>
+            </div>
+          </motion.div>
+        ) : isInitialLoading ? (
           <div className="empty-practice-state glass">
             <div className="empty-icon-wrap">
               <Timer size={36} className="empty-icon" />
@@ -461,6 +613,19 @@ const MCQPractice = () => {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
             >
+              {isReviewMode && (
+                <div className="review-mode-hud glass">
+                  <div className="review-mode-info">
+                    <span className="review-badge">Review Mode • Question {activeQuestionIndex + 1} of {filteredQuestions.length}</span>
+                    <span className="review-score-preview">Score: {score}/{filteredQuestions.length}</span>
+                  </div>
+                  <button type="button" className="btn btn-secondary btn-sm back-scorecard-btn" onClick={handleBackToScorecard}>
+                    <Award size={15} />
+                    <span>Back to Scorecard</span>
+                  </button>
+                </div>
+              )}
+
               <div className="question-header">
                 <span className="question-category-tag">{formatTag(questionItem)}</span>
                 <span className="question-number">
@@ -507,30 +672,41 @@ const MCQPractice = () => {
 
               {/* Action Buttons */}
               <div className="question-actions">
-                {!showResult ? (
-                  <button
-                    className="btn btn-primary submit-btn"
-                    onClick={handleSubmit}
-                    disabled={selectedAnswer === null}
-                  >
-                    <span>Submit Answer</span>
-                    <ArrowRight size={18} />
-                  </button>
-                ) : (
-                  <div className="next-action-group">
-                    {!isLastQuestion ? (
-                      <button className="btn btn-primary next-btn" onClick={handleNext}>
-                        <span>Next Question</span>
-                        <ArrowRight size={18} />
-                      </button>
-                    ) : (
-                      <button className="btn btn-primary restart-btn" onClick={handleReset}>
-                        <RotateCcw size={18} />
-                        <span>Restart Quiz</span>
-                      </button>
-                    )}
-                  </div>
-                )}
+                <div className="action-group-left">
+                  {activeQuestionIndex > 0 && (
+                    <button type="button" className="btn btn-secondary prev-btn" onClick={handlePrev}>
+                      <ArrowLeft size={18} />
+                      <span>Previous</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="action-group-right">
+                  {!showResult ? (
+                    <button
+                      className="btn btn-primary submit-btn"
+                      onClick={handleSubmit}
+                      disabled={selectedAnswer === null}
+                    >
+                      <span>Submit Answer</span>
+                      <ArrowRight size={18} />
+                    </button>
+                  ) : (
+                    <div className="next-action-group">
+                      {!isLastQuestion ? (
+                        <button className="btn btn-primary next-btn" onClick={handleNext}>
+                          <span>Next Question</span>
+                          <ArrowRight size={18} />
+                        </button>
+                      ) : (
+                        <button className="btn btn-primary complete-btn" onClick={handleFinishQuiz}>
+                          <Award size={18} />
+                          <span>Finish & View Scorecard</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Explanation Card */}

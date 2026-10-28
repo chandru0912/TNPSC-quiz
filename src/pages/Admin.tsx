@@ -700,6 +700,12 @@ const Admin = () => {
     const cleanUser = usernameInput.trim().toLowerCase()
     const cleanPass = passwordInput.trim()
 
+    if (!cleanUser || !cleanPass) {
+      setLoginError('Username and password are required.')
+      setIsLoggingIn(false)
+      return
+    }
+
     try {
       let res: Response | null = null
       let data: any = {}
@@ -708,11 +714,11 @@ const Admin = () => {
         res = await apiFetch('/api/admin/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: usernameInput, password: passwordInput }),
+          body: JSON.stringify({ username: cleanUser, password: cleanPass }),
         })
         data = await res.json().catch(() => ({}))
       } catch (networkErr) {
-        console.warn('Backend network request failed, checking client verification:', networkErr)
+        console.warn('Backend network request failed:', networkErr)
       }
 
       if (res && res.ok && data.token) {
@@ -724,41 +730,26 @@ const Admin = () => {
         setToken(data.token)
         setUsernameInput('')
         setPasswordInput('')
+        showToast('success', `Signed in as ${data.user?.name || cleanUser}`)
         return
       }
 
-      // Check if this is a static hosting environment (e.g. Vercel returning 405 Method Not Allowed or 404)
-      const isStaticHost = !res || res.status === 405 || res.status === 404 || res.status === 502 || res.status === 503
-
-      if (isStaticHost) {
-        const defaultAccounts = [
-          { username: 'admin', password: 'tnpscadmin2026', name: 'Super Admin', role: 'super_admin' },
-          { username: 'content_admin', password: 'tnpsccontent2026', name: 'Content Administrator', role: 'admin' },
-          { username: 'reviewer', password: 'tnpscreview2026', name: 'Syllabus Reviewer', role: 'reviewer' },
-        ]
-
-        const matched = defaultAccounts.find(
-          (acc) => acc.username.toLowerCase() === cleanUser && acc.password === cleanPass
-        )
-
-        if (matched) {
-          const clientToken = `vercel_session_${btoa(JSON.stringify({ u: matched.username, r: matched.role, t: Date.now() }))}`
-          localStorage.setItem('tnpsc_admin_token', clientToken)
-          localStorage.setItem('tnpsc_admin_user', JSON.stringify(matched))
-          setAdminUser(matched)
-          setToken(clientToken)
-          setUsernameInput('')
-          setPasswordInput('')
-          showToast('success', `Signed in as ${matched.name} (Vercel Standalone Mode)`)
-          return
-        } else {
-          setLoginError('Invalid admin username or password')
-          return
-        }
+      if (!res) {
+        setLoginError('Authentication server is unreachable. Please verify network or backend server connection.')
+        return
       }
 
-      console.error('Admin login failed:', { status: res?.status, message: data.message })
-      setLoginError(data.message || `Login failed (${res?.status})`)
+      if (res.status === 401) {
+        setLoginError(data.message || 'Invalid admin username or password.')
+        return
+      }
+
+      if (res.status === 503 || res.status === 500) {
+        setLoginError(data.message || 'Database connection error. Please verify the PostgreSQL service health.')
+        return
+      }
+
+      setLoginError(data.message || `Login failed (Status ${res.status}). Please try again.`)
     } catch (err) {
       console.error('Admin login error:', err)
       setLoginError('Failed to connect to authentication server. Please check your network.')

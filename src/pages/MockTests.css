@@ -329,3 +329,23 @@
     padding: 0.6rem 1rem;
   }
 }
+
+@media (max-width: 360px) {
+  .mocktests {
+    padding: 0.75rem 0.5rem 2.5rem;
+  }
+
+  .mocktests-title {
+    font-size: 1.35rem;
+  }
+
+  .mocktest-card {
+    padding: 1rem 0.75rem;
+  }
+
+  .mocktest-meta {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+}
+

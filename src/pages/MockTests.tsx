@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { GraduationCap, Clock, FileText, Users, Play, Star } from 'lucide-react'
 import './MockTests.css'
@@ -17,6 +18,7 @@ interface MockTestItem {
 }
 
 const MockTests = () => {
+  const navigate = useNavigate()
   const [selectedCategory, setSelectedCategory] = useState<'group1' | 'group2_2a' | 'group4'>('group1')
 
   const categories = [
@@ -233,8 +235,15 @@ const MockTests = () => {
                 </div>
 
                 <button
+                  type="button"
                   className="mocktest-btn"
-                  onClick={() => alert(`Starting test: ${test.title}`)}
+                  onClick={() =>
+                    navigate(
+                      `/practice?group=${
+                        test.category === 'group4_vao' ? 'group4' : test.category
+                      }&title=${encodeURIComponent(test.title)}`
+                    )
+                  }
                 >
                   <Play size={18} />
                   <span>Start Test</span>

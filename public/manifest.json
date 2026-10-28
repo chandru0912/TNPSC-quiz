@@ -1,0 +1,27 @@
+{
+  "name": "TNPSC Study Hub",
+  "short_name": "TNPSC Hub",
+  "description": "Comprehensive Tamil Nadu Public Service Commission exam preparation with mock tests, MCQs, and syllabus-aligned study materials.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060913",
+  "theme_color": "#060913",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "48x48 72x72 96x96 128x128 192x192 256x256 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["education", "books", "productivity"],
+  "lang": "en"
+}
