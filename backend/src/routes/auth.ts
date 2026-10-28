@@ -169,7 +169,11 @@ router.post('/login', async (req: Request, res: Response) => {
             role: user.role,
           },
         });
+      } else {
+        console.warn('Admin login failed: password mismatch for existing DB user');
       }
+    } else {
+      console.warn('Admin login failed: user not found in DB and not in env');
     }
   } catch (err: any) {
     console.error('Error querying admin_users table:', err.message);

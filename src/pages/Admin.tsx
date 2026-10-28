@@ -612,7 +612,8 @@ const Admin = () => {
         setUsernameInput('')
         setPasswordInput('')
       } else {
-        setLoginError(data.message || 'Invalid username or password')
+        console.error('Admin login failed:', { status: res.status, statusText: res.statusText, message: data.message })
+        setLoginError(data.message || `Login failed (${res.status})`)
       }
     } catch (err) {
       console.error('Admin login error:', err)
