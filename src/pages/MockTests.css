@@ -57,26 +57,48 @@
 .mocktests-tab {
   padding: 0.6rem 1.35rem;
   background: transparent;
-  border: none;
-  color: var(--text-secondary);
+  border: 1px solid transparent;
+  color: #cbd5e1;
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 600;
   border-radius: 9999px;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
 
 .mocktests-tab:hover {
-  color: var(--gold-primary);
-  background: rgba(255, 215, 0, 0.1);
+  color: #ffffff;
+  background: rgba(168, 85, 247, 0.15);
+  border-color: rgba(168, 85, 247, 0.35);
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.2);
 }
 
 .mocktests-tab.active {
-  color: #060913;
-  background: var(--gradient-primary);
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.85) 0%, rgba(79, 70, 229, 0.9) 100%);
+  border: 1px solid rgba(216, 180, 254, 0.6);
   font-weight: 700;
-  box-shadow: 0 0 18px rgba(255, 215, 0, 0.45);
+  box-shadow: 0 4px 18px rgba(124, 58, 237, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.mocktests-tab.active::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 10%;
+  right: 10%;
+  height: 45%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, transparent 100%);
+  border-radius: 9999px 9999px 60% 60%;
+  pointer-events: none;
+}
+
+.mocktests-tab:active {
+  transform: translateY(1px) scale(0.98);
 }
 
 /* Sub-Filters */
@@ -99,30 +121,38 @@
 }
 
 .mocktests-sub-btn {
-  padding: 0.4rem 0.95rem;
+  padding: 0.45rem 1rem;
   border-radius: 9999px;
-  background: rgba(20, 28, 52, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  color: var(--text-secondary);
+  background: rgba(22, 30, 56, 0.55);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  color: #cbd5e1;
   font-size: 0.8rem;
   font-weight: 500;
   cursor: pointer;
-  transition: var(--transition);
-  backdrop-filter: blur(10px);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .mocktests-sub-btn:hover {
-  border-color: rgba(255, 215, 0, 0.35);
-  color: var(--gold-primary);
-  background: rgba(255, 215, 0, 0.08);
+  border-color: rgba(168, 85, 247, 0.45);
+  color: #ffffff;
+  background: rgba(124, 58, 237, 0.2);
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
 }
 
 .mocktests-sub-btn.active {
-  background: rgba(255, 215, 0, 0.16);
-  border-color: var(--gold-primary);
-  color: var(--gold-primary);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.35) 0%, rgba(139, 92, 246, 0.25) 100%);
+  border-color: rgba(192, 132, 252, 0.6);
+  color: #ffffff;
   font-weight: 600;
-  box-shadow: 0 0 12px rgba(255, 215, 0, 0.2);
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.mocktests-sub-btn:active {
+  transform: translateY(1px) scale(0.97);
 }
 
 .mocktests-grid {
@@ -258,22 +288,43 @@
   justify-content: center;
   gap: 0.55rem;
   padding: 0.75rem 1.75rem;
-  background: var(--gradient-primary);
-  border: none;
-  color: #060913;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #4f46e5 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(216, 180, 254, 0.5);
+  color: #ffffff;
   border-radius: 9999px;
   font-weight: 700;
   font-size: 0.925rem;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   align-self: flex-start;
-  box-shadow: 0 4px 18px rgba(255, 215, 0, 0.35);
+  box-shadow: 0 4px 18px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.mocktest-btn::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 10%;
+  right: 10%;
+  height: 45%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, transparent 100%);
+  border-radius: 9999px 9999px 60% 60%;
+  pointer-events: none;
 }
 
 .mocktest-btn:hover {
-  box-shadow: 0 8px 28px rgba(255, 215, 0, 0.55);
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #6366f1 100%);
+  box-shadow: 0 8px 28px rgba(124, 58, 237, 0.55), 0 0 20px rgba(168, 85, 247, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.55);
   transform: translateY(-2px);
-  color: #060913;
+  color: #ffffff;
+}
+
+.mocktest-btn:active {
+  transform: translateY(1px) scale(0.98);
 }
 
 @media (max-width: 640px) {

@@ -1,0 +1,219 @@
+/* =========================================================
+   Interactive 3D Spatial Effect for Logos & Brand SVG Icons
+   Spatial Perspective, Volumetric Extrusion, Multi-Layer Shadows & Dynamic Glare
+   ========================================================= */
+
+/* 1. Perspective Foundations on Parent Containers */
+.nav-logo,
+.footer-brand,
+.sidebar-brand,
+.auth-header,
+.admin-auth-icon-wrap,
+.mobile-auth-header-left,
+.spatial-logo-container,
+[data-spatial-logo-container] {
+  perspective: 1000px;
+  -webkit-perspective: 1000px;
+  transform-style: preserve-3d;
+  isolation: isolate;
+}
+
+/* 2. Target 3D Medallions & Logo Badges */
+.nav-logo-icon-3d,
+.footer-logo-icon-3d,
+.sidebar-brand-mark,
+.auth-icon,
+.admin-auth-icon,
+.mobile-auth-icon-box,
+.spatial-logo-target,
+[data-spatial-logo] {
+  transform-style: preserve-3d;
+  will-change: transform, box-shadow;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+
+  /* Multi-layered Volumetric Shadow Stack:
+     - Micro-contact shadow
+     - Mid-elevation shadow
+     - Soft deep floor shadow
+     - Ambient Luminous Gold & Violet Halos
+     - Specular Top Rim Inset Highlight
+     - Dark Bottom Crevice Inset Shade */
+  box-shadow:
+    0 2px 4px -1px rgba(0, 0, 0, 0.45),
+    0 8px 18px -2px rgba(0, 0, 0, 0.55),
+    0 18px 36px -4px rgba(0, 0, 0, 0.65),
+    0 0 24px rgba(255, 215, 0, 0.32),
+    0 0 12px rgba(124, 58, 237, 0.25),
+    inset 0 1.5px 2px rgba(255, 255, 255, 0.85),
+    inset 0 -2.5px 3.5px rgba(0, 0, 0, 0.5);
+
+  transition: 
+    box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.3s ease,
+    filter 0.3s ease;
+}
+
+/* Hover/Tilt intensified 3D elevation */
+.nav-logo:hover .nav-logo-icon-3d,
+.footer-brand:hover .footer-logo-icon-3d,
+.sidebar-brand:hover .sidebar-brand-mark,
+.auth-icon:hover,
+.admin-auth-icon:hover,
+.mobile-auth-icon-box:hover,
+.spatial-logo-target:hover,
+[data-spatial-logo]:hover {
+  box-shadow:
+    0 4px 8px -1px rgba(0, 0, 0, 0.5),
+    0 14px 28px -2px rgba(0, 0, 0, 0.6),
+    0 28px 56px -6px rgba(0, 0, 0, 0.75),
+    0 0 36px rgba(255, 215, 0, 0.48),
+    0 0 20px rgba(147, 51, 234, 0.38),
+    inset 0 2px 3px rgba(255, 255, 255, 0.95),
+    inset 0 -3px 4px rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.65);
+}
+
+/* 3. Volumetric 3D Extrusion on Brand SVG Icons */
+.nav-logo-icon,
+.footer-logo-icon,
+.sidebar-brand-mark svg,
+.auth-icon svg,
+.admin-auth-icon svg,
+.mobile-auth-icon-box svg,
+[data-spatial-logo] svg,
+.spatial-logo-svg {
+  position: relative;
+  z-index: 2;
+  transform: translateZ(24px);
+  transform-style: preserve-3d;
+  color: var(--gold-primary, #ffd700);
+
+  /* SVG Volumetric Filter + Multi-Layered Drop Shadow Fallback */
+  filter: 
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.7))
+    drop-shadow(0 2px 3px rgba(0, 0, 0, 0.75))
+    drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 0 14px rgba(255, 215, 0, 0.45));
+
+  transition: 
+    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.28s ease;
+}
+
+/* Enhance SVG paths with smooth volumetric bevel caps */
+.nav-logo-icon path,
+.footer-logo-icon path,
+.sidebar-brand-mark svg path,
+.auth-icon svg path,
+.admin-auth-icon svg path,
+.mobile-auth-icon-box svg path,
+[data-spatial-logo] svg path,
+.spatial-logo-svg path {
+  stroke-width: 2.15px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* SVG Elevation on Hover / Tilt */
+.nav-logo:hover .nav-logo-icon,
+.footer-brand:hover .footer-logo-icon,
+.sidebar-brand:hover .sidebar-brand-mark svg,
+.auth-icon:hover svg,
+.admin-auth-icon:hover svg,
+.mobile-auth-icon-box:hover svg,
+[data-spatial-logo]:hover svg {
+  transform: translateZ(32px) scale(1.08);
+  filter: 
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.95))
+    drop-shadow(0 3px 6px rgba(0, 0, 0, 0.85))
+    drop-shadow(0 10px 20px rgba(0, 0, 0, 0.65))
+    drop-shadow(0 0 22px rgba(255, 215, 0, 0.7));
+}
+
+/* 4. Dynamic Cursor-Tracking Glare & Reflection Sheen */
+.spatial-glare {
+  position: absolute;
+  inset: -20%;
+  width: 140%;
+  height: 140%;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 5;
+  transform: translateZ(18px);
+
+  /* Dynamic radial glare tracking cursor coordinates */
+  background: radial-gradient(
+    circle 90px at var(--glare-x, 50%) var(--glare-y, 50%),
+    rgba(255, 255, 255, 0.85) 0%,
+    rgba(255, 235, 120, 0.4) 30%,
+    rgba(255, 255, 255, 0.08) 60%,
+    transparent 80%
+  );
+  mix-blend-mode: overlay;
+  opacity: var(--glare-opacity, 0);
+  transition: opacity 0.22s ease-out;
+}
+
+/* Secondary High-Gloss Specular Sheen */
+.spatial-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4;
+  transform: translateZ(12px);
+  background: linear-gradient(
+    125deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.28) 45%,
+    rgba(255, 235, 120, 0.15) 55%,
+    transparent 75%
+  );
+  opacity: 0.45;
+  transition: opacity 0.3s ease;
+}
+
+/* 5. Parallax Depth for Brand Typography */
+.nav-logo-text-group,
+.footer-brand-text,
+.sidebar-brand-text {
+  transform: translateZ(16px);
+  transform-style: preserve-3d;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-logo:hover .nav-logo-text-group,
+.footer-brand:hover .footer-brand-text,
+.sidebar-brand:hover .sidebar-brand-text {
+  transform: translateZ(24px);
+}
+
+/* 6. Hardware-Accelerated Rendering Hints */
+.nav-logo,
+.footer-brand,
+.sidebar-brand,
+.auth-icon,
+.admin-auth-icon {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* 7. Respect Accessibility (Reduced Motion) */
+@media (prefers-reduced-motion: reduce) {
+  .nav-logo,
+  .footer-brand,
+  .sidebar-brand,
+  .auth-icon,
+  .admin-auth-icon,
+  .mobile-auth-icon-box,
+  .spatial-logo-target,
+  [data-spatial-logo] {
+    transform: none !important;
+    transition: none !important;
+  }
+  .spatial-glare {
+    display: none !important;
+  }
+}

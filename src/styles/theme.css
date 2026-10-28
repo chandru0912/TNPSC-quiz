@@ -37,18 +37,25 @@
   --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
   --gradient-glass-card: linear-gradient(160deg, rgba(24, 34, 62, 0.72) 0%, rgba(12, 18, 34, 0.82) 100%);
 
-  /* Glassmorphism System Tokens */
-  --glass-bg: rgba(16, 24, 46, 0.65);
-  --glass-bg-elevated: rgba(22, 33, 62, 0.78);
-  --glass-bg-subtle: rgba(12, 18, 34, 0.5);
-  --glass-bg-input: rgba(9, 14, 28, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.1);
+  /* Glassmorphism System Tokens - Liquid Glass Spatial UI */
+  --glass-bg: rgba(18, 25, 42, 0.42);
+  --glass-bg-elevated: rgba(26, 35, 58, 0.55);
+  --glass-bg-subtle: rgba(14, 19, 34, 0.35);
+  --glass-bg-input: rgba(10, 15, 28, 0.58);
+  --glass-border: rgba(255, 255, 255, 0.13);
   --glass-border-gold: rgba(255, 215, 0, 0.28);
-  --glass-border-hover: rgba(255, 215, 0, 0.5);
-  --glass-blur: blur(18px);
-  --glass-blur-lg: blur(28px);
-  --glass-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
-  --glass-shadow-hover: 0 24px 50px -10px rgba(0, 0, 0, 0.7), 0 0 25px rgba(255, 215, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  --glass-border-hover: rgba(255, 255, 255, 0.26);
+  --glass-blur: blur(20px) saturate(180%);
+  --glass-blur-lg: blur(32px) saturate(190%);
+  --glass-shadow: 0 20px 48px -10px rgba(0, 0, 0, 0.58), inset 0 1px 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  --glass-shadow-hover: 0 28px 60px -10px rgba(0, 0, 0, 0.7), 0 0 28px rgba(255, 215, 0, 0.28), inset 0 1px 1px 0 rgba(255, 255, 255, 0.32);
+
+  /* Luminous Gold & Yellow Tokens (Replaces Orange) */
+  --yellow-primary: #ffd700;
+  --yellow-bright: #ffeb3b;
+  --yellow-soft: #fff59d;
+  --yellow-gradient: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
+  --yellow-glow: rgba(255, 215, 0, 0.45);
 
   /* Shadows */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -62,11 +69,26 @@
   --border-radius-xl: 26px;
   --transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 
+  /* Layout Dimensions */
+  --navbar-height: 80px;
+
   /* Mobile Safe Areas */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+}
+
+@media (max-width: 640px) {
+  :root {
+    --navbar-height: 70px;
+  }
+}
+
+@media (max-width: 380px) {
+  :root {
+    --navbar-height: 64px;
+  }
 }
 
 *,
@@ -85,6 +107,7 @@ html {
   overflow-y: scroll;
   overflow-x: hidden;
   scrollbar-gutter: stable;
+  scroll-padding-top: var(--navbar-height, 80px);
 }
 
 body {
@@ -268,3 +291,329 @@ p, span, h1, h2, h3, h4, h5, h6, a, button, label {
   background: rgba(255, 215, 0, 0.35);
   color: var(--text-primary);
 }
+
+/* =========================================================
+   Universal Master Glassmorphic 3D Button Design System
+   ========================================================= */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 0.82rem 1.75rem;
+  border-radius: 9999px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: 1px solid transparent;
+  text-decoration: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.25s ease,
+              border-color 0.25s ease,
+              color 0.25s ease;
+  user-select: none;
+}
+
+.btn > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Polished Top Curved Glass Reflection */
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 8%;
+  right: 8%;
+  height: 48%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.08) 85%, transparent 100%);
+  border-radius: 9999px 9999px 50% 50%;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  opacity: 0.85;
+  z-index: 1;
+}
+
+/* Diagonal Specular Glint Sheen */
+.btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.14) 48%, rgba(255, 255, 255, 0.35) 50%, rgba(255, 255, 255, 0.14) 52%, transparent 80%);
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.45s ease;
+  z-index: 1;
+}
+
+.btn:hover::after {
+  opacity: 0.9;
+  transform: translateX(8%);
+}
+
+.btn:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4),
+              inset 0 2px 4px rgba(0, 0, 0, 0.45),
+              inset 0 1px 1px rgba(255, 255, 255, 0.35) !important;
+  transition-duration: 0.1s;
+}
+
+.btn:focus-visible {
+  outline: 2px solid rgba(196, 181, 253, 0.85);
+  outline-offset: 3px;
+}
+
+.btn:disabled,
+.btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+  box-shadow: none !important;
+  filter: grayscale(0.5);
+}
+
+/* 1. Primary Glass Button — Royal Amethyst, Violet & Blue */
+.btn-primary {
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.38) 0%, rgba(216, 180, 254, 0.2) 36%, transparent 70%),
+    linear-gradient(135deg, rgba(147, 51, 234, 0.58) 0%, rgba(109, 40, 217, 0.48) 42%, rgba(59, 130, 246, 0.52) 100%);
+  border: 1px solid rgba(196, 181, 253, 0.55);
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.45);
+  box-shadow: 
+    0 12px 30px -4px rgba(124, 58, 237, 0.48),
+    0 4px 14px rgba(59, 130, 246, 0.26),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -2px 4px 0 rgba(76, 29, 149, 0.35);
+}
+
+.btn-primary svg {
+  color: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.btn-primary:hover {
+  transform: translateY(-2.5px);
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.48) 0%, rgba(216, 180, 254, 0.28) 36%, transparent 70%),
+    linear-gradient(135deg, rgba(168, 85, 247, 0.68) 0%, rgba(124, 58, 237, 0.58) 42%, rgba(59, 130, 246, 0.6) 100%);
+  border-color: rgba(233, 213, 255, 0.85);
+  box-shadow: 
+    0 18px 42px -4px rgba(139, 92, 246, 0.65),
+    0 0 28px rgba(167, 139, 250, 0.45),
+    0 4px 14px rgba(59, 130, 246, 0.35),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -2px 4px 0 rgba(76, 29, 149, 0.4);
+  color: #ffffff;
+}
+
+/* 2. Secondary Glass Button — Frosted Lavender & Icy Sapphire */
+.btn-secondary {
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.35) 0%, rgba(224, 231, 255, 0.18) 38%, transparent 75%),
+    linear-gradient(135deg, rgba(168, 85, 247, 0.24) 0%, rgba(129, 140, 248, 0.22) 50%, rgba(96, 165, 250, 0.24) 100%);
+  border: 1px solid rgba(216, 180, 254, 0.42);
+  color: #f8fafc;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.35);
+  box-shadow: 
+    0 10px 28px -4px rgba(99, 102, 241, 0.36),
+    0 4px 14px rgba(0, 0, 0, 0.24),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.65),
+    inset 0 -2px 4px 0 rgba(0, 0, 0, 0.25);
+}
+
+.btn-secondary svg {
+  color: #e0e7ff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.btn-secondary:hover {
+  transform: translateY(-2.5px);
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.45) 0%, rgba(224, 231, 255, 0.25) 38%, transparent 75%),
+    linear-gradient(135deg, rgba(192, 132, 252, 0.34) 0%, rgba(147, 197, 253, 0.3) 50%, rgba(129, 140, 248, 0.34) 100%);
+  border-color: rgba(233, 213, 255, 0.75);
+  box-shadow: 
+    0 16px 36px -4px rgba(99, 102, 241, 0.5),
+    0 0 24px rgba(192, 132, 252, 0.35),
+    0 4px 14px rgba(0, 0, 0, 0.2),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -2px 4px 0 rgba(0, 0, 0, 0.2);
+  color: #ffffff;
+}
+
+/* 3. Success Glass Button — Emerald Glass */
+.btn-success {
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.35) 0%, transparent 60%),
+    linear-gradient(135deg, rgba(16, 185, 129, 0.58) 0%, rgba(5, 150, 105, 0.5) 100%);
+  border: 1px solid rgba(110, 231, 183, 0.55);
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(6, 78, 59, 0.45);
+  box-shadow: 
+    0 10px 28px -4px rgba(16, 185, 129, 0.45),
+    0 4px 12px rgba(5, 150, 105, 0.25),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -2px 4px 0 rgba(6, 78, 59, 0.35);
+}
+
+.btn-success:hover {
+  transform: translateY(-2px);
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.45) 0%, transparent 60%),
+    linear-gradient(135deg, rgba(16, 185, 129, 0.7) 0%, rgba(5, 150, 105, 0.6) 100%);
+  border-color: rgba(167, 243, 208, 0.85);
+  box-shadow: 
+    0 16px 36px -4px rgba(16, 185, 129, 0.6),
+    0 0 24px rgba(52, 211, 153, 0.4),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.9);
+  color: #ffffff;
+}
+
+/* 4. Danger Glass Button — Crimson / Ruby Glass */
+.btn-danger {
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.35) 0%, transparent 60%),
+    linear-gradient(135deg, rgba(239, 68, 68, 0.58) 0%, rgba(185, 28, 28, 0.5) 100%);
+  border: 1px solid rgba(252, 165, 165, 0.55);
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(127, 29, 29, 0.45);
+  box-shadow: 
+    0 10px 28px -4px rgba(239, 68, 68, 0.45),
+    0 4px 12px rgba(185, 28, 28, 0.25),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -2px 4px 0 rgba(127, 29, 29, 0.35);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.45) 0%, transparent 60%),
+    linear-gradient(135deg, rgba(239, 68, 68, 0.7) 0%, rgba(185, 28, 28, 0.6) 100%);
+  border-color: rgba(254, 202, 202, 0.85);
+  box-shadow: 
+    0 16px 36px -4px rgba(239, 68, 68, 0.6),
+    0 0 24px rgba(248, 113, 113, 0.4),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.9);
+  color: #ffffff;
+}
+
+/* 5. Size Modifiers */
+.btn-large {
+  padding: 1rem 2.25rem;
+  font-size: 1.05rem;
+}
+
+.btn-sm {
+  padding: 0.45rem 1rem;
+  font-size: 0.8125rem;
+  gap: 0.45rem;
+}
+
+/* 6. Universal 3D Glassmorphic Back Button */
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 1.35rem;
+  background: 
+    radial-gradient(120% 100% at 50% -10%, rgba(255, 255, 255, 0.28) 0%, rgba(196, 181, 253, 0.12) 40%, transparent 80%),
+    linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(30, 41, 75, 0.65) 100%);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  color: #e0e7ff;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  width: fit-content;
+  text-decoration: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(99, 102, 241, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.25s ease,
+              border-color 0.25s ease,
+              color 0.25s ease;
+}
+
+.back-btn > * {
+  position: relative;
+  z-index: 2;
+}
+
+.back-btn::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 10%;
+  right: 10%;
+  height: 48%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.05) 85%, transparent 100%);
+  border-radius: 9999px 9999px 50% 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.back-btn:hover {
+  background: 
+    radial-gradient(120% 100% at 50% -10%, rgba(255, 255, 255, 0.4) 0%, rgba(216, 180, 254, 0.2) 40%, transparent 80%),
+    linear-gradient(135deg, rgba(124, 58, 237, 0.38) 0%, rgba(59, 130, 246, 0.3) 100%);
+  border-color: rgba(216, 180, 254, 0.75);
+  color: #ffffff;
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.45),
+    0 0 20px rgba(168, 85, 247, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.85);
+  transform: translateX(-3px);
+}
+
+.back-btn:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* 7. Ghost & Outline 3D Glass Buttons */
+.btn-ghost,
+.btn-outline {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #e2e8f0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.btn-ghost:hover,
+.btn-outline:hover {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: rgba(192, 132, 252, 0.5);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), 0 0 16px rgba(168, 85, 247, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-2px);
+}
+
+.btn-ghost:active,
+.btn-outline:active {
+  transform: translateY(1px) scale(0.98);
+}
+

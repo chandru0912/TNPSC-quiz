@@ -78,9 +78,13 @@ const Navbar = () => {
     <nav className="navbar glass">
       <div className="nav-container">
         <Link to="/" className="nav-logo" aria-label="TNPSC Study Hub home" onClick={closeMenu}>
-          <GraduationCap className="nav-logo-icon" size={32} />
-          <span className="nav-logo-text">TNPSC Study Hub</span>
-          <span className="nav-logo-short">TNPSC</span>
+          <span className="nav-logo-icon-3d">
+            <GraduationCap className="nav-logo-icon" size={24} />
+          </span>
+          <span className="nav-logo-text-group">
+            <span className="nav-logo-text">TNPSC Study Hub</span>
+            <span className="nav-logo-short">TNPSC</span>
+          </span>
         </Link>
 
         <ul id="primary-navigation" className={`nav-menu ${isOpen ? 'active' : ''}`}>

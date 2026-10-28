@@ -1,6 +1,9 @@
+import { useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { GraduationCap } from 'lucide-react'
 import ScrollToTop from './components/ScrollToTop'
 import Navbar from './components/Navbar'
+import { initSpatialTilt } from './utils/spatialTilt'
 import Home from './pages/Home'
 import Dashboard from './pages/Dashboard'
 import StudyMaterials from './pages/StudyMaterials'
@@ -27,12 +30,67 @@ import Admin from './pages/Admin'
 import './App.css'
 
 function App() {
+  // Initialize interactive 3D spatial tilt & dynamic glare tracking across all website logos
+  useEffect(() => {
+    const destroyTilt = initSpatialTilt()
+    return () => {
+      destroyTilt()
+    }
+  }, [])
+
   return (
     <Router>
       <ScrollToTop />
       <div className="app">
+        {/* Global SVG Definitions for 3D Volumetric Extrusion, Bevel & Gold Gradient */}
+        <svg
+          className="spatial-svg-defs"
+          aria-hidden="true"
+          style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }}
+        >
+          <defs>
+            {/* Luminous Gold Linear Gradient for SVG strokes */}
+            <linearGradient id="spatial-gold-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#ffffff" />
+              <stop offset="25%" stopColor="#fff59d" />
+              <stop offset="55%" stopColor="#ffd700" />
+              <stop offset="85%" stopColor="#f59e0b" />
+              <stop offset="100%" stopColor="#b45309" />
+            </linearGradient>
+
+            {/* 3D Extruded Bevel & Volumetric Directional Lighting */}
+            <filter id="spatial-extruded-3d" x="-30%" y="-30%" width="160%" height="160%">
+              <feDropShadow dx="0" dy="1" stdDeviation="0.6" floodColor="#000000" floodOpacity="0.85" result="drop1" />
+              <feDropShadow dx="0" dy="3" stdDeviation="2" floodColor="#000000" floodOpacity="0.6" result="drop2" />
+              <feDropShadow dx="0" dy="6" stdDeviation="4" floodColor="#000000" floodOpacity="0.45" result="drop3" />
+              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#ffd700" floodOpacity="0.35" result="glow" />
+              <feGaussianBlur in="SourceAlpha" stdDeviation="0.9" result="blur" />
+              <feSpecularLighting
+                in="blur"
+                surfaceScale="2.8"
+                specularConstant="1.2"
+                specularExponent="20"
+                lightingColor="#ffffff"
+                result="specular"
+              >
+                <fePointLight x="-25" y="-45" z="70" />
+              </feSpecularLighting>
+              <feComposite in="specular" in2="SourceAlpha" operator="in" result="specularCut" />
+              <feMerge>
+                <feMergeNode in="glow" />
+                <feMergeNode in="drop3" />
+                <feMergeNode in="drop2" />
+                <feMergeNode in="drop1" />
+                <feMergeNode in="SourceGraphic" />
+                <feMergeNode in="specularCut" />
+              </feMerge>
+            </filter>
+          </defs>
+        </svg>
+
         {/* Ambient Glassmorphic Background Orbs & Mesh */}
         <div className="ambient-glass-backdrop" aria-hidden="true">
+          <div className="ambient-orb orb-warm-lamp" />
           <div className="ambient-orb orb-gold" />
           <div className="ambient-orb orb-indigo" />
           <div className="ambient-orb orb-cyan" />
@@ -75,8 +133,13 @@ function App() {
         <footer className="footer glass">
           <div className="footer-content">
             <div className="footer-brand">
-              <span className="footer-logo">TNPSC Study Hub</span>
-              <span className="footer-tag">Glassmorphic Portal</span>
+              <span className="footer-logo-icon-3d">
+                <GraduationCap className="footer-logo-icon" size={22} />
+              </span>
+              <div className="footer-brand-text">
+                <span className="footer-logo">TNPSC Study Hub</span>
+                <span className="footer-tag">Glassmorphic Portal</span>
+              </div>
             </div>
             <p className="footer-copy">© 2026 TNPSC Study Hub. Crafted with an ultra-premium Glassmorphism Dashboard UI/UX.</p>
             <p className="footer-note">⚡ Real-time analytics, mock tests, school syllabus notes & lesson-wise practice modules</p>

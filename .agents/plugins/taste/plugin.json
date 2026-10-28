@@ -1,0 +1,5 @@
+{
+    "description":  "Semantic Design System Plugin (TASTE). Enforces premium, anti-generic UI standards and generates DESIGN.md specifications.",
+    "name":  "taste",
+    "version":  "1.0.0"
+}

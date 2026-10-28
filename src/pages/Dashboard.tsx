@@ -24,6 +24,8 @@ import {
   Sparkles,
   Timer,
   BarChart3,
+  Lock,
+  Zap,
 } from 'lucide-react'
 import './Dashboard.css'
 import { useScrollLock } from '../hooks/useScrollLock'
@@ -221,6 +223,23 @@ const Dashboard = () => {
       </AnimatePresence>
 
       <div className="dashboard-content">
+        {/* Spatial Window Chrome (VisionOS Liquid Glass Bar) */}
+        <div className="spatial-window-bar">
+          <div className="spatial-window-dots">
+            <span className="win-dot win-dot-red" />
+            <span className="win-dot win-dot-yellow" />
+            <span className="win-dot win-dot-green" />
+          </div>
+          <div className="spatial-window-url">
+            <Lock size={12} className="url-lock-icon" />
+            <span className="url-text">tnpsc.aspirant.hub/dashboard-overview</span>
+          </div>
+          <div className="spatial-window-status">
+            <span className="live-status-dot" />
+            <span className="live-status-text">Study Space Active</span>
+          </div>
+        </div>
+
         {/* Header */}
         <motion.header
           className="dash-header"
@@ -238,12 +257,12 @@ const Dashboard = () => {
               <Menu size={20} />
             </button>
             <div>
-              <p className="dash-eyebrow">Dashboard overview</p>
+              <p className="dash-eyebrow">Study Dashboard</p>
               <h1 className="dash-title">
-                Welcome back, <span className="gradient-text">{userName}</span>
+                My Dashboard
               </h1>
               <p className="dash-subtitle">
-                Your TNPSC preparation, tracked in one place.
+                Welcome back, <span className="dash-user-highlight">{userName}</span> • Your TNPSC preparation, tracked live.
               </p>
             </div>
           </div>
@@ -256,6 +275,44 @@ const Dashboard = () => {
           </div>
         </motion.header>
 
+        {/* Quick Glass Metrics Strip (Matching KezaBank Reference Header Pills) */}
+        <motion.div
+          className="dash-summary-strip glass"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.05 }}
+        >
+          <div className="dash-summary-item">
+            <div className="dash-summary-icon">
+              <Clock size={16} />
+            </div>
+            <div className="dash-summary-info">
+              <span className="dash-summary-label">Total Study Time</span>
+              <span className="dash-summary-val">34.5 <span className="dash-summary-unit">hrs</span></span>
+            </div>
+          </div>
+          <div className="dash-summary-divider" />
+          <div className="dash-summary-item">
+            <div className="dash-summary-icon">
+              <Zap size={16} />
+            </div>
+            <div className="dash-summary-info">
+              <span className="dash-summary-label">Questions Solved</span>
+              <span className="dash-summary-val">892 <span className="dash-summary-unit">/ 2,500</span></span>
+            </div>
+          </div>
+          <div className="dash-summary-divider" />
+          <div className="dash-summary-item">
+            <div className="dash-summary-icon">
+              <Target size={16} />
+            </div>
+            <div className="dash-summary-info">
+              <span className="dash-summary-label">Overall Accuracy</span>
+              <span className="dash-summary-val">78%</span>
+            </div>
+          </div>
+        </motion.div>
+
         {/* Overview: progress ring + stats */}
         <div className="dash-overview">
           <motion.div
@@ -266,6 +323,13 @@ const Dashboard = () => {
           >
             <div className="overview-ring">
               <svg viewBox="0 0 130 130" className="ring-svg">
+                <defs>
+                  <linearGradient id="ringSunsetGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#fff59d" />
+                    <stop offset="50%" stopColor="#ffd700" />
+                    <stop offset="100%" stopColor="#f59e0b" />
+                  </linearGradient>
+                </defs>
                 <circle
                   className="ring-track"
                   cx="65"
@@ -282,6 +346,7 @@ const Dashboard = () => {
                   fill="none"
                   strokeWidth="9"
                   strokeLinecap="round"
+                  stroke="url(#ringSunsetGradient)"
                   strokeDasharray={ringCircumference}
                   initial={{ strokeDashoffset: ringCircumference }}
                   animate={{

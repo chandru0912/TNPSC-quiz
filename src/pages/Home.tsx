@@ -1,5 +1,6 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { 
   BookOpen, 
   FileText, 
@@ -7,14 +8,85 @@ import {
   Trophy, 
   Clock, 
   Users, 
-  ArrowRight,
-  GraduationCap,
-  Target,
-  Zap
+  ArrowRight, 
+  GraduationCap, 
+  Target, 
+  Zap,
+  ChevronLeft,
+  ChevronRight,
+  Landmark,
+  Award,
+  Sparkles
 } from 'lucide-react'
 import './Home.css'
 
 const Home = () => {
+  const [currentSlide, setCurrentSlide] = useState(0)
+  const [isPaused, setIsPaused] = useState(false)
+
+  const heroSlides = [
+    {
+      id: 'overview',
+      tag: 'Curated Syllabus',
+      title: 'All TNPSC Categories',
+      description: 'Comprehensive study materials, notes & lesson-wise practice for all group examinations.',
+      icon: GraduationCap,
+      type: 'badges' as const,
+      badges: [
+        { label: 'TNPSC Group 1', to: '/materials?group=group1' },
+        { label: 'TNPSC Group 2 & 2A', to: '/materials?group=group2_2a' },
+        { label: 'TNPSC Group 4', to: '/materials?group=group4_vao' },
+      ],
+    },
+    {
+      id: 'group1',
+      tag: 'Degree Standard • Code 497',
+      title: 'TNPSC Group 1 Prelims',
+      description: 'Deputy Collector, DSP & District Officer ranks with 175 General Studies questions across 6 core units.',
+      icon: Landmark,
+      type: 'actions' as const,
+      actions: [
+        { label: 'Syllabus & Notes', to: '/materials/group1/general-studies', primary: true },
+        { label: 'Practice MCQs', to: '/practice?group=group1', primary: false },
+      ],
+    },
+    {
+      id: 'group2',
+      tag: 'Interview & Non-Interview',
+      title: 'TNPSC Group 2 & 2A',
+      description: 'Sub-Registrar & Municipal Commissioner services with General Studies, Tamil & English language coverage.',
+      icon: Trophy,
+      type: 'actions' as const,
+      actions: [
+        { label: 'Group 2 Subjects', to: '/materials?group=group2_2a', primary: true },
+        { label: 'Mock Test Simulator', to: '/mock-tests', primary: false },
+      ],
+    },
+    {
+      id: 'group4',
+      tag: 'SSLC Standard • 10th Std',
+      title: 'TNPSC Group 4 & VAO',
+      description: 'Village Administrative Officer & Junior Assistant vacancies mapped directly to Samacheer Kalvi textbooks.',
+      icon: Award,
+      type: 'actions' as const,
+      actions: [
+        { label: 'Group 4 Hub', to: '/materials?group=group4_vao', primary: true },
+        { label: 'School Materials', to: '/school-materials', primary: false },
+      ],
+    },
+  ]
+
+  useEffect(() => {
+    if (isPaused) return
+    const timer = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % heroSlides.length)
+    }, 4500)
+    return () => clearInterval(timer)
+  }, [isPaused, heroSlides.length])
+
+  const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % heroSlides.length)
+  const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length)
+
   const features = [
     {
       icon: BookOpen,
@@ -77,12 +149,12 @@ const Home = () => {
             </p>
             
             <div className="hero-actions">
-              <Link to="/practice" className="btn btn-primary">
+              <Link to="/practice" className="btn btn-primary hero-btn-practice">
                 <Target size={20} />
                 <span>Start Practice</span>
-                <ArrowRight size={20} />
+                <ArrowRight size={20} className="hero-btn-arrow" />
               </Link>
-              <Link to="/materials" className="btn btn-secondary">
+              <Link to="/materials" className="btn btn-secondary hero-btn-materials">
                 <BookOpen size={20} />
                 <span>Study Materials</span>
               </Link>
@@ -95,10 +167,105 @@ const Home = () => {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.8, delay: 0.2 }}
           >
-            <div className="hero-card glass animate-float">
-              <GraduationCap size={60} className="hero-card-icon" />
-              <h3>All TNPSC Categories</h3>
-              <p>TNPSC Group 1 • TNPSC Group 2 & 2A • TNPSC Group 4</p>
+            <div 
+              className="hero-card hero-slides-container glass"
+              onMouseEnter={() => setIsPaused(true)}
+              onMouseLeave={() => setIsPaused(false)}
+            >
+              {/* Carousel Header Controls */}
+              <div className="hero-carousel-header">
+                <div className="hero-slide-counter">
+                  <span className="hero-slide-counter-dot" />
+                  <span>0{currentSlide + 1} / 0{heroSlides.length}</span>
+                </div>
+                <div className="hero-carousel-controls">
+                  <button 
+                    type="button" 
+                    className="hero-carousel-nav-btn" 
+                    onClick={prevSlide}
+                    aria-label="Previous Slide"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <button 
+                    type="button" 
+                    className="hero-carousel-nav-btn" 
+                    onClick={nextSlide}
+                    aria-label="Next Slide"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Carousel Animated Slide Content */}
+              <div className="hero-slide-viewport">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentSlide}
+                    className="hero-slide-stage"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <div className="hero-card-icon-wrap">
+                      {(() => {
+                        const Icon = heroSlides[currentSlide].icon
+                        return <Icon size={38} className="hero-card-icon" />
+                      })()}
+                    </div>
+
+                    <span className="hero-slide-tag">
+                      <Sparkles size={12} />
+                      {heroSlides[currentSlide].tag}
+                    </span>
+
+                    <h3 className="hero-slide-title">{heroSlides[currentSlide].title}</h3>
+                    <p className="hero-slide-desc">{heroSlides[currentSlide].description}</p>
+
+                    {heroSlides[currentSlide].type === 'badges' && (
+                      <div className="hero-category-badges">
+                        {heroSlides[currentSlide].badges.map((badge, idx) => (
+                          <Link key={idx} to={badge.to} className="hero-category-badge">
+                            {badge.label}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+
+                    {heroSlides[currentSlide].type === 'actions' && (
+                      <div className="hero-slide-action-row">
+                        {heroSlides[currentSlide].actions.map((act, idx) => (
+                          <Link 
+                            key={idx} 
+                            to={act.to} 
+                            className={`hero-slide-action-btn ${act.primary ? 'primary' : 'secondary'}`}
+                          >
+                            <span>{act.label}</span>
+                            <ArrowRight size={14} />
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+
+              {/* Carousel Pagination Dots */}
+              <div className="hero-carousel-dots" role="tablist" aria-label="Slide Selection">
+                {heroSlides.map((slide, idx) => (
+                  <button
+                    key={slide.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={idx === currentSlide}
+                    className={`hero-slide-dot ${idx === currentSlide ? 'active' : ''}`}
+                    onClick={() => setCurrentSlide(idx)}
+                    aria-label={`Go to slide ${idx + 1}: ${slide.title}`}
+                  />
+                ))}
+              </div>
             </div>
           </motion.div>
         </div>
@@ -176,7 +343,7 @@ const Home = () => {
       <section className="cta">
         <div className="cta-container">
           <motion.div 
-            className="cta-card glass animate-glow"
+            className="cta-card glass"
             initial={{ opacity: 0, scale: 0.95 }}
             whileInView={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6 }}
