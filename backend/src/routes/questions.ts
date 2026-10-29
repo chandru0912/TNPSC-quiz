@@ -710,6 +710,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
     let skippedDuplicates = 0;
     const validationErrors: { index: number; reason: string }[] = [];
     const validQuestions: any[] = [];
+    const insertedIds: number[] = [];
 
     rawList.forEach((q, index) => {
       const questionText = q.question || q.questionText || q.question_text;
@@ -828,6 +829,9 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
       const resInsert = await client.query(insertQuery, values);
       if (resInsert.rowCount && resInsert.rowCount > 0) {
         insertedCount++;
+        if (resInsert.rows && resInsert.rows[0] && resInsert.rows[0].id) {
+          insertedIds.push(resInsert.rows[0].id);
+        }
       } else {
         skippedDuplicates++;
       }
@@ -842,6 +846,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
       validated: validQuestions.length,
       inserted: insertedCount,
       skippedDuplicates,
+      insertedIds,
       validationErrorsCount: validationErrors.length,
       validationErrors: validationErrors.slice(0, 10),
     });

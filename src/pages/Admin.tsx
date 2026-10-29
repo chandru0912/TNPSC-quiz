@@ -630,14 +630,27 @@ const Admin = () => {
           countUploaded = data.inserted || approvedQuestions.length
           uploadedSuccess = true
           try {
-            await apiFetch('/api/questions/publish', {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({}),
-            })
+            const ids = Array.isArray(data.insertedIds) ? data.insertedIds : []
+            if (ids.length > 0) {
+              await apiFetch('/api/questions/publish', {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ ids }),
+              })
+            } else {
+              // Fallback: if no IDs returned, publish all staging (legacy behavior)
+              await apiFetch('/api/questions/publish', {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({}),
+              })
+            }
           } catch {}
         }
       } catch (uploadErr) {
