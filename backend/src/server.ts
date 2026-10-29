@@ -12,7 +12,9 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 const allowedOrigins = [
+  'https://tnpsc-quiz-lrkivhxrn-moonzoro.vercel.app',
   'https://tnpsc-quiz-1rra490pf-moonzoro.vercel.app',
+  'https://tnpsc-quiz-lval.vercel.app',
   'https://tnpsc-quiz-jwkl.vercel.app',
   'https://tnpsc-quiz-jwk1.vercel.app',
   'http://localhost:5173',
