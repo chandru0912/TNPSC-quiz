@@ -98,10 +98,7 @@ const Group1UnitClass = () => {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [activeReadingLesson])
 
-  const openLessonNotes = (lesson: SchoolLesson) => {
-    setActiveReadingLesson(lesson)
-    setCurrentSlideIndex(0)
-  }
+  // modal handlers removed - using full page navigation
 
   const closeLessonNotes = () => {
     setActiveReadingLesson(null)
@@ -338,8 +335,11 @@ const Group1UnitClass = () => {
                     <div className="lesson-action-row">
                       <button
                         className="lesson-read-btn"
-                        onClick={() => openLessonNotes(lesson)}
-                        title={`Open interactive study notes for ${translated.title}`}
+                        onClick={() => {
+                          const lessonTitle = translated?.title || lesson.title
+                          navigate(`/study-notes/group1/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}`)
+                        }}
+                        title={isTamil ? 'பாடக் குறிப்புகளைப் படிக்க' : 'Read Study Notes'}
                       >
                         <BookMarked size={15} />
                         <span>{isTamil ? 'பாடக்குறிப்புகளைப் படிக்க' : 'Read Study Notes'}</span>

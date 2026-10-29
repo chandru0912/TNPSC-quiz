@@ -108,12 +108,7 @@ const Group2UnitClass = () => {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [activeModalLesson, activeModalTab])
 
-  const handleOpenLesson = (lesson: Group2SchoolLesson, tab: 'notes' | 'quiz') => {
-    setActiveModalLesson(lesson)
-    setActiveModalTab(tab)
-    setCurrentSlideIndex(0)
-    setSelectedAnswers({})
-  }
+  // modal handlers removed - using full page navigation
 
   const handleOptionSelect = (qId: string, optIdx: number) => {
     if (selectedAnswers[qId] !== undefined) return
@@ -378,8 +373,11 @@ const Group2UnitClass = () => {
                     <div className="lesson-action-row">
                       <button
                         className="lesson-read-btn"
-                        onClick={() => handleOpenLesson(lesson, 'notes')}
-                        title={`Open interactive study notes for ${translated.title}`}
+                        onClick={() => {
+                          const lessonTitle = translated?.title || lesson.title
+                          navigate(`/study-notes/group2_2a/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}`)
+                        }}
+                        title={isTamil ? 'பாடக் குறிப்புகளைப் படிக்க' : 'Read Study Notes'}
                       >
                         <FileQuestion size={15} />
                         <span>{isTamil ? 'பாடக்குறிப்புகளைப் படிக்க' : 'Read Study Notes'}</span>

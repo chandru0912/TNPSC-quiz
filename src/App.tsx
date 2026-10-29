@@ -22,6 +22,7 @@ import Group4UnitDetail from './pages/Group4UnitDetail'
 import Group4Lessons from './pages/Group4Lessons'
 import Group4UnitClass from './pages/Group4UnitClass'
 import MCQPractice from './pages/MCQPractice'
+import StudyNotesPage from './pages/StudyNotesPage'
 import MockTests from './pages/MockTests'
 import PreviousPapers from './pages/PreviousPapers'
 import Login from './pages/Login'
@@ -122,6 +123,9 @@ function App() {
             <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
             <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
             <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
+            <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+            <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+            <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
             <Route path="/school-materials" element={<SchoolMaterials />} />
             <Route path="/practice" element={<MCQPractice />} />
             <Route path="/mock-tests" element={<MockTests />} />

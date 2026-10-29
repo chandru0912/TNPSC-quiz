@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useScrollLock } from '../hooks/useScrollLock'
 import {
@@ -31,17 +31,21 @@ import {
   translateSubjectName,
 } from '../utils/bilingualSyllabus'
 import { translateQuestionItem } from '../utils/languageData'
+import { apiFetch } from '../utils/api'
 import './Group1Lessons.css'
 
 const Group2Lessons = () => {
   const { subjectId, unitId } = useParams<{ subjectId: string; unitId: string }>()
+  const navigate = useNavigate()
   const { language, isTamil } = useLanguage()
 
   const activeSubjectId = subjectId || 'general-studies'
   const parsedUnitId = parseInt(unitId || '1', 10)
 
   const subject = getGroup2SubjectById(activeSubjectId)
-  const unit = getGroup2UnitById(activeSubjectId, parsedUnitId)
+  const baseUnit = getGroup2UnitById(activeSubjectId, parsedUnitId)
+  const [mergedUnit, setMergedUnit] = useState(baseUnit)
+  const unit = mergedUnit || baseUnit
 
   const [activeLesson, setActiveLesson] = useState<{
     lesson: Group2Lesson
@@ -53,6 +57,77 @@ const Group2Lessons = () => {
 
   // Lock background scroll when lesson modal is open
   useScrollLock(Boolean(activeLesson))
+
+  useEffect(() => {
+    const fetchDynamicContent = async () => {
+      if (!baseUnit) return
+      try {
+        const [questionsRes, notesRes] = await Promise.allSettled([
+          apiFetch(`/api/questions?category=group2_2a&unitId=${parsedUnitId}&limit=500`),
+          apiFetch(`/api/notes?category=group2_2a&unitId=${parsedUnitId}&limit=500`),
+        ])
+
+        const dbQuestions: any[] = []
+        if (questionsRes.status === 'fulfilled' && questionsRes.value.ok) {
+          const qdata = await questionsRes.value.json()
+          if (qdata.status === 'success' && Array.isArray(qdata.data)) {
+            qdata.data.forEach((q: any) => {
+              dbQuestions.push({
+                id: `db-${q.id}`,
+                question: q.question,
+                options: q.options,
+                correctAnswer: q.correctAnswer,
+                explanation: q.explanation,
+                lessonTitle: q.lessonTitle,
+              })
+            })
+          }
+        }
+
+        const dbNotes: any[] = []
+        if (notesRes.status === 'fulfilled' && notesRes.value.ok) {
+          const ndata = await notesRes.value.json()
+          if (ndata.status === 'success' && Array.isArray(ndata.data)) {
+            ndata.data.forEach((n: any) => {
+              dbNotes.push({
+                title: n.title || n.lessonTitle,
+                content: n.content,
+                lessonTitle: n.lessonTitle,
+              })
+            })
+          }
+        }
+
+        const clonedUnit: any = JSON.parse(JSON.stringify(baseUnit))
+        clonedUnit.chapters?.forEach((chapter: any) => {
+          chapter.lessons?.forEach((lesson: any) => {
+            const matchingDbQs = dbQuestions.filter((dq) => dq.lessonTitle && lesson.title && dq.lessonTitle.toLowerCase() === lesson.title.toLowerCase())
+            if (matchingDbQs.length > 0) {
+              if (!lesson.practiceQuestions) lesson.practiceQuestions = []
+              matchingDbQs.forEach((mq) => {
+                if (!lesson.practiceQuestions.some((pq: any) => pq.question === mq.question)) {
+                  lesson.practiceQuestions.push(mq)
+                }
+              })
+            }
+            const matchingDbNotes = dbNotes.filter((dn) => dn.lessonTitle && lesson.title && dn.lessonTitle.toLowerCase() === lesson.title.toLowerCase())
+            if (matchingDbNotes.length > 0) {
+              if (!lesson.studyNotes) lesson.studyNotes = []
+              matchingDbNotes.forEach((mn) => {
+                if (!lesson.studyNotes.some((sn: any) => sn.content === mn.content)) {
+                  lesson.studyNotes.push({ type: 'text', content: mn.content })
+                }
+              })
+            }
+          })
+        })
+        setMergedUnit(clonedUnit)
+      } catch (err) {
+        console.error('Failed to merge dynamic content:', err)
+      }
+    }
+    fetchDynamicContent()
+  }, [baseUnit, parsedUnitId])
 
   if (!subject || !unit) {
     return (
@@ -78,10 +153,7 @@ const Group2Lessons = () => {
   const chapterCount = getGroup2UnitChapterCount(unit)
   const lessonCount = getGroup2UnitLessonCount(unit)
 
-  const handleOpenLesson = (lesson: Group2Lesson, chapterTitle: string, chapterNumber: number) => {
-    setActiveLesson({ lesson, chapterTitle, chapterNumber })
-    setModalTab('notes')
-  }
+  // removed modal handler - using dedicated pages
 
   const handleOptionSelect = (qId: string, optIdx: number) => {
     setQuizAnswers((prev) => ({
@@ -215,10 +287,12 @@ const Group2Lessons = () => {
                       <button
                         type="button"
                         className="lesson-btn"
-                        onClick={() => handleOpenLesson(lesson, chapter.title, chapter.chapterNumber)}
+                        onClick={() =>
+                          navigate(`/study-notes/group2_2a/subject/${subject.id}/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}`)
+                        }
                       >
                         <BookOpen size={14} />
-                        <span>{isTamil ? 'பாடக் குறிப்புகள் & வினாடி-வினா' : 'Study Notes & Quiz'}</span>
+                        <span>{isTamil ? 'பாடக் குறிப்புகள் படிக்க' : 'Read Study Notes'}</span>
                       </button>
                     </div>
                   </div>

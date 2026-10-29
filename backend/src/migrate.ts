@@ -43,7 +43,29 @@ export async function runMigration() {
       );
     `);
 
-    // 2. Create indices for high-performance querying
+    // 3. Create study_notes table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS study_notes (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(50) NOT NULL DEFAULT 'group1',
+        unit_id INT NOT NULL,
+        class_id INT,
+        subject VARCHAR(100) NOT NULL,
+        lesson_title VARCHAR(255) NOT NULL,
+        topic VARCHAR(255),
+        language VARCHAR(10) NOT NULL DEFAULT 'english' CHECK (language IN ('tamil', 'english')),
+        title VARCHAR(255),
+        content TEXT NOT NULL,
+        content_html TEXT,
+        tags JSONB,
+        status VARCHAR(20) NOT NULL DEFAULT 'published' CHECK (status IN ('staging', 'published', 'archived')),
+        source_reference VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 4. Create indices for high-performance querying
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_questions_category_unit_status 
       ON questions (category, unit_id, status);
@@ -59,8 +81,13 @@ export async function runMigration() {
       ON questions (class_id);
     `);
 
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_study_notes_category_lesson 
+      ON study_notes (category, lesson_title, status);
+    `);
+
     await client.query('COMMIT');
-    console.log('Migration completed successfully: questions table and indices created/verified.');
+    console.log('Migration completed successfully: questions, admin_users, study_notes tables and indices created/verified.');
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Migration failed:', error.message);

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import pool from './db';
 import questionsRouter from './routes/questions';
 import authRouter from './routes/auth';
+import notesRouter from './routes/notes';
 
 dotenv.config();
 
@@ -29,12 +30,14 @@ app.get('/', (_req, res) => {
       dbHealth: '/api/db-health',
       adminAuth: '/api/admin/login',
       questions: '/api/questions',
+      notes: '/api/notes',
     },
   });
 });
 
 app.use('/api/admin', authRouter);
 app.use('/api/questions', questionsRouter);
+app.use('/api/notes', notesRouter);
 
 // Preserved existing health check endpoint
 app.get('/api/health', (_req, res) => {

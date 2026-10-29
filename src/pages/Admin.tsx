@@ -112,6 +112,17 @@ const Admin = () => {
   const [filteredTotal, setFilteredTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<number>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+
+  // Notes management
+  const [notesList, setNotesList] = useState<any[]>([])
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [notesGroupFilter, setNotesGroupFilter] = useState<'all' | 'group1' | 'group2' | 'group2a' | 'group4' | 'vao'>('all')
+  const [notesStatusFilter, setNotesStatusFilter] = useState<'all' | 'staging' | 'published' | 'archived'>('all')
+  const [notesLanguageFilter, setNotesLanguageFilter] = useState<'all' | 'tamil' | 'english'>('all')
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<number>>(new Set())
+  const [notesBulkDeleting, setNotesBulkDeleting] = useState(false)
 
   // Filter Bar state
   const [searchQuery, setSearchQuery] = useState('')
@@ -136,6 +147,12 @@ const Admin = () => {
 
   // Gemini AI Generator state (TNPSC Group, Subject, Standard, Unit, Lesson & Specific Topic Cascading)
   const [isAIGeneratorOpen, setIsAIGeneratorOpen] = useState(false)
+  const [aiMode, setAiMode] = useState<'mcq' | 'notes'>('mcq')
+  const [notesLanguage, setNotesLanguage] = useState<'english' | 'tamil'>('english')
+  const [notesInstructions, setNotesInstructions] = useState('')
+  const [isNotesGenerating, setIsNotesGenerating] = useState(false)
+  const [notesPreview, setNotesPreview] = useState<{ content: string; title: string } | null>(null)
+  const [isNotesUploading, setIsNotesUploading] = useState(false)
 
   // Lock background page scrolling strictly when any admin modal is open
   const hasOpenAdminModal =
@@ -150,8 +167,7 @@ const Admin = () => {
   const [aiSubjectId, setAiSubjectId] = useState<string>('general-studies')
   const [aiClassId, setAiClassId] = useState<number>(6)
   const [aiUnitId, setAiUnitId] = useState<number>(1)
-  const [aiLessonTitle, setAiLessonTitle] = useState<string>('Measurements and SI Units')
-  const [aiTopic, setAiTopic] = useState<string>('')
+  const [aiLessonTitle, setAiLessonTitle] = useState<string>('')
   const [aiQuestionCount, setAiQuestionCount] = useState<number>(5)
   const [aiDifficulty, setAiDifficulty] = useState<'Medium' | 'Easy' | 'Hard' | 'Mixed'>('Medium')
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('tnpsc_gemini_api_key') || '')
@@ -187,18 +203,14 @@ const Admin = () => {
   const selectedLessonObj = availableLessons.find((l) => l.title === aiLessonTitle) || availableLessons[0]
   const currentLessonTitle = selectedLessonObj?.title || ''
 
-  // 5. Available topics for selected Lesson
-  const availableTopics = selectedLessonObj
-    ? getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId, selectedLessonObj.title)
-    : []
-  const selectedTopicObj = availableTopics.find((t) => t.name === aiTopic) || availableTopics[0]
-  const currentTopicName = selectedTopicObj?.name || ''
+  // Topics no longer used in generator UI
+  const currentTopicName = ''
 
   // ---------------------------------------------------------------------------
   // EXPLICIT DOWNSTREAM RESET HANDLERS
   // ---------------------------------------------------------------------------
 
-  // 1. When Group changes: resets Subject, Standard, Unit, Lesson, and Topic
+  // 1. When Group changes: resets Subject, Standard, Unit, Lesson
   const handleGroupChange = (newGroupId: 'group1' | 'group2' | 'group4') => {
     setAiGroupId(newGroupId)
     const nextSubjects = getSubjectsForGroup(newGroupId)
@@ -216,12 +228,9 @@ const Admin = () => {
     const nextLessons = getLessonsForSelection(newGroupId, nextSubj, nextStd, nextUnit)
     const nextLesson = nextLessons[0]?.title || ''
     setAiLessonTitle(nextLesson)
-
-    const nextTopics = getTopicsForSelection(newGroupId, nextSubj, nextStd, nextUnit, nextLesson)
-    setAiTopic(nextTopics[0]?.name || '')
   }
 
-  // 2. When Subject changes: resets Standard, Unit, Lesson, and Topic
+  // 2. When Subject changes: resets Standard, Unit, Lesson
   const handleSubjectChange = (newSubj: string) => {
     setAiSubjectId(newSubj)
 
@@ -236,12 +245,9 @@ const Admin = () => {
     const nextLessons = getLessonsForSelection(aiGroupId, newSubj, nextStd, nextUnit)
     const nextLesson = nextLessons[0]?.title || ''
     setAiLessonTitle(nextLesson)
-
-    const nextTopics = getTopicsForSelection(aiGroupId, newSubj, nextStd, nextUnit, nextLesson)
-    setAiTopic(nextTopics[0]?.name || '')
   }
 
-  // 3. When Standard changes: resets Unit, Lesson, and Topic
+  // 3. When Standard changes: resets Unit, Lesson
   const handleStandardChange = (newStd: number) => {
     setAiClassId(newStd)
 
@@ -252,34 +258,20 @@ const Admin = () => {
     const nextLessons = getLessonsForSelection(aiGroupId, currentSubjectId, newStd, nextUnit)
     const nextLesson = nextLessons[0]?.title || ''
     setAiLessonTitle(nextLesson)
-
-    const nextTopics = getTopicsForSelection(aiGroupId, currentSubjectId, newStd, nextUnit, nextLesson)
-    setAiTopic(nextTopics[0]?.name || '')
   }
 
-  // 4. When Unit changes: resets Lesson and Topic
+  // 4. When Unit changes: resets Lesson
   const handleUnitChange = (newUnit: number) => {
     setAiUnitId(newUnit)
 
     const nextLessons = getLessonsForSelection(aiGroupId, currentSubjectId, currentClassId, newUnit)
     const nextLesson = nextLessons[0]?.title || ''
     setAiLessonTitle(nextLesson)
-
-    const nextTopics = getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, newUnit, nextLesson)
-    setAiTopic(nextTopics[0]?.name || '')
   }
 
-  // 5. When Lesson changes: resets Topic
+  // 5. When Lesson changes
   const handleLessonChange = (newLesson: string) => {
     setAiLessonTitle(newLesson)
-
-    const nextTopics = getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId, newLesson)
-    setAiTopic(nextTopics[0]?.name || '')
-  }
-
-  // 6. When Topic changes
-  const handleTopicChange = (newTopic: string) => {
-    setAiTopic(newTopic)
   }
 
   // Defensive fallback synchronization effects
@@ -315,21 +307,6 @@ const Admin = () => {
     }
   }, [aiGroupId, currentSubjectId, currentClassId, currentUnitId, aiLessonTitle])
 
-  useEffect(() => {
-    if (aiLessonTitle) {
-      const topics = getTopicsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId, aiLessonTitle)
-      if (topics.length > 0) {
-        if (!topics.some((t) => t.name === aiTopic)) {
-          setAiTopic(topics[0].name)
-        }
-      } else {
-        setAiTopic(`${aiLessonTitle}: Core Concepts`)
-      }
-    } else if (aiTopic) {
-      setAiTopic('')
-    }
-  }, [aiGroupId, currentSubjectId, currentClassId, currentUnitId, aiLessonTitle, aiTopic])
-
   // Save API key to localStorage when updated
   const handleApiKeyChange = (val: string) => {
     setGeminiApiKey(val)
@@ -345,7 +322,6 @@ const Admin = () => {
   const isStandardValid = availableStandards.some((s) => s.id === currentClassId)
   const isUnitValid = availableUnits.some((u) => u.id === currentUnitId)
   const isLessonValid = Boolean(selectedLessonObj && selectedLessonObj.title)
-  const isTopicValid = Boolean(currentTopicName || (availableTopics.length > 0))
   const isCountValid = aiQuestionCount >= 1 && aiQuestionCount <= 15
   const isDifficultyValid = ['Medium', 'Easy', 'Hard', 'Mixed'].includes(aiDifficulty)
 
@@ -354,7 +330,6 @@ const Admin = () => {
     isStandardValid &&
     isUnitValid &&
     isLessonValid &&
-    isTopicValid &&
     isCountValid &&
     isDifficultyValid &&
     !isAIGenerating
@@ -366,7 +341,7 @@ const Admin = () => {
     setAiNotice(null)
     setAiUploadSuccess(null)
 
-    const activeTopic = aiTopic || currentTopicName || (availableTopics[0]?.name) || `${currentLessonTitle}: Key Concepts`
+    const activeTopic = currentLessonTitle
 
     try {
       let data: any = null
@@ -388,7 +363,7 @@ const Admin = () => {
             unitTitle: currentUnit?.title,
             lessonTitle: currentLessonTitle,
             topic: activeTopic,
-            topics: availableTopics.map((t) => t.name),
+            topics: [],
             description: selectedLessonObj?.description || '',
             count: aiQuestionCount,
             difficulty: aiDifficulty,
@@ -499,7 +474,7 @@ const Admin = () => {
     if (!token || regeneratingIndex !== null) return
     setRegeneratingIndex(qIndex)
     const currentQ = aiGeneratedQuestions[qIndex]
-    const targetTopic = currentQ.topic || aiTopic || currentTopicName || (availableTopics[0]?.name) || `${currentLessonTitle}: Key Concepts`
+    const targetTopic = currentQ.topic || currentLessonTitle
 
     try {
       const res = await apiFetch('/api/questions/ai-regenerate-single', {
@@ -985,13 +960,206 @@ const Admin = () => {
     }
   }, [token, searchQuery, groupFilter, standardFilter, unitFilter, statusFilter, difficultyFilter, page])
 
+  const fetchNotes = useCallback(async () => {
+    if (!token) return
+    setNotesLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (notesGroupFilter !== 'all') params.set('category', notesGroupFilter)
+      if (notesStatusFilter !== 'all') params.set('status', notesStatusFilter)
+      if (notesLanguageFilter !== 'all') params.set('language', notesLanguageFilter)
+      params.set('limit', '100')
+      const res = await apiFetch(`/api/notes/admin?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
+        setNotesList(data.data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch notes:', err)
+    } finally {
+      setNotesLoading(false)
+    }
+  }, [token, notesGroupFilter, notesStatusFilter, notesLanguageFilter])
+
   useEffect(() => {
     fetchQuestions()
   }, [fetchQuestions])
 
+  useEffect(() => {
+    fetchNotes()
+  }, [fetchNotes])
+
+  useEffect(() => {
+    setSelectedQuestionIds(new Set())
+  }, [searchQuery, groupFilter, standardFilter, unitFilter, statusFilter, difficultyFilter, page])
+
+  useEffect(() => {
+    setSelectedNoteIds(new Set())
+  }, [notesGroupFilter, notesStatusFilter, notesLanguageFilter])
+
   const showToast = (type: 'success' | 'error', text: string) => {
     setActionMessage({ type, text })
     setTimeout(() => setActionMessage(null), 5000)
+  }
+
+  const toggleSelectQuestion = (id: number) => {
+    setSelectedQuestionIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAllVisible = () => {
+    if (selectedQuestionIds.size === questions.length && questions.length > 0) {
+      setSelectedQuestionIds(new Set())
+    } else {
+      setSelectedQuestionIds(new Set(questions.map((q) => q.id)))
+    }
+  }
+
+  const toggleSelectNote = (id: number) => {
+    setSelectedNoteIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAllNotes = () => {
+    if (selectedNoteIds.size === notesList.length && notesList.length > 0) {
+      setSelectedNoteIds(new Set())
+    } else {
+      setSelectedNoteIds(new Set(notesList.map((n) => n.id)))
+    }
+  }
+
+  const handleDeleteSelected = async () => {
+    if (!token || selectedQuestionIds.size === 0) return
+    if (!window.confirm(`Delete ${selectedQuestionIds.size} selected question(s)? This action cannot be undone.`)) return
+    setIsBulkDeleting(true)
+    try {
+      const res = await apiFetch('/api/questions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ids: Array.from(selectedQuestionIds) }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', data.message || `Deleted ${selectedQuestionIds.size} question(s)`)
+        setSelectedQuestionIds(new Set())
+        fetchQuestions()
+      } else {
+        showToast('error', data.message || 'Failed to delete selected questions')
+      }
+    } catch {
+      showToast('error', 'Network error during deletion')
+    } finally {
+      setIsBulkDeleting(false)
+    }
+  }
+
+  const handleDeleteAllFiltered = async () => {
+    if (!token) return
+    const count = filteredTotal
+    if (count === 0) {
+      showToast('error', 'No questions match current filters')
+      return
+    }
+    if (!window.confirm(`Delete ALL ${count} question(s) matching current filters (Group/Class/Subject/Unit/Lesson/Status/Difficulty)? This action cannot be undone and will permanently remove them.`)) return
+    if (!window.confirm(`Final confirmation: Permanently delete ${count} filtered question(s)?`)) return
+    setIsBulkDeleting(true)
+    try {
+      const res = await apiFetch('/api/questions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          deleteAll: true,
+          category: groupFilter !== 'all' ? groupFilter : undefined,
+          classId: standardFilter !== 'all' ? standardFilter : undefined,
+          unitId: unitFilter !== 'all' ? unitFilter : undefined,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          difficulty: difficultyFilter !== 'all' ? difficultyFilter : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', data.message || `Deleted ${data.deletedCount || count} question(s)`)
+        setSelectedQuestionIds(new Set())
+        fetchQuestions()
+      } else {
+        showToast('error', data.message || 'Failed to delete questions')
+      }
+    } catch {
+      showToast('error', 'Network error during deletion')
+    } finally {
+      setIsBulkDeleting(false)
+    }
+  }
+
+  const handleDeleteSelectedNotes = async () => {
+    if (!token || selectedNoteIds.size === 0) return
+    if (!window.confirm(`Delete ${selectedNoteIds.size} selected study note(s)? This action cannot be undone.`)) return
+    setNotesBulkDeleting(true)
+    try {
+      const res = await apiFetch('/api/notes', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ids: Array.from(selectedNoteIds) }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', data.message || `Deleted ${selectedNoteIds.size} study note(s)`)
+        setSelectedNoteIds(new Set())
+        fetchNotes()
+      } else {
+        showToast('error', data.message || 'Failed to delete selected study notes')
+      }
+    } catch {
+      showToast('error', 'Network error during deletion')
+    } finally {
+      setNotesBulkDeleting(false)
+    }
+  }
+
+  const handleDeleteAllNotes = async () => {
+    if (!token) return
+    const count = notesList.length
+    if (count === 0) {
+      showToast('error', 'No study notes match current filters')
+      return
+    }
+    if (!window.confirm(`Delete ALL ${count} study note(s) matching current filters (Group/Status/Language)? This action cannot be undone and will permanently remove them.`)) return
+    if (!window.confirm(`Final confirmation: Permanently delete ${count} filtered study note(s)?`)) return
+    setNotesBulkDeleting(true)
+    try {
+      const res = await apiFetch('/api/notes', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          deleteAll: true,
+          category: notesGroupFilter !== 'all' ? notesGroupFilter : undefined,
+          status: notesStatusFilter !== 'all' ? notesStatusFilter : undefined,
+          language: notesLanguageFilter !== 'all' ? notesLanguageFilter : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', data.message || `Deleted ${data.deletedCount || count} study note(s)`)
+        setSelectedNoteIds(new Set())
+        fetchNotes()
+      } else {
+        showToast('error', data.message || 'Failed to delete study notes')
+      }
+    } catch {
+      showToast('error', 'Network error during deletion')
+    } finally {
+      setNotesBulkDeleting(false)
+    }
   }
 
   // Add / Edit Modal handlers
@@ -1541,8 +1709,23 @@ const Admin = () => {
               </select>
             </div>
 
-            <div className="admin-filter-count">
-              Showing <strong>{questions.length}</strong> of <strong>{filteredTotal}</strong> matching questions
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              <div className="admin-filter-count">
+                Showing <strong>{questions.length}</strong> of <strong>{filteredTotal}</strong> matching questions | Selected: <strong>{selectedQuestionIds.size}</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button className="admin-btn admin-btn-secondary" onClick={toggleSelectAllVisible} disabled={questions.length === 0}>
+                  {selectedQuestionIds.size === questions.length && questions.length > 0 ? 'Deselect All Visible' : 'Select All Visible'}
+                </button>
+                <button className="admin-btn admin-btn-secondary" onClick={handleDeleteSelected} disabled={selectedQuestionIds.size === 0 || isBulkDeleting}>
+                  <Trash2 size={14} />
+                  <span>Delete Selected ({selectedQuestionIds.size})</span>
+                </button>
+                <button className="admin-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={handleDeleteAllFiltered} disabled={filteredTotal === 0 || isBulkDeleting}>
+                  <Trash2 size={14} />
+                  <span>{isBulkDeleting ? 'Deleting...' : `Delete All Filtered (${filteredTotal})`}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1555,6 +1738,7 @@ const Admin = () => {
           <table className="admin-table">
             <thead>
               <tr>
+                <th style={{ width: '40px' }}>Sel</th>
                 <th style={{ width: '70px' }}>ID</th>
                 <th style={{ width: '120px' }}>Status</th>
                 <th style={{ width: '140px' }}>Group & Unit</th>
@@ -1579,6 +1763,9 @@ const Admin = () => {
               ) : (
                 questions.map((q) => (
                   <tr key={q.id}>
+                    <td>
+                      <input type="checkbox" checked={selectedQuestionIds.has(q.id)} onChange={() => toggleSelectQuestion(q.id)} />
+                    </td>
                     <td>
                       <span className="qid-badge">#{q.id}</span>
                     </td>
@@ -1677,6 +1864,118 @@ const Admin = () => {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Study Notes Management Section */}
+        <div className="admin-section-header" style={{ marginTop: '2rem' }}>
+          <div>
+            <h2 className="admin-section-title">Study Notes Management</h2>
+            <p className="admin-section-subtitle">Filter, select and delete study notes independently from MCQ questions</p>
+          </div>
+        </div>
+
+        <div className="admin-filter-bar glass">
+          <div className="admin-filter-pills">
+            <div className="admin-filter-group">
+              <select
+                className="filter-select"
+                value={notesGroupFilter}
+                onChange={(e) => setNotesGroupFilter(e.target.value as any)}
+              >
+                <option value="all">All TNPSC Groups</option>
+                <option value="group1">Group 1</option>
+                <option value="group2">Group 2</option>
+                <option value="group2a">Group 2A</option>
+                <option value="group2_2a">Group 2 & 2A</option>
+                <option value="group4">Group 4</option>
+                <option value="vao">VAO</option>
+                <option value="group4_vao">Group 4 & VAO</option>
+              </select>
+
+              <select
+                className="filter-select"
+                value={notesStatusFilter}
+                onChange={(e) => setNotesStatusFilter(e.target.value as any)}
+              >
+                <option value="all">All Statuses</option>
+                <option value="published">Published</option>
+                <option value="staging">Staging</option>
+                <option value="archived">Archived</option>
+              </select>
+
+              <select
+                className="filter-select"
+                value={notesLanguageFilter}
+                onChange={(e) => setNotesLanguageFilter(e.target.value as any)}
+              >
+                <option value="all">All Languages</option>
+                <option value="english">English</option>
+                <option value="tamil">Tamil</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+              <div className="admin-filter-count">
+                Showing <strong>{notesList.length}</strong> notes | Selected: <strong>{selectedNoteIds.size}</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button className="admin-btn admin-btn-secondary" onClick={toggleSelectAllNotes} disabled={notesList.length === 0}>
+                  {selectedNoteIds.size === notesList.length && notesList.length > 0 ? 'Deselect All' : 'Select All'}
+                </button>
+                <button className="admin-btn admin-btn-secondary" onClick={handleDeleteSelectedNotes} disabled={selectedNoteIds.size === 0 || notesBulkDeleting}>
+                  <Trash2 size={14} />
+                  <span>Delete Selected Notes ({selectedNoteIds.size})</span>
+                </button>
+                <button className="admin-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={handleDeleteAllNotes} disabled={notesList.length === 0 || notesBulkDeleting}>
+                  <Trash2 size={14} />
+                  <span>{notesBulkDeleting ? 'Deleting...' : `Delete All Notes (${notesList.length})`}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="admin-table-wrapper glass" style={{ marginTop: '1rem' }}>
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th style={{ width: '40px' }}>Sel</th>
+                <th style={{ width: '60px' }}>ID</th>
+                <th style={{ width: '100px' }}>Group</th>
+                <th style={{ width: '90px' }}>Unit/Class</th>
+                <th style={{ width: '200px' }}>Lesson</th>
+                <th style={{ width: '90px' }}>Language</th>
+                <th style={{ width: '100px' }}>Status</th>
+                <th>Title</th>
+              </tr>
+            </thead>
+            <tbody>
+              {notesLoading ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>Loading study notes...</td>
+                </tr>
+              ) : notesList.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>No study notes found</td>
+                </tr>
+              ) : (
+                notesList.map((n) => (
+                  <tr key={n.id}>
+                    <td>
+                      <input type="checkbox" checked={selectedNoteIds.has(n.id)} onChange={() => toggleSelectNote(n.id)} />
+                    </td>
+                    <td>#{n.id}</td>
+                    <td>{n.category?.toUpperCase()}</td>
+                    <td>Unit {n.unitId}{n.classId ? ` / ${n.classId}` : ''}</td>
+                    <td>{n.lessonTitle}</td>
+                    <td>{n.language}</td>
+                    <td>{n.status}</td>
+                    <td>{n.title}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -2482,10 +2781,30 @@ const Admin = () => {
                       {TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name} • {selectedSubjectObj?.name} • {selectedStandardObj?.label}
                     </span>
                   </div>
-                  <h2 className="ai-modal-title">Syllabus-Wise MCQ Generator</h2>
+                  <h2 className="ai-modal-title">{aiMode === 'mcq' ? 'Syllabus-Wise MCQ Generator' : 'Study Notes Generator'}</h2>
                   <p className="ai-modal-subtitle">
-                    Select Group, Subject, Standard, Unit, Lesson & exact Topic to generate authentic syllabus MCQs with Google Gemini.
+                    {aiMode === 'mcq'
+                      ? 'Select Group, Subject, Standard, Unit, and Lesson to generate authentic syllabus MCQs with Google Gemini.'
+                      : 'Select Group, Class/Standard, Subject, Unit, and Lesson to generate study notes in Tamil or English for student Study Materials.'}
                   </p>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <button
+                      type="button"
+                      className={`admin-btn ${aiMode === 'mcq' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}
+                      style={{ padding: '0.4rem 0.9rem' }}
+                      onClick={() => setAiMode('mcq')}
+                    >
+                      MCQ Questions
+                    </button>
+                    <button
+                      type="button"
+                      className={`admin-btn ${aiMode === 'notes' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}
+                      style={{ padding: '0.4rem 0.9rem' }}
+                      onClick={() => setAiMode('notes')}
+                    >
+                      Study Notes
+                    </button>
+                  </div>
                 </div>
                 <button
                   className="admin-modal-close"
@@ -2615,7 +2934,7 @@ const Admin = () => {
                         </select>
                       </div>
 
-                      {/* 2. Subject Selection (immediately after TNPSC Group and before Standard) */}
+                      {/* 2. Subject Selection */}
                       <div className="ai-field">
                         <label>2. Subject Selection ({availableSubjects.length} Subjects) *</label>
                         <select
@@ -2687,26 +3006,7 @@ const Admin = () => {
                       </div>
                     </div>
 
-                    {/* Row 3: 6. Specific Topic */}
-                    <div className="ai-field" style={{ marginTop: '0.85rem' }}>
-                      <label>6. Specific Topic ({availableTopics.length} Topics) *</label>
-                      <select
-                        className="ai-select"
-                        value={currentTopicName}
-                        onChange={(e) => handleTopicChange(e.target.value)}
-                        disabled={availableTopics.length === 0}
-                      >
-                        {availableTopics.length === 0 ? (
-                          <option value="" disabled>No topics available</option>
-                        ) : (
-                          availableTopics.map((t) => (
-                            <option key={t.id} value={t.name}>
-                              {t.name}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </div>
+
 
                     {/* Lesson Details Card */}
                     {selectedLessonObj && (
@@ -2733,59 +3033,124 @@ const Admin = () => {
                             {selectedLessonObj.description}
                           </p>
                         )}
-                        <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Target Topic:</span>
-                          <span className="ai-tag-pill ai-tag-topic" style={{ fontSize: '0.78rem' }}>
-                            📌 {currentTopicName || (availableTopics[0]?.name) || selectedLessonObj.title}
-                          </span>
-                        </div>
                       </div>
                     )}
 
-                    {/* Generation Settings: 7. Questions Count, 8. Difficulty, 9. Generate Button */}
-                    <div className="ai-generation-options">
-                      <div className="ai-options-inline">
-                        <div className="ai-field ai-field-compact">
-                          <label>7. Questions Count</label>
-                          <select
-                            className="ai-select"
-                            value={aiQuestionCount}
-                            onChange={(e) => setAiQuestionCount(Number(e.target.value))}
-                          >
-                            <option value={3}>3 Questions</option>
-                            <option value={5}>5 Questions (Recommended)</option>
-                            <option value={10}>10 Questions</option>
-                          </select>
+                    {/* Generation Settings */}
+                    {aiMode === 'mcq' ? (
+                      <div className="ai-generation-options">
+                        <div className="ai-options-inline">
+                          <div className="ai-field ai-field-compact">
+                            <label>7. Questions Count</label>
+                            <select
+                              className="ai-select"
+                              value={aiQuestionCount}
+                              onChange={(e) => setAiQuestionCount(Number(e.target.value))}
+                            >
+                              <option value={3}>3 Questions</option>
+                              <option value={5}>5 Questions (Recommended)</option>
+                              <option value={10}>10 Questions</option>
+                            </select>
+                          </div>
+
+                          <div className="ai-field ai-field-compact">
+                            <label>8. Difficulty</label>
+                            <select
+                              className="ai-select"
+                              value={aiDifficulty}
+                              onChange={(e) => setAiDifficulty(e.target.value as any)}
+                            >
+                              <option value="Medium">Medium (Exam Std)</option>
+                              <option value="Easy">Easy (Conceptual)</option>
+                              <option value="Hard">Hard (Deep Analysis)</option>
+                              <option value="Mixed">Mixed</option>
+                            </select>
+                          </div>
                         </div>
 
-                        <div className="ai-field ai-field-compact">
-                          <label>8. Difficulty</label>
-                          <select
-                            className="ai-select"
-                            value={aiDifficulty}
-                            onChange={(e) => setAiDifficulty(e.target.value as any)}
-                          >
-                            <option value="Medium">Medium (Exam Std)</option>
-                            <option value="Easy">Easy (Conceptual)</option>
-                            <option value="Hard">Hard (Deep Analysis)</option>
-                            <option value="Mixed">Mixed</option>
-                          </select>
-                        </div>
+                        <button
+                          className="ai-generate-action-btn"
+                          onClick={handleGenerateAIQuestions}
+                          disabled={!isFormValid || isAIGenerating}
+                        >
+                          <Sparkles size={18} className={isAIGenerating ? 'spin-icon' : ''} />
+                          <span>
+                            {isAIGenerating
+                              ? 'Generating MCQs...'
+                              : `7. Generate ${aiQuestionCount} MCQs for ${selectedSubjectObj?.name || 'Subject'}`}
+                          </span>
+                        </button>
                       </div>
-
-                      <button
-                        className="ai-generate-action-btn"
-                        onClick={handleGenerateAIQuestions}
-                        disabled={!isFormValid || isAIGenerating}
-                      >
-                        <Sparkles size={18} className={isAIGenerating ? 'spin-icon' : ''} />
-                        <span>
-                          {isAIGenerating
-                            ? 'Generating MCQs...'
-                            : `9. Generate ${aiQuestionCount} MCQs for ${selectedSubjectObj?.name || 'Subject'}`}
-                        </span>
-                      </button>
-                    </div>
+                    ) : (
+                      <div className="ai-generation-options">
+                        <div className="ai-options-inline">
+                          <div className="ai-field ai-field-compact">
+                            <label>7. Language</label>
+                            <select
+                              className="ai-select"
+                              value={notesLanguage}
+                              onChange={(e) => setNotesLanguage(e.target.value as any)}
+                            >
+                              <option value="english">English</option>
+                              <option value="tamil">Tamil</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="ai-field" style={{ marginTop: '0.75rem' }}>
+                          <label>8. Instructions (Optional)</label>
+                          <textarea
+                            className="ai-textarea"
+                            rows={2}
+                            value={notesInstructions}
+                            onChange={(e) => setNotesInstructions(e.target.value)}
+                            placeholder="e.g. Include key points, definitions, mnemonics and exam questions"
+                          />
+                        </div>
+                        <button
+                          className="ai-generate-action-btn"
+                          onClick={async () => {
+                            if (!token || !isFormValid) return
+                            setIsNotesGenerating(true)
+                            setNotesPreview(null)
+                            setAiNotice(null)
+                            try {
+                              const res = await apiFetch('/api/notes/ai-generate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({
+                                  category: aiGroupId,
+                                  subject: selectedSubjectObj.name,
+                                  classId: currentClassId,
+                                  unitId: currentUnitId,
+                                  lessonTitle: currentLessonTitle,
+                                  topic: currentTopicName || currentLessonTitle,
+                                  language: notesLanguage,
+                                  instructions: notesInstructions,
+                                  apiKey: geminiApiKey.trim() || undefined,
+                                }),
+                              })
+                              const data = await res.json()
+                              if (res.ok && data.data) {
+                                setNotesPreview({ content: data.data.content, title: data.data.title || currentLessonTitle })
+                                setAiNotice(data.source === 'gemini' ? 'Study notes generated via Gemini.' : 'Study notes generated.')
+                              } else {
+                                showToast('error', data.message || 'Failed to generate notes')
+                              }
+                            } catch (err: any) {
+                              showToast('error', err.message || 'Error generating notes')
+                            } finally {
+                              setIsNotesGenerating(false)
+                            }
+                          }}
+                          disabled={!isFormValid || isNotesGenerating}
+                        >
+                          <Sparkles size={18} className={isNotesGenerating ? 'spin-icon' : ''} />
+                          <span>
+                            {isNotesGenerating ? 'Generating Notes...' : `Generate Study Notes (${notesLanguage === 'tamil' ? 'Tamil' : 'English'})`}
+                          </span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2801,8 +3166,70 @@ const Admin = () => {
                   </div>
                 )}
 
+                {/* Notes Preview */}
+                {aiMode === 'notes' && notesPreview && (
+                  <div className="ai-preview-container">
+                    <div className="ai-batch-bar">
+                      <div className="ai-batch-left">
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                          Study Notes Preview - {notesPreview.title}
+                        </span>
+                      </div>
+                      <button
+                        className="admin-btn admin-btn-primary"
+                        disabled={isNotesUploading}
+                        onClick={async () => {
+                          if (!token || !notesPreview) return
+                          setIsNotesUploading(true)
+                          try {
+                            const res = await apiFetch('/api/notes', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify({
+                                category: aiGroupId,
+                                subject: selectedSubjectObj.name,
+                                classId: currentClassId,
+                                unitId: currentUnitId,
+                                lessonTitle: currentLessonTitle,
+                                topic: currentTopicName || currentLessonTitle,
+                                language: notesLanguage,
+                                title: notesPreview.title,
+                                content: notesPreview.content,
+                                sourceReference: `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
+                                status: 'published',
+                              }),
+                            })
+                            const data = await res.json()
+                            if (res.ok) {
+                              showToast('success', 'Study notes uploaded and published successfully')
+                              setNotesPreview(null)
+                            } else {
+                              showToast('error', data.message || 'Failed to upload notes')
+                            }
+                          } catch (err: any) {
+                            showToast('error', err.message || 'Error uploading notes')
+                          } finally {
+                            setIsNotesUploading(false)
+                          }
+                        }}
+                      >
+                        <Upload size={16} />
+                        <span>{isNotesUploading ? 'Uploading...' : 'Upload & Publish Notes'}</span>
+                      </button>
+                    </div>
+                    <div className="ai-preview-card" style={{ padding: '1rem' }}>
+                      <textarea
+                        className="ai-textarea"
+                        style={{ minHeight: '300px', fontFamily: 'monospace', fontSize: '0.85rem' }}
+                        value={notesPreview.content}
+                        onChange={(e) => setNotesPreview({ ...notesPreview, content: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* 5. Review & Preview Table */}
-                {aiGeneratedQuestions.length > 0 && !aiUploadSuccess && (
+                {aiMode === 'mcq' && aiGeneratedQuestions.length > 0 && !aiUploadSuccess && (
                   <div className="ai-preview-container">
                     {/* Batch Actions Bar */}
                     <div className="ai-batch-bar">
@@ -2952,7 +3379,7 @@ const Admin = () => {
                 >
                   Close
                 </button>
-                {aiGeneratedQuestions.length > 0 && !aiUploadSuccess && (
+                {aiMode === 'mcq' && aiGeneratedQuestions.length > 0 && !aiUploadSuccess && (
                   <button
                     className="admin-btn admin-btn-primary"
                     disabled={isAIUploading || aiGeneratedQuestions.filter((q) => q.selected !== false).length === 0}

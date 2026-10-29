@@ -86,10 +86,7 @@ const Group4UnitClass = () => {
   // Lock background scroll when interactive lesson modal is open
   useScrollLock(Boolean(activeModalLesson))
 
-  const handleOpenLesson = (lesson: Group4SchoolLesson, tab: 'notes' | 'quiz') => {
-    setActiveModalLesson(lesson)
-    setActiveModalTab(tab)
-  }
+  // modal handlers removed - using full page navigation
 
   const handleOptionSelect = (qId: string, optIdx: number) => {
     if (selectedAnswers[qId] !== undefined) return
@@ -326,8 +323,11 @@ const Group4UnitClass = () => {
                     <div className="lesson-action-row">
                       <button
                         className="lesson-read-btn"
-                        onClick={() => handleOpenLesson(lesson, 'notes')}
-                        title={isTamil ? `${tLesson.title} பாடக் குறிப்புகளைப் படிக்க` : `Open interactive study notes for ${lesson.title}`}
+                        onClick={() => {
+                          const lessonTitle = lesson.title
+                          navigate(`/study-notes/group4_vao/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}`)
+                        }}
+                        title={isTamil ? `${lesson.title} பாடக் குறிப்புகளைப் படிக்க` : `Read study notes for ${lesson.title}`}
                       >
                         <FileQuestion size={15} />
                         <span>{isTamil ? 'பாடக் குறிப்புகளைப் படிக்க' : 'Read Study Notes'}</span>

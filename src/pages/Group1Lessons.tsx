@@ -1,21 +1,15 @@
-import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
-import { useScrollLock } from '../hooks/useScrollLock'
+import { motion } from 'framer-motion'
 import {
   ChevronRight,
   ArrowLeft,
   Clock,
   Layers,
-  X,
-  FileQuestion,
-  Info,
 } from 'lucide-react'
 import {
   getUnitById,
   getUnitChapterCount,
   getUnitLessonCount,
-  type Lesson,
 } from '../data/group1SyllabusData'
 import { useLanguage } from '../context/LanguageContext'
 import LanguageSwitch from '../components/LanguageSwitch'
@@ -33,15 +27,6 @@ const Group1Lessons = () => {
   const { language, isTamil } = useLanguage()
   const parsedId = parseInt(unitId || '1', 10)
   const unit = getUnitById(parsedId)
-
-  const [activeLesson, setActiveLesson] = useState<{
-    lesson: Lesson
-    chapterTitle: string
-    chapterNumber: number
-  } | null>(null)
-
-  // Lock background scroll when lesson modal is open
-  useScrollLock(Boolean(activeLesson))
 
   if (!unit) {
     return (
@@ -154,14 +139,10 @@ const Group1Lessons = () => {
                       <button
                         className="view-lesson-btn"
                         onClick={() =>
-                          setActiveLesson({
-                            lesson,
-                            chapterTitle: translateLessonTitle(chapter.title, language),
-                            chapterNumber: chapter.chapterNumber,
-                          })
+                          navigate(`/study-notes/group1/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}`)
                         }
                       >
-                        <span>{isTamil ? 'பாட விவரங்கள்' : 'Lesson Details'}</span>
+                        <span>{isTamil ? 'பாடக் குறிப்புகள் படிக்க' : 'Read Study Notes'}</span>
                         <ChevronRight size={14} />
                       </button>
                     </div>
@@ -172,87 +153,7 @@ const Group1Lessons = () => {
           ))}
         </div>
 
-        {/* Modal Drawer for Lesson Notes Details */}
-        <AnimatePresence>
-          {activeLesson && (
-            <div className="lesson-modal-overlay" onClick={() => setActiveLesson(null)}>
-              <motion.div
-                className="lesson-modal glass"
-                initial={{ opacity: 0, scale: 0.94 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.94 }}
-                transition={{ duration: 0.25 }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="modal-head">
-                  <div className="modal-title-group">
-                    <span className="modal-code-pill">
-                      {isTamil ? `பாடம் ${activeLesson.lesson.lessonNumber} • அத்தியாயம் ${activeLesson.chapterNumber}` : `Lesson ${activeLesson.lesson.lessonNumber} • Chapter ${activeLesson.chapterNumber}`}
-                    </span>
-                    <h3 className="modal-title">{translateLessonTitle(activeLesson.lesson.title, language)}</h3>
-                  </div>
-                  <button
-                    className="modal-close-btn"
-                    onClick={() => setActiveLesson(null)}
-                    aria-label="Close modal"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                {/* Honest Notes Status Notice Box */}
-                <div className="modal-notice-box">
-                  <Info size={22} className="modal-notice-icon" />
-                  <div className="modal-notice-content">
-                    <span className="modal-notice-title">
-                      {isTamil ? 'நிலை: அதிகாரப்பூர்வ குறிப்புகள் தயாரிப்பில் உள்ளன' : 'Status: Awaiting Official Notes'}
-                    </span>
-                    <p className="modal-notice-text">
-                      {isTamil
-                        ? 'இப்பாடத்திட்ட தலைப்பிற்கான முழுமையான பள்ளிப் பாடநூல் குறிப்புகள் தமிழ்நாடு எஸ்சிஇஆர்டி (SCERT) பாடநூல்கள் மற்றும் அங்கீகரிக்கப்பட்ட உசாத்துணை நூல்களிலிருந்து தொகுக்கப்பட்டு வருகின்றன. முறையான குறிப்புகள் சரிபார்க்கப்பட்டதும் இங்கு காட்சிப்படுத்தப்படும்.'
-                        : 'Full textbook notes for this syllabus topic are currently awaiting verified publication from Tamil Nadu SCERT textbooks and standard academic references. Rather than displaying fabricated content, official material will appear here once authenticated.'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Official Syllabus Scope */}
-                <div className="modal-scope-section">
-                  <span className="modal-section-title">{isTamil ? 'அதிகாரப்பூர்வ பாடத்திட்ட எல்லை' : 'Official Syllabus Coverage'}</span>
-                  <p className="modal-scope-text">
-                    {translateLessonDescription(activeLesson.lesson.description, language) ||
-                      (isTamil
-                        ? `அத்தியாயம் ${activeLesson.chapterNumber}: ${activeLesson.chapterTitle}-ன் கீழ் ${translateLessonTitle(activeLesson.lesson.title, language)} பாட உள்ளடக்கம்.`
-                        : `Study coverage for ${activeLesson.lesson.title} under Chapter ${activeLesson.chapterNumber}: ${activeLesson.chapterTitle}.`)}
-                  </p>
-                </div>
-
-                <div className="modal-actions">
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => setActiveLesson(null)}
-                  >
-                    <span>{isTamil ? 'மூடு' : 'Close'}</span>
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => {
-                      const lessonTitle = activeLesson.lesson.title
-                      setActiveLesson(null)
-                      navigate(
-                        `/practice?group=group1&unitId=${unit.id}&unitTitle=${encodeURIComponent(
-                          unit.title
-                        )}&lesson=${encodeURIComponent(lessonTitle)}`
-                      )
-                    }}
-                  >
-                    <FileQuestion size={16} />
-                    <span>{isTamil ? 'தொடர்புடைய வினாக்களைப் பயிற்சி செய்' : 'Practice Related MCQs'}</span>
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
+        {/* Modal removed - Read Study Notes now opens full page */}
       </div>
     </div>
   )

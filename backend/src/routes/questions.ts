@@ -569,6 +569,96 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * DELETE /api/questions (Protected) - Bulk delete
+ * Supports: { ids: [...] } or filters { category, classId, unitId, lesson, subject, status, difficulty }
+ */
+router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const { ids, category, classId, unitId, lesson, subject, status, difficulty, deleteAll = false } = req.body || {};
+
+    if (Array.isArray(ids) && ids.length > 0) {
+      const validIds = ids.filter((id: any) => !isNaN(Number(id))).map((id: any) => Number(id));
+      if (validIds.length === 0) {
+        return res.status(400).json({ status: 'error', message: 'No valid question IDs provided' });
+      }
+      const result = await client.query('DELETE FROM questions WHERE id = ANY($1) RETURNING id', [validIds]);
+      return res.status(200).json({
+        status: 'success',
+        message: `Deleted ${result.rowCount} question(s)`,
+        deletedCount: result.rowCount,
+      });
+    }
+
+    if (deleteAll) {
+      const queryConditions: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      if (category && typeof category === 'string' && category !== 'all') {
+        const cleanCat = category.trim().toLowerCase();
+        if (cleanCat === 'group2_2a' || cleanCat === 'group2' || cleanCat === 'group2a') {
+          queryConditions.push(`category IN ('group2', 'group2a', 'group2_2a')`);
+        } else if (cleanCat === 'group4_vao' || cleanCat === 'group4' || cleanCat === 'vao') {
+          queryConditions.push(`category IN ('group4', 'vao', 'group4_vao')`);
+        } else {
+          queryConditions.push(`category = $${paramIndex++}`);
+          values.push(cleanCat);
+        }
+      }
+      if (classId && !isNaN(Number(classId))) {
+        queryConditions.push(`class_id = $${paramIndex++}`);
+        values.push(Number(classId));
+      }
+      if (unitId && !isNaN(Number(unitId))) {
+        queryConditions.push(`unit_id = $${paramIndex++}`);
+        values.push(Number(unitId));
+      }
+      if (subject && typeof subject === 'string' && subject.trim()) {
+        queryConditions.push(`LOWER(subject) = $${paramIndex++}`);
+        values.push(subject.trim().toLowerCase());
+      }
+      if (lesson && typeof lesson === 'string' && lesson.trim()) {
+        queryConditions.push(`LOWER(lesson_title) = $${paramIndex++}`);
+        values.push(lesson.trim().toLowerCase());
+      }
+      if (status && typeof status === 'string' && status !== 'all') {
+        queryConditions.push(`status = $${paramIndex++}`);
+        values.push(status);
+      }
+      if (difficulty && typeof difficulty === 'string' && difficulty !== 'all') {
+        queryConditions.push(`difficulty = $${paramIndex++}`);
+        values.push(difficulty);
+      }
+
+      const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(' AND ')}` : '';
+      const countQuery = `SELECT COUNT(*) AS total FROM questions ${whereClause}`;
+      const countResult = await client.query(countQuery, values);
+      const totalToDelete = parseInt(countResult.rows[0].total, 10);
+
+      if (totalToDelete === 0) {
+        return res.status(200).json({ status: 'success', message: 'No questions found to delete', deletedCount: 0 });
+      }
+
+      const deleteQuery = `DELETE FROM questions ${whereClause} RETURNING id`;
+      const deleteResult = await client.query(deleteQuery, values);
+      return res.status(200).json({
+        status: 'success',
+        message: `Deleted ${deleteResult.rowCount} question(s)`,
+        deletedCount: deleteResult.rowCount,
+      });
+    }
+
+    return res.status(400).json({ status: 'error', message: 'Provide ids array or deleteAll with filters' });
+  } catch (error: any) {
+    console.error('Error in bulk delete:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to delete questions', error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * DELETE /api/questions/:id (Protected)
  * Explicit question deletion
  */
