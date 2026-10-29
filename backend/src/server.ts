@@ -1,5 +1,5 @@
 import express from 'express';
-import cors from 'cors';
+import cors, { CorsOptions } from 'cors';
 import dotenv from 'dotenv';
 import pool from './db';
 import questionsRouter from './routes/questions';
@@ -21,8 +21,8 @@ if (process.env.CORS_ORIGIN) {
     if (trimmed && !allowedOrigins.includes(trimmed)) allowedOrigins.push(trimmed);
   });
 }
-const corsOptions = {
-  origin: (origin, callback) => {
+const corsOptions: CorsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
       return callback(null, true);
