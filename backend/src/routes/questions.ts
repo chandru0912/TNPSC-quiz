@@ -851,12 +851,24 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
       validationErrors: validationErrors.slice(0, 10),
     });
   } catch (error: any) {
-    await client.query('ROLLBACK');
-    console.error('Error during bulk upload:', error);
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr: any) {
+      console.error('Rollback error during bulk upload:', rollbackErr?.message || rollbackErr);
+    }
+    console.error('Error during bulk upload:', error?.message || error);
+    console.error('Bulk upload stack:', error?.stack);
+    console.error('Bulk upload details:', {
+      code: error?.code,
+      detail: error?.detail,
+      constraint: error?.constraint,
+      table: error?.table,
+      column: error?.column,
+    });
     return res.status(500).json({
       status: 'error',
       message: 'Failed to process bulk upload',
-      error: error.message,
+      error: error?.message || 'Unknown database error',
     });
   } finally {
     client.release();

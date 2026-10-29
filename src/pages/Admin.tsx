@@ -652,30 +652,41 @@ const Admin = () => {
               })
             }
           } catch {}
+        } else {
+          console.error('Upload failed:', res.status, data)
+          showToast('error', data?.message || 'Upload failed')
         }
       } catch (uploadErr) {
-        console.warn('Backend upload unreachable, saving locally:', uploadErr)
+        console.error('Backend upload unreachable:', uploadErr)
+        showToast('error', 'Network error during upload')
       }
 
       if (!uploadedSuccess) {
         // Save to local storage for Vercel standalone preview
-        const existingRaw = localStorage.getItem('tnpsc_staged_questions')
-        const existing: any[] = existingRaw ? JSON.parse(existingRaw) : []
-        const newItems = approvedQuestions.map((q, idx) => ({
-          ...q,
-          id: Date.now() + idx,
-          status: 'staging',
-          createdAt: new Date().toISOString(),
-        }))
-        localStorage.setItem('tnpsc_staged_questions', JSON.stringify([...newItems, ...existing]))
-        uploadedSuccess = true
+        try {
+          const existingRaw = localStorage.getItem('tnpsc_staged_questions')
+          const existing: any[] = existingRaw ? JSON.parse(existingRaw) : []
+          const newItems = approvedQuestions.map((q, idx) => ({
+            ...q,
+            id: Date.now() + idx,
+            status: 'staging',
+            createdAt: new Date().toISOString(),
+          }))
+          localStorage.setItem('tnpsc_staged_questions', JSON.stringify([...newItems, ...existing]))
+          uploadedSuccess = true
+        } catch (e) {
+          console.error('Local storage fallback failed:', e)
+        }
       }
 
-      showToast('success', `Uploaded ${countUploaded} approved questions for "${currentLessonTitle}" to Staging!`)
-      setAiUploadSuccess({ count: countUploaded, lessonTitle: currentLessonTitle })
-      setAiGeneratedQuestions([])
-      fetchQuestions()
-    } catch {
+      if (uploadedSuccess) {
+        showToast('success', `Uploaded ${countUploaded} approved questions for "${currentLessonTitle}" to Staging!`)
+        setAiUploadSuccess({ count: countUploaded, lessonTitle: currentLessonTitle })
+        setAiGeneratedQuestions([])
+        fetchQuestions()
+      }
+    } catch (err) {
+      console.error('Error during question upload:', err)
       showToast('error', 'Error during question upload')
     } finally {
       setIsAIUploading(false)
