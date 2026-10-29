@@ -304,11 +304,13 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       data: dataResult.rows.map(mapRowToQuestion),
     });
   } catch (error: any) {
-    console.error('Error in admin questions query:', error);
+    console.error('Error in admin questions query:', error?.message || error);
+    console.error('Admin query stack:', error?.stack);
+    console.error('Admin query details:', { code: error?.code, detail: error?.detail, constraint: error?.constraint });
     res.status(500).json({
       status: 'error',
       message: 'Failed to retrieve admin questions',
-      error: error.message,
+      error: error?.message || 'Unknown database error',
     });
   }
 });

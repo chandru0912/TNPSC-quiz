@@ -47,30 +47,41 @@ self.addEventListener('fetch', (event) => {
       if (cachedResponse) {
         // Fetch background update for cache
         fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+          if (networkResponse && networkResponse.ok && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone())).catch(() => {});
           }
         }).catch(() => {/* Ignore network errors during background revalidation */});
         return cachedResponse;
       }
 
       return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
+        if (!response || !response.ok || response.status !== 200 || response.type !== 'basic') {
           return response;
         }
 
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
-        });
+        try {
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache).catch(() => {});
+          }).catch(() => {});
+        } catch (e) {
+          // ignore
+        }
 
         return response;
       }).catch(() => {
         // If offline and requesting an HTML page, return index.html
         if (event.request.headers.get('accept')?.includes('text/html')) {
-          return caches.match('/index.html') || caches.match('/');
+          return caches.match('/index.html').then(r => r || caches.match('/')).catch(() => undefined);
         }
+        return undefined;
       });
+    }).catch(() => {
+      // Fallback to avoid "Failed to convert value to 'Response'"
+      if (event.request.headers.get('accept')?.includes('text/html')) {
+        return caches.match('/index.html').catch(() => undefined);
+      }
+      return undefined;
     })
   );
 });
