@@ -84,20 +84,20 @@ const StudyNotesPage = () => {
           <div className="lessons-header-orb lessons-header-orb-2" />
           <div className="lessons-header-grid" />
         </div>
-        <div className="lessons-header-content" style={{ maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
-          <button className="back-to-unit-btn" onClick={() => navigate(-1)}>
+        <div className="lessons-header-content" style={{ maxWidth: '1280px', margin: '0 auto', width: '100%', padding: '2rem 1.5rem 1.5rem' }}>
+          <button className="back-to-unit-btn" onClick={() => navigate(-1)} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
             <ArrowLeft size={18} />
-            <span>{isTamil ? 'பின்னால் செல்ல' : 'Back to Lesson'}</span>
+            <span>{isTamil ? 'பாடத்திற்கு திரும்பு' : 'Back to Lesson'}</span>
           </button>
-          <div className="lessons-hero">
+          <div className="lessons-hero" style={{ marginTop: '1rem' }}>
             <div className="lessons-badge">
               <BookOpen size={16} />
               <span>{isTamil ? 'பாடக் குறிப்புகள்' : 'Read Study Notes'}</span>
             </div>
-            <h1 className="lessons-title">
+            <h1 className="lessons-title" style={{ fontSize: 'clamp(1.8rem, 4vw, 2.6rem)', lineHeight: 1.15, wordBreak: 'break-word' }}>
               <span className="lessons-title-main">{decodedLessonTitle}</span>
             </h1>
-            <p className="lessons-subtitle">
+            <p className="lessons-subtitle" style={{ fontSize: '1rem', opacity: 0.9, marginTop: '0.5rem' }}>
               {getGroupName()}
               {unitId && ` • ${isTamil ? 'அலகு' : 'Unit'} ${unitId}`}
               {chapter && ` • ${chapter}`}
@@ -108,7 +108,7 @@ const StudyNotesPage = () => {
       </div>
 
       <div className="lessons-main" style={{ width: '100%', maxWidth: '100%' }}>
-        <div className="lessons-container" style={{ maxWidth: '1400px', width: '100%', margin: '0 auto' }}>
+        <div className="lessons-container" style={{ maxWidth: '1100px', width: '100%', margin: '0 auto', padding: '0 1.25rem 3rem' }}>
           {loading ? (
             <div className="lessons-empty-state glass">
               <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto 1rem', color: 'var(--gold-primary)' }} />
@@ -127,9 +127,9 @@ const StudyNotesPage = () => {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', width: '100%' }}>
               {notes.map((note, idx) => (
-                <article key={note.id || idx} className="chapter-block glass" style={{ padding: '2.5rem', width: '100%' }}>
-                  <header style={{ marginBottom: '2rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1.25rem' }}>
-                    <h2 style={{ margin: 0, fontSize: '2rem', color: 'var(--gold-primary)', lineHeight: 1.3 }}>
+                <article key={note.id || idx} className="chapter-block glass" style={{ padding: 'clamp(1.25rem, 4vw, 3rem)', width: '100%', borderRadius: '16px' }}>
+                  <header style={{ marginBottom: '2rem', borderBottom: '1px solid rgba(255,255,255,0.12)', paddingBottom: '1.25rem' }}>
+                    <h2 style={{ margin: 0, fontSize: 'clamp(1.4rem, 3vw, 2.2rem)', color: 'var(--gold-primary)', lineHeight: 1.25, fontWeight: 700, wordBreak: 'break-word' }}>
                       {note.title || decodedLessonTitle}
                     </h2>
                     <div style={{ marginTop: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
@@ -139,11 +139,12 @@ const StudyNotesPage = () => {
                   <div 
                     style={{ 
                       whiteSpace: 'pre-wrap', 
-                      lineHeight: 2, 
-                      fontSize: '1.08rem',
+                      lineHeight: 1.9, 
+                      fontSize: 'clamp(1rem, 1.2vw, 1.08rem)',
                       color: 'var(--text-primary)',
                       wordBreak: 'break-word',
-                      maxWidth: '100%'
+                      maxWidth: '100%',
+                      fontFamily: "'Inter', 'Noto Sans Tamil', 'Latha', 'Vijaya', system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
                     }}
                   >
                     {note.content}

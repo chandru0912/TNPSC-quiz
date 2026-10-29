@@ -629,6 +629,16 @@ const Admin = () => {
         if (res.ok) {
           countUploaded = data.inserted || approvedQuestions.length
           uploadedSuccess = true
+          try {
+            await apiFetch('/api/questions/publish', {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({}),
+            })
+          } catch {}
         }
       } catch (uploadErr) {
         console.warn('Backend upload unreachable, saving locally:', uploadErr)
