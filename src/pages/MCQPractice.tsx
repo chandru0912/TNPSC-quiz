@@ -19,6 +19,9 @@ import {
   BarChart2,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
+import { useLanguage } from '../context/LanguageContext'
+import LanguageSwitch from '../components/LanguageSwitch'
+import { translateQuestionItem } from '../utils/languageData'
 import './MCQPractice.css'
 
 interface QuestionItem {
@@ -42,6 +45,7 @@ interface QuestionItem {
 const MCQPractice = () => {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { language, isTamil } = useLanguage()
 
   const urlGroup = searchParams.get('group')
   const urlSubjectId = searchParams.get('subjectId') || 'general-studies'
@@ -222,7 +226,10 @@ const MCQPractice = () => {
 
   // Safe fallback if index exceeds filtered questions
   const activeQuestionIndex = Math.min(currentQuestion, Math.max(0, filteredQuestions.length - 1))
-  const questionItem = filteredQuestions[activeQuestionIndex]
+  const rawQuestion = filteredQuestions[activeQuestionIndex]
+  const questionItem: QuestionItem | null = rawQuestion
+    ? translateQuestionItem(rawQuestion, language)
+    : null
 
   const handleGroupSelect = (group: string) => {
     if (group === selectedGroup) return
@@ -333,60 +340,73 @@ const MCQPractice = () => {
 
   const isLastQuestion = activeQuestionIndex === filteredQuestions.length - 1
 
-  // Format question tag nicely according to the selected examination group
+  // Format question tag nicely according to the selected examination group and language
   const formatTag = (q: QuestionItem) => {
-    const groupName =
-      selectedGroup === 'group2_2a'
-        ? 'Group 2 & 2A'
+    const groupName = isTamil
+      ? selectedGroup === 'group2_2a'
+        ? 'குரூப் 2 & 2A'
         : selectedGroup === 'group4_vao'
-        ? 'Group 4 & VAO'
-        : 'Group 1'
+        ? 'குரூப் 4 & VAO'
+        : 'குரூப் 1'
+      : selectedGroup === 'group2_2a'
+      ? 'Group 2 & 2A'
+      : selectedGroup === 'group4_vao'
+      ? 'Group 4 & VAO'
+      : 'Group 1'
 
     if (q.tag) {
-      return q.tag.replace(/^Group 1/i, groupName)
+      return isTamil
+        ? q.tag.replace(/^Group 1/i, groupName).replace(/Unit/i, 'அலகு')
+        : q.tag.replace(/^Group 1/i, groupName)
     }
-    return `${groupName} • Unit ${q.unitId || 1}: ${q.subject || 'General Studies'}`
+    return isTamil
+      ? `${groupName} • அலகு ${q.unitId || 1}: ${q.subject || 'பொது அறிவு'}`
+      : `${groupName} • Unit ${q.unitId || 1}: ${q.subject || 'General Studies'}`
   }
 
   return (
     <div className="practice">
       <div className="practice-container">
-        {/* Top-Left Back Navigation Bar */}
+        {/* Top Navigation Bar with Back buttons and Language Switch */}
         <div className="practice-top-bar">
-          <button
-            type="button"
-            className="back-btn glass back-materials-btn"
-            onClick={() => navigate('/materials')}
-            aria-label="Back to Study Materials"
-            title="Navigate directly to main Study Materials page"
-          >
-            <BookOpen size={16} />
-            <span>Back to Study Materials</span>
-          </button>
+          <div className="practice-top-nav-left">
+            <button
+              type="button"
+              className="back-btn glass back-materials-btn"
+              onClick={() => navigate('/materials')}
+              aria-label={isTamil ? 'பாடக்குறிப்புகளுக்குத் திரும்புக' : 'Back to Study Materials'}
+              title={isTamil ? 'முதன்மைப் பாடக்குறிப்புகள் பக்கத்திற்குச் செல்ல' : 'Navigate directly to main Study Materials page'}
+            >
+              <BookOpen size={16} />
+              <span>{isTamil ? 'பாடக்குறிப்புகளுக்குத் திரும்புக' : 'Back to Study Materials'}</span>
+            </button>
 
-          {urlClassId ? (
-            <button
-              type="button"
-              className="back-btn glass"
-              onClick={handleBackToStandard}
-              aria-label="Back to Standard"
-              title={urlClassId ? `Back to ${urlClassId}th Standard` : 'Back to Standard'}
-            >
-              <ArrowLeft size={16} />
-              <span>Back to Standard</span>
-            </button>
-          ) : urlUnitId ? (
-            <button
-              type="button"
-              className="back-btn glass"
-              onClick={handleBackToStandard}
-              aria-label="Back to Unit"
-              title="Back to Unit"
-            >
-              <ArrowLeft size={16} />
-              <span>Back to Unit</span>
-            </button>
-          ) : null}
+            {urlClassId ? (
+              <button
+                type="button"
+                className="back-btn glass"
+                onClick={handleBackToStandard}
+                aria-label={isTamil ? 'வகுப்புப் பாடங்களுக்குத் திரும்புக' : 'Back to Standard'}
+                title={urlClassId ? (isTamil ? `${urlClassId}-ஆம் வகுப்புக்குத் திரும்புக` : `Back to ${urlClassId}th Standard`) : 'Back to Standard'}
+              >
+                <ArrowLeft size={16} />
+                <span>{isTamil ? 'வகுப்புப் பாடங்களுக்குத் திரும்புக' : 'Back to Standard'}</span>
+              </button>
+            ) : urlUnitId ? (
+              <button
+                type="button"
+                className="back-btn glass"
+                onClick={handleBackToStandard}
+                aria-label={isTamil ? 'அலகுக்குத் திரும்புக' : 'Back to Unit'}
+                title={isTamil ? 'அலகுப் பக்கத்திற்குத் திரும்புக' : 'Back to Unit'}
+              >
+                <ArrowLeft size={16} />
+                <span>{isTamil ? 'அலகுக்குத் திரும்புக' : 'Back to Unit'}</span>
+              </button>
+            ) : null}
+          </div>
+
+          <LanguageSwitch variant="section" forceVisible={true} />
         </div>
 
         <motion.div
@@ -398,26 +418,36 @@ const MCQPractice = () => {
           <div className="practice-badge-row">
             <span className="practice-badge">
               <Sparkles size={14} />
-              <span>Interactive Examination Engine</span>
+              <span>{isTamil ? 'ஊடாடும் தேர்வுப் பயிற்சி தளம்' : 'Interactive Examination Engine'}</span>
             </span>
             {isUsingLiveBank ? (
               <span className="practice-code-badge live-connected">
                 <span className="live-dot">●</span>
-                <span>Live Database Connected ({filteredQuestions.length} Questions)</span>
+                <span>
+                  {isTamil
+                    ? `நேரடி வினா வங்கி இணைக்கப்பட்டுள்ளது (${filteredQuestions.length} வினாக்கள்)`
+                    : `Live Database Connected (${filteredQuestions.length} Questions)`}
+                </span>
               </span>
             ) : (
-              <span className="practice-code-badge">TNPSC Quizzes</span>
+              <span className="practice-code-badge">{isTamil ? 'TNPSC வினாடி-வினா' : 'TNPSC Quizzes'}</span>
             )}
           </div>
 
           <h1 className="practice-title">
             <FileText size={32} />
             <span>
-              MCQ <span className="gradient-text">Practice & Quizzes</span>
+              {isTamil ? (
+                <>பயிற்சி <span className="gradient-text">வினாக்களும் வினாடி-வினாவும்</span></>
+              ) : (
+                <>MCQ <span className="gradient-text">Practice & Quizzes</span></>
+              )}
             </span>
           </h1>
           <p className="practice-subtitle">
-            Curated Samacheer Kalvi topic-wise questions organized by TNPSC Group 1, TNPSC Group 2 & 2A, and TNPSC Group 4
+            {isTamil
+              ? 'சமச்சீர் கல்விப் பாடத்திட்டத்தின்படி TNPSC குரூப் 1, குரூப் 2 & 2A மற்றும் குரூப் 4 வினாக்கள்'
+              : 'Curated Samacheer Kalvi topic-wise questions organized by TNPSC Group 1, TNPSC Group 2 & 2A, and TNPSC Group 4'}
           </p>
         </motion.div>
 
@@ -483,19 +513,27 @@ const MCQPractice = () => {
           <div className="practice-stat-card glass">
             <Timer size={18} />
             <span>
-              Question {filteredQuestions.length > 0 ? activeQuestionIndex + 1 : 0} of {filteredQuestions.length}
+              {isTamil
+                ? `வினா ${filteredQuestions.length > 0 ? activeQuestionIndex + 1 : 0} / ${filteredQuestions.length}`
+                : `Question ${filteredQuestions.length > 0 ? activeQuestionIndex + 1 : 0} of ${filteredQuestions.length}`}
             </span>
           </div>
           <div className="practice-stat-card glass">
             <CheckCircle2 size={18} />
             <span>
-              Score: {score} / {answeredQuestions}
+              {isTamil ? `மதிப்பெண்: ${score} / ${answeredQuestions}` : `Score: ${score} / ${answeredQuestions}`}
             </span>
           </div>
           <div className="practice-stat-card glass">
             <Layers size={18} />
             <span>
-              {selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
+              {isTamil
+                ? selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
+                  ? 'TNPSC குரூப் 2 & 2A'
+                  : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
+                  ? 'TNPSC குரூப் 4 & VAO'
+                  : 'TNPSC குரூப் 1'
+                : selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
                 ? 'TNPSC Group 2 & 2A'
                 : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
                 ? 'TNPSC Group 4'
@@ -519,16 +557,22 @@ const MCQPractice = () => {
             <div className="completion-header">
               <span className="completion-badge">
                 <Sparkles size={14} />
-                <span>Assessment Completed</span>
+                <span>{isTamil ? 'மதிப்பீடு நிறைவுற்றது' : 'Assessment Completed'}</span>
               </span>
-              <h2 className="completion-title">Quiz Completed!</h2>
+              <h2 className="completion-title">{isTamil ? 'பயிற்சி நிறைவடைந்தது!' : 'Quiz Completed!'}</h2>
               <p className="completion-subtitle">
-                {selectedGroup === 'group2_2a'
+                {isTamil
+                  ? selectedGroup === 'group2_2a'
+                    ? 'TNPSC குரூப் 2 & 2A'
+                    : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
+                    ? 'TNPSC குரூப் 4 & VAO'
+                    : 'TNPSC குரூப் 1'
+                  : selectedGroup === 'group2_2a'
                   ? 'TNPSC Group 2 & 2A'
                   : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
                   ? 'TNPSC Group 4 & VAO'
                   : 'TNPSC Group 1'}
-                {activeUnitFilter ? ` • Unit ${activeUnitFilter}` : ''}
+                {activeUnitFilter ? (isTamil ? ` • அலகு ${activeUnitFilter}` : ` • Unit ${activeUnitFilter}`) : ''}
                 {urlLesson ? ` • ${decodeURIComponent(urlLesson)}` : ''}
               </p>
             </div>
@@ -540,16 +584,28 @@ const MCQPractice = () => {
                   {score} <span className="score-total">/ {filteredQuestions.length}</span>
                 </span>
                 <span className="score-percentage-pill">
-                  {Math.round((score / Math.max(1, filteredQuestions.length)) * 100)}% Accuracy
+                  {Math.round((score / Math.max(1, filteredQuestions.length)) * 100)}% {isTamil ? 'துல்லியம்' : 'Accuracy'}
                 </span>
               </div>
               <div className="score-evaluation-text">
                 {Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 80 ? (
-                  <span className="eval-outstanding">🌟 Outstanding Performance! Excellent preparation for TNPSC prelims.</span>
+                  <span className="eval-outstanding">
+                    {isTamil
+                      ? '🌟 மிகச் சிறந்த செயல்திறன்! TNPSC முதல்நிலைத் தேர்வுக்கு உன்னதமான தயாரிப்பு.'
+                      : '🌟 Outstanding Performance! Excellent preparation for TNPSC prelims.'}
+                  </span>
                 ) : Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 60 ? (
-                  <span className="eval-good">🎯 Good Job! Review the missed questions to reinforce key concepts.</span>
+                  <span className="eval-good">
+                    {isTamil
+                      ? '🎯 நன்று! தவறவிட்ட வினாக்களை மீண்டும் படித்துக் கருத்துகளை வலுப்படுத்துங்கள்.'
+                      : '🎯 Good Job! Review the missed questions to reinforce key concepts.'}
+                  </span>
                 ) : (
-                  <span className="eval-practice">📖 Keep Practicing! Read the syllabus study notes and re-attempt.</span>
+                  <span className="eval-practice">
+                    {isTamil
+                      ? '📖 தொடர்ந்து பயிற்சி செய்க! பாடத்திட்டக் குறிப்புகளைப் படித்து மீண்டும் முயற்சி செய்க.'
+                      : '📖 Keep Practicing! Read the syllabus study notes and re-attempt.'}
+                  </span>
                 )}
               </div>
             </div>
@@ -560,21 +616,21 @@ const MCQPractice = () => {
                 <CheckCircle2 size={22} className="stat-icon-correct" />
                 <div>
                   <span className="stat-num">{score}</span>
-                  <span className="stat-label">Correct</span>
+                  <span className="stat-label">{isTamil ? 'சரியானவை' : 'Correct'}</span>
                 </div>
               </div>
               <div className="completion-stat-tile glass stat-incorrect">
                 <XCircle size={22} className="stat-icon-wrong" />
                 <div>
                   <span className="stat-num">{Math.max(0, answeredQuestions - score)}</span>
-                  <span className="stat-label">Incorrect</span>
+                  <span className="stat-label">{isTamil ? 'தவறானவை' : 'Incorrect'}</span>
                 </div>
               </div>
               <div className="completion-stat-tile glass stat-total">
                 <BarChart2 size={22} className="stat-icon-total" />
                 <div>
                   <span className="stat-num">{filteredQuestions.length}</span>
-                  <span className="stat-label">Total Questions</span>
+                  <span className="stat-label">{isTamil ? 'மொத்த வினாக்கள்' : 'Total Questions'}</span>
                 </div>
               </div>
             </div>
@@ -583,15 +639,15 @@ const MCQPractice = () => {
             <div className="completion-actions">
               <button className="btn btn-secondary review-answers-btn" onClick={handleStartReview}>
                 <FileText size={18} />
-                <span>Review All Answers</span>
+                <span>{isTamil ? 'அனைத்து விடைகளையும் மதிப்பாய்வு செய்' : 'Review All Answers'}</span>
               </button>
               <button className="btn btn-primary retake-btn" onClick={handleReset}>
                 <RotateCcw size={18} />
-                <span>Retake Quiz</span>
+                <span>{isTamil ? 'மீண்டும் தேர்வு எழுதுக' : 'Retake Quiz'}</span>
               </button>
               <button className="btn btn-secondary back-mats-btn" onClick={() => navigate('/materials')}>
                 <BookOpen size={18} />
-                <span>Back to Study Materials</span>
+                <span>{isTamil ? 'பாடக்குறிப்புகளுக்குத் திரும்புக' : 'Back to Study Materials'}</span>
               </button>
             </div>
           </motion.div>
@@ -600,8 +656,8 @@ const MCQPractice = () => {
             <div className="empty-icon-wrap">
               <Timer size={36} className="empty-icon" />
             </div>
-            <h3>Loading Practice Questions...</h3>
-            <p>Fetching syllabus-verified MCQs from the question bank.</p>
+            <h3>{isTamil ? 'பயிற்சி வினாக்கள் ஏற்றப்படுகின்றன...' : 'Loading Practice Questions...'}</h3>
+            <p>{isTamil ? 'பாடத்திட்ட அடிப்படையிலான வினாக்கள் வினா வங்கியிலிருந்து பெறப்படுகின்றன.' : 'Fetching syllabus-verified MCQs from the question bank.'}</p>
           </div>
         ) : questionItem ? (
           <AnimatePresence mode="wait">
@@ -616,12 +672,18 @@ const MCQPractice = () => {
               {isReviewMode && (
                 <div className="review-mode-hud glass">
                   <div className="review-mode-info">
-                    <span className="review-badge">Review Mode • Question {activeQuestionIndex + 1} of {filteredQuestions.length}</span>
-                    <span className="review-score-preview">Score: {score}/{filteredQuestions.length}</span>
+                    <span className="review-badge">
+                      {isTamil
+                        ? `மதிப்பாய்வு முறை • வினா ${activeQuestionIndex + 1} / ${filteredQuestions.length}`
+                        : `Review Mode • Question ${activeQuestionIndex + 1} of ${filteredQuestions.length}`}
+                    </span>
+                    <span className="review-score-preview">
+                      {isTamil ? `மதிப்பெண்: ${score}/${filteredQuestions.length}` : `Score: ${score}/${filteredQuestions.length}`}
+                    </span>
                   </div>
                   <button type="button" className="btn btn-secondary btn-sm back-scorecard-btn" onClick={handleBackToScorecard}>
                     <Award size={15} />
-                    <span>Back to Scorecard</span>
+                    <span>{isTamil ? 'மதிப்பெண் அட்டைக்குத் திரும்பு' : 'Back to Scorecard'}</span>
                   </button>
                 </div>
               )}
@@ -629,7 +691,9 @@ const MCQPractice = () => {
               <div className="question-header">
                 <span className="question-category-tag">{formatTag(questionItem)}</span>
                 <span className="question-number">
-                  Q {activeQuestionIndex + 1} of {filteredQuestions.length}
+                  {isTamil
+                    ? `வினா ${activeQuestionIndex + 1} / ${filteredQuestions.length}`
+                    : `Q ${activeQuestionIndex + 1} of ${filteredQuestions.length}`}
                 </span>
               </div>
 
@@ -676,7 +740,7 @@ const MCQPractice = () => {
                   {activeQuestionIndex > 0 && (
                     <button type="button" className="btn btn-secondary prev-btn" onClick={handlePrev}>
                       <ArrowLeft size={18} />
-                      <span>Previous</span>
+                      <span>{isTamil ? 'முந்தைய வினா' : 'Previous'}</span>
                     </button>
                   )}
                 </div>
@@ -688,20 +752,20 @@ const MCQPractice = () => {
                       onClick={handleSubmit}
                       disabled={selectedAnswer === null}
                     >
-                      <span>Submit Answer</span>
+                      <span>{isTamil ? 'விடையைச் சமர்ப்பி' : 'Submit Answer'}</span>
                       <ArrowRight size={18} />
                     </button>
                   ) : (
                     <div className="next-action-group">
                       {!isLastQuestion ? (
                         <button className="btn btn-primary next-btn" onClick={handleNext}>
-                          <span>Next Question</span>
+                          <span>{isTamil ? 'அடுத்த வினா' : 'Next Question'}</span>
                           <ArrowRight size={18} />
                         </button>
                       ) : (
                         <button className="btn btn-primary complete-btn" onClick={handleFinishQuiz}>
                           <Award size={18} />
-                          <span>Finish & View Scorecard</span>
+                          <span>{isTamil ? 'முடித்து மதிப்பெண்ணைக் காண்க' : 'Finish & View Scorecard'}</span>
                         </button>
                       )}
                     </div>
@@ -721,10 +785,14 @@ const MCQPractice = () => {
                 >
                   <div className="explanation-header">
                     <span className="explanation-status">
-                      {selectedAnswer === questionItem.correctAnswer ? 'Correct!' : 'Incorrect'}
+                      {selectedAnswer === questionItem.correctAnswer
+                        ? (isTamil ? 'சரியான விடை!' : 'Correct!')
+                        : (isTamil ? 'தவறான விடை' : 'Incorrect')}
                     </span>
                     <span className="correct-answer-label">
-                      Correct Answer: Option {String.fromCharCode(65 + questionItem.correctAnswer)}
+                      {isTamil
+                        ? `சரியான விடை: விருப்பம் ${String.fromCharCode(65 + questionItem.correctAnswer)}`
+                        : `Correct Answer: Option ${String.fromCharCode(65 + questionItem.correctAnswer)}`}
                     </span>
                   </div>
                   <p className="explanation-text">{questionItem.explanation}</p>
@@ -738,7 +806,7 @@ const MCQPractice = () => {
                         paddingTop: '0.5rem',
                       }}
                     >
-                      <strong style={{ color: '#38bdf8' }}>Source Reference:</strong>{' '}
+                      <strong style={{ color: '#38bdf8' }}>{isTamil ? 'பாடநூல் ஆதாரம்:' : 'Source Reference:'}</strong>{' '}
                       {questionItem.sourceReference}
                     </div>
                   )}
@@ -751,36 +819,40 @@ const MCQPractice = () => {
             <div className="empty-icon-wrap">
               <FileText size={36} className="empty-icon" />
             </div>
-            <h3>No Practice MCQs Available</h3>
+            <h3>{isTamil ? 'பயிற்சி வினாக்கள் ஏதுமில்லை' : 'No Practice MCQs Available'}</h3>
             <p>
               {urlLesson ? (
                 <>
-                  No questions found for <strong>{decodeURIComponent(urlLesson)}</strong> in{' '}
-                  {urlClassId ? `${urlClassId}th Standard ` : ''}Unit {activeUnitFilter}.
+                  {isTamil
+                    ? `பாடப்பிரிவு "${decodeURIComponent(urlLesson)}" க்கான வினாக்கள் எதுவும் கண்டறியப்படவில்லை.`
+                    : <>No questions found for <strong>{decodeURIComponent(urlLesson)}</strong> in {urlClassId ? `${urlClassId}th Standard ` : ''}Unit {activeUnitFilter}.</>}
                 </>
               ) : urlClassId ? (
                 <>
-                  No questions mapped yet for <strong>{urlClassId}th Standard</strong>
-                  {activeUnitFilter ? ` Unit ${activeUnitFilter}` : ''}.
+                  {isTamil
+                    ? `${urlClassId}ஆம் வகுப்பிற்கான வினாக்கள் இன்னும் சேர்க்கப்படவில்லை.`
+                    : <>No questions mapped yet for <strong>{urlClassId}th Standard</strong>{activeUnitFilter ? ` Unit ${activeUnitFilter}` : ''}.</>}
                 </>
               ) : activeUnitFilter ? (
                 <>
-                  No questions mapped yet for <strong>Unit {activeUnitFilter}</strong>.
+                  {isTamil
+                    ? `அலகு ${activeUnitFilter}-க்கான வினாக்கள் இன்னும் சேர்க்கப்படவில்லை.`
+                    : <>No questions mapped yet for <strong>Unit {activeUnitFilter}</strong>.</>}
                 </>
               ) : (
-                <>No practice questions found for the selected examination filter.</>
+                <>{isTamil ? 'தேர்வு வடிகட்டலின்படி வினாக்கள் ஏதுமில்லை.' : 'No practice questions found for the selected examination filter.'}</>
               )}
             </p>
             <div className="empty-actions">
               {(activeUnitFilter || urlClassId || urlLesson) && (
                 <button className="btn btn-primary" onClick={clearUnitFilter}>
                   <RotateCcw size={16} />
-                  <span>View All General Studies Questions</span>
+                  <span>{isTamil ? 'அனைத்து பொது அறிவு வினாக்களையும் காண்க' : 'View All General Studies Questions'}</span>
                 </button>
               )}
               <button className="btn btn-secondary" onClick={() => navigate('/materials')}>
                 <BookOpen size={16} />
-                <span>Back to Study Materials</span>
+                <span>{isTamil ? 'பாடக்குறிப்புகளுக்குத் திரும்புக' : 'Back to Study Materials'}</span>
               </button>
             </div>
           </div>
@@ -800,12 +872,12 @@ const MCQPractice = () => {
           >
             <BookOpen size={16} />
             <span>
-              Back to{' '}
+              {isTamil ? 'திரும்புக: ' : 'Back to '}
               {selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
-                ? 'TNPSC Group 2 & 2A Study Materials'
+                ? (isTamil ? 'குரூப் 2 & 2A பாடக்குறிப்புகள்' : 'TNPSC Group 2 & 2A Study Materials')
                 : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
-                ? 'TNPSC Group 4 Study Materials'
-                : 'Group 1 General Studies'}
+                ? (isTamil ? 'குரூப் 4 பாடக்குறிப்புகள்' : 'TNPSC Group 4 Study Materials')
+                : (isTamil ? 'குரூப் 1 பொது அறிவு' : 'Group 1 General Studies')}
             </span>
           </Link>
         </div>

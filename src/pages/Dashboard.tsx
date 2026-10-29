@@ -225,11 +225,6 @@ const Dashboard = () => {
       <div className="dashboard-content">
         {/* Spatial Window Chrome (VisionOS Liquid Glass Bar) */}
         <div className="spatial-window-bar">
-          <div className="spatial-window-dots">
-            <span className="win-dot win-dot-red" />
-            <span className="win-dot win-dot-yellow" />
-            <span className="win-dot win-dot-green" />
-          </div>
           <div className="spatial-window-url">
             <Lock size={12} className="url-lock-icon" />
             <span className="url-text">tnpsc.aspirant.hub/dashboard-overview</span>

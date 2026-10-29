@@ -29,6 +29,17 @@ import {
   type Group4SchoolLesson,
 } from '../data/group4ClassSyllabusData'
 import { getGroup4SubjectById } from '../data/group4SyllabusData'
+import { useLanguage } from '../context/LanguageContext'
+import LanguageSwitch from '../components/LanguageSwitch'
+import {
+  translateTopic,
+  translateLesson,
+  translateClassTitle,
+  translateUnitNumber,
+  translateSubjectName,
+  translateLessonTitle,
+} from '../utils/bilingualSyllabus'
+import { translateQuestionItem } from '../utils/languageData'
 import './Group1UnitClass.css'
 import './Group1Lessons.css'
 
@@ -49,6 +60,7 @@ const Group4UnitClass = () => {
     classId: string
   }>()
   const navigate = useNavigate()
+  const { language, isTamil } = useLanguage()
 
   const activeSubjectId = subjectId || 'general-studies'
   const parsedUnitId = parseInt(unitId || '1', 10)
@@ -73,7 +85,6 @@ const Group4UnitClass = () => {
 
   // Lock background scroll when interactive lesson modal is open
   useScrollLock(Boolean(activeModalLesson))
-
 
   const handleOpenLesson = (lesson: Group4SchoolLesson, tab: 'notes' | 'quiz') => {
     setActiveModalLesson(lesson)
@@ -104,33 +115,37 @@ const Group4UnitClass = () => {
       <div className="unit-class-container">
         {/* Breadcrumb Navigation */}
         <div className="unit-class-breadcrumb">
-          <Link to="/">Home</Link>
+          <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials?group=group4_vao">Study Materials</Link>
+          <Link to="/materials?group=group4_vao">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
           <ChevronRight size={14} />
           <Link to={`/materials/group4/${activeSubjectId}`}>
-            {subject?.title || data.subjectTitle}
+            {isTamil ? (subject?.tamilTitle || translateSubjectName(subject?.title || data.subjectTitle, language)) : (subject?.title || data.subjectTitle)}
           </Link>
           <ChevronRight size={14} />
           <span className="active">
-            {data.unitNumber} – {data.classTitle}
+            {translateUnitNumber(data.unitNumber, language)} – {translateClassTitle(data.classTitle, language)}
           </span>
         </div>
 
-        {/* Top Back Navigation Bar */}
-        <div className="unit-class-top-bar">
-          <Link to={`/materials/group4/${activeSubjectId}`} className="back-btn glass">
-            <ArrowLeft size={16} />
-            <span>Back to {subject?.title || 'General Studies'}</span>
-          </Link>
+        {/* Top Back Navigation Bar & Language Switch */}
+        <div className="unit-class-top-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <Link to={`/materials/group4/${activeSubjectId}`} className="back-btn glass">
+              <ArrowLeft size={16} />
+              <span>{isTamil ? 'பாடம் தெரிவுக்குத் திரும்பு' : `Back to ${subject?.title || 'General Studies'}`}</span>
+            </Link>
 
-          <Link
-            to={`/materials/group4/${activeSubjectId}/unit/${parsedUnitId}`}
-            className="back-btn glass"
-          >
-            <BookOpen size={16} />
-            <span>View Full {data.unitNumber} Syllabus</span>
-          </Link>
+            <Link
+              to={`/materials/group4/${activeSubjectId}/unit/${parsedUnitId}`}
+              className="back-btn glass"
+            >
+              <BookOpen size={16} />
+              <span>{isTamil ? `முழு பாடத்திட்டம் (${translateUnitNumber(data.unitNumber, language)})` : `View Full ${data.unitNumber} Syllabus`}</span>
+            </Link>
+          </div>
+
+          <LanguageSwitch />
         </div>
 
         {/* Hero Card */}
@@ -143,14 +158,14 @@ const Group4UnitClass = () => {
           <div className="unit-class-hero-badges">
             <span className="hero-badge hero-badge-gold">
               <Sparkles size={13} />
-              TNPSC Group 4 & VAO {subject?.title}
+              {isTamil ? 'டிஎன்பிஎஸ்சி குரூப் 4 & விஏஓ' : `TNPSC Group 4 & VAO ${subject?.title || ''}`}
             </span>
-            <span className="hero-badge hero-badge-cyan">{data.unitNumber}</span>
+            <span className="hero-badge hero-badge-cyan">{translateUnitNumber(data.unitNumber, language)}</span>
             <span className="hero-badge hero-badge-purple">
               <GraduationCap size={14} />
-              {data.classTitle}
+              {translateClassTitle(data.classTitle, language)}
             </span>
-            <span className="hero-badge hero-badge-sub">Samacheer Kalvi</span>
+            <span className="hero-badge hero-badge-sub">{isTamil ? 'சமச்சீர் கல்வி' : 'Samacheer Kalvi'}</span>
           </div>
 
           <div className="unit-class-hero-main">
@@ -159,12 +174,13 @@ const Group4UnitClass = () => {
             </div>
             <div className="unit-class-title-group">
               <h1 className="unit-class-hero-title">
-                {data.unitNumber}: {data.unitTitle} –{' '}
-                <span className="gold-text">{data.classTitle}</span>
+                {translateUnitNumber(data.unitNumber, language)}: {isTamil ? translateTopic(data.unitTitle, language) : data.unitTitle} –{' '}
+                <span className="gold-text">{translateClassTitle(data.classTitle, language)}</span>
               </h1>
               <p className="unit-class-hero-sub">
-                Official Samacheer Kalvi Tamil Nadu State Board textbook curriculum aligned with TNPSC
-                Group 4 & VAO Examination Syllabus (Code: 496).
+                {isTamil
+                  ? 'டிஎன்பிஎஸ்சி குரூப் 4 மற்றும் விஏஓ தேர்வுக்கான அதிகாரப்பூர்வ தமிழ்நாடு சமச்சீர் கல்வி பாடத்திட்டம் (குறியீடு: 496).'
+                  : 'Official Samacheer Kalvi Tamil Nadu State Board textbook curriculum aligned with TNPSC Group 4 & VAO Examination Syllabus (Code: 496).'}
               </p>
             </div>
           </div>
@@ -173,7 +189,7 @@ const Group4UnitClass = () => {
           <div className="switchers-wrapper glass">
             {/* Standard Switcher (6th to 10th) */}
             <div className="switcher-row">
-              <span className="switcher-label">Select Standard:</span>
+              <span className="switcher-label">{isTamil ? 'வகுப்பைத் தேர்ந்தெடுக்கவும்:' : 'Select Standard:'}</span>
               <div className="switcher-pills">
                 {standardClasses.map((cls) => {
                   const isActive = cls.id === parsedClassId
@@ -187,7 +203,7 @@ const Group4UnitClass = () => {
                         )
                       }
                     >
-                      {cls.label}
+                      {translateClassTitle(cls.label, language)}
                     </button>
                   )
                 })}
@@ -196,7 +212,7 @@ const Group4UnitClass = () => {
 
             {/* Unit Switcher */}
             <div className="switcher-row">
-              <span className="switcher-label">Select Unit:</span>
+              <span className="switcher-label">{isTamil ? 'அலகைத் தேர்ந்தெடுக்கவும்:' : 'Select Unit:'}</span>
               <div className="switcher-pills">
                 {(subject?.units || []).map((u) => {
                   const isActive = u.id === parsedUnitId
@@ -209,9 +225,9 @@ const Group4UnitClass = () => {
                           `/materials/group4/${activeSubjectId}/unit/${u.id}/class/${parsedClassId}`
                         )
                       }
-                      title={u.title}
+                      title={isTamil ? translateTopic(u.title, language) : u.title}
                     >
-                      {u.unitNumber}
+                      {translateUnitNumber(u.unitNumber, language)}
                     </button>
                   )
                 })}
@@ -231,16 +247,22 @@ const Group4UnitClass = () => {
             <div className="topics-box-header">
               <div className="topics-box-title">
                 <BookOpen size={18} />
-                <span>Textbook Syllabus & Focus Areas ({data.classTitle})</span>
+                <span>
+                  {isTamil
+                    ? `பாடநூல் பாடத்திட்டம் & முக்கிய தலைப்புகள் (${translateClassTitle(data.classTitle, language)})`
+                    : `Textbook Syllabus & Focus Areas (${data.classTitle})`}
+                </span>
               </div>
-              <span className="topics-count-badge">{data.topics.length} Key Topics</span>
+              <span className="topics-count-badge">
+                {data.topics.length} {isTamil ? 'முக்கியத் தலைப்புகள்' : 'Key Topics'}
+              </span>
             </div>
 
             <div className="topics-chips-list">
               {data.topics.map((topic, idx) => (
                 <div key={idx} className="topic-chip">
                   <span className="topic-chip-num">{idx + 1}</span>
-                  <span className="topic-chip-text">{topic}</span>
+                  <span className="topic-chip-text">{translateTopic(topic, language)}</span>
                 </div>
               ))}
             </div>
@@ -252,16 +274,18 @@ const Group4UnitClass = () => {
           <div className="section-head-bar">
             <div>
               <h2 className="section-title">
-                Curated Lessons for {data.classTitle}
+                {isTamil ? `${translateClassTitle(data.classTitle, language)}-க்கான பாடங்கள்` : `Curated Lessons for ${data.classTitle}`}
               </h2>
               <p className="section-sub">
-                Samacheer Kalvi school textbook chapters mapped to {data.unitTitle}
+                {isTamil
+                  ? `${translateTopic(data.unitTitle, language)} பாடத்திற்குரிய சமச்சீர் கல்வி பள்ளிப் பாடநூல் அத்தியாயங்கள்`
+                  : `Samacheer Kalvi school textbook chapters mapped to ${data.unitTitle}`}
               </p>
             </div>
             {hasLessons && (
               <span className="lessons-count-pill">
                 <Layers size={14} />
-                {lessons.length} Lessons Available
+                {lessons.length} {isTamil ? 'பாடங்கள் கிடைக்கக்கூடியவை' : 'Lessons Available'}
               </span>
             )}
           </div>
@@ -269,6 +293,7 @@ const Group4UnitClass = () => {
           {hasLessons ? (
             <div className="lessons-grid">
               {lessons.map((lesson: Group4SchoolLesson, index: number) => {
+                const tLesson = translateLesson(lesson, language)
                 const practiceUrl = `/practice?group=group4_vao&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
                   data.unitTitle
                 )}&lesson=${encodeURIComponent(lesson.title)}&classId=${data.classId}`
@@ -282,35 +307,37 @@ const Group4UnitClass = () => {
                     transition={{ duration: 0.35, delay: index * 0.05 }}
                   >
                     <div className="lesson-top-meta">
-                      <span className="lesson-num-badge">Lesson {lesson.lessonNumber}</span>
-                      {lesson.term && <span className="lesson-term-badge">{lesson.term}</span>}
+                      <span className="lesson-num-badge">
+                        {isTamil ? `பாடம் ${tLesson.lessonNumber}` : `Lesson ${lesson.lessonNumber}`}
+                      </span>
+                      {tLesson.term && <span className="lesson-term-badge">{tLesson.term}</span>}
                       <span className="lesson-status-badge">
                         <CheckCircle2 size={12} />
-                        {lesson.status}
+                        {tLesson.status}
                       </span>
                     </div>
 
-                    <h3 className="lesson-title">{lesson.title}</h3>
+                    <h3 className="lesson-title">{tLesson.title}</h3>
 
-                    {lesson.description && (
-                      <p className="lesson-desc">{lesson.description}</p>
+                    {tLesson.description && (
+                      <p className="lesson-desc">{tLesson.description}</p>
                     )}
 
                     <div className="lesson-action-row">
                       <button
                         className="lesson-read-btn"
                         onClick={() => handleOpenLesson(lesson, 'notes')}
-                        title={`Open interactive study notes for ${lesson.title}`}
+                        title={isTamil ? `${tLesson.title} பாடக் குறிப்புகளைப் படிக்க` : `Open interactive study notes for ${lesson.title}`}
                       >
                         <FileQuestion size={15} />
-                        <span>Read Study Notes</span>
+                        <span>{isTamil ? 'பாடக் குறிப்புகளைப் படிக்க' : 'Read Study Notes'}</span>
                       </button>
                       <Link
                         to={practiceUrl}
                         className="lesson-practice-btn"
-                        title="Practice MCQs for this lesson"
+                        title={isTamil ? 'இப்பாடத்திற்கான வினாக்களைப் பயிற்சி செய்' : 'Practice MCQs for this lesson'}
                       >
-                        <span>Practice MCQs</span>
+                        <span>{isTamil ? 'பயிற்சி வினாக்கள்' : 'Practice MCQs'}</span>
                         <ChevronRight size={14} />
                       </Link>
                     </div>
@@ -376,9 +403,9 @@ const Group4UnitClass = () => {
                 <div className="modal-head">
                   <div className="modal-title-group">
                     <span className="modal-code-pill">
-                      {data.classTitle} • Lesson {activeModalLesson.lessonNumber}
+                      {translateClassTitle(data.classTitle, language)} • {isTamil ? 'பாடம்' : 'Lesson'} {activeModalLesson.lessonNumber}
                     </span>
-                    <h3 className="modal-title">{activeModalLesson.title}</h3>
+                    <h3 className="modal-title">{translateLessonTitle(activeModalLesson.title, language)}</h3>
                   </div>
 
                   <button
@@ -396,14 +423,14 @@ const Group4UnitClass = () => {
                     onClick={() => setActiveModalTab('notes')}
                   >
                     <BookOpen size={15} style={{ display: 'inline', marginRight: '6px' }} />
-                    Study Notes & Summary
+                    {isTamil ? 'பாடக் குறிப்புகள் & சுருக்கம்' : 'Study Notes & Summary'}
                   </button>
                   <button
                     className={`switcher-pill ${activeModalTab === 'quiz' ? 'active' : ''}`}
                     onClick={() => setActiveModalTab('quiz')}
                   >
                     <Sparkles size={15} style={{ display: 'inline', marginRight: '6px' }} />
-                    Practice Quiz ({activeModalLesson.practiceMCQs?.length || 0} Questions)
+                    {isTamil ? `பயிற்சி வினாடி வினா (${activeModalLesson.practiceMCQs?.length || 0} வினாக்கள்)` : `Practice Quiz (${activeModalLesson.practiceMCQs?.length || 0} Questions)`}
                   </button>
                 </div>
 
@@ -413,7 +440,7 @@ const Group4UnitClass = () => {
                       {activeModalLesson.keyConcepts && activeModalLesson.keyConcepts.length > 0 && (
                         <div>
                           <span style={{ fontSize: '0.75rem', color: 'var(--gold-primary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                            Core Concepts:
+                            {isTamil ? 'முக்கியக் கருத்துகள்:' : 'Core Concepts:'}
                           </span>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.4rem' }}>
                             {activeModalLesson.keyConcepts.map((concept, idx) => (
@@ -429,7 +456,7 @@ const Group4UnitClass = () => {
                                   fontWeight: 600,
                                 }}
                               >
-                                {concept}
+                                {translateTopic(concept, language)}
                               </span>
                             ))}
                           </div>
@@ -438,7 +465,7 @@ const Group4UnitClass = () => {
 
                       <div>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          Lesson Study Notes:
+                          {isTamil ? 'பாடக் குறிப்புகள்:' : 'Lesson Study Notes:'}
                         </span>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
                           {(activeModalLesson.studyNotes || [
@@ -457,7 +484,7 @@ const Group4UnitClass = () => {
                                 lineHeight: '1.6',
                               }}
                             >
-                              {note}
+                              {translateTopic(note, language)}
                             </div>
                           ))}
                         </div>
@@ -473,7 +500,7 @@ const Group4UnitClass = () => {
                           onClick={() => setActiveModalLesson(null)}
                         >
                           <Award size={16} />
-                          <span>Finish & Practice MCQs</span>
+                          <span>{isTamil ? 'பயிற்சி வினாக்களைத் தொடங்க' : 'Finish & Practice MCQs'}</span>
                           <ChevronRight size={14} />
                         </Link>
                       </div>
@@ -495,10 +522,10 @@ const Group4UnitClass = () => {
                         }}
                       >
                         <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          Answered: <strong>{answeredCount}</strong> of <strong>{totalQuestions}</strong>
+                          {isTamil ? 'பதிலளித்தவை:' : 'Answered:'} <strong>{answeredCount}</strong> {isTamil ? 'இல்' : 'of'} <strong>{totalQuestions}</strong>
                         </span>
                         <span style={{ fontSize: '0.875rem', color: 'var(--gold-primary)', fontWeight: 700 }}>
-                          Current Score: {correctCount}/{answeredCount} ({answeredCount > 0 ? scorePercent : 0}%)
+                          {isTamil ? 'தற்போதைய மதிப்பெண்:' : 'Current Score:'} {correctCount}/{answeredCount} ({answeredCount > 0 ? scorePercent : 0}%)
                         </span>
                       </div>
 
@@ -507,6 +534,18 @@ const Group4UnitClass = () => {
                           const userAnswer = selectedAnswers[q.id]
                           const isAnswered = userAnswer !== undefined
                           const isCorrect = isAnswered && userAnswer === q.correctAnswer
+                          const translatedQ = translateQuestionItem(
+                            {
+                              id: q.id,
+                              category: 'group4_vao',
+                              tag: `${data.unitNumber} • ${activeModalLesson.title}`,
+                              question: q.question,
+                              options: q.options,
+                              correctAnswer: q.correctAnswer,
+                              explanation: q.explanation,
+                            },
+                            language
+                          )
 
                           return (
                             <div
@@ -532,15 +571,15 @@ const Group4UnitClass = () => {
                                     fontSize: '0.8rem',
                                   }}
                                 >
-                                  Q{qIndex + 1}
+                                  {isTamil ? `வினா ${qIndex + 1}` : `Q${qIndex + 1}`}
                                 </span>
                                 <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.95rem' }}>
-                                  {q.question}
+                                  {translatedQ.question}
                                 </span>
                               </div>
 
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                {q.options.map((opt, optIdx) => {
+                                {translatedQ.options.map((opt, optIdx) => {
                                   const letter = String.fromCharCode(65 + optIdx)
                                   let bg = 'rgba(255,255,255,0.04)'
                                   let borderColor = 'rgba(255,255,255,0.08)'
@@ -624,10 +663,12 @@ const Group4UnitClass = () => {
                                       marginBottom: '0.25rem',
                                     }}
                                   >
-                                    {isCorrect ? '✓ Correct Answer!' : '✗ Incorrect Explanation:'}
+                                    {isCorrect
+                                      ? (isTamil ? '✓ சரியான விடை!' : '✓ Correct Answer!')
+                                      : (isTamil ? '✗ விளக்கம்:' : '✗ Incorrect Explanation:')}
                                   </div>
                                   <p style={{ margin: 0, fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
-                                    {q.explanation}
+                                    {translatedQ.explanation}
                                   </p>
                                 </div>
                               )}
@@ -636,7 +677,7 @@ const Group4UnitClass = () => {
                         })
                       ) : (
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', margin: '2rem 0' }}>
-                          Practice questions for this lesson will be available soon.
+                          {isTamil ? 'இப்பாடத்திற்கான பயிற்சி வினாக்கள் விரைவில் சேர்க்கப்படும்.' : 'Practice questions for this lesson will be available soon.'}
                         </p>
                       )}
 

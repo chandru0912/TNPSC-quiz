@@ -19,6 +19,9 @@ import {
   getTotalGSLessons,
   group1AptitudeUnits,
 } from '../data/group1SyllabusData'
+import { useLanguage } from '../context/LanguageContext'
+import LanguageSwitch from '../components/LanguageSwitch'
+import { UI_TRANSLATIONS } from '../utils/languageData'
 import './StudyMaterials.css'
 
 type GroupId = 'group1' | 'group2_2a' | 'group4_vao'
@@ -45,6 +48,8 @@ const StudyMaterials = () => {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
+  const { language, isTamil } = useLanguage()
+  const t = UI_TRANSLATIONS.studyMaterials[language]
 
   const rawUrlParam = searchParams.get('group') || searchParams.get('tab')
   const groupFromUrl = normalizeGroup(rawUrlParam)
@@ -62,9 +67,9 @@ const StudyMaterials = () => {
   }, [selectedGroup])
 
   const groups = [
-    { id: 'group1' as const, name: 'TNPSC Group 1' },
-    { id: 'group2_2a' as const, name: 'TNPSC Group 2 & 2A' },
-    { id: 'group4_vao' as const, name: 'TNPSC Group 4' },
+    { id: 'group1' as const, name: isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1' },
+    { id: 'group2_2a' as const, name: isTamil ? 'TNPSC குரூப் 2 & 2A' : 'TNPSC Group 2 & 2A' },
+    { id: 'group4_vao' as const, name: isTamil ? 'TNPSC குரூப் 4 & VAO' : 'TNPSC Group 4' },
   ]
 
   const handleGroupChange = (group: GroupId) => {
@@ -90,13 +95,24 @@ const StudyMaterials = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
         >
-          <h1 className="materials-title">
-            <BookOpen size={32} />
-            <span>Study Materials & Syllabus</span>
-          </h1>
-          <p className="materials-subtitle">
-            Comprehensive syllabus-mapped learning modules, study notes, and lesson-wise practice quizzes
-          </p>
+          <div className="materials-header-top">
+            <h1 className="materials-title">
+              <BookOpen size={32} />
+              <span>
+                {isTamil ? (
+                  <>
+                    பாடக்குறிப்புகள் & <span className="gradient-text">பாடத்திட்டம்</span>
+                  </>
+                ) : (
+                  <>
+                    Study Materials & <span className="gradient-text">Syllabus</span>
+                  </>
+                )}
+              </span>
+            </h1>
+            <LanguageSwitch variant="section" forceVisible={true} />
+          </div>
+          <p className="materials-subtitle">{t.pageSubtitle}</p>
         </motion.div>
 
         {/* Main Category Tabs */}
@@ -133,10 +149,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group1/general-studies')}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part A • Degree Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி A • பட்டப்படிப்புத் தரம்' : 'Part A • Degree Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  {gsTotalQuestions} Questions
+                  {gsTotalQuestions} {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -145,41 +161,42 @@ const StudyMaterials = () => {
                   <BookOpen size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">General Studies</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'பொது அறிவு (General Studies)' : 'General Studies'}</h2>
                   <span className="group1-card-sub">
-                    {group1GeneralStudiesUnits.length} Distinct Syllabus Units
+                    {group1GeneralStudiesUnits.length} {isTamil ? 'பாடத்திட்ட அலகுகள்' : 'Distinct Syllabus Units'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                Comprehensive degree standard syllabus covering General Science, Indian Geography,
-                History & Culture of India, Indian Polity, Indian Economy & TN Administration, and Tamil Society Heritage.
+                {isTamil
+                  ? 'பொது அறிவியல், இந்தியப் புவியியல், இந்திய வரலாறு & கலாச்சாரம், இந்திய ஆட்சியியல், இந்தியப் பொருளாதாரம் & தமிழ்நாடு நிர்வாகம் மற்றும் தமிழ் மரபு உள்ளடக்கிய பட்டப்படிப்புத் தரம்.'
+                  : 'Comprehensive degree standard syllabus covering General Science, Indian Geography, History & Culture of India, Indian Polity, Indian Economy & TN Administration, and Tamil Society Heritage.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>{group1GeneralStudiesUnits.length}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{group1GeneralStudiesUnits.length}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <BookOpen size={16} />
                   <span>
-                    Chapters: <strong>{gsTotalChapters}</strong>
+                    {isTamil ? 'அத்தியாயங்கள்:' : 'Chapters:'} <strong>{gsTotalChapters}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Sparkles size={16} />
                   <span>
-                    Lessons: <strong>{gsTotalLessons}</strong>
+                    {isTamil ? 'பாடங்கள்:' : 'Lessons:'} <strong>{gsTotalLessons}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore General Studies (6 Units)</span>
+                <span>{isTamil ? 'பொது அறிவு அலகுகளை ஆராய்க (6 அலகுகள்)' : 'Explore General Studies (6 Units)'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -190,10 +207,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group1/aptitude')}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part B • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி B • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part B • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  {aptTotalQuestions} Questions
+                  {aptTotalQuestions} {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -202,41 +219,42 @@ const StudyMaterials = () => {
                   <Calculator size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">Aptitude and Mental Ability</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்' : 'Aptitude and Mental Ability'}</h2>
                   <span className="group1-card-sub">
-                    {group1AptitudeUnits.length} Units (Aptitude & Reasoning)
+                    {group1AptitudeUnits.length} {isTamil ? 'அலகுகள் (கணிதம் & தர்க்கவியல்)' : 'Units (Aptitude & Reasoning)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                SSLC standard quantitative aptitude and logical reasoning modules including Simplification,
-                HCF & LCM, Ratio, Percentage, Simple & Compound Interest, Puzzles, Dice, and Visual Reasoning.
+                {isTamil
+                  ? 'பத்தாம் வகுப்புத் தரத்திலான சுருக்குதல், விழுக்காடு, மீ.பொ.வ, மீ.சி.ம, விகிதம், தனிவட்டி, கூட்டுவட்டி, பரப்பளவு மற்றும் தர்க்கக் கணக்குகள்.'
+                  : 'SSLC standard quantitative aptitude and logical reasoning modules including Simplification, HCF & LCM, Ratio, Percentage, Simple & Compound Interest, Puzzles, Dice, and Visual Reasoning.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>{group1AptitudeUnits.length}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{group1AptitudeUnits.length}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Clock size={16} />
                   <span>
-                    Standard: <strong>SSLC (10th)</strong>
+                    {isTamil ? 'தரம்:' : 'Standard:'} <strong>{isTamil ? 'பத்தாம் வகுப்பு (SSLC)' : 'SSLC (10th)'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <HelpCircle size={16} />
                   <span>
-                    Weightage: <strong>{aptTotalQuestions} Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{aptTotalQuestions} {isTamil ? 'மதிப்பெண்கள்' : 'Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore Aptitude & Reasoning</span>
+                <span>{isTamil ? 'திறனறிவுப் பாடங்களை ஆராய்க' : 'Explore Aptitude & Reasoning'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -261,10 +279,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group2/general-studies', { state: { selectedGroup: 'group2_2a' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part A • Degree Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி A • பட்டப்படிப்புத் தரம்' : 'Part A • Degree Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  75 Questions
+                  75 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -273,41 +291,42 @@ const StudyMaterials = () => {
                   <Globe2 size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">General Studies</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'பொது அறிவு (General Studies)' : 'General Studies'}</h2>
                   <span className="group1-card-sub">
-                    6 Syllabus Units (Degree Standard • Preliminary Exam)
+                    {isTamil ? '6 பாடத்திட்ட அலகுகள் (பட்டப்படிப்புத் தரம் • முதல்நிலைத் தேர்வு)' : '6 Syllabus Units (Degree Standard • Preliminary Exam)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                Official TNPSC Group 2 & 2A preliminary syllabus covering General Science, Geography of India,
-                History & Culture of India and INM, Indian Polity, Indian Economy & TN Administration, and Tamil Society Heritage.
+                {isTamil
+                  ? 'அதிகாரப்பூர்வ TNPSC குரூப் 2 & 2A முதல்நிலைத் தேர்வுப் பாடத்திட்டம்: பொது அறிவியல், இந்தியப் புவியியல், இந்திய வரலாறு மற்றும் இந்திய தேசிய இயக்கம், ஆட்சியியல், பொருளாதாரம் மற்றும் தமிழ் சமூகப் பண்பாடு.'
+                  : 'Official TNPSC Group 2 & 2A preliminary syllabus covering General Science, Geography of India, History & Culture of India and INM, Indian Polity, Indian Economy & TN Administration, and Tamil Society Heritage.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>6 Units</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '6 அலகுகள்' : '6 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <BookOpen size={16} />
                   <span>
-                    Classes: <strong>6th to 12th</strong>
+                    {isTamil ? 'வகுப்புகள்:' : 'Classes:'} <strong>{isTamil ? '6 முதல் 12 வரை' : '6th to 12th'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Sparkles size={16} />
                   <span>
-                    Weightage: <strong>75 Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '75 மதிப்பெண்கள்' : '75 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore General Studies (6 Units & Classes)</span>
+                <span>{isTamil ? 'பொது அறிவு அலகுகளை ஆராய்க (6 அலகுகள்)' : 'Explore General Studies (6 Units & Classes)'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -318,10 +337,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group2/aptitude', { state: { selectedGroup: 'group2_2a' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part B • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி B • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part B • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  25 Questions
+                  25 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -330,41 +349,42 @@ const StudyMaterials = () => {
                   <Calculator size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">Aptitude and Mental Ability</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்' : 'Aptitude and Mental Ability'}</h2>
                   <span className="group1-card-sub">
-                    2 Units (Aptitude & Mental Ability • SSLC Standard)
+                    {isTamil ? '2 அலகுகள் (பத்தாம் வகுப்புத் தரம்)' : '2 Units (Aptitude & Mental Ability • SSLC Standard)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                SSLC standard quantitative aptitude and logical reasoning modules including Simplification,
-                Percentage, HCF & LCM, Ratio & Proportion, Simple & Compound Interest, Area & Volume, Time and Work, Puzzles, Dice, and Visual Reasoning.
+                {isTamil
+                  ? 'பத்தாம் வகுப்புத் தரத்திலான சுருக்குதல், விழுக்காடு, மீ.பொ.வ, மீ.சி.ம, விகிதம் & விகிதாச்சாரம், தனிவட்டி, கூட்டுவட்டி, பரப்பளவு, காலம் மற்றும் வேலை, புதிர்கள் மற்றும் பகடை.'
+                  : 'SSLC standard quantitative aptitude and logical reasoning modules including Simplification, Percentage, HCF & LCM, Ratio & Proportion, Simple & Compound Interest, Area & Volume, Time and Work, Puzzles, Dice, and Visual Reasoning.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>2 Units</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '2 அலகுகள்' : '2 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Clock size={16} />
                   <span>
-                    Standard: <strong>SSLC (10th)</strong>
+                    {isTamil ? 'தரம்:' : 'Standard:'} <strong>{isTamil ? 'பத்தாம் வகுப்பு (SSLC)' : 'SSLC (10th)'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <HelpCircle size={16} />
                   <span>
-                    Weightage: <strong>25 Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '25 மதிப்பெண்கள்' : '25 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore Aptitude and Mental Ability</span>
+                <span>{isTamil ? 'திறனறிவுப் பாடங்களை ஆராய்க' : 'Explore Aptitude and Mental Ability'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -375,10 +395,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group2/general-english', { state: { selectedGroup: 'group2_2a' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part C • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி C • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part C • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  100 Questions
+                  100 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -387,41 +407,42 @@ const StudyMaterials = () => {
                   <Languages size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">General English</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'பொது ஆங்கிலம் (General English)' : 'General English'}</h2>
                   <span className="group1-card-sub">
-                    7 Units (Grammar, Vocabulary & Literature • SSLC Standard)
+                    {isTamil ? '7 அலகுகள் (இலக்கணம், சொற்களஞ்சியம் & இலக்கியம்)' : '7 Units (Grammar, Vocabulary & Literature • SSLC Standard)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                Comprehensive SSLC standard syllabus covering English Grammar, Vocabulary, Writing Skills,
-                Technical Terms, Reading Comprehension, Translation, and Renowned Literary Works & Figures.
+                {isTamil
+                  ? 'பத்தாம் வகுப்புத் தரத்திலான ஆங்கில இலக்கணம், சொற்களஞ்சியம், வாசித்தல் புரிதல், மொழிபெயர்ப்பு மற்றும் பாடநூல் இலக்கியப் பகுதிகள்.'
+                  : 'Comprehensive SSLC standard syllabus covering English Grammar, Vocabulary, Writing Skills, Technical Terms, Reading Comprehension, Translation, and Renowned Literary Works & Figures.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>7 Units</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <BookOpen size={16} />
                   <span>
-                    Classes: <strong>6th to 12th</strong>
+                    {isTamil ? 'வகுப்புகள்:' : 'Classes:'} <strong>{isTamil ? '6 முதல் 12 வரை' : '6th to 12th'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Sparkles size={16} />
                   <span>
-                    Weightage: <strong>100 Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '100 மதிப்பெண்கள்' : '100 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore General English (7 Units & Classes)</span>
+                <span>{isTamil ? 'பொது ஆங்கிலத்தை ஆராய்க (7 அலகுகள்)' : 'Explore General English (7 Units & Classes)'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -432,10 +453,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group2/general-tamil', { state: { selectedGroup: 'group2_2a' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part C • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி C • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part C • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  100 Questions
+                  100 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -444,41 +465,42 @@ const StudyMaterials = () => {
                   <Sparkles size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">General Tamil (பொதுத் தமிழ்)</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'பொதுத் தமிழ்' : 'General Tamil (பொதுத் தமிழ்)'}</h2>
                   <span className="group1-card-sub">
-                    7 Units (இலக்கணம், இலக்கியம், தமிழ் அறிஞர்கள் • SSLC Standard)
+                    {isTamil ? '7 அலகுகள் (இலக்கணம், இலக்கியம், தமிழ் அறிஞர்கள்)' : '7 Units (இலக்கணம், இலக்கியம், தமிழ் அறிஞர்கள் • SSLC Standard)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                விரிவான பத்தாம் வகுப்பு தரத்திலான பொதுத் தமிழ் பாடத்திட்டம்: இலக்கணம், சொல்லகராதி, எழுதும் திறன்,
-                கலைச் சொற்கள், வாசித்தல் புரிதல், மொழிபெயர்ப்பு மற்றும் இலக்கியமும் தமிழறிஞர்களும்.
+                {isTamil
+                  ? 'விரிவான பத்தாம் வகுப்பு தரத்திலான பொதுத் தமிழ் பாடத்திட்டம்: இலக்கணம், சொல்லகராதி, எழுதும் திறன், கலைச் சொற்கள், வாசித்தல் புரிதல், மொழிபெயர்ப்பு மற்றும் இலக்கியமும் தமிழறிஞர்களும்.'
+                  : 'Comprehensive SSLC standard syllabus covering Tamil Grammar, Vocabulary, Writing Skills, Technical Terms, Reading Comprehension, Translation, and Literature & Tamil Scholars.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>7 Units</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <BookOpen size={16} />
                   <span>
-                    Classes: <strong>6th to 12th</strong>
+                    {isTamil ? 'வகுப்புகள்:' : 'Classes:'} <strong>{isTamil ? '6 முதல் 12 வரை' : '6th to 12th'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Sparkles size={16} />
                   <span>
-                    Weightage: <strong>100 Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '100 மதிப்பெண்கள்' : '100 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore General Tamil (7 Units & Classes)</span>
+                <span>{isTamil ? 'பொதுத் தமிழை ஆராய்க (7 அலகுகள்)' : 'Explore General Tamil (7 Units & Classes)'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -503,10 +525,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group4/general-studies', { state: { selectedGroup: 'group4_vao' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part A • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி A • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part A • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  75 Questions
+                  75 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -515,41 +537,42 @@ const StudyMaterials = () => {
                   <Globe2 size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">General Studies</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'பொது அறிவு (General Studies)' : 'General Studies'}</h2>
                   <span className="group1-card-sub">
-                    6 Syllabus Units (SSLC Standard • Single Paper)
+                    {isTamil ? '6 பாடத்திட்ட அலகுகள் (பத்தாம் வகுப்புத் தரம்)' : '6 Syllabus Units (SSLC Standard • Single Paper)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                Official TNPSC Group 4 General Studies syllabus covering General Science, Geography of India & TN,
-                History & Culture of India and INM, Indian Polity, Indian Economy & TN Dev Admin, and Tamil Nadu History/Heritage/Movements.
+                {isTamil
+                  ? 'அதிகாரப்பூர்வ TNPSC குரூப் 4 பொது அறிவுப் பாடத்திட்டம்: பொது அறிவியல், இந்திய மற்றும் தமிழ்நாடு புவியியல், வரலாறு, இந்திய தேசிய இயக்கம், ஆட்சியியல், பொருளாதாரம் மற்றும் தமிழ்நாட்டின் விடுதலைப் போராட்ட வரலாறு.'
+                  : 'Official TNPSC Group 4 General Studies syllabus covering General Science, Geography of India & TN, History & Culture of India and INM, Indian Polity, Indian Economy & TN Dev Admin, and Tamil Nadu History/Heritage/Movements.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>6 Units</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '6 அலகுகள்' : '6 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <BookOpen size={16} />
                   <span>
-                    Classes: <strong>6th to 10th</strong>
+                    {isTamil ? 'வகுப்புகள்:' : 'Classes:'} <strong>{isTamil ? '6 முதல் 10 வரை' : '6th to 10th'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Sparkles size={16} />
                   <span>
-                    Weightage: <strong>75 Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '75 மதிப்பெண்கள்' : '75 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore General Studies (6 Units & Classes)</span>
+                <span>{isTamil ? 'பொது அறிவு அலகுகளை ஆராய்க (6 அலகுகள்)' : 'Explore General Studies (6 Units & Classes)'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -560,10 +583,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group4/aptitude', { state: { selectedGroup: 'group4_vao' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part B • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி B • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part B • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  25 Questions
+                  25 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -572,41 +595,42 @@ const StudyMaterials = () => {
                   <Calculator size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">Aptitude and Mental Ability</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்' : 'Aptitude and Mental Ability'}</h2>
                   <span className="group1-card-sub">
-                    2 Units (Aptitude & Reasoning • SSLC Standard)
+                    {isTamil ? '2 அலகுகள் (பத்தாம் வகுப்புத் தரம்)' : '2 Units (Aptitude & Reasoning • SSLC Standard)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                SSLC standard quantitative aptitude and logical reasoning modules including Simplification,
-                Percentage, HCF & LCM, Ratio & Proportion, Simple & Compound Interest, Area & Volume, Time and Work, Puzzles, Dice, Visual Reasoning, and Number Series.
+                {isTamil
+                  ? 'பத்தாம் வகுப்புத் தரத்திலான சுருக்குதல், விழுக்காடு, மீ.பொ.வ, மீ.சி.ம, விகிதம் & விகிதாச்சாரம், தனிவட்டி, கூட்டுவட்டி, பரப்பளவு, காலம் மற்றும் வேலை, புதிர்கள் மற்றும் பகடை.'
+                  : 'SSLC standard quantitative aptitude and logical reasoning modules including Simplification, Percentage, HCF & LCM, Ratio & Proportion, Simple & Compound Interest, Area & Volume, Time and Work, Puzzles, Dice, Visual Reasoning, and Number Series.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>2 Units</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '2 அலகுகள்' : '2 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Clock size={16} />
                   <span>
-                    Standard: <strong>SSLC (10th)</strong>
+                    {isTamil ? 'தரம்:' : 'Standard:'} <strong>{isTamil ? 'பத்தாம் வகுப்பு (SSLC)' : 'SSLC (10th)'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <HelpCircle size={16} />
                   <span>
-                    Weightage: <strong>25 Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '25 மதிப்பெண்கள்' : '25 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore Aptitude and Mental Ability</span>
+                <span>{isTamil ? 'திறனறிவுப் பாடங்களை ஆராய்க' : 'Explore Aptitude and Mental Ability'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -617,10 +641,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group4/general-tamil', { state: { selectedGroup: 'group4_vao' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part C • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி C • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part C • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  100 Questions
+                  100 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -629,40 +653,42 @@ const StudyMaterials = () => {
                   <BookOpen size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">General Tamil (பொதுத் தமிழ்)</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'பொதுத் தமிழ்' : 'General Tamil (பொதுத் தமிழ்)'}</h2>
                   <span className="group1-card-sub">
-                    7 அலகுகள் (தமிழ் தகுதி மற்றும் மதிப்பீட்டுத் தேர்வு)
+                    {isTamil ? '7 அலகுகள் (தமிழ் தகுதி மற்றும் மதிப்பீட்டுத் தேர்வு)' : '7 Units (Tamil Eligibility & Scoring Test)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                SSLC தரத்திலான தமிழ் தகுதி மற்றும் மதிப்பீட்டுத் தேர்வு பாடத்திட்டம்: இலக்கணம், சொல்லகராதி, எழுதும் திறன், கலைச் சொற்கள், வாசித்தல் புரிந்து கொள்ளும் திறன், எளிய மொழி பெயர்ப்பு, இலக்கியம் மற்றும் தமிழ் அறிஞர்களும் தமிழ்த்தொண்டும்.
+                {isTamil
+                  ? 'SSLC தரத்திலான தமிழ் தகுதி மற்றும் மதிப்பீட்டுத் தேர்வு பாடத்திட்டம்: இலக்கணம், சொல்லகராதி, எழுதும் திறன், கலைச் சொற்கள், வாசித்தல் புரிந்து கொள்ளும் திறன், எளிய மொழி பெயர்ப்பு, இலக்கியம் மற்றும் தமிழ் அறிஞர்களும் தமிழ்த்தொண்டும்.'
+                  : 'SSLC standard syllabus for Tamil Eligibility and Scoring Test: Grammar, Vocabulary, Writing Skills, Technical Terms, Reading Comprehension, Translation, Literature, and Tamil Scholars & Contributions.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    அலகுகள்: <strong>7 அலகுகள்</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <BookOpen size={16} />
                   <span>
-                    வகுப்புகள்: <strong>6 முதல் 10 வரை</strong>
+                    {isTamil ? 'வகுப்புகள்:' : 'Classes:'} <strong>{isTamil ? '6 முதல் 10 வரை' : '6th to 10th'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Sparkles size={16} />
                   <span>
-                    மதிப்பெண்: <strong>100 வினாக்கள்</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '100 மதிப்பெண்கள்' : '100 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore General Tamil (7 Units & Classes)</span>
+                <span>{isTamil ? 'பொதுத் தமிழை ஆராய்க (7 அலகுகள்)' : 'Explore General Tamil (7 Units & Classes)'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -673,10 +699,10 @@ const StudyMaterials = () => {
               onClick={() => navigate('/materials/group4/general-english', { state: { selectedGroup: 'group4_vao' } })}
             >
               <div className="group1-card-top">
-                <span className="group1-part-tag">Part C • SSLC Standard</span>
+                <span className="group1-part-tag">{isTamil ? 'பகுதி C • பத்தாம் வகுப்புத் தரம் (SSLC)' : 'Part C • SSLC Standard'}</span>
                 <span className="group1-weightage-pill">
                   <HelpCircle size={14} />
-                  100 Questions
+                  100 {isTamil ? 'வினாக்கள்' : 'Questions'}
                 </span>
               </div>
 
@@ -685,41 +711,42 @@ const StudyMaterials = () => {
                   <Languages size={28} />
                 </div>
                 <div className="group1-card-title-group">
-                  <h2 className="group1-card-title">General English</h2>
+                  <h2 className="group1-card-title">{isTamil ? 'பொது ஆங்கிலம் (General English)' : 'General English'}</h2>
                   <span className="group1-card-sub">
-                    7 Units (Grammar, Vocabulary & Literature • SSLC Standard)
+                    {isTamil ? '7 அலகுகள் (இலக்கணம், சொற்களஞ்சியம் & இலக்கியம்)' : '7 Units (Grammar, Vocabulary & Literature • SSLC Standard)'}
                   </span>
                 </div>
               </div>
 
               <p className="group1-card-desc">
-                SSLC standard syllabus (for Differently Abled Candidates) covering Grammar, Vocabulary, Writing Skills,
-                Technical Terms, Reading Comprehension, Translation, and 30 Prescribed Poems & 26 Prose Works with school textbook mappings.
+                {isTamil
+                  ? 'பத்தாம் வகுப்புத் தரத்திலான பொது ஆங்கிலப் பாடத்திட்டம்: இலக்கணம், சொற்களஞ்சியம், எழுதும் திறன், வாசித்தல் புரிதல் மற்றும் அரசு பாடநூல் செய்யுள் & உரைநடை பகுதிகள்.'
+                  : 'SSLC standard syllabus (for Differently Abled Candidates) covering Grammar, Vocabulary, Writing Skills, Technical Terms, Reading Comprehension, Translation, and 30 Prescribed Poems & 26 Prose Works with school textbook mappings.'}
               </p>
 
               <div className="group1-card-stats">
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    Units: <strong>7 Units</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <BookOpen size={16} />
                   <span>
-                    Classes: <strong>6th to 10th</strong>
+                    {isTamil ? 'வகுப்புகள்:' : 'Classes:'} <strong>{isTamil ? '6 முதல் 10 வரை' : '6th to 10th'}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
                   <Sparkles size={16} />
                   <span>
-                    Weightage: <strong>100 Marks</strong>
+                    {isTamil ? 'மதிப்பெண்:' : 'Weightage:'} <strong>{isTamil ? '100 மதிப்பெண்கள்' : '100 Marks'}</strong>
                   </span>
                 </div>
               </div>
 
               <div className="group1-card-action">
-                <span>Explore General English (7 Units & Classes)</span>
+                <span>{isTamil ? 'பொது ஆங்கிலத்தை ஆராய்க (7 அலகுகள்)' : 'Explore General English (7 Units & Classes)'}</span>
                 <ChevronRight size={18} />
               </div>
             </div>

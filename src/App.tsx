@@ -27,6 +27,7 @@ import PreviousPapers from './pages/PreviousPapers'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Admin from './pages/Admin'
+import { LanguageProvider } from './context/LanguageContext'
 import './App.css'
 
 function App() {
@@ -40,8 +41,9 @@ function App() {
 
   return (
     <Router>
-      <ScrollToTop />
-      <div className="app">
+      <LanguageProvider>
+        <ScrollToTop />
+        <div className="app">
         {/* Global SVG Definitions for 3D Volumetric Extrusion, Bevel & Gold Gradient */}
         <svg
           className="spatial-svg-defs"
@@ -146,6 +148,7 @@ function App() {
           </div>
         </footer>
       </div>
+      </LanguageProvider>
     </Router>
   )
 }

@@ -1,0 +1,124 @@
+/* =========================================================
+   Bilingual Language Switcher (VisionOS Liquid Glass Style)
+   Restricted to Study Materials, MCQ Practice & Mock Tests
+   ========================================================= */
+
+.bilingual-switch-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  user-select: none;
+}
+
+/* Section Header Variant (Prominent Banner Style) */
+.bilingual-switch-container.variant-section {
+  padding: 0.4rem 0.85rem;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  box-shadow: 
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.bilingual-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.bilingual-icon {
+  color: #ffd700;
+  filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.5));
+}
+
+/* Switch Segmented Track */
+.bilingual-switch-track {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 9999px;
+  background: rgba(12, 18, 36, 0.65);
+  border: 1px solid rgba(216, 180, 254, 0.25);
+  box-shadow: 
+    inset 0 2px 4px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.25);
+  gap: 3px;
+  position: relative;
+}
+
+/* Segmented Buttons */
+.bilingual-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.bilingual-switch-btn:hover:not(.active) {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Active Highlight with Amethyst & Violet Glow */
+.bilingual-switch-btn.active {
+  background: 
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.4) 0%, rgba(216, 180, 254, 0.2) 36%, transparent 70%),
+    linear-gradient(135deg, rgba(147, 51, 234, 0.75) 0%, rgba(109, 40, 217, 0.68) 42%, rgba(59, 130, 246, 0.65) 100%);
+  border: 1px solid rgba(233, 213, 255, 0.75);
+  color: #ffffff;
+  box-shadow: 
+    0 4px 14px rgba(124, 58, 237, 0.5),
+    0 0 10px rgba(167, 139, 250, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.8),
+    inset 0 -1px 2px rgba(76, 29, 149, 0.4);
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.5);
+}
+
+.bilingual-check {
+  color: #ffd700;
+  filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.6));
+}
+
+.tamil-font-text {
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* Navbar Variant Adjustments */
+.bilingual-switch-container.variant-navbar {
+  margin-right: 0.25rem;
+}
+
+.variant-navbar .bilingual-switch-btn {
+  padding: 0.28rem 0.7rem;
+  font-size: 0.75rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .bilingual-switch-container.variant-section {
+    width: 100%;
+    justify-content: space-between;
+    box-sizing: border-box;
+  }
+}

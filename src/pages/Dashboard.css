@@ -399,35 +399,6 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.spatial-window-dots {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.win-dot {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  display: inline-block;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-}
-
-.win-dot-red {
-  background: #ff5f56;
-  box-shadow: 0 0 8px rgba(255, 95, 86, 0.45);
-}
-
-.win-dot-yellow {
-  background: #ffd700;
-  box-shadow: 0 0 8px rgba(255, 215, 0, 0.55);
-}
-
-.win-dot-green {
-  background: #27c93f;
-  box-shadow: 0 0 8px rgba(39, 201, 63, 0.45);
-}
-
 .spatial-window-url {
   display: flex;
   align-items: center;

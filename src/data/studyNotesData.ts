@@ -1,5 +1,7 @@
 // Interactive Study Notes Data Generator for TNPSC Group 1 Lessons
 // Provides slide-by-slide structured study notes for Samacheer Kalvi mapped lessons
+import type { Language } from '../context/LanguageContext'
+import { localizeLessonDeck } from './bilingualStudyNotes'
 
 export interface NoteSlide {
   title: string
@@ -41,7 +43,8 @@ export const getLessonNotes = (
     description?: string
     keyConcepts?: string[]
     studyNotes?: string[]
-  }
+  },
+  lang: Language = 'en'
 ): LessonNotesDeck => {
   const termText = lesson.term ? ` (${lesson.term})` : ''
 
@@ -249,7 +252,7 @@ export const getLessonNotes = (
     },
   ]
 
-  return {
+  const deck: LessonNotesDeck = {
     lessonId: lesson.id,
     lessonTitle: lesson.title,
     unitNumber,
@@ -259,4 +262,10 @@ export const getLessonNotes = (
     subjectName,
     slides,
   }
+
+  if (lang === 'ta') {
+    return localizeLessonDeck(deck, 'ta')
+  }
+
+  return deck
 }

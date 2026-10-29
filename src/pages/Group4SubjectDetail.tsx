@@ -24,6 +24,14 @@ import {
   type Group4Unit,
 } from '../data/group4SyllabusData'
 import { standardClasses } from '../data/group4ClassSyllabusData'
+import { useLanguage } from '../context/LanguageContext'
+import LanguageSwitch from '../components/LanguageSwitch'
+import {
+  translateTopic,
+  translateUnitNumber,
+  translateClassTitle,
+  translateSubjectName,
+} from '../utils/bilingualSyllabus'
 import './Group1GeneralStudies.css'
 import './StudyMaterials.css'
 
@@ -40,6 +48,7 @@ const unitIcons: Record<number, any> = {
 const Group4SubjectDetail = () => {
   const { subjectId } = useParams<{ subjectId: string }>()
   const navigate = useNavigate()
+  const { language, isTamil } = useLanguage()
 
   const activeSubjectId = (subjectId as 'general-studies' | 'aptitude' | 'general-tamil' | 'general-english') || 'general-studies'
   const subject = getGroup4SubjectById(activeSubjectId)
@@ -49,11 +58,11 @@ const Group4SubjectDetail = () => {
       <div className="gs-page">
         <div className="gs-container">
           <div className="empty-state glass" style={{ padding: '3rem', textAlign: 'center' }}>
-            <h2>Subject Not Found</h2>
-            <p>The requested TNPSC Group 4 & VAO syllabus subject does not exist.</p>
+            <h2>{isTamil ? 'பாடம் கிடைக்கவில்லை' : 'Subject Not Found'}</h2>
+            <p>{isTamil ? 'கோரப்பட்ட டிஎன்பிஎஸ்சி குரூப் 4 & விஏஓ பாடத்திட்ட பாடம் இல்லை.' : 'The requested TNPSC Group 4 & VAO syllabus subject does not exist.'}</p>
             <Link to="/materials?group=group4_vao" className="btn btn-primary" style={{ marginTop: '1rem' }}>
               <ArrowLeft size={16} />
-              <span>Back to Group 4 & VAO</span>
+              <span>{isTamil ? 'குரூப் 4 & விஏஓ பகுதிக்குத் திரும்பு' : 'Back to Group 4 & VAO'}</span>
             </Link>
           </div>
         </div>
@@ -69,19 +78,23 @@ const Group4SubjectDetail = () => {
       <div className="gs-container">
         {/* Breadcrumb Navigation */}
         <div className="gs-breadcrumb">
-          <Link to="/">Home</Link>
+          <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials?group=group4_vao">Study Materials</Link>
+          <Link to="/materials?group=group4_vao">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
           <ChevronRight size={14} />
-          <span className="active">TNPSC Group 4 & VAO {subject.title}</span>
+          <span className="active">
+            {isTamil ? `டிஎன்பிஎஸ்சி குரூப் 4 & விஏஓ ${subject.tamilTitle || translateSubjectName(subject.title, language)}` : `TNPSC Group 4 & VAO ${subject.title}`}
+          </span>
         </div>
 
-        {/* Back Link */}
-        <div>
+        {/* Back Link & Language Switch */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
           <Link to="/materials?group=group4_vao" className="back-btn glass" state={{ selectedGroup: 'group4_vao' }}>
             <ArrowLeft size={16} />
-            <span>Back to Study Materials</span>
+            <span>{isTamil ? 'பாடக்குறிப்புகளுக்குத் திரும்பு' : 'Back to Study Materials'}</span>
           </Link>
+
+          <LanguageSwitch />
         </div>
 
         {/* Subject Navigation Tabs (Order: General Studies, Aptitude and Mental Ability, General Tamil, General English) */}
@@ -92,7 +105,7 @@ const Group4SubjectDetail = () => {
               className={`group-tab ${sub.id === subject.id ? 'active' : ''}`}
               onClick={() => navigate(`/materials/group4/${sub.id}`)}
             >
-              {sub.title} ({sub.questionCount} Qs)
+              {isTamil ? (sub.tamilTitle || translateSubjectName(sub.title, language)) : sub.title} ({sub.questionCount} {isTamil ? 'வினா' : 'Qs'})
             </button>
           ))}
         </div>
@@ -244,8 +257,8 @@ const Group4SubjectDetail = () => {
                 onClick={() => navigate(`/materials/group4/${subject.id}/unit/${unit.id}`)}
               >
                 <div className="unit-top-row">
-                  <span className="unit-number-pill">{unit.unitNumber}</span>
-                  <span className="unit-q-count">{unit.questionCount} Questions</span>
+                  <span className="unit-number-pill">{translateUnitNumber(unit.unitNumber, language)}</span>
+                  <span className="unit-q-count">{unit.questionCount} {isTamil ? 'வினாக்கள்' : 'Questions'}</span>
                 </div>
 
                 <div className="unit-main-header">
@@ -253,15 +266,15 @@ const Group4SubjectDetail = () => {
                     <Icon size={24} />
                   </div>
                   <div className="unit-title-group">
-                    <h2 className="unit-title">{unit.title}</h2>
-                    {unit.tamilTitle && <span className="unit-tamil-title">{unit.tamilTitle}</span>}
+                    <h2 className="unit-title">{isTamil ? (unit.tamilTitle || unit.title) : unit.title}</h2>
+                    {unit.tamilTitle && !isTamil && <span className="unit-tamil-title">{unit.tamilTitle}</span>}
                   </div>
                 </div>
 
                 <div className="unit-topics-preview">
-                  <span className="unit-topics-heading">Official Syllabus Scope:</span>
+                  <span className="unit-topics-heading">{isTamil ? 'அதிகாரப்பூர்வ பாடத்திட்ட எல்லை:' : 'Official Syllabus Scope:'}</span>
                   <p className="unit-topics-snippet">
-                    {unit.officialTopics.slice(0, 3).join(' • ')}...
+                    {unit.officialTopics.slice(0, 3).map((t) => translateTopic(t, language)).join(' • ')}...
                   </p>
                 </div>
 
@@ -269,13 +282,13 @@ const Group4SubjectDetail = () => {
                   <div className="unit-metric">
                     <BookOpen size={16} />
                     <span>
-                      <strong className="unit-metric-bold">{chapterCount}</strong> Chapters
+                      <strong className="unit-metric-bold">{chapterCount}</strong> {isTamil ? 'அத்தியாயங்கள்' : 'Chapters'}
                     </span>
                   </div>
                   <div className="unit-metric">
                     <Layers size={16} />
                     <span>
-                      <strong className="unit-metric-bold">{lessonCount}</strong> Lessons
+                      <strong className="unit-metric-bold">{lessonCount}</strong> {isTamil ? 'பாடங்கள்' : 'Lessons'}
                     </span>
                   </div>
                 </div>
@@ -288,7 +301,7 @@ const Group4SubjectDetail = () => {
                   <div className="unit-class-selector-header">
                     <div className="unit-class-selector-title">
                       <GraduationCap size={14} />
-                      <span>Select Class (6th to 12th Standard):</span>
+                      <span>{isTamil ? 'வகுப்பைத் தேர்ந்தெடுக்கவும் (6 முதல் 12 வரை):' : 'Select Class (6th to 12th Standard):'}</span>
                     </div>
                   </div>
 
@@ -304,14 +317,14 @@ const Group4SubjectDetail = () => {
                         }}
                         title={`Open ${unit.unitNumber} – ${cls.label}`}
                       >
-                        {cls.label}
+                        {translateClassTitle(cls.label, language)}
                       </button>
                     ))}
                   </div>
                 </div>
 
                 <div className="unit-btn">
-                  <span>Explore Full {unit.unitNumber} Syllabus</span>
+                  <span>{isTamil ? `முழு பாடத்திட்டம் (${translateUnitNumber(unit.unitNumber, language)})` : `Explore Full ${unit.unitNumber} Syllabus`}</span>
                   <ChevronRight size={16} />
                 </div>
               </motion.div>
