@@ -54,12 +54,41 @@ function ensureServerlessPdfGlobals(): void {
   }
 }
 
+let pdfWorkerConfigured = false;
+
 function getPdfParseClass(): any {
   ensureServerlessPdfGlobals();
   // Lazy-load pdf-parse only when processing a PDF so server startup and auth routes never load canvas/pdfjs
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const mod = require('pdf-parse');
-  return mod.PDFParse || mod.default || mod;
+  const PDFParseClass = mod.PDFParse || mod.default || mod;
+
+  if (!pdfWorkerConfigured && PDFParseClass && typeof PDFParseClass.setWorker === 'function') {
+    try {
+      // Load embedded base64 worker data URL from pdf-parse/worker so Vercel serverless
+      // never fails looking for a missing relative ./pdf.worker.mjs file on disk
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const workerMod = require('pdf-parse/worker');
+      if (workerMod && typeof workerMod.getData === 'function') {
+        PDFParseClass.setWorker(workerMod.getData());
+        pdfWorkerConfigured = true;
+      }
+    } catch {
+      try {
+        // Fallback for environments where subpath export resolution differs
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const workerMod = require('pdf-parse/dist/worker/cjs/index.cjs');
+        if (workerMod && typeof workerMod.getData === 'function') {
+          PDFParseClass.setWorker(workerMod.getData());
+          pdfWorkerConfigured = true;
+        }
+      } catch (workerErr) {
+        console.warn('[PDF Processor] Could not configure embedded PDF worker data URL:', workerErr);
+      }
+    }
+  }
+
+  return PDFParseClass;
 }
 
 export interface ProcessPdfOptions {
