@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db';
 import { requireAdminAuth } from '../middleware/auth';
+import { retrieveRelevantTextbookContent } from '../services/textbookRag';
 
 const router = Router();
 
@@ -172,7 +173,7 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
   }
 });
 
-// AI generate notes
+// AI generate notes grounded in Samacheer Kalvi textbook content
 router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const {
@@ -183,9 +184,11 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
       topic,
       subject = 'General Studies',
       language = 'english',
-      count = 1,
       apiKey,
       instructions = '',
+      textbookMode = 'auto',
+      textbookId,
+      term = 'Term 1',
     } = req.body;
 
     const cleanCategory = String(category || '').trim().toLowerCase();
@@ -200,34 +203,125 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
       return res.status(400).json({ status: 'error', message: 'lessonTitle is required.' });
     }
 
+    if (isNaN(parsedUnitId) || parsedUnitId < 1) {
+      return res.status(400).json({ status: 'error', message: 'Valid unitId is required.' });
+    }
+
+    const effectiveMedium = /tamil|தமிழ்/i.test(subject) || lang === 'tamil'
+      ? 'Tamil'
+      : (req.body.medium || 'English');
+
+    const parsedTextbookId = textbookId && !isNaN(Number(textbookId)) ? Number(textbookId) : undefined;
+
+    // Retrieve relevant textbook content using RAG service
+    const ragResult = await retrieveRelevantTextbookContent({
+      groupId: cleanCategory,
+      standard: parsedClassId || 6,
+      subject,
+      medium: effectiveMedium,
+      term: term && term !== 'Full Year' ? term : undefined,
+      unitId: parsedUnitId,
+      lessonTitle: trimmedLesson,
+      topic: trimmedTopic,
+      textbookId: parsedTextbookId,
+      maxPages: 25,
+    });
+
+    if (textbookMode === 'specific') {
+      if (!ragResult.textbookId || !ragResult.hasSufficientContent || ragResult.chunks.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Selected textbook (#${parsedTextbookId || 'ID'}) does not have sufficient indexed content for Unit ${parsedUnitId} ("${trimmedLesson}"). Please choose another completed textbook or upload a PDF.`,
+        });
+      }
+    } else if (textbookMode === 'upload') {
+      if (!ragResult.textbookId || !ragResult.hasSufficientContent || ragResult.chunks.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: `The uploaded textbook PDF is still processing or does not have sufficient indexed content. Please wait for background indexing to complete before generating notes.`,
+        });
+      }
+    } else {
+      // Auto mode
+      if (!ragResult.textbookId || !ragResult.hasSufficientContent || ragResult.chunks.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: `No matching completed Samacheer Kalvi textbook PDF found for ${parsedClassId || 6}th Standard - ${subject} (${term || 'Term 1'}, Unit ${parsedUnitId}, Lesson: "${trimmedLesson}"). Please upload the textbook PDF using "Upload New Textbook PDF" or select a specific textbook.`,
+        });
+      }
+    }
+
+    const textbookContext = {
+      textbookId: ragResult.textbookId,
+      bookName: ragResult.bookName || `Samacheer Kalvi ${parsedClassId || 6}th Standard ${subject}`,
+      relevantPages: ragResult.relevantPages,
+      passages: ragResult.chunks.map((c) => ({
+        pageNumber: c.pageNumber,
+        content: c.content,
+      })),
+    };
+
     let content = '';
-    let title = trimmedLesson;
+    const title = trimmedLesson;
+
+    const passagesText = textbookContext.passages
+      .slice(0, 16)
+      .map((p) => `--- PAGE ${p.pageNumber} (${textbookContext.bookName}) ---\n${p.content}`)
+      .join('\n\n');
 
     if (effectiveApiKey) {
       try {
         const prompt = `You are an expert TNPSC study material creator for Tamil Nadu State Board (Samacheer Kalvi).
-Generate comprehensive, exam-oriented Study Notes for:
-- Target: ${cleanCategory.toUpperCase()}
+Generate comprehensive, syllabus-aligned, exam-oriented Study Notes strictly grounded in the provided official Samacheer Kalvi textbook content.
+
+TEXTBOOK SOURCE REFERENCE:
+- Textbook: ${textbookContext.bookName}
+- Relevant Pages: ${textbookContext.relevantPages.join(', ')}
+- Target Exam: ${cleanCategory.toUpperCase()}
 - Subject: ${subject}
 - Class/Standard: ${parsedClassId ? parsedClassId + 'th Standard' : 'as applicable'}
 - Unit: ${parsedUnitId}
 - Lesson: "${trimmedLesson}"
 - Topic: "${trimmedTopic}"
-- Language: ${lang === 'tamil' ? 'Tamil' : 'English'}
-- Instructions: ${instructions || 'Provide clear explanations, key points, important definitions, mnemonics, and exam-relevant facts.'}
+- Language: ${lang === 'tamil' ? 'Tamil (தமிழ்)' : 'English'}
+- Additional Instructions: ${instructions || 'Provide clear explanations, key points, important definitions, mnemonics, and exam-relevant facts.'}
 
-Requirements:
-- Write in ${lang === 'tamil' ? 'clear Tamil' : 'clear English'}
-- Include: Title, Introduction, Key Concepts/Points, Important Definitions, Short Notes, Quick Revision Points, Practice Questions (if relevant)
-- Make it suitable for TNPSC exam preparation
-- Be accurate and syllabus-aligned
-- Return well-structured markdown content
+PRIMARY TEXTBOOK PASSAGES (OFFICIAL SAMACHEER KALVI):
+"""
+${passagesText}
+"""
 
-Return ONLY the markdown content, no JSON wrapper.`;
+STRICT GROUNDING & QUALITY REQUIREMENTS:
+1. Grounding: All concepts, explanations, definitions, key dates, historical figures, Tamil literature lines, scientific formulas, and factual data MUST be strictly derived from the textbook passages above.
+2. Accuracy: Do not introduce external, conflicting, or unverified claims. Cite the textbook where relevant.
+3. Language: Write in ${lang === 'tamil' ? 'authentic, formal academic Tamil (தமிழ்)' : 'clear, concise, academic English'}.
+4. Required Markdown Structure:
+   # ${title}
+   > **Source**: ${textbookContext.bookName} | Unit ${parsedUnitId}: ${trimmedLesson} | Pages: ${textbookContext.relevantPages.join(', ')}
+
+   ## 1. பாட அறிமுகம் / Overview & Core Background
+   (Brief introductory summary of the lesson context)
+
+   ## 2. முக்கிய கருத்துகள் / Key Concepts & In-Depth Notes
+   (Structured explanations, points, sub-sections based on textbook passages)
+
+   ## 3. முக்கிய கலைச்சொற்கள் & வரையறைகள் / Important Definitions & Glossary
+   (Key terminologies, formulas, or literary meanings)
+
+   ## 4. தேர்வு நோக்கில் முக்கிய குறிப்புகள் / High-Yield Exam Facts & Points to Remember
+   (Tables, bullet points, mnemonics, and high-probability TNPSC facts)
+
+   ## 5. விரைவு மீள்பார்வை / Summary & Quick Revision Checklist
+   (Concise summary of the lesson)
+
+   ## 6. மாதிரி வினாக்கள் & விடைகள் / Practice Questions with Textbook Answers
+   (3-5 high-yield conceptual/objective review questions directly based on the textbook)
+
+5. Output: Return ONLY the formatted Markdown. Do NOT include JSON wrappers or markdown code fence blocks.`;
 
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${effectiveApiKey}`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
 
         const geminiRes = await fetch(geminiUrl, {
           method: 'POST',
@@ -235,7 +329,7 @@ Return ONLY the markdown content, no JSON wrapper.`;
           signal: controller.signal,
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.4, topK: 40, topP: 0.95 },
+            generationConfig: { temperature: 0.35, topK: 40, topP: 0.95 },
           }),
         });
 
@@ -253,18 +347,27 @@ Return ONLY the markdown content, no JSON wrapper.`;
       }
     }
 
-    if (!content) {
-      // Fallback content
+    if (!content && textbookContext.passages.length > 0) {
+      // Textbook RAG fallback notes
+      const topPassages = textbookContext.passages.slice(0, 4);
+      const excerpts = topPassages.map((p) => `### Page ${p.pageNumber}\n${p.content.slice(0, 450)}...`).join('\n\n');
       if (lang === 'tamil') {
-        content = `# ${trimmedLesson}\n\n## தலைப்பு: ${trimmedTopic}\n\n### முக்கிய கருத்துகள்\n\n- இந்த பாடம் TNPSC தேர்வுக்கு மிகவும் முக்கியமானது.\n- ${trimmedLesson} தொடர்பான முக்கிய குறிப்புகள் கீழே கொடுக்கப்பட்டுள்ளன.\n\n### சுருக்கம்\n\nஇந்த பாடத்தின் சாராம்சம் TNPSC பொதுத்தேர்வுகளில் அடிக்கடி கேட்கப்படும் வகையில் உள்ளது.\n\n### முக்கிய புள்ளிகள்\n\n1. முக்கிய வரையறைகள் மற்றும் கருத்துகள்\n2. முக்கிய நிகழ்வுகள்/செயல்கள்\n3. தேர்வில் அடிக்கடி கேட்கப்படும் வினாக்கள்\n\n### விரைவான மீளாய்வு\n\n- மேற்கண்ட அனைத்து புள்ளிகளையும் அவசியம் மறுபரிசீலனை செய்யவும்.`;
+        content = `# ${title}\n\n> **பாடநூல் ஆதாரம்**: ${textbookContext.bookName} (பக்கங்கள்: ${textbookContext.relevantPages.join(', ')})\n\n## 1. பாட அறிமுகம்\n${cleanCategory.toUpperCase()} - ${subject}, வகுப்பு ${parsedClassId || 6}, அலகு ${parsedUnitId}: ${trimmedLesson} பாடத்திற்கான TNPSC தேர்வு வழிகாட்டி குறிப்புகள்.\n\n## 2. பாடநூல் முக்கிய பகுதிகள்\n\n${excerpts}\n\n## 3. முக்கிய கருத்துகள் & வரையறைகள்\n- பாடநூலில் இருந்து பெறப்பட்ட தேர்வு சார்ந்த முக்கிய தகவல்கள்\n- TNPSC தேர்வுக்கு தேவையான அனைத்து முக்கிய புள்ளிகளும் இதில் அடங்கும்\n\n## 4. விரைவு மீள்பார்வை\n- மேற்கண்ட முக்கிய குறிப்புகளை தேர்வுக்கு முன் கவனமாக படிக்கவும்.`;
       } else {
-        content = `# ${trimmedLesson}\n\n## Topic: ${trimmedTopic}\n\n### Introduction\n\nThis lesson covers important concepts for TNPSC examination preparation.\n\n### Key Concepts\n\n- Fundamental principles related to ${trimmedLesson}\n- Important definitions and terminologies\n- Syllabus-aligned facts for TNPSC\n\n### Important Points\n\n1. Core concepts and their applications\n2. Exam-oriented facts\n3. Commonly asked questions areas\n\n### Quick Revision\n\nReview the key points above for effective preparation.`;
+        content = `# ${title}\n\n> **Source**: ${textbookContext.bookName} (Pages: ${textbookContext.relevantPages.join(', ')})\n\n## 1. Overview\nComprehensive Study Notes for ${cleanCategory.toUpperCase()} - ${subject}, Class ${parsedClassId || 6}, Unit ${parsedUnitId}: ${trimmedLesson}.\n\n## 2. Key Textbook Excerpts\n\n${excerpts}\n\n## 3. Key Concepts & Definitions\n- Concepts extracted directly from ${textbookContext.bookName}\n- Exam-focused syllabus points for Unit ${parsedUnitId}\n\n## 4. Quick Revision Checklist\n- Review the key textbook points and definitions above before attending practice tests.`;
       }
     }
 
+    const sourceRef = `${textbookContext.bookName} (Pages ${textbookContext.relevantPages.join(', ')})`;
+
     return res.status(200).json({
       status: 'success',
-      source: effectiveApiKey && content.length > 100 ? 'gemini' : 'fallback',
+      source: effectiveApiKey && content.length > 100 ? 'gemini' : 'textbook_rag',
+      textbookUsed: {
+        id: textbookContext.textbookId,
+        name: textbookContext.bookName,
+        pages: textbookContext.relevantPages,
+      },
       data: {
         category: cleanCategory,
         unitId: parsedUnitId,
@@ -276,6 +379,7 @@ Return ONLY the markdown content, no JSON wrapper.`;
         title,
         content,
         contentHtml: null,
+        sourceReference: sourceRef,
       },
     });
   } catch (error: any) {

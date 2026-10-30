@@ -206,6 +206,17 @@ const Admin = () => {
   const [aiInlineProgress, setAiInlineProgress] = useState<number>(0)
   const [aiInlineProcessingJob, setAiInlineProcessingJob] = useState<{ id: number; status: string; progressPercent: number; stepDescription: string } | null>(null)
 
+  // Study Notes Generator Textbook Source states (Independent from MCQ Generator)
+  const [notesTextbookMode, setNotesTextbookMode] = useState<'auto' | 'specific' | 'upload'>('auto')
+  const [notesSelectedTextbookId, setNotesSelectedTextbookId] = useState<number | null>(null)
+  const [notesInlineMedium, setNotesInlineMedium] = useState<'Tamil' | 'English'>('English')
+  const [notesInlineTerm, setNotesInlineTerm] = useState<string>('Full Year')
+  const [notesInlineBookName, setNotesInlineBookName] = useState<string>('')
+  const [notesInlineFile, setNotesInlineFile] = useState<File | null>(null)
+  const [notesInlineUploading, setNotesInlineUploading] = useState<boolean>(false)
+  const [notesInlineProgress, setNotesInlineProgress] = useState<number>(0)
+  const [notesInlineProcessingJob, setNotesInlineProcessingJob] = useState<{ id: number; status: string; progressPercent: number; stepDescription: string } | null>(null)
+
   // Notes management
   const [notesList, setNotesList] = useState<any[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
@@ -254,7 +265,7 @@ const Admin = () => {
   const [notesLanguage, setNotesLanguage] = useState<'english' | 'tamil'>('english')
   const [notesInstructions, setNotesInstructions] = useState('')
   const [isNotesGenerating, setIsNotesGenerating] = useState(false)
-  const [notesPreview, setNotesPreview] = useState<{ content: string; title: string } | null>(null)
+  const [notesPreview, setNotesPreview] = useState<{ content: string; title: string; sourceReference?: string } | null>(null)
   const [isNotesUploading, setIsNotesUploading] = useState(false)
 
   // Lock background page scrolling strictly when any admin modal is open
@@ -356,6 +367,16 @@ const Admin = () => {
     isDifficultyValid &&
     isTextbookReady &&
     !isAIGenerating
+
+  const isNotesTextbookReady = !notesInlineUploading && (!notesInlineProcessingJob || notesInlineProcessingJob.status === 'completed')
+
+  const isNotesFormValid =
+    isSubjectValid &&
+    isStandardValid &&
+    isUnitValid &&
+    isLessonValid &&
+    isNotesTextbookReady &&
+    !isNotesGenerating
 
   // Generate AI Questions handler (Strictly Textbook-Grounded)
   const handleGenerateAIQuestions = async () => {
@@ -1176,7 +1197,8 @@ const Admin = () => {
   useEffect(() => {
     const hasActiveProcessing =
       textbooksList.some((t) => t.status === 'processing' || t.status === 'uploaded') ||
-      (aiInlineProcessingJob && aiInlineProcessingJob.status === 'processing')
+      (aiInlineProcessingJob && aiInlineProcessingJob.status === 'processing') ||
+      (notesInlineProcessingJob && notesInlineProcessingJob.status === 'processing')
 
     if (!hasActiveProcessing || !token) return
 
@@ -1212,10 +1234,41 @@ const Admin = () => {
           console.warn('Job polling error:', e)
         }
       }
+
+      if (notesInlineProcessingJob) {
+        try {
+          const res = await apiFetch(`/api/textbooks/${notesInlineProcessingJob.id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const { data } = await parseApiResponse(res)
+          if (res.ok && data.data) {
+            const tb = data.data
+            if (tb.status === 'completed' || tb.status === 'failed') {
+              setNotesInlineProcessingJob(null)
+              if (tb.status === 'completed') {
+                setNotesSelectedTextbookId(tb.id)
+                setNotesTextbookMode('specific')
+                showToast('success', `Textbook "${tb.bookName}" processed and indexed successfully for Study Notes!`)
+              } else {
+                showToast('error', `Textbook processing failed: ${tb.errorMessage || 'Unknown error'}`)
+              }
+            } else if (tb.job) {
+              setNotesInlineProcessingJob({
+                id: tb.id,
+                status: tb.status,
+                progressPercent: tb.job.progressPercent || 0,
+                stepDescription: tb.job.stepDescription || 'Processing...',
+              })
+            }
+          }
+        } catch (e) {
+          console.warn('Notes job polling error:', e)
+        }
+      }
     }, 2500)
 
     return () => clearInterval(interval)
-  }, [textbooksList, aiInlineProcessingJob, token, fetchTextbooks])
+  }, [textbooksList, aiInlineProcessingJob, notesInlineProcessingJob, token, fetchTextbooks])
 
   // Upload or Replace Textbook
   const handleUploadTextbook = async (e: React.FormEvent) => {
@@ -1492,6 +1545,102 @@ const Admin = () => {
       showToast('error', friendlyError)
     } finally {
       setAiInlineUploading(false)
+    }
+  }
+
+  // Direct Inline PDF Upload from Study Notes Generator Modal
+  const handleNotesInlineUploadTextbook = async () => {
+    if (!token) {
+      showToast('error', 'Unauthorized (401): Admin authentication token is missing.')
+      return
+    }
+    if (!notesInlineFile) {
+      showToast('error', 'Please choose a PDF file to upload.')
+      return
+    }
+    if (!notesInlineFile.name.toLowerCase().endsWith('.pdf') && notesInlineFile.type !== 'application/pdf') {
+      showToast('error', 'Bad Request (400): Only PDF files (.pdf) are supported.')
+      return
+    }
+    if (notesInlineFile.size > 100 * 1024 * 1024) {
+      showToast('error', 'Payload Too Large (413): File size exceeds the 100 MB application upload limit.')
+      return
+    }
+
+    setNotesInlineUploading(true)
+    setNotesInlineProgress(25)
+
+    try {
+      const autoBookName = notesInlineBookName.trim() || `Class ${currentClassId} ${selectedSubjectObj.name} (${notesInlineMedium})`
+      const formData = new FormData()
+      formData.append('group', aiGroupId)
+      formData.append('standard', `${currentClassId}th`)
+      formData.append('subject', selectedSubjectObj.name)
+      formData.append('medium', notesInlineMedium)
+      formData.append('term', notesInlineTerm)
+      formData.append('bookName', autoBookName)
+      formData.append('replace', 'false')
+      formData.append('pdf', notesInlineFile)
+
+      setNotesInlineProgress(60)
+
+      const res = await apiFetch('/api/textbooks/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+        body: formData,
+        cache: 'no-store',
+        timeoutMs: 180000,
+      })
+      const { data, rawText } = await parseApiResponse(res)
+      setNotesInlineProgress(100)
+
+      if (res.status === 409) {
+        if (data?.existingId) {
+          setNotesSelectedTextbookId(Number(data.existingId))
+          setNotesTextbookMode('specific')
+        }
+        showToast('error', data?.message || 'A textbook with this name already exists. Selecting existing...')
+        setNotesInlineUploading(false)
+        fetchTextbooks()
+        return
+      }
+
+      if (res.status === 304 || !res.ok || !data?.data?.id || data?.data?.status === 'failed') {
+        const errMsg = classifyApiError(res, data, rawText, 'POST /api/textbooks/upload')
+        showToast('error', errMsg)
+        setNotesInlineUploading(false)
+        return
+      }
+
+      if (data.data.status === 'completed') {
+        showToast('success', `PDF uploaded and indexed (${data.data.pageCount || 0} pages)!`)
+        setNotesSelectedTextbookId(data.data.id)
+        setNotesTextbookMode('specific')
+      } else {
+        showToast('success', 'PDF uploaded! Processing and indexing text in background for Study Notes...')
+        setNotesInlineProcessingJob({
+          id: data.data.id,
+          status: 'processing',
+          progressPercent: 10,
+          stepDescription: 'Extracting text from PDF pages...',
+        })
+      }
+      setNotesInlineFile(null)
+      setNotesInlineBookName('')
+      fetchTextbooks()
+    } catch (err: any) {
+      console.error('Notes inline upload error:', err)
+      const friendlyError = await classifyFetchFailure(err, {
+        endpointLabel: 'POST /api/textbooks/upload',
+        uploadFileSizeBytes: notesInlineFile.size,
+      })
+      showToast('error', friendlyError)
+    } finally {
+      setNotesInlineUploading(false)
     }
   }
 
@@ -4660,6 +4809,171 @@ const Admin = () => {
                       </div>
                     ) : (
                       <div className="ai-generation-options">
+                        {/* 6. Textbook Source Selection (Study Notes) */}
+                        <div className="ai-textbook-source-box">
+                          <label style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.88rem' }}>
+                            <BookOpen size={15} style={{ color: 'var(--gold-primary)' }} />
+                            <span>6. Textbook Source Selection *</span>
+                          </label>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                            <label className={`ai-source-radio-card ${notesTextbookMode === 'auto' ? 'active' : ''}`}>
+                              <input
+                                type="radio"
+                                name="notesTbSourceMode"
+                                checked={notesTextbookMode === 'auto'}
+                                onChange={() => setNotesTextbookMode('auto')}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Use Uploaded Automatically</div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  Matches {currentClassId}th Standard {selectedSubjectObj?.name}
+                                </div>
+                              </div>
+                            </label>
+
+                            <label className={`ai-source-radio-card ${notesTextbookMode === 'specific' ? 'active' : ''}`}>
+                              <input
+                                type="radio"
+                                name="notesTbSourceMode"
+                                checked={notesTextbookMode === 'specific'}
+                                onChange={() => setNotesTextbookMode('specific')}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Select Specific Textbook</div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  Choose from existing uploaded books
+                                </div>
+                              </div>
+                            </label>
+
+                            <label className={`ai-source-radio-card ${notesTextbookMode === 'upload' ? 'active' : ''}`}>
+                              <input
+                                type="radio"
+                                name="notesTbSourceMode"
+                                checked={notesTextbookMode === 'upload'}
+                                onChange={() => setNotesTextbookMode('upload')}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Upload New Textbook PDF</div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  Upload and index directly here
+                                </div>
+                              </div>
+                            </label>
+                          </div>
+
+                          {/* Mode: specific */}
+                          {notesTextbookMode === 'specific' && (
+                            <div className="ai-field" style={{ marginTop: '0.5rem' }}>
+                              <label>Choose Uploaded Textbook ({textbooksList.filter((t) => t.status === 'completed').length} Available)</label>
+                              <select
+                                className="ai-select"
+                                value={notesSelectedTextbookId || ''}
+                                onChange={(e) => setNotesSelectedTextbookId(Number(e.target.value))}
+                              >
+                                <option value="">-- Auto-select or Pick Textbook --</option>
+                                {textbooksList.map((t) => (
+                                  <option key={t.id} value={t.id} disabled={t.status !== 'completed'}>
+                                    #{t.id} [{t.standard} - {t.subject} - {t.medium}] {t.bookName} ({t.status})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {/* Mode: upload */}
+                          {notesTextbookMode === 'upload' && (
+                            <div
+                              style={{
+                                padding: '0.75rem',
+                                background: 'rgba(255, 255, 255, 0.03)',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                marginTop: '0.5rem',
+                              }}
+                            >
+                              <div className="form-grid-2" style={{ marginBottom: '0.5rem' }}>
+                                <div className="ai-field">
+                                  <label>Book Name / Title</label>
+                                  <input
+                                    type="text"
+                                    className="admin-auth-input"
+                                    placeholder={`Class ${currentClassId} ${selectedSubjectObj.name}`}
+                                    value={notesInlineBookName}
+                                    onChange={(e) => setNotesInlineBookName(e.target.value)}
+                                  />
+                                </div>
+                                <div className="ai-field">
+                                  <label>Medium</label>
+                                  <select
+                                    className="ai-select"
+                                    value={notesInlineMedium}
+                                    onChange={(e) => setNotesInlineMedium(e.target.value as any)}
+                                  >
+                                    <option value="English">English Medium</option>
+                                    <option value="Tamil">Tamil Medium (தமிழ்)</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div className="form-grid-2" style={{ marginBottom: '0.5rem' }}>
+                                <div className="ai-field">
+                                  <label>Term</label>
+                                  <select
+                                    className="ai-select"
+                                    value={notesInlineTerm}
+                                    onChange={(e) => setNotesInlineTerm(e.target.value)}
+                                  >
+                                    <option value="Full Year">Full Year (Combined)</option>
+                                    <option value="Term 1">Term 1</option>
+                                    <option value="Term 2">Term 2</option>
+                                    <option value="Term 3">Term 3</option>
+                                  </select>
+                                </div>
+                                <div className="ai-field">
+                                  <label>PDF File (Classes 6–12 Samacheer Kalvi)</label>
+                                  <input
+                                    type="file"
+                                    accept=".pdf,application/pdf"
+                                    onChange={(e) => setNotesInlineFile(e.target.files?.[0] || null)}
+                                  />
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                className="admin-btn admin-btn-primary"
+                                onClick={handleNotesInlineUploadTextbook}
+                                disabled={notesInlineUploading || !notesInlineFile}
+                                style={{ width: '100%', justifyContent: 'center' }}
+                              >
+                                <UploadCloud size={16} />
+                                <span>{notesInlineUploading ? `Uploading PDF (${notesInlineProgress}%)...` : 'Upload & Start Background Indexing'}</span>
+                              </button>
+
+                              {/* Processing Progress Notification */}
+                              {notesInlineProcessingJob && (
+                                <div style={{ marginTop: '0.75rem', padding: '0.65rem', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '6px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#fbbf24', fontWeight: 600 }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                      <RefreshCw size={13} className="spin-icon" />
+                                      <span>{notesInlineProcessingJob.stepDescription}</span>
+                                    </span>
+                                    <span>{notesInlineProcessingJob.progressPercent}%</span>
+                                  </div>
+                                  <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.35rem' }}>
+                                    <div style={{ width: `${notesInlineProcessingJob.progressPercent}%`, height: '100%', background: '#fbbf24' }} />
+                                  </div>
+                                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', marginBottom: 0 }}>
+                                    Study notes generation will be unlocked as soon as indexing is complete.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
                         <div className="ai-options-inline">
                           <div className="ai-field ai-field-compact">
                             <label>7. Language</label>
@@ -4686,7 +5000,7 @@ const Admin = () => {
                         <button
                           className="ai-generate-action-btn"
                           onClick={async () => {
-                            if (!token || !isFormValid) return
+                            if (!token || !isNotesFormValid) return
                             setIsNotesGenerating(true)
                             setNotesPreview(null)
                             setAiNotice(null)
@@ -4704,12 +5018,26 @@ const Admin = () => {
                                   language: notesLanguage,
                                   instructions: notesInstructions,
                                   apiKey: geminiApiKey.trim() || undefined,
+                                  textbookMode: notesTextbookMode,
+                                  textbookId:
+                                    notesTextbookMode === 'specific'
+                                      ? notesSelectedTextbookId
+                                      : (notesInlineProcessingJob?.id || undefined),
+                                  term: notesInlineTerm || 'Term 1',
                                 }),
                               })
                               const data = await res.json()
                               if (res.ok && data.data) {
-                                setNotesPreview({ content: data.data.content, title: data.data.title || currentLessonTitle })
-                                setAiNotice(data.source === 'gemini' ? 'Study notes generated via Gemini.' : 'Study notes generated.')
+                                setNotesPreview({
+                                  content: data.data.content,
+                                  title: data.data.title || currentLessonTitle,
+                                  sourceReference: data.data.sourceReference || undefined,
+                                })
+                                setAiNotice(
+                                  data.source === 'gemini'
+                                    ? `Study notes generated via Gemini referencing "${data.textbookUsed?.name || 'Textbook'}" (Pages ${data.textbookUsed?.pages?.join(', ') || ''}).`
+                                    : `Study notes generated referencing "${data.textbookUsed?.name || 'Textbook'}"`
+                                )
                               } else {
                                 showToast('error', data.message || 'Failed to generate notes')
                               }
@@ -4719,7 +5047,7 @@ const Admin = () => {
                               setIsNotesGenerating(false)
                             }
                           }}
-                          disabled={!isFormValid || isNotesGenerating}
+                          disabled={!isNotesFormValid || isNotesGenerating}
                         >
                           <Sparkles size={18} className={isNotesGenerating ? 'spin-icon' : ''} />
                           <span>
@@ -4749,7 +5077,7 @@ const Admin = () => {
                     <div className="ai-batch-bar">
                       <div className="ai-batch-left">
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
-                          Study Notes Preview - {notesPreview.title}
+                          Study Notes Preview - {notesPreview.title} {notesPreview.sourceReference ? `(${notesPreview.sourceReference})` : ''}
                         </span>
                       </div>
                       <button
@@ -4772,7 +5100,7 @@ const Admin = () => {
                                 language: notesLanguage,
                                 title: notesPreview.title,
                                 content: notesPreview.content,
-                                sourceReference: `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
+                                sourceReference: notesPreview.sourceReference || `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
                                 status: 'published',
                               }),
                             })
