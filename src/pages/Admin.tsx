@@ -40,6 +40,7 @@ import {
   AlertCircle,
   Eye,
   UploadCloud,
+  Target,
 } from 'lucide-react'
 import './Admin.css'
 import {
@@ -215,6 +216,7 @@ const Admin = () => {
   const [notesBulkDeleting, setNotesBulkDeleting] = useState(false)
 
   // Filter Bar state (reuses shared Gemini AI Generator cascading syllabus logic)
+  const [targetSystemFilter, setTargetSystemFilter] = useState<'study_materials' | 'main_practice'>('study_materials')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [difficultyFilter, setDifficultyFilter] = useState('all')
@@ -298,6 +300,7 @@ const Admin = () => {
   const aiUnitId = typeof rawAiUnitId === 'number' ? rawAiUnitId : currentUnitId
   const selectedSubjectObj = rawAiSelectedSubjectObj || availableSubjects[0]
 
+  const [aiLanguage, setAiLanguage] = useState<'tamil' | 'english'>('tamil')
   const [aiQuestionCount, setAiQuestionCount] = useState<number>(50)
   const [aiDifficulty, setAiDifficulty] = useState<'Medium' | 'Easy' | 'Hard' | 'Mixed'>('Medium')
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('tnpsc_gemini_api_key') || '')
@@ -349,9 +352,9 @@ const Admin = () => {
     setAiUploadSuccess(null)
 
     const activeTopic = currentLessonTitle
-    const resolvedMedium = /tamil|தமிழ்/i.test(selectedSubjectObj.name)
+    const resolvedMedium = aiLanguage === 'tamil'
       ? 'Tamil'
-      : (aiInlineMedium || 'English')
+      : (/tamil|தமிழ்/i.test(selectedSubjectObj.name) ? 'Tamil' : (aiInlineMedium || 'English'))
 
     try {
       const res = await apiFetch('/api/questions/ai-generate', {
@@ -382,6 +385,7 @@ const Admin = () => {
               ? aiSelectedTextbookId
               : (aiInlineProcessingJob?.id || undefined),
           medium: resolvedMedium,
+          language: aiLanguage,
           term: aiInlineTerm || 'Term 1',
         }),
       })
@@ -403,12 +407,17 @@ const Admin = () => {
           ...q,
           category: aiGroupId,
           subject: selectedSubjectObj.name,
+          subjectId: selectedSubjectObj.id,
           classId: currentClassId,
           standard: currentClassId,
           unitId: currentUnitId,
           lessonTitle: currentLessonTitle,
           lessonId: selectedLessonObj?.id || q.lessonId,
           topic: activeTopic,
+          language: aiLanguage,
+          targetSystem: 'study_materials',
+          examGroupId: aiGroupId,
+          standardId: typeof currentClassId === 'number' ? currentClassId : parseInt(currentClassId, 10),
           selected: true,
         }))
         setAiGeneratedQuestions(taggedQuestions)
@@ -581,7 +590,7 @@ const Admin = () => {
 
     try {
       try {
-        const res = await apiFetch('/api/questions/upload', {
+        const res = await apiFetch('/api/study-materials/questions/upload', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -995,7 +1004,10 @@ const Admin = () => {
       let data: any = null
 
       try {
-        res = await apiFetch(`/api/questions/admin?${params.toString()}`, {
+        const endpoint = targetSystemFilter === 'study_materials'
+          ? `/api/study-materials/questions/admin?${params.toString()}`
+          : `/api/questions/admin?${params.toString()}`
+        res = await apiFetch(endpoint, {
           headers: { Authorization: `Bearer ${token}` },
         })
         if (res.status === 401 || res.status === 403) {
@@ -1089,6 +1101,7 @@ const Admin = () => {
     qbSelectedLessonObj,
     statusFilter,
     difficultyFilter,
+    targetSystemFilter,
     page,
   ])
 
@@ -1489,6 +1502,7 @@ const Admin = () => {
     qbSelectedLessonObj,
     statusFilter,
     difficultyFilter,
+    targetSystemFilter,
     page,
   ])
 
@@ -1540,7 +1554,10 @@ const Admin = () => {
     if (!window.confirm(`Delete ${selectedQuestionIds.size} selected question(s)? This action cannot be undone.`)) return
     setIsBulkDeleting(true)
     try {
-      const res = await apiFetch('/api/questions', {
+      const endpoint = targetSystemFilter === 'study_materials'
+        ? '/api/study-materials/questions'
+        : '/api/questions'
+      const res = await apiFetch(endpoint, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ids: Array.from(selectedQuestionIds) }),
@@ -1571,7 +1588,10 @@ const Admin = () => {
     if (!window.confirm(`Final confirmation: Permanently delete ${count} filtered question(s)?`)) return
     setIsBulkDeleting(true)
     try {
-      const res = await apiFetch('/api/questions', {
+      const endpoint = targetSystemFilter === 'study_materials'
+        ? '/api/study-materials/questions'
+        : '/api/questions'
+      const res = await apiFetch(endpoint, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -1612,7 +1632,10 @@ const Admin = () => {
     const ids = selectedStagingIds
     setIsBulkPublishing(true)
     try {
-      const res = await apiFetch('/api/questions/publish', {
+      const endpoint = targetSystemFilter === 'study_materials'
+        ? '/api/study-materials/questions/publish'
+        : '/api/questions/publish'
+      const res = await apiFetch(endpoint, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ids }),
@@ -2161,6 +2184,68 @@ const Admin = () => {
           <>
             {/* Toolbar & Filters */}
         <div className="admin-toolbar glass">
+          {/* Target System Toggle: Study Materials (Lesson-wise) vs Main Practice */}
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.85rem' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Target Question System:</span>
+            <div style={{ display: 'inline-flex', padding: '3px', background: 'rgba(255,255,255,0.06)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <button
+                type="button"
+                style={{
+                  padding: '0.45rem 1rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.84rem',
+                  background: targetSystemFilter === 'study_materials' ? 'linear-gradient(135deg, rgba(255,215,0,0.3), rgba(245,158,11,0.4))' : 'transparent',
+                  color: targetSystemFilter === 'study_materials' ? '#ffd700' : 'var(--text-secondary)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  transition: 'all 0.2s ease',
+                }}
+                onClick={() => {
+                  setTargetSystemFilter('study_materials')
+                  setSelectedQuestionIds(new Set())
+                  setPage(1)
+                }}
+              >
+                <BookOpen size={14} />
+                <span>📚 Study Materials (Lesson-wise Practice)</span>
+              </button>
+              <button
+                type="button"
+                style={{
+                  padding: '0.45rem 1rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.84rem',
+                  background: targetSystemFilter === 'main_practice' ? 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.4))' : 'transparent',
+                  color: targetSystemFilter === 'main_practice' ? '#a5b4fc' : 'var(--text-secondary)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  transition: 'all 0.2s ease',
+                }}
+                onClick={() => {
+                  setTargetSystemFilter('main_practice')
+                  setSelectedQuestionIds(new Set())
+                  setPage(1)
+                }}
+              >
+                <Target size={14} />
+                <span>🎯 Main Practice Question Bank</span>
+              </button>
+            </div>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              {targetSystemFilter === 'study_materials'
+                ? 'Managing questions linked strictly to syllabus lessons in Study Materials.'
+                : 'Managing general question bank questions for the /practice page.'}
+            </span>
+          </div>
+
           <div className="admin-toolbar-row">
             <div className="admin-search-wrapper">
               <Search size={16} className="admin-search-icon" />
@@ -4495,6 +4580,18 @@ const Admin = () => {
                     {aiMode === 'mcq' ? (
                       <div className="ai-generation-options">
                         <div className="ai-options-inline">
+                          <div className="ai-field ai-field-compact">
+                            <label>6. Language</label>
+                            <select
+                              className="ai-select"
+                              value={aiLanguage}
+                              onChange={(e) => setAiLanguage(e.target.value as 'tamil' | 'english')}
+                            >
+                              <option value="tamil">Tamil (தமிழ்)</option>
+                              <option value="english">English</option>
+                            </select>
+                          </div>
+
                           <div className="ai-field ai-field-compact">
                             <label>7. Questions Count</label>
                             <select

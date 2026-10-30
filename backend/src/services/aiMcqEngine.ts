@@ -38,6 +38,7 @@ export interface AiGenerationConfig {
   unitTitle?: string;
   term?: string;
   medium?: string;
+  language?: 'tamil' | 'english';
   lessonTitle: string;
   topic: string;
   count: number;
@@ -626,8 +627,8 @@ function buildPrompt(
   previousQuestions: string[]
 ): string {
   const isTamil =
-    config.subject.toLowerCase().includes('tamil') ||
-    (config.medium || '').toLowerCase() === 'tamil';
+    config.language === 'tamil' ||
+    (!config.language && (config.subject.toLowerCase().includes('tamil') || (config.medium || '').toLowerCase() === 'tamil'));
   const languageRule = isTamil
     ? 'Write the question, all 4 options, and the explanation in authentic, grammatically correct Tamil.'
     : 'Write the question, all 4 options, and the explanation in clear, grammatically correct English.';

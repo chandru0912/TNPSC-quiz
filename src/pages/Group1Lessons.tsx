@@ -145,6 +145,16 @@ const Group1Lessons = () => {
                         <span>{isTamil ? 'பாடக் குறிப்புகள் படிக்க' : 'Read Study Notes'}</span>
                         <ChevronRight size={14} />
                       </button>
+                      <button
+                        className="view-lesson-btn"
+                        style={{ marginLeft: '0.4rem', background: 'linear-gradient(135deg, rgba(255,215,0,0.18), rgba(245,158,11,0.28))', borderColor: 'rgba(255,215,0,0.5)', color: '#ffd700' }}
+                        onClick={() =>
+                          navigate(`/study-materials/practice/group1/general-studies/all/${unit.id}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`)
+                        }
+                      >
+                        <span>{isTamil ? 'பயிற்சி வினாக்கள்' : 'Practice MCQs'}</span>
+                        <ChevronRight size={14} />
+                      </button>
                     </div>
                   </div>
                 ))}

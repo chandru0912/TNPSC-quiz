@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Loader2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, Loader2, HelpCircle } from 'lucide-react'
 import { useLanguage } from '../context/LanguageContext'
 import { apiFetch } from '../utils/api'
 import './Group1Lessons.css'
@@ -103,6 +103,33 @@ const StudyNotesPage = () => {
               {chapter && ` • ${chapter}`}
               {chapterNum && ` (${isTamil ? 'பாடம்' : 'Lesson'} ${chapterNum})`}
             </p>
+            <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                className="lesson-practice-btn"
+                style={{
+                  padding: '0.65rem 1.25rem',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, rgba(255,215,0,0.22), rgba(245,158,11,0.32))',
+                  border: '1px solid rgba(255,215,0,0.5)',
+                  color: '#ffd700',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}
+                onClick={() => {
+                  const g = group?.toLowerCase().includes('group1') ? 'group1' : group?.toLowerCase().includes('group4') ? 'group4' : 'group2'
+                  const s = subjectId || 'general-studies'
+                  const c = searchParams.get('classId') || 'all'
+                  const u = unitId || '1'
+                  navigate(`/study-materials/practice?group=${g}&subjectId=${s}&classId=${c}&unitId=${u}&lessonTitle=${encodeURIComponent(decodedLessonTitle)}`)
+                }}
+              >
+                <HelpCircle size={16} />
+                <span>{isTamil ? 'இப்பாட வினாக்களைப் பயிற்சி செய்க' : 'Practice Lesson MCQs'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

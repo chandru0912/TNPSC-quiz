@@ -63,7 +63,7 @@ const Group2Lessons = () => {
       if (!baseUnit) return
       try {
         const [questionsRes, notesRes] = await Promise.allSettled([
-          apiFetch(`/api/questions?category=group2_2a&unitId=${parsedUnitId}&limit=500`),
+          apiFetch(`/api/study-materials/questions?group=group2&subjectId=${activeSubjectId}&unitId=${parsedUnitId}&limit=500`),
           apiFetch(`/api/notes?category=group2_2a&unitId=${parsedUnitId}&limit=500`),
         ])
 
@@ -297,6 +297,17 @@ const Group2Lessons = () => {
                       >
                         <BookOpen size={14} />
                         <span>{isTamil ? 'பாடக் குறிப்புகள் படிக்க' : 'Read Study Notes'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="lesson-btn"
+                        style={{ background: 'linear-gradient(135deg, rgba(255,215,0,0.18), rgba(245,158,11,0.28))', borderColor: 'rgba(255,215,0,0.5)', color: '#ffd700' }}
+                        onClick={() =>
+                          navigate(`/study-materials/practice/group2/${subject.id}/all/${unit.id}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`)
+                        }
+                      >
+                        <FileQuestion size={14} />
+                        <span>{isTamil ? 'பயிற்சி வினாக்கள்' : 'Practice MCQs'}</span>
                       </button>
                     </div>
                   </div>

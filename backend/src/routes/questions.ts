@@ -21,11 +21,20 @@ export interface QuestionDTO {
   subject: string;
   lessonTitle: string;
   lessonId?: string | null;
+  targetSystem?: 'study_materials' | 'main_practice';
+  language?: string;
+  examGroupId?: string | null;
+  subjectId?: string | null;
+  standardId?: number | null;
   topic: string | null;
   difficulty: 'Easy' | 'Medium' | 'Hard';
   tag: string;
   question: string;
   options: string[];
+  optionA?: string;
+  optionB?: string;
+  optionC?: string;
+  optionD?: string;
   correctAnswer: number;
   explanation: string;
   sourceReference: string | null;
@@ -39,6 +48,7 @@ export interface QuestionDTO {
 
 // Convert DB row to camelCase frontend-friendly QuestionDTO
 export function mapRowToQuestion(row: any): QuestionDTO {
+  const parsedOptions = typeof row.options === 'string' ? JSON.parse(row.options) : (row.options || []);
   return {
     id: row.id,
     category: row.category,
@@ -47,11 +57,20 @@ export function mapRowToQuestion(row: any): QuestionDTO {
     subject: row.subject,
     lessonTitle: row.lesson_title,
     lessonId: row.lesson_id || null,
+    targetSystem: row.target_system || 'main_practice',
+    language: row.language || 'tamil',
+    examGroupId: row.exam_group_id || row.category,
+    subjectId: row.subject_id || null,
+    standardId: row.standard_id || row.class_id,
     topic: row.topic,
     difficulty: row.difficulty,
     tag: row.tag || `Group 1 • Unit ${row.unit_id}: ${row.subject}`,
     question: row.question_text,
-    options: typeof row.options === 'string' ? JSON.parse(row.options) : row.options,
+    options: parsedOptions,
+    optionA: row.option_a || parsedOptions[0] || '',
+    optionB: row.option_b || parsedOptions[1] || '',
+    optionC: row.option_c || parsedOptions[2] || '',
+    optionD: row.option_d || parsedOptions[3] || '',
     correctAnswer: row.correct_answer,
     explanation: row.explanation,
     sourceReference: row.source_reference,
@@ -73,9 +92,14 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const { category, unitId, classId, lesson, lessonId, topic, subject, status, limit = '200', offset = '0' } = req.query;
 
-    const queryConditions: string[] = [];
+    const queryConditions: string[] = ["(target_system = 'main_practice' OR target_system IS NULL)"];
     const values: any[] = [];
     let paramIndex = 1;
+
+    // Strict Target System Isolation:
+    // Main MCQ Practice queries ONLY main_practice questions (or unassigned legacy questions).
+    // NEVER return study_materials questions!
+    queryConditions.push(`(target_system = 'main_practice' OR target_system IS NULL)`);
 
     // Strict Category / Group Filtering:
     // Prevents question leakage so students see only questions for their exact selected Group.
@@ -274,7 +298,7 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       offset = '0',
     } = req.query;
 
-    const queryConditions: string[] = [];
+    const queryConditions: string[] = ["(target_system = 'main_practice' OR target_system IS NULL)"];
     const values: any[] = [];
     let paramIndex = 1;
 
@@ -356,7 +380,8 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
         COUNT(*) as total_count,
         COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
         COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count
-      FROM questions;
+      FROM questions
+      WHERE (target_system = 'main_practice' OR target_system IS NULL);
     `);
     const metrics = metricsResult.rows[0];
 
@@ -730,7 +755,7 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
     }
 
     if (deleteAll) {
-      const queryConditions: string[] = [];
+      const queryConditions: string[] = ["(target_system = 'main_practice' OR target_system IS NULL)"];
       const values: any[] = [];
       let paramIndex = 1;
 
@@ -1443,11 +1468,21 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
     const requestedTotal = parsedCount * uniqueTopics.length;
     const groupDetails = getGroupDetails(cleanCategory);
 
-    // Infer medium automatically if subject is General Tamil / Tamil
+    // Infer medium automatically if subject is General Tamil / Tamil or language specified
+    const rawLanguage = String(req.body.language || '').trim().toLowerCase();
+    const resolvedLanguage: 'tamil' | 'english' =
+      rawLanguage === 'english'
+        ? 'english'
+        : rawLanguage === 'tamil'
+          ? 'tamil'
+          : /tamil|தமிழ்/i.test(subject)
+            ? 'tamil'
+            : 'english';
+
     const effectiveMedium =
       medium && String(medium).trim()
         ? String(medium).trim()
-        : /tamil|தமிழ்/i.test(subject)
+        : resolvedLanguage === 'tamil'
           ? 'Tamil'
           : 'English';
 
@@ -1541,6 +1576,7 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
         unitTitle: `Unit ${parsedUnitId}`,
         term: resolvedTerm,
         medium: effectiveMedium,
+        language: resolvedLanguage,
         lessonTitle: trimmedLesson,
         topic: topicName,
         count: parsedCount,
@@ -1603,6 +1639,8 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
           lesson: trimmedLesson,
           lessonTitle: trimmedLesson,
           lessonId: String(lessonId || req.body?.lesson_id || '').trim() || null,
+          language: resolvedLanguage,
+          targetSystem: 'study_materials',
           topic: topicName,
           difficulty: ['Easy', 'Medium', 'Hard'].includes(q.difficulty)
             ? q.difficulty

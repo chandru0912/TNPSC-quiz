@@ -10,6 +10,7 @@ import authRouter, { getConfiguredAdminCount } from './routes/auth';
 import { generateAdminToken, verifyAdminToken } from './middleware/auth';
 import notesRouter from './routes/notes';
 import textbooksRouter from './routes/textbooks';
+import studyMaterialQuestionsRouter from './routes/studyMaterialQuestions';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -159,6 +160,7 @@ const requireSchemaMiddleware = async (_req: Request, _res: Response, next: Next
 
 app.use('/api/admin', authRouter);
 app.use('/api/questions', requireSchemaMiddleware, questionsRouter);
+app.use('/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
 app.use('/api/notes', requireSchemaMiddleware, notesRouter);
 app.use('/api/textbooks', requireSchemaMiddleware, textbooksRouter);
 

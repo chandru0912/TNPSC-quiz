@@ -148,7 +148,70 @@ export async function runMigration() {
         ) THEN
           ALTER TABLE questions ADD COLUMN lesson_id VARCHAR(100);
         END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'target_system'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN target_system VARCHAR(50) NOT NULL DEFAULT 'main_practice';
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'language'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN language VARCHAR(20) NOT NULL DEFAULT 'tamil';
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'exam_group_id'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN exam_group_id VARCHAR(50);
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'subject_id'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN subject_id VARCHAR(100);
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'standard_id'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN standard_id INT;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'option_a'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN option_a TEXT;
+          ALTER TABLE questions ADD COLUMN option_b TEXT;
+          ALTER TABLE questions ADD COLUMN option_c TEXT;
+          ALTER TABLE questions ADD COLUMN option_d TEXT;
+        END IF;
       END $$;
+    `);
+
+    // Backfill existing questions: set study_materials for textbook-grounded or lesson-mapped questions
+    await client.query(`
+      UPDATE questions
+      SET target_system = 'study_materials',
+          exam_group_id = COALESCE(exam_group_id, category),
+          subject_id = COALESCE(subject_id, LOWER(REPLACE(subject, ' ', '-'))),
+          standard_id = COALESCE(standard_id, class_id),
+          language = COALESCE(language, 'tamil')
+      WHERE textbook_id IS NOT NULL OR lesson_id IS NOT NULL;
+
+      UPDATE questions
+      SET option_a = options->>0,
+          option_b = options->>1,
+          option_c = options->>2,
+          option_d = options->>3
+      WHERE option_a IS NULL AND options IS NOT NULL;
     `);
 
     // 8. Create indices for high-performance querying
@@ -170,6 +233,16 @@ export async function runMigration() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_questions_category_lesson_id 
       ON questions (category, lesson_id, status);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_questions_target_system 
+      ON questions (target_system);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_questions_sm_lookup 
+      ON questions (target_system, exam_group_id, subject_id, standard_id, unit_id, lesson_id, language, status);
     `);
 
     await client.query(`

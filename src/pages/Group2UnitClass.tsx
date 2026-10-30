@@ -341,9 +341,7 @@ const Group2UnitClass = () => {
             <div className="lessons-grid">
               {lessons.map((lesson: Group2SchoolLesson, index: number) => {
                 const translated = translateLesson(lesson, language)
-                const practiceUrl = `/practice?group=group2_2a&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
-                  data.unitTitle
-                )}&lesson=${encodeURIComponent(lesson.title)}&lessonId=${encodeURIComponent(lesson.id || '')}&classId=${data.classId}`
+                const practiceUrl = `/study-materials/practice/group2/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
 
                 return (
                   <motion.div
@@ -613,9 +611,7 @@ const Group2UnitClass = () => {
                               onClick={() => {
                                 setActiveModalLesson(null)
                                 navigate(
-                                  `/practice?group=group2_2a&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
-                                    data.unitTitle
-                                  )}&lesson=${encodeURIComponent(activeModalLesson.title)}&lessonId=${encodeURIComponent(activeModalLesson.id || '')}&classId=${data.classId}`
+                                  `/study-materials/practice/group2/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(activeModalLesson.id || '')}?lessonTitle=${encodeURIComponent(activeModalLesson.title)}`
                                 )
                               }}
                             >

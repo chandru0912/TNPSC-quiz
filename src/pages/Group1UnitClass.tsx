@@ -303,9 +303,7 @@ const Group1UnitClass = () => {
             <div className="lessons-grid">
               {lessons.map((lesson: SchoolLesson, index: number) => {
                 const translated = translateLesson(lesson, language)
-                const practiceUrl = `/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
-                  data.unitTitle
-                )}&lesson=${encodeURIComponent(lesson.title)}&lessonId=${encodeURIComponent(lesson.id || '')}&classId=${data.classId}`
+                const practiceUrl = `/study-materials/practice/group1/general-studies/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
 
                 return (
                   <motion.div
@@ -579,9 +577,7 @@ const Group1UnitClass = () => {
                       onClick={() => {
                         closeLessonNotes()
                         navigate(
-                          `/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
-                            data.unitTitle
-                          )}&lesson=${encodeURIComponent(activeReadingLesson.title)}&lessonId=${encodeURIComponent(activeReadingLesson.id || '')}&classId=${data.classId}`
+                          `/study-materials/practice/group1/general-studies/${data.classId}/${data.unitId}/${encodeURIComponent(activeReadingLesson.id || '')}?lessonTitle=${encodeURIComponent(activeReadingLesson.title)}`
                         )
                       }}
                     >

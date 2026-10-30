@@ -291,9 +291,7 @@ const Group4UnitClass = () => {
             <div className="lessons-grid">
               {lessons.map((lesson: Group4SchoolLesson, index: number) => {
                 const tLesson = translateLesson(lesson, language)
-                const practiceUrl = `/practice?group=group4_vao&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
-                  data.unitTitle
-                )}&lesson=${encodeURIComponent(lesson.title)}&lessonId=${encodeURIComponent(lesson.id || '')}&classId=${data.classId}`
+                const practiceUrl = `/study-materials/practice/group4/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
 
                 return (
                   <motion.div
@@ -492,9 +490,7 @@ const Group4UnitClass = () => {
 
                       <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
                         <Link
-                          to={`/practice?group=group4_vao&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
-                            data.unitTitle
-                          )}&lesson=${encodeURIComponent(activeModalLesson.title)}&lessonId=${encodeURIComponent(activeModalLesson.id || '')}&classId=${data.classId}`}
+                          to={`/study-materials/practice/group4/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(activeModalLesson.id || '')}?lessonTitle=${encodeURIComponent(activeModalLesson.title)}`}
                           className="lesson-practice-btn"
                           style={{ padding: '0.65rem 1.25rem', textDecoration: 'none' }}
                           onClick={() => setActiveModalLesson(null)}
