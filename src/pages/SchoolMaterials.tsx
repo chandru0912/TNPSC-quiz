@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { BookOpen, ChevronRight, GraduationCap, ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { apiFetch } from '../utils/api'
 import './SchoolMaterials.css'
 
 const SchoolMaterials = () => {
@@ -98,7 +99,7 @@ const SchoolMaterials = () => {
 
   useEffect(() => {
     if (!selectedStandard) return
-    fetch(`/api/questions?classId=${selectedStandard}&limit=300`)
+    apiFetch(`/api/questions?classId=${selectedStandard}&limit=300`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.status === 'success' && Array.isArray(data?.data)) {

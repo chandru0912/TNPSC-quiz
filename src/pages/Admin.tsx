@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { apiFetch } from '../utils/api'
+import {
+  apiFetch,
+  parseApiResponse,
+  classifyApiError,
+  classifyFetchFailure,
+} from '../utils/api'
 import { useScrollLock } from '../hooks/useScrollLock'
 import {
   Shield,
@@ -1138,7 +1143,7 @@ const Admin = () => {
       const res = await apiFetch(`/api/textbooks?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-      const data = await res.json()
+      const { data } = await parseApiResponse(res)
       if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
         setTextbooksList(data.data)
       }
@@ -1170,7 +1175,7 @@ const Admin = () => {
           const res = await apiFetch(`/api/textbooks/${aiInlineProcessingJob.id}`, {
             headers: { Authorization: `Bearer ${token}` },
           })
-          const data = await res.json()
+          const { data } = await parseApiResponse(res)
           if (res.ok && data.data) {
             const tb = data.data
             if (tb.status === 'completed' || tb.status === 'failed') {
@@ -1203,7 +1208,10 @@ const Admin = () => {
   // Upload or Replace Textbook
   const handleUploadTextbook = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!token) return
+    if (!token) {
+      setTbUploadError('Unauthorized (401): Admin authentication token is missing. Please sign in again.')
+      return
+    }
     if (!tbFile) {
       setTbUploadError('Please select a valid PDF textbook file.')
       return
@@ -1212,12 +1220,16 @@ const Admin = () => {
       setTbUploadError('Please enter the Textbook Name.')
       return
     }
-    if (!tbFile.name.toLowerCase().endsWith('.pdf')) {
-      setTbUploadError('Only PDF files are supported.')
+    if (!tbSubject.trim()) {
+      setTbUploadError('Please enter the Subject.')
       return
     }
-    if (tbFile.size > 50 * 1024 * 1024) {
-      setTbUploadError('File size exceeds the 50MB limit.')
+    if (!tbFile.name.toLowerCase().endsWith('.pdf') && tbFile.type !== 'application/pdf') {
+      setTbUploadError('Bad Request (400): Only PDF files (.pdf) are supported.')
+      return
+    }
+    if (tbFile.size > 100 * 1024 * 1024) {
+      setTbUploadError('Payload Too Large (413): File size exceeds the 100 MB application upload limit.')
       return
     }
 
@@ -1229,11 +1241,14 @@ const Admin = () => {
       const formData = new FormData()
       formData.append('group', tbGroup)
       formData.append('standard', tbStandard)
-      formData.append('subject', tbSubject)
+      formData.append('subject', tbSubject.trim())
       formData.append('medium', tbMedium)
       formData.append('term', tbTerm)
       formData.append('bookName', tbBookName.trim())
       formData.append('replace', replacingTextbookId ? 'true' : 'false')
+      if (replacingTextbookId) {
+        formData.append('replaceId', String(replacingTextbookId))
+      }
       formData.append('pdf', tbFile)
 
       setTbUploadProgress(45)
@@ -1242,22 +1257,40 @@ const Admin = () => {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
+        timeoutMs: 180000,
       })
 
-      const data = await res.json()
+      const { data, rawText } = await parseApiResponse(res)
       setTbUploadProgress(100)
 
       if (res.status === 409) {
-        setTbUploadError(data.message || 'A textbook with this Standard, Subject, and Book Name already exists.')
+        if (data?.existingId) {
+          setReplacingTextbookId(Number(data.existingId))
+        }
+        setTbUploadError(
+          data?.message ||
+            'Conflict (409): A textbook with this specification already exists. Click "Replace & Reprocess" below to confirm overwriting it.'
+        )
         return
       }
 
       if (!res.ok) {
-        setTbUploadError(data.message || 'Failed to upload textbook.')
+        const errMsg = classifyApiError(res, data, rawText, 'POST /api/textbooks/upload')
+        setTbUploadError(errMsg)
+        showToast('error', errMsg)
         return
       }
 
-      showToast('success', replacingTextbookId ? 'Textbook replaced successfully. Background indexing started.' : 'Textbook uploaded successfully. Background indexing started.')
+      const isAlreadyCompleted = data?.data?.status === 'completed'
+      const successMsg = replacingTextbookId
+        ? isAlreadyCompleted
+          ? `Textbook replaced and indexed (${data.data.pageCount || 0} pages).`
+          : 'Textbook replaced successfully. Background indexing started.'
+        : isAlreadyCompleted
+          ? `Textbook uploaded and indexed (${data.data.pageCount || 0} pages).`
+          : 'Textbook uploaded successfully. Background indexing started.'
+
+      showToast('success', successMsg)
       setIsUploadTextbookModalOpen(false)
       setReplacingTextbookId(null)
       setTbBookName('')
@@ -1266,7 +1299,12 @@ const Admin = () => {
       fetchTextbooks()
     } catch (err: any) {
       console.error('Textbook upload error:', err)
-      setTbUploadError(err.message || 'Network error while uploading textbook.')
+      const friendlyError = await classifyFetchFailure(err, {
+        endpointLabel: 'POST /api/textbooks/upload',
+        uploadFileSizeBytes: tbFile.size,
+      })
+      setTbUploadError(friendlyError)
+      showToast('error', friendlyError)
     } finally {
       setTbUploading(false)
     }
@@ -1281,16 +1319,19 @@ const Admin = () => {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
-      const data = await res.json()
+      const { data, rawText } = await parseApiResponse(res)
       if (res.ok) {
-        showToast('success', `Textbook "${deletingTextbook.bookName}" deleted successfully`)
+        showToast('success', data?.message || `Textbook "${deletingTextbook.bookName}" deleted successfully`)
         setDeletingTextbook(null)
         fetchTextbooks()
       } else {
-        showToast('error', data.message || 'Failed to delete textbook')
+        showToast('error', classifyApiError(res, data, rawText, `DELETE /api/textbooks/${deletingTextbook.id}`))
       }
-    } catch {
-      showToast('error', 'Network error deleting textbook')
+    } catch (err: any) {
+      const friendlyError = await classifyFetchFailure(err, {
+        endpointLabel: `DELETE /api/textbooks/${deletingTextbook.id}`,
+      })
+      showToast('error', friendlyError)
     } finally {
       setIsDeletingTextbook(false)
     }
@@ -1303,16 +1344,20 @@ const Admin = () => {
       const res = await apiFetch(`/api/textbooks/${tb.id}/reprocess`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
+        timeoutMs: 120000,
       })
-      const data = await res.json()
+      const { data, rawText } = await parseApiResponse(res)
       if (res.ok) {
-        showToast('success', `Reprocessing queued for "${tb.bookName}"`)
+        showToast('success', data?.message || `Reprocessing queued for "${tb.bookName}"`)
         fetchTextbooks()
       } else {
-        showToast('error', data.message || 'Failed to reprocess textbook')
+        showToast('error', classifyApiError(res, data, rawText, `POST /api/textbooks/${tb.id}/reprocess`))
       }
-    } catch {
-      showToast('error', 'Network error triggering reprocess')
+    } catch (err: any) {
+      const friendlyError = await classifyFetchFailure(err, {
+        endpointLabel: `POST /api/textbooks/${tb.id}/reprocess`,
+      })
+      showToast('error', friendlyError)
     }
   }
 
@@ -1325,9 +1370,9 @@ const Admin = () => {
       const res = await apiFetch(`/api/textbooks/search-content?textbookId=${tb.id}&standard=${encodeURIComponent(String(tb.standard))}&subject=${encodeURIComponent(tb.subject)}&medium=${encodeURIComponent(tb.medium)}&limit=10`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-      const data = await res.json()
-      const excerpts = Array.isArray(data.data) ? data.data : data.data?.chunks
-      if (res.ok && data.status === 'success' && Array.isArray(excerpts)) {
+      const { data } = await parseApiResponse(res)
+      const excerpts = Array.isArray(data?.data) ? data.data : data?.data?.chunks
+      if (res.ok && data?.status === 'success' && Array.isArray(excerpts)) {
         setTextbookExcerpts(excerpts)
       }
     } catch (e) {
@@ -1339,17 +1384,20 @@ const Admin = () => {
 
   // Direct Inline PDF Upload from MCQ Generator Modal
   const handleInlineUploadTextbook = async () => {
-    if (!token) return
+    if (!token) {
+      showToast('error', 'Unauthorized (401): Admin authentication token is missing.')
+      return
+    }
     if (!aiInlineFile) {
       showToast('error', 'Please choose a PDF file to upload.')
       return
     }
-    if (!aiInlineFile.name.toLowerCase().endsWith('.pdf')) {
-      showToast('error', 'Only PDF files are supported.')
+    if (!aiInlineFile.name.toLowerCase().endsWith('.pdf') && aiInlineFile.type !== 'application/pdf') {
+      showToast('error', 'Bad Request (400): Only PDF files (.pdf) are supported.')
       return
     }
-    if (aiInlineFile.size > 50 * 1024 * 1024) {
-      showToast('error', 'File size exceeds 50MB limit.')
+    if (aiInlineFile.size > 100 * 1024 * 1024) {
+      showToast('error', 'Payload Too Large (413): File size exceeds the 100 MB application upload limit.')
       return
     }
 
@@ -1374,36 +1422,52 @@ const Admin = () => {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
+        timeoutMs: 180000,
       })
-      const data = await res.json()
+      const { data, rawText } = await parseApiResponse(res)
       setAiInlineProgress(100)
 
       if (res.status === 409) {
-        showToast('error', data.message || 'A textbook with this name already exists. Selecting existing...')
+        if (data?.existingId) {
+          setAiSelectedTextbookId(Number(data.existingId))
+          setAiTextbookMode('specific')
+        }
+        showToast('error', data?.message || 'A textbook with this name already exists. Selecting existing...')
         setAiInlineUploading(false)
         fetchTextbooks()
         return
       }
 
-      if (!res.ok || !data.data) {
-        showToast('error', data.message || 'Failed to upload textbook')
+      if (!res.ok || !data?.data) {
+        const errMsg = classifyApiError(res, data, rawText, 'POST /api/textbooks/upload')
+        showToast('error', errMsg)
         setAiInlineUploading(false)
         return
       }
 
-      showToast('success', 'PDF uploaded! Processing and indexing text in background...')
-      setAiInlineProcessingJob({
-        id: data.data.id,
-        status: 'processing',
-        progressPercent: 10,
-        stepDescription: 'Extracting text from PDF pages...',
-      })
+      if (data.data.status === 'completed') {
+        showToast('success', `PDF uploaded and indexed (${data.data.pageCount || 0} pages)!`)
+        setAiSelectedTextbookId(data.data.id)
+        setAiTextbookMode('specific')
+      } else {
+        showToast('success', 'PDF uploaded! Processing and indexing text in background...')
+        setAiInlineProcessingJob({
+          id: data.data.id,
+          status: 'processing',
+          progressPercent: 10,
+          stepDescription: 'Extracting text from PDF pages...',
+        })
+      }
       setAiInlineFile(null)
       setAiInlineBookName('')
       fetchTextbooks()
     } catch (err: any) {
       console.error('Inline upload error:', err)
-      showToast('error', err.message || 'Network error during upload')
+      const friendlyError = await classifyFetchFailure(err, {
+        endpointLabel: 'POST /api/textbooks/upload',
+        uploadFileSizeBytes: aiInlineFile.size,
+      })
+      showToast('error', friendlyError)
     } finally {
       setAiInlineUploading(false)
     }
@@ -3758,7 +3822,7 @@ const Admin = () => {
 
                   {/* 7. PDF Upload Dropzone */}
                   <div className="form-field" style={{ marginTop: '0.5rem' }}>
-                    <label>7. PDF Textbook File * (Max 50MB)</label>
+                    <label>7. PDF Textbook File * (Max 100MB)</label>
                     <div
                       className="bulk-dropzone"
                       style={{ padding: '1.5rem', textAlign: 'center', cursor: 'pointer' }}

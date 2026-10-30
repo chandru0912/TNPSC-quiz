@@ -319,6 +319,54 @@ export async function processTextbookPdf(options: ProcessPdfOptions): Promise<vo
     );
 
     if (!fs.existsSync(filePath)) {
+      const existingContentRes = await client.query(
+        `SELECT id, page_number, content, is_ocr FROM textbook_content WHERE textbook_id = $1 ORDER BY page_number ASC`,
+        [textbookId]
+      );
+      if (existingContentRes.rows.length > 0) {
+        const storedPages = existingContentRes.rows;
+        const storedTotal = storedPages.length;
+        let activeUnitId: number | undefined;
+        let activeUnitTitle: string | undefined;
+        let activeLessonTitle: string | undefined;
+
+        for (const row of storedPages) {
+          const pageNum = row.page_number;
+          const pageText = cleanText(row.content || '');
+          const meta = extractPageSyllabusMeta(pageText, subject, pageNum, storedTotal);
+          if (meta.unitId) {
+            if (meta.unitId !== activeUnitId) activeLessonTitle = undefined;
+            activeUnitId = meta.unitId;
+          }
+          if (meta.unitTitle) activeUnitTitle = meta.unitTitle;
+          if (meta.lessonTitle) activeLessonTitle = meta.lessonTitle;
+
+          await client.query(
+            `UPDATE textbook_content
+             SET unit_id = $1, unit_title = $2, lesson_title = $3, topic = $4, content = $5, text_length = $6
+             WHERE id = $7`,
+            [
+              meta.unitId || activeUnitId || null,
+              meta.unitTitle || activeUnitTitle || null,
+              meta.lessonTitle || activeLessonTitle || null,
+              meta.topic || null,
+              pageText,
+              pageText.length,
+              row.id,
+            ]
+          );
+        }
+
+        await client.query(
+          `UPDATE textbooks SET status = 'completed', page_count = $2, error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [textbookId, storedTotal]
+        );
+        await client.query(
+          `UPDATE textbook_processing_jobs SET status = 'completed', progress_percent = 100, step_description = 'Re-indexed stored textbook pages successfully', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [jobId]
+        );
+        return;
+      }
       throw new Error(`Textbook file does not exist at path: ${filePath}`);
     }
 

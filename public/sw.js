@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tnpsc-hub-v1';
+const CACHE_NAME = 'tnpsc-hub-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -6,7 +6,7 @@ const STATIC_ASSETS = [
   '/manifest.json'
 ];
 
-// Install: pre-cache core static shell
+// Install: pre-cache core static shell and activate immediately
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -17,7 +17,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate: clean up older caches
+// Activate: clean up all older caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -32,25 +32,49 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch: bypass /api completely, cache-first for static assets, network-first for pages
+// Fetch: bypass cross-origin and /api completely; Network-First for HTML/navigation; Cache-First for hashed assets
 self.addEventListener('fetch', (event) => {
   const requestUrl = new URL(event.request.url);
 
-  // CRITICAL: NEVER cache API requests or non-GET requests
-  if (event.request.method !== 'GET' || requestUrl.pathname.startsWith('/api')) {
+  // CRITICAL: NEVER intercept cross-origin requests, non-GET requests, or /api routes
+  if (
+    event.request.method !== 'GET' ||
+    requestUrl.origin !== self.location.origin ||
+    requestUrl.pathname.startsWith('/api')
+  ) {
     return;
   }
 
-  // Handle static assets and navigation
+  const isHtmlNavigation =
+    event.request.mode === 'navigate' ||
+    (event.request.headers.get('accept') || '').includes('text/html') ||
+    requestUrl.pathname === '/' ||
+    requestUrl.pathname === '/index.html';
+
+  // Network-First for HTML navigation so new deployments are always picked up immediately
+  if (isHtmlNavigation) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.ok && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          return caches
+            .match(event.request)
+            .then((cached) => cached || caches.match('/index.html') || caches.match('/'));
+        })
+    );
+    return;
+  }
+
+  // Cache-First for static assets (icons, manifest, hashed bundles)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Fetch background update for cache
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.ok && networkResponse.status === 200 && networkResponse.type === 'basic') {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone())).catch(() => {});
-          }
-        }).catch(() => {/* Ignore network errors during background revalidation */});
         return cachedResponse;
       }
 
@@ -64,24 +88,12 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache).catch(() => {});
           }).catch(() => {});
-        } catch (e) {
+        } catch {
           // ignore
         }
 
         return response;
-      }).catch(() => {
-        // If offline and requesting an HTML page, return index.html
-        if (event.request.headers.get('accept')?.includes('text/html')) {
-          return caches.match('/index.html').then(r => r || caches.match('/')).catch(() => undefined);
-        }
-        return undefined;
       });
-    }).catch(() => {
-      // Fallback to avoid "Failed to convert value to 'Response'"
-      if (event.request.headers.get('accept')?.includes('text/html')) {
-        return caches.match('/index.html').catch(() => undefined);
-      }
-      return undefined;
     })
   );
 });

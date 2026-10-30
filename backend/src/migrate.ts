@@ -191,6 +191,18 @@ export async function runMigration() {
   }
 }
 
+let schemaInitPromise: Promise<void> | null = null;
+
+export function ensureDatabaseSchema(): Promise<void> {
+  if (!schemaInitPromise) {
+    schemaInitPromise = runMigration().catch((err) => {
+      schemaInitPromise = null;
+      throw err;
+    });
+  }
+  return schemaInitPromise;
+}
+
 if (require.main === module) {
   runMigration()
     .then(() => {

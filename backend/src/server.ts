@@ -4,6 +4,7 @@ dotenv.config();
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { CorsOptions } from 'cors';
 import pool from './db';
+import { ensureDatabaseSchema } from './migrate';
 import questionsRouter from './routes/questions';
 import authRouter, { getConfiguredAdminCount } from './routes/auth';
 import { generateAdminToken, verifyAdminToken } from './middleware/auth';
@@ -40,6 +41,10 @@ const isOriginAllowed = (origin: string): boolean => {
     return true;
   }
   if (allowedOrigins.includes(clean) || allowedOrigins.includes(origin)) {
+    return true;
+  }
+  // Allow local development origins on any port
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(clean)) {
     return true;
   }
   // Allow all Vercel deployment and preview subdomains for this project
@@ -114,10 +119,20 @@ app.get('/api/admin/login', (_req, res) => {
   });
 });
 
+// Ensure PostgreSQL schema tables exist before handling data routes
+const requireSchemaMiddleware = async (_req: Request, _res: Response, next: NextFunction) => {
+  try {
+    await ensureDatabaseSchema();
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
 app.use('/api/admin', authRouter);
-app.use('/api/questions', questionsRouter);
-app.use('/api/notes', notesRouter);
-app.use('/api/textbooks', textbooksRouter);
+app.use('/api/questions', requireSchemaMiddleware, questionsRouter);
+app.use('/api/notes', requireSchemaMiddleware, notesRouter);
+app.use('/api/textbooks', requireSchemaMiddleware, textbooksRouter);
 
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {
@@ -192,6 +207,14 @@ app.get('/api/db-health', async (_req: Request, res: Response) => {
   }
 });
 
+// JSON 404 handler for unmatched routes (prevents Express default HTML 404 responses)
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    status: 'error',
+    message: `Not Found (404): Route ${req.method} ${req.originalUrl} does not exist on this server.`,
+  });
+});
+
 // Global JSON error handler to ensure runtime or middleware errors never drop CORS headers or return raw HTML
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[Server Error]:', err?.message || err);
@@ -203,6 +226,9 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 if (!process.env.VERCEL) {
+  ensureDatabaseSchema().catch((err) => {
+    console.warn('[Server Startup] Schema check warning:', err?.message || err);
+  });
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

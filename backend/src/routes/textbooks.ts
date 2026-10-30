@@ -1,14 +1,25 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import pool from '../db';
+import { ensureDatabaseSchema } from '../migrate';
 import { requireAdminAuth } from '../middleware/auth';
 import { processTextbookPdf } from '../services/pdfProcessor';
 import { retrieveRelevantTextbookContent } from '../services/textbookRag';
 
 const router = Router();
+
+// Ensure PostgreSQL schema (textbooks, textbook_content, textbook_processing_jobs) is initialized
+router.use(async (_req: Request, _res: Response, next: NextFunction) => {
+  try {
+    await ensureDatabaseSchema();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Configure upload storage directory safely (supports read-only serverless filesystems like Vercel)
 function resolveUploadsDir(): string {
@@ -39,7 +50,8 @@ const UPLOADS_DIR = resolveUploadsDir();
 // Multer disk storage configuration
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, UPLOADS_DIR);
+    const dir = resolveUploadsDir();
+    cb(null, dir);
   },
   filename: (_req, file, cb) => {
     const timestamp = Date.now();
@@ -57,7 +69,7 @@ const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFil
   if (isPdf) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type: Only PDF documents are allowed.'));
+    cb(new Error('Invalid file type: Only PDF documents (.pdf) are allowed.'));
   }
 };
 
@@ -68,6 +80,31 @@ const upload = multer({
     fileSize: 100 * 1024 * 1024, // 100 MB max file size
   },
 });
+
+// Multer middleware wrapper with proper HTTP status classification (413 for size limit, 400 for validation)
+function handlePdfUpload(req: Request, res: Response, next: NextFunction) {
+  upload.single('pdf')(req, res, (err: any) => {
+    if (!err) {
+      return next();
+    }
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          status: 'error',
+          message: 'Payload Too Large (413): PDF file exceeds the 100 MB application upload limit.',
+        });
+      }
+      return res.status(400).json({
+        status: 'error',
+        message: `Bad Request (400): ${err.message}`,
+      });
+    }
+    return res.status(400).json({
+      status: 'error',
+      message: err.message || 'Bad Request (400): Invalid PDF file upload.',
+    });
+  });
+}
 
 /**
  * Normalizes Group names to standard identifiers (group1, group2, group4)
@@ -94,117 +131,193 @@ function normalizeStandard(val: any): number {
 }
 
 /**
- * POST /api/textbooks/upload (Protected Admin)
- * Uploads textbook PDF, records metadata, prevents duplicates, starts async processing.
+ * Shared handler for POST /api/textbooks/upload and PUT /api/textbooks/:id
  */
-router.post(
-  '/upload',
-  requireAdminAuth,
-  upload.single('pdf'),
-  async (req: Request, res: Response) => {
-    let uploadedFilePath: string | null = null;
-    try {
-      if (!req.file) {
-        return res.status(400).json({ status: 'error', message: 'No PDF file uploaded.' });
-      }
+async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
+  let uploadedFilePath: string | null = null;
+  try {
+    if (!req.file) {
+      return res.status(400).json({ status: 'error', message: 'No PDF file uploaded.' });
+    }
 
-      uploadedFilePath = req.file.path;
+    uploadedFilePath = req.file.path;
 
-      const {
-        group,
-        groupId,
-        standard = 6,
-        subject,
-        medium = 'English',
-        term = 'Full Year',
-        bookName,
-        replace = false,
-        replaceId,
-      } = req.body;
+    const {
+      group,
+      groupId,
+      standard = 6,
+      subject,
+      medium = 'English',
+      term = 'Full Year',
+      bookName,
+      replace = false,
+      replaceId,
+    } = req.body;
 
-      if (!subject || !String(subject).trim()) {
-        return res.status(400).json({ status: 'error', message: 'Subject is required.' });
-      }
+    if (!subject || !String(subject).trim()) {
+      if (fs.existsSync(uploadedFilePath)) fs.unlinkSync(uploadedFilePath);
+      return res.status(400).json({ status: 'error', message: 'Subject is required.' });
+    }
 
-      if (!bookName || !String(bookName).trim()) {
-        return res.status(400).json({ status: 'error', message: 'Book Name is required.' });
-      }
+    if (!bookName || !String(bookName).trim()) {
+      if (fs.existsSync(uploadedFilePath)) fs.unlinkSync(uploadedFilePath);
+      return res.status(400).json({ status: 'error', message: 'Book Name is required.' });
+    }
 
-      const cleanGroupId = normalizeGroupId(group || groupId || 'group1');
-      const parsedStandard = normalizeStandard(standard);
-      const cleanSubject = String(subject).trim();
-      const cleanMedium = String(medium).trim().toLowerCase() === 'tamil' ? 'Tamil' : 'English';
-      const cleanTerm = term && String(term).trim() ? String(term).trim() : 'Full Year';
-      const cleanBookName = String(bookName).trim();
-      const fileSize = req.file.size;
+    const cleanGroupId = normalizeGroupId(group || groupId || 'group1');
+    const parsedStandard = normalizeStandard(standard);
+    const cleanSubject = String(subject).trim();
+    const cleanMedium = String(medium).trim().toLowerCase() === 'tamil' ? 'Tamil' : 'English';
+    const cleanTerm = term && String(term).trim() ? String(term).trim() : 'Full Year';
+    const cleanBookName = String(bookName).trim();
+    const fileSize = req.file.size;
 
-      // Duplicate check: group_id, standard, subject, medium, term, book_name
-      const duplicateRes = await pool.query(
-        `SELECT id, file_path, status FROM textbooks 
-         WHERE group_id = $1 AND standard = $2 AND LOWER(subject) = LOWER($3) 
-           AND medium = $4 AND term = $5 AND LOWER(book_name) = LOWER($6)`,
-        [cleanGroupId, parsedStandard, cleanSubject, cleanMedium, cleanTerm, cleanBookName]
+    const targetReplaceId = req.params.id
+      ? parseInt(req.params.id, 10)
+      : replaceId
+        ? parseInt(String(replaceId), 10)
+        : NaN;
+    const hasValidReplaceId = !isNaN(targetReplaceId) && targetReplaceId > 0;
+    const shouldReplace =
+      String(replace).toLowerCase() === 'true' ||
+      replace === true ||
+      hasValidReplaceId ||
+      req.method === 'PUT';
+
+    // 1. Check if replacing a specific textbook by ID
+    let existingRecord: { id: number; file_path: string; status: string } | null = null;
+    if (hasValidReplaceId) {
+      const idRes = await pool.query(
+        `SELECT id, file_path, status FROM textbooks WHERE id = $1`,
+        [targetReplaceId]
       );
+      if (idRes.rows.length > 0) {
+        existingRecord = idRes.rows[0];
+      }
+    }
 
-      let textbookId: number;
+    // 2. Duplicate check: group_id, standard, subject, medium, term, book_name
+    const duplicateRes = await pool.query(
+      `SELECT id, file_path, status FROM textbooks 
+       WHERE group_id = $1 AND standard = $2 AND LOWER(subject) = LOWER($3) 
+         AND medium = $4 AND term = $5 AND LOWER(book_name) = LOWER($6)`,
+      [cleanGroupId, parsedStandard, cleanSubject, cleanMedium, cleanTerm, cleanBookName]
+    );
+    const duplicateSpecRecord = duplicateRes.rows[0] || null;
 
-      if (duplicateRes.rows.length > 0) {
-        const existing = duplicateRes.rows[0];
-        const shouldReplace = String(replace) === 'true' || replace === true || Boolean(replaceId);
+    if (!existingRecord && duplicateSpecRecord) {
+      existingRecord = duplicateSpecRecord;
+    }
 
-        if (!shouldReplace) {
-          // Clean up newly uploaded file to avoid orphaned files on disk
-          if (fs.existsSync(uploadedFilePath)) {
-            fs.unlinkSync(uploadedFilePath);
-          }
-          return res.status(409).json({
-            status: 'error',
-            message: `A textbook with this specification already exists (ID: ${existing.id}, "${cleanBookName}"). To overwrite it, confirm replace.`,
-            existingId: existing.id,
-          });
+    let textbookId: number;
+
+    if (existingRecord) {
+      if (!shouldReplace) {
+        // Clean up newly uploaded file to avoid orphaned files on disk
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
         }
+        return res.status(409).json({
+          status: 'error',
+          message: `A textbook with this specification already exists (ID: ${existingRecord.id}, "${cleanBookName}"). To overwrite it, confirm replace.`,
+          existingId: existingRecord.id,
+        });
+      }
 
-        // Replace existing textbook
-        if (existing.file_path && fs.existsSync(existing.file_path)) {
+      // If replacing by ID and the updated metadata also collides with a different row, remove the colliding duplicate
+      if (duplicateSpecRecord && duplicateSpecRecord.id !== existingRecord.id) {
+        if (duplicateSpecRecord.file_path && fs.existsSync(duplicateSpecRecord.file_path)) {
           try {
-            fs.unlinkSync(existing.file_path);
+            fs.unlinkSync(duplicateSpecRecord.file_path);
           } catch {}
         }
-
-        const updateRes = await pool.query(
-          `UPDATE textbooks 
-           SET file_path = $1, file_size = $2, status = 'uploaded', error_message = NULL, updated_at = CURRENT_TIMESTAMP 
-           WHERE id = $3 
-           RETURNING *`,
-          [uploadedFilePath, fileSize, existing.id]
-        );
-        textbookId = updateRes.rows[0].id;
-      } else {
-        // Insert new textbook
-        const insertRes = await pool.query(
-          `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_path, file_size, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'uploaded')
-           RETURNING *`,
-          [cleanGroupId, parsedStandard, cleanSubject, cleanMedium, cleanTerm, cleanBookName, uploadedFilePath, fileSize]
-        );
-        textbookId = insertRes.rows[0].id;
+        await pool.query(`DELETE FROM textbooks WHERE id = $1`, [duplicateSpecRecord.id]);
       }
 
-      // Trigger asynchronous PDF processing engine
-      processTextbookPdf({
+      // Remove old file from disk before updating
+      if (
+        existingRecord.file_path &&
+        existingRecord.file_path !== uploadedFilePath &&
+        fs.existsSync(existingRecord.file_path)
+      ) {
+        try {
+          fs.unlinkSync(existingRecord.file_path);
+        } catch {}
+      }
+
+      const updateRes = await pool.query(
+        `UPDATE textbooks 
+         SET group_id = $1,
+             standard = $2,
+             subject = $3,
+             medium = $4,
+             term = $5,
+             book_name = $6,
+             file_path = $7,
+             file_size = $8,
+             status = 'uploaded',
+             error_message = NULL,
+             updated_at = CURRENT_TIMESTAMP 
+         WHERE id = $9 
+         RETURNING *`,
+        [
+          cleanGroupId,
+          parsedStandard,
+          cleanSubject,
+          cleanMedium,
+          cleanTerm,
+          cleanBookName,
+          uploadedFilePath,
+          fileSize,
+          existingRecord.id,
+        ]
+      );
+      textbookId = updateRes.rows[0].id;
+    } else {
+      // Insert new textbook
+      const insertRes = await pool.query(
+        `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_path, file_size, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'uploaded')
+         RETURNING *`,
+        [
+          cleanGroupId,
+          parsedStandard,
+          cleanSubject,
+          cleanMedium,
+          cleanTerm,
+          cleanBookName,
+          uploadedFilePath,
+          fileSize,
+        ]
+      );
+      textbookId = insertRes.rows[0].id;
+    }
+
+    // On serverless hosts (Vercel), await PDF extraction before returning so the container is not frozen mid-indexing.
+    // On persistent Node servers (local dev / dedicated server), run asynchronously in background.
+    if (process.env.VERCEL) {
+      await processTextbookPdf({
         textbookId,
         filePath: uploadedFilePath,
         groupId: cleanGroupId,
         standard: parsedStandard,
         subject: cleanSubject,
         medium: cleanMedium,
-      }).catch((err) => {
-        console.error(`[Textbook Route] Async processing failure for ${textbookId}:`, err);
+        term: cleanTerm,
       });
+
+      const finalRes = await pool.query(
+        `SELECT status, page_count, error_message FROM textbooks WHERE id = $1`,
+        [textbookId]
+      );
+      const finalRow = finalRes.rows[0] || { status: 'completed', page_count: 0, error_message: null };
 
       return res.status(201).json({
         status: 'success',
-        message: 'Textbook uploaded successfully. Processing and indexing started.',
+        message:
+          finalRow.status === 'completed'
+            ? `Textbook uploaded and indexed successfully (${finalRow.page_count || 0} pages).`
+            : 'Textbook uploaded. Processing initiated.',
         data: {
           id: textbookId,
           groupId: cleanGroupId,
@@ -213,23 +326,65 @@ router.post(
           medium: cleanMedium,
           term: cleanTerm,
           bookName: cleanBookName,
-          status: 'uploaded',
+          pageCount: finalRow.page_count || 0,
+          status: finalRow.status,
+          errorMessage: finalRow.error_message,
         },
       });
-    } catch (error: any) {
-      if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-        try {
-          fs.unlinkSync(uploadedFilePath);
-        } catch {}
-      }
-      console.error('[Textbooks Route] Upload error:', error);
-      return res.status(500).json({
-        status: 'error',
-        message: error.message || 'Failed to upload textbook.',
-      });
     }
+
+    // Persistent server: trigger asynchronous PDF processing engine
+    processTextbookPdf({
+      textbookId,
+      filePath: uploadedFilePath,
+      groupId: cleanGroupId,
+      standard: parsedStandard,
+      subject: cleanSubject,
+      medium: cleanMedium,
+      term: cleanTerm,
+    }).catch((err) => {
+      console.error(`[Textbook Route] Async processing failure for ${textbookId}:`, err);
+    });
+
+    return res.status(201).json({
+      status: 'success',
+      message: 'Textbook uploaded successfully. Processing and indexing started.',
+      data: {
+        id: textbookId,
+        groupId: cleanGroupId,
+        standard: parsedStandard,
+        subject: cleanSubject,
+        medium: cleanMedium,
+        term: cleanTerm,
+        bookName: cleanBookName,
+        status: 'uploaded',
+      },
+    });
+  } catch (error: any) {
+    if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
+      try {
+        fs.unlinkSync(uploadedFilePath);
+      } catch {}
+    }
+    console.error('[Textbooks Route] Upload error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: error.message || 'Failed to upload textbook.',
+    });
   }
-);
+}
+
+/**
+ * POST /api/textbooks/upload (Protected Admin)
+ * Uploads textbook PDF, records metadata, prevents duplicates, starts async processing.
+ */
+router.post('/upload', requireAdminAuth, handlePdfUpload, handleUploadOrReplaceTextbook);
+
+/**
+ * PUT /api/textbooks/:id (Protected Admin)
+ * Replaces an existing textbook PDF by ID and re-indexes it.
+ */
+router.put('/:id', requireAdminAuth, handlePdfUpload, handleUploadOrReplaceTextbook);
 
 /**
  * GET /api/textbooks (Public / Admin)
@@ -467,6 +622,22 @@ router.post('/:id/reprocess', requireAdminAuth, async (req: Request, res: Respon
     }
 
     const r = tbRes.rows[0];
+
+    if (process.env.VERCEL) {
+      await processTextbookPdf({
+        textbookId: r.id,
+        filePath: r.file_path,
+        groupId: r.group_id,
+        standard: r.standard,
+        subject: r.subject,
+        medium: r.medium,
+      });
+
+      return res.status(200).json({
+        status: 'success',
+        message: `Reprocessing completed for "${r.book_name}".`,
+      });
+    }
 
     processTextbookPdf({
       textbookId: r.id,
