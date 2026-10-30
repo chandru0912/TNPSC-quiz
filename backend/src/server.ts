@@ -5,6 +5,7 @@ import pool from './db';
 import questionsRouter from './routes/questions';
 import authRouter from './routes/auth';
 import notesRouter from './routes/notes';
+import textbooksRouter from './routes/textbooks';
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ const allowedOrigins = [
   'https://tnpsc-quiz-jwkl.vercel.app',
   'https://tnpsc-quiz-jwk1.vercel.app',
   'http://localhost:5173',
+  'http://localhost:5174',
   'http://localhost:3000',
   'http://localhost:5000',
 ];
@@ -69,7 +71,7 @@ const corsOptions: CorsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.get('/', (_req, res) => {
@@ -84,6 +86,7 @@ app.get('/', (_req, res) => {
       adminAuth: '/api/admin/login',
       questions: '/api/questions',
       notes: '/api/notes',
+      textbooks: '/api/textbooks',
     },
   });
 });
@@ -113,6 +116,7 @@ app.get('/api/admin/login', (_req, res) => {
 app.use('/api/admin', authRouter);
 app.use('/api/questions', questionsRouter);
 app.use('/api/notes', notesRouter);
+app.use('/api/textbooks', textbooksRouter);
 
 // Preserved existing health check endpoint
 app.get('/api/health', (_req, res) => {

@@ -65,7 +65,86 @@ export async function runMigration() {
       );
     `);
 
-    // 4. Create indices for high-performance querying
+    // 4. Create textbooks table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS textbooks (
+        id SERIAL PRIMARY KEY,
+        group_id VARCHAR(50) NOT NULL,
+        standard INT NOT NULL,
+        subject VARCHAR(150) NOT NULL,
+        medium VARCHAR(20) NOT NULL DEFAULT 'English' CHECK (medium IN ('Tamil', 'English')),
+        term VARCHAR(50) DEFAULT 'Full Year',
+        book_name VARCHAR(255) NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        file_size BIGINT NOT NULL,
+        page_count INT DEFAULT 0,
+        status VARCHAR(30) NOT NULL DEFAULT 'uploaded' CHECK (status IN ('uploaded', 'processing', 'completed', 'failed')),
+        error_message TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_textbook_spec UNIQUE (group_id, standard, subject, medium, term, book_name)
+      );
+    `);
+
+    // 5. Create textbook_content table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS textbook_content (
+        id SERIAL PRIMARY KEY,
+        textbook_id INT NOT NULL REFERENCES textbooks(id) ON DELETE CASCADE,
+        page_number INT NOT NULL,
+        unit_id INT,
+        unit_title VARCHAR(255),
+        lesson_title VARCHAR(255),
+        topic VARCHAR(255),
+        content TEXT NOT NULL,
+        text_length INT NOT NULL,
+        is_ocr BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 6. Create textbook_processing_jobs table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS textbook_processing_jobs (
+        id SERIAL PRIMARY KEY,
+        textbook_id INT NOT NULL REFERENCES textbooks(id) ON DELETE CASCADE,
+        status VARCHAR(30) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'extracting', 'indexing', 'completed', 'failed')),
+        progress_percent INT DEFAULT 0,
+        step_description VARCHAR(255),
+        error_message TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 7. Add textbook references to questions table safely if not already present
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'textbook_id'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN textbook_id INT REFERENCES textbooks(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'source_page'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN source_page INT;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'verification_status'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN verification_status VARCHAR(30) DEFAULT 'needs_review' CHECK (verification_status IN ('verified', 'needs_review', 'rejected'));
+        END IF;
+      END $$;
+    `);
+
+    // 8. Create indices for high-performance querying
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_questions_category_unit_status 
       ON questions (category, unit_id, status);
@@ -86,8 +165,23 @@ export async function runMigration() {
       ON study_notes (category, lesson_title, status);
     `);
 
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_textbooks_lookup 
+      ON textbooks (group_id, standard, subject, medium);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_textbook_content_search 
+      ON textbook_content (textbook_id, page_number);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_textbook_content_lesson 
+      ON textbook_content (unit_id, lesson_title);
+    `);
+
     await client.query('COMMIT');
-    console.log('Migration completed successfully: questions, admin_users, study_notes tables and indices created/verified.');
+    console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, and jobs verified.');
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Migration failed:', error.message);

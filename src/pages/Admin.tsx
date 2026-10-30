@@ -29,6 +29,12 @@ import {
   RefreshCcw,
   Users,
   UserPlus,
+  BookOpen,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  Eye,
+  UploadCloud,
 } from 'lucide-react'
 import './Admin.css'
 import {
@@ -40,10 +46,6 @@ import {
   getLessonsForSelection,
   getTopicsForSelection,
 } from '../data/unifiedSyllabusRegistry'
-import {
-  generateClientGeminiQuestions,
-  generateClientSyllabusFallback,
-} from '../utils/syllabusFallback'
 
 interface QuestionItem {
   id: number
@@ -61,7 +63,35 @@ interface QuestionItem {
   explanation: string
   sourceReference: string | null
   status: 'staging' | 'published' | 'archived'
+  textbookId?: number | null
+  sourcePage?: number | null
+  verificationStatus?: 'verified' | 'needs_review' | 'rejected'
   createdAt?: string
+}
+
+interface TextbookItem {
+  id: number
+  groupId: string
+  standard: number | string
+  subject: string
+  medium: 'Tamil' | 'English'
+  term?: string | null
+  bookName: string
+  filePath: string
+  fileSize: number
+  pageCount: number
+  status: 'uploaded' | 'processing' | 'completed' | 'failed'
+  errorMessage?: string | null
+  createdAt?: string
+  updatedAt?: string
+  job?: {
+    status: string
+    progressPercent: number
+    stepDescription: string
+    totalPages: number
+    processedPages: number
+    errorMessage?: string
+  }
 }
 
 interface AdminMetrics {
@@ -122,6 +152,50 @@ const Admin = () => {
     .filter((q) => selectedQuestionIds.has(q.id) && q.status === 'staging')
     .map((q) => q.id)
 
+  // Navigation Section
+  const [adminSection, setAdminSection] = useState<'questions' | 'textbooks' | 'notes'>('questions')
+
+  // Textbook management state
+  const [textbooksList, setTextbooksList] = useState<TextbookItem[]>([])
+  const [textbooksLoading, setTextbooksLoading] = useState(false)
+  const [textbookSearch, setTextbookSearch] = useState('')
+  const [textbookGroupFilter, setTextbookGroupFilter] = useState('all')
+  const [textbookStandardFilter, setTextbookStandardFilter] = useState('all')
+  const [textbookMediumFilter, setTextbookMediumFilter] = useState('all')
+  const [textbookStatusFilter, setTextbookStatusFilter] = useState('all')
+
+  // Textbook Modals & Actions
+  const [isUploadTextbookModalOpen, setIsUploadTextbookModalOpen] = useState(false)
+  const [selectedTextbookDetail, setSelectedTextbookDetail] = useState<TextbookItem | null>(null)
+  const [textbookExcerpts, setTextbookExcerpts] = useState<any[]>([])
+  const [isLoadingExcerpts, setIsLoadingExcerpts] = useState(false)
+  const [deletingTextbook, setDeletingTextbook] = useState<TextbookItem | null>(null)
+  const [isDeletingTextbook, setIsDeletingTextbook] = useState(false)
+  const [replacingTextbookId, setReplacingTextbookId] = useState<number | null>(null)
+
+  // Upload Form Fields
+  const [tbGroup, setTbGroup] = useState<'group1' | 'group2' | 'group4'>('group1')
+  const [tbStandard, setTbStandard] = useState<string>('10th')
+  const [tbSubject, setTbSubject] = useState<string>('General Science')
+  const [tbMedium, setTbMedium] = useState<'Tamil' | 'English'>('English')
+  const [tbTerm, setTbTerm] = useState<string>('Full Year')
+  const [tbBookName, setTbBookName] = useState<string>('')
+  const [tbFile, setTbFile] = useState<File | null>(null)
+  const [tbUploading, setTbUploading] = useState(false)
+  const [tbUploadProgress, setTbUploadProgress] = useState(0)
+  const [tbUploadError, setTbUploadError] = useState<string | null>(null)
+
+  // In-Generator Textbook Source states
+  const [aiTextbookMode, setAiTextbookMode] = useState<'auto' | 'specific' | 'upload'>('auto')
+  const [aiSelectedTextbookId, setAiSelectedTextbookId] = useState<number | null>(null)
+  const [aiInlineMedium, setAiInlineMedium] = useState<'Tamil' | 'English'>('English')
+  const [aiInlineTerm, setAiInlineTerm] = useState<string>('Full Year')
+  const [aiInlineBookName, setAiInlineBookName] = useState<string>('')
+  const [aiInlineFile, setAiInlineFile] = useState<File | null>(null)
+  const [aiInlineUploading, setAiInlineUploading] = useState<boolean>(false)
+  const [aiInlineProgress, setAiInlineProgress] = useState<number>(0)
+  const [aiInlineProcessingJob, setAiInlineProcessingJob] = useState<{ id: number; status: string; progressPercent: number; stepDescription: string } | null>(null)
+
   // Notes management
   const [notesList, setNotesList] = useState<any[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
@@ -166,8 +240,11 @@ const Admin = () => {
     isUsersModalOpen ||
     isEditModalOpen ||
     Boolean(isDeleting) ||
+    Boolean(deletingTextbook) ||
     isBulkModalOpen ||
     isBulkPublishModalOpen ||
+    isUploadTextbookModalOpen ||
+    Boolean(selectedTextbookDetail) ||
     isAIGeneratorOpen
   useScrollLock(hasOpenAdminModal)
 
@@ -332,6 +409,7 @@ const Admin = () => {
   const isLessonValid = Boolean(selectedLessonObj && selectedLessonObj.title)
   const isCountValid = [50, 80, 100].includes(aiQuestionCount)
   const isDifficultyValid = ['Medium', 'Easy', 'Hard', 'Mixed'].includes(aiDifficulty)
+  const isTextbookReady = !aiInlineUploading && (!aiInlineProcessingJob || aiInlineProcessingJob.status === 'completed')
 
   const isFormValid =
     isSubjectValid &&
@@ -340,9 +418,10 @@ const Admin = () => {
     isLessonValid &&
     isCountValid &&
     isDifficultyValid &&
+    isTextbookReady &&
     !isAIGenerating
 
-  // Generate AI Questions handler
+  // Generate AI Questions handler (Strictly Textbook-Grounded)
   const handleGenerateAIQuestions = async () => {
     if (!token || !isFormValid) return
     setIsAIGenerating(true)
@@ -350,129 +429,83 @@ const Admin = () => {
     setAiUploadSuccess(null)
 
     const activeTopic = currentLessonTitle
+    const resolvedMedium = /tamil|தமிழ்/i.test(selectedSubjectObj.name)
+      ? 'Tamil'
+      : (aiInlineMedium || 'English')
 
     try {
-      let data: any = null
-      let isBackendSuccessful = false
+      const res = await apiFetch('/api/questions/ai-generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          category: aiGroupId,
+          subject: selectedSubjectObj.name,
+          subjectId: selectedSubjectObj.id,
+          classId: currentClassId,
+          standard: currentClassId,
+          unitId: currentUnitId,
+          unitTitle: currentUnit?.title,
+          lessonTitle: currentLessonTitle,
+          topic: activeTopic,
+          topics: [],
+          description: selectedLessonObj?.description || '',
+          count: aiQuestionCount,
+          difficulty: aiDifficulty,
+          apiKey: geminiApiKey.trim() || undefined,
+          textbookMode: aiTextbookMode,
+          textbookId:
+            aiTextbookMode === 'specific'
+              ? aiSelectedTextbookId
+              : (aiInlineProcessingJob?.id || undefined),
+          medium: resolvedMedium,
+          term: aiInlineTerm || 'Term 1',
+        }),
+      })
 
-      try {
-        const res = await apiFetch('/api/questions/ai-generate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            category: aiGroupId,
-            subject: selectedSubjectObj.name,
-            subjectId: selectedSubjectObj.id,
-            classId: currentClassId,
-            unitId: currentUnitId,
-            unitTitle: currentUnit?.title,
-            lessonTitle: currentLessonTitle,
-            topic: activeTopic,
-            topics: [],
-            description: selectedLessonObj?.description || '',
-            count: aiQuestionCount,
-            difficulty: aiDifficulty,
-            apiKey: geminiApiKey.trim() || undefined,
-          }),
-        })
+      const data = await res.json().catch(() => ({}))
 
-        if (res.ok) {
-          data = await res.json()
-          if (data && Array.isArray(data.questions) && data.questions.length >= aiQuestionCount) {
-            data.questions = data.questions.slice(0, aiQuestionCount)
-            isBackendSuccessful = true
-          }
-        }
-      } catch (backendErr) {
-        console.warn('Backend ai-generate endpoint unreachable, using client generator:', backendErr)
+      if (!res.ok) {
+        const errMsg =
+          data?.message ||
+          `Required textbook content could not be retrieved for ${currentClassId}th Standard ${selectedSubjectObj.name}.`
+        setAiGeneratedQuestions([])
+        setAiNotice(errMsg)
+        showToast('error', errMsg)
+        return
       }
 
-      if (isBackendSuccessful && data && data.questions) {
-        // Stamp approval selection state
-        const taggedQuestions = data.questions.map((q: any) => ({
+      if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+        const taggedQuestions = data.questions.slice(0, aiQuestionCount).map((q: any) => ({
           ...q,
           category: aiGroupId,
           subject: selectedSubjectObj.name,
           classId: currentClassId,
+          standard: currentClassId,
           unitId: currentUnitId,
           lessonTitle: currentLessonTitle,
           topic: activeTopic,
           selected: true,
         }))
         setAiGeneratedQuestions(taggedQuestions)
-        setAiSource(data.source)
-        setAiNotice(data.notice || `Generated ${data.count} syllabus-aligned questions ready for review.`)
-      } else {
-        // Standalone Client Generation (for Vercel or offline environments)
-        let generated: any[] = []
-        let src: 'gemini' | 'curated_syllabus' = 'curated_syllabus'
-
-        if (geminiApiKey.trim()) {
-          try {
-            generated = await generateClientGeminiQuestions(geminiApiKey.trim(), {
-              category: aiGroupId,
-              subject: selectedSubjectObj.name,
-              classId: currentClassId,
-              unitId: currentUnitId,
-              unitTitle: currentUnit?.title,
-              lessonTitle: currentLessonTitle,
-              topic: activeTopic,
-              count: aiQuestionCount,
-              difficulty: aiDifficulty,
-            })
-            src = 'gemini'
-          } catch (geminiErr: any) {
-            console.warn('Direct Gemini API call failed, using syllabus fallback:', geminiErr)
-            generated = generateClientSyllabusFallback({
-              category: aiGroupId,
-              subject: selectedSubjectObj.name,
-              classId: currentClassId,
-              unitId: currentUnitId,
-              unitTitle: currentUnit?.title,
-              lessonTitle: currentLessonTitle,
-              topic: activeTopic,
-              count: aiQuestionCount,
-              difficulty: aiDifficulty,
-            })
-          }
-        } else {
-          generated = generateClientSyllabusFallback({
-            category: aiGroupId,
-            subject: selectedSubjectObj.name,
-            classId: currentClassId,
-            unitId: currentUnitId,
-            unitTitle: currentUnit?.title,
-            lessonTitle: currentLessonTitle,
-            topic: activeTopic,
-            count: aiQuestionCount,
-            difficulty: aiDifficulty,
-          })
-        }
-
-        const taggedQuestions = generated.map((q) => ({
-          ...q,
-          category: aiGroupId,
-          subject: selectedSubjectObj.name,
-          classId: currentClassId,
-          unitId: currentUnitId,
-          lessonTitle: currentLessonTitle,
-          topic: activeTopic,
-          selected: true,
-        }))
-
-        setAiGeneratedQuestions(taggedQuestions)
-        setAiSource(src)
+        setAiSource(data.source || 'gemini')
         setAiNotice(
-          src === 'gemini'
-            ? `Generated ${taggedQuestions.length} questions directly via Gemini 1.5 Flash.`
-            : `Generated ${taggedQuestions.length} verified Samacheer Kalvi syllabus questions.`
+          data.notice ||
+            `Generated ${taggedQuestions.length} unique textbook-verified questions ready for review.`
         )
+        showToast('success', `Generated ${taggedQuestions.length} textbook-verified questions`)
+      } else {
+        const emptyMsg =
+          data?.message ||
+          'No unique questions could be generated from the textbook without repeating existing questions.'
+        setAiGeneratedQuestions([])
+        setAiNotice(emptyMsg)
+        showToast('error', emptyMsg)
       }
     } catch (err: any) {
-      showToast('error', err.message || 'Error generating questions')
+      showToast('error', err.message || 'Error generating questions from textbook')
     } finally {
       setIsAIGenerating(false)
     }
@@ -500,7 +533,8 @@ const Admin = () => {
           lessonTitle: currentQ.lessonTitle || currentLessonTitle,
           topic: targetTopic,
           difficulty: currentQ.difficulty || aiDifficulty,
-          previousQuestion: currentQ.question,
+          term: aiInlineTerm || 'Term 1',
+          existingQuestions: aiGeneratedQuestions.map((q) => q.question),
           apiKey: geminiApiKey.trim() || undefined,
         }),
       })
@@ -638,19 +672,7 @@ const Admin = () => {
         if (res.ok) {
           countUploaded = data.inserted || approvedQuestions.length
           uploadedSuccess = true
-          try {
-            const ids = Array.isArray(data.insertedIds) ? data.insertedIds : []
-            if (ids.length > 0) {
-              await apiFetch('/api/questions/publish', {
-                method: 'PATCH',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ ids }),
-              })
-            }
-          } catch {}
+          // Staged questions strictly remain in Staging awaiting Admin review and approval
         } else {
           console.error('Upload failed:', res.status, data)
           showToast('error', data?.message || 'Upload failed')
@@ -1015,6 +1037,291 @@ const Admin = () => {
       setNotesLoading(false)
     }
   }, [token, notesGroupFilter, notesStatusFilter, notesLanguageFilter])
+
+  // Fetch Textbooks
+  const fetchTextbooks = useCallback(async () => {
+    if (!token) return
+    setTextbooksLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (textbookGroupFilter !== 'all') params.set('group', textbookGroupFilter)
+      if (textbookStandardFilter !== 'all') params.set('standard', textbookStandardFilter)
+      if (textbookMediumFilter !== 'all') params.set('medium', textbookMediumFilter)
+      if (textbookStatusFilter !== 'all') params.set('status', textbookStatusFilter)
+
+      const res = await apiFetch(`/api/textbooks?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
+        setTextbooksList(data.data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch textbooks:', err)
+    } finally {
+      setTextbooksLoading(false)
+    }
+  }, [token, textbookGroupFilter, textbookStandardFilter, textbookMediumFilter, textbookStatusFilter])
+
+  useEffect(() => {
+    if (token) {
+      fetchTextbooks()
+    }
+  }, [fetchTextbooks, token])
+
+  // Poll active processing jobs
+  useEffect(() => {
+    const hasActiveProcessing =
+      textbooksList.some((t) => t.status === 'processing' || t.status === 'uploaded') ||
+      (aiInlineProcessingJob && aiInlineProcessingJob.status === 'processing')
+
+    if (!hasActiveProcessing || !token) return
+
+    const interval = setInterval(async () => {
+      fetchTextbooks()
+      if (aiInlineProcessingJob) {
+        try {
+          const res = await apiFetch(`/api/textbooks/${aiInlineProcessingJob.id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const data = await res.json()
+          if (res.ok && data.data) {
+            const tb = data.data
+            if (tb.status === 'completed' || tb.status === 'failed') {
+              setAiInlineProcessingJob(null)
+              if (tb.status === 'completed') {
+                setAiSelectedTextbookId(tb.id)
+                setAiTextbookMode('specific')
+                showToast('success', `Textbook "${tb.bookName}" processed and indexed successfully!`)
+              } else {
+                showToast('error', `Textbook processing failed: ${tb.errorMessage || 'Unknown error'}`)
+              }
+            } else if (tb.job) {
+              setAiInlineProcessingJob({
+                id: tb.id,
+                status: tb.status,
+                progressPercent: tb.job.progressPercent || 0,
+                stepDescription: tb.job.stepDescription || 'Processing...',
+              })
+            }
+          }
+        } catch (e) {
+          console.warn('Job polling error:', e)
+        }
+      }
+    }, 2500)
+
+    return () => clearInterval(interval)
+  }, [textbooksList, aiInlineProcessingJob, token, fetchTextbooks])
+
+  // Upload or Replace Textbook
+  const handleUploadTextbook = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!token) return
+    if (!tbFile) {
+      setTbUploadError('Please select a valid PDF textbook file.')
+      return
+    }
+    if (!tbBookName.trim()) {
+      setTbUploadError('Please enter the Textbook Name.')
+      return
+    }
+    if (!tbFile.name.toLowerCase().endsWith('.pdf')) {
+      setTbUploadError('Only PDF files are supported.')
+      return
+    }
+    if (tbFile.size > 50 * 1024 * 1024) {
+      setTbUploadError('File size exceeds the 50MB limit.')
+      return
+    }
+
+    setTbUploading(true)
+    setTbUploadProgress(15)
+    setTbUploadError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('group', tbGroup)
+      formData.append('standard', tbStandard)
+      formData.append('subject', tbSubject)
+      formData.append('medium', tbMedium)
+      formData.append('term', tbTerm)
+      formData.append('bookName', tbBookName.trim())
+      formData.append('replace', replacingTextbookId ? 'true' : 'false')
+      formData.append('pdf', tbFile)
+
+      setTbUploadProgress(45)
+
+      const res = await apiFetch('/api/textbooks/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+
+      const data = await res.json()
+      setTbUploadProgress(100)
+
+      if (res.status === 409) {
+        setTbUploadError(data.message || 'A textbook with this Standard, Subject, and Book Name already exists.')
+        return
+      }
+
+      if (!res.ok) {
+        setTbUploadError(data.message || 'Failed to upload textbook.')
+        return
+      }
+
+      showToast('success', replacingTextbookId ? 'Textbook replaced successfully. Background indexing started.' : 'Textbook uploaded successfully. Background indexing started.')
+      setIsUploadTextbookModalOpen(false)
+      setReplacingTextbookId(null)
+      setTbBookName('')
+      setTbFile(null)
+      setTbUploadProgress(0)
+      fetchTextbooks()
+    } catch (err: any) {
+      console.error('Textbook upload error:', err)
+      setTbUploadError(err.message || 'Network error while uploading textbook.')
+    } finally {
+      setTbUploading(false)
+    }
+  }
+
+  // Delete Textbook
+  const handleDeleteTextbook = async () => {
+    if (!token || !deletingTextbook) return
+    setIsDeletingTextbook(true)
+    try {
+      const res = await apiFetch(`/api/textbooks/${deletingTextbook.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', `Textbook "${deletingTextbook.bookName}" deleted successfully`)
+        setDeletingTextbook(null)
+        fetchTextbooks()
+      } else {
+        showToast('error', data.message || 'Failed to delete textbook')
+      }
+    } catch {
+      showToast('error', 'Network error deleting textbook')
+    } finally {
+      setIsDeletingTextbook(false)
+    }
+  }
+
+  // Reprocess Textbook
+  const handleReprocessTextbook = async (tb: TextbookItem) => {
+    if (!token) return
+    try {
+      const res = await apiFetch(`/api/textbooks/${tb.id}/reprocess`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', `Reprocessing queued for "${tb.bookName}"`)
+        fetchTextbooks()
+      } else {
+        showToast('error', data.message || 'Failed to reprocess textbook')
+      }
+    } catch {
+      showToast('error', 'Network error triggering reprocess')
+    }
+  }
+
+  // View Textbook Details & Sample Excerpts
+  const handleViewTextbookDetails = async (tb: TextbookItem) => {
+    setSelectedTextbookDetail(tb)
+    setIsLoadingExcerpts(true)
+    setTextbookExcerpts([])
+    try {
+      const res = await apiFetch(`/api/textbooks/search-content?textbookId=${tb.id}&standard=${encodeURIComponent(String(tb.standard))}&subject=${encodeURIComponent(tb.subject)}&medium=${encodeURIComponent(tb.medium)}&limit=10`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      const excerpts = Array.isArray(data.data) ? data.data : data.data?.chunks
+      if (res.ok && data.status === 'success' && Array.isArray(excerpts)) {
+        setTextbookExcerpts(excerpts)
+      }
+    } catch (e) {
+      console.warn('Failed to load excerpts:', e)
+    } finally {
+      setIsLoadingExcerpts(false)
+    }
+  }
+
+  // Direct Inline PDF Upload from MCQ Generator Modal
+  const handleInlineUploadTextbook = async () => {
+    if (!token) return
+    if (!aiInlineFile) {
+      showToast('error', 'Please choose a PDF file to upload.')
+      return
+    }
+    if (!aiInlineFile.name.toLowerCase().endsWith('.pdf')) {
+      showToast('error', 'Only PDF files are supported.')
+      return
+    }
+    if (aiInlineFile.size > 50 * 1024 * 1024) {
+      showToast('error', 'File size exceeds 50MB limit.')
+      return
+    }
+
+    setAiInlineUploading(true)
+    setAiInlineProgress(25)
+
+    try {
+      const autoBookName = aiInlineBookName.trim() || `Class ${currentClassId} ${selectedSubjectObj.name} (${aiInlineMedium})`
+      const formData = new FormData()
+      formData.append('group', aiGroupId)
+      formData.append('standard', `${currentClassId}th`)
+      formData.append('subject', selectedSubjectObj.name)
+      formData.append('medium', aiInlineMedium)
+      formData.append('term', aiInlineTerm)
+      formData.append('bookName', autoBookName)
+      formData.append('replace', 'false')
+      formData.append('pdf', aiInlineFile)
+
+      setAiInlineProgress(60)
+
+      const res = await apiFetch('/api/textbooks/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      const data = await res.json()
+      setAiInlineProgress(100)
+
+      if (res.status === 409) {
+        showToast('error', data.message || 'A textbook with this name already exists. Selecting existing...')
+        setAiInlineUploading(false)
+        fetchTextbooks()
+        return
+      }
+
+      if (!res.ok || !data.data) {
+        showToast('error', data.message || 'Failed to upload textbook')
+        setAiInlineUploading(false)
+        return
+      }
+
+      showToast('success', 'PDF uploaded! Processing and indexing text in background...')
+      setAiInlineProcessingJob({
+        id: data.data.id,
+        status: 'processing',
+        progressPercent: 10,
+        stepDescription: 'Extracting text from PDF pages...',
+      })
+      setAiInlineFile(null)
+      setAiInlineBookName('')
+      fetchTextbooks()
+    } catch (err: any) {
+      console.error('Inline upload error:', err)
+      showToast('error', err.message || 'Network error during upload')
+    } finally {
+      setAiInlineUploading(false)
+    }
+  }
 
   useEffect(() => {
     fetchQuestions()
@@ -1647,7 +1954,44 @@ const Admin = () => {
           </div>
         </div>
 
-        {/* Toolbar & Filters */}
+        {/* Navigation Section Tabs */}
+        <div className="admin-section-nav">
+          <button
+            className={`admin-section-tab ${adminSection === 'questions' ? 'active' : ''}`}
+            onClick={() => setAdminSection('questions')}
+          >
+            <Database size={16} />
+            <span>Question Bank</span>
+            <span className="admin-section-tab-count">{metrics.totalQuestions}</span>
+          </button>
+          <button
+            className={`admin-section-tab ${adminSection === 'textbooks' ? 'active' : ''}`}
+            onClick={() => {
+              setAdminSection('textbooks')
+              fetchTextbooks()
+            }}
+          >
+            <BookOpen size={16} />
+            <span>Textbook Management</span>
+            <span className="admin-section-tab-count">{textbooksList.length}</span>
+          </button>
+          <button
+            className={`admin-section-tab ${adminSection === 'notes' ? 'active' : ''}`}
+            onClick={() => {
+              setAdminSection('notes')
+              fetchNotes()
+            }}
+          >
+            <FileText size={16} />
+            <span>Study Notes</span>
+            <span className="admin-section-tab-count">{notesList.length}</span>
+          </button>
+        </div>
+
+        {/* Section 1: Question Bank Management */}
+        {adminSection === 'questions' && (
+          <>
+            {/* Toolbar & Filters */}
         <div className="admin-toolbar glass">
           <div className="admin-toolbar-row">
             <div className="admin-search-wrapper">
@@ -1848,10 +2192,20 @@ const Admin = () => {
                       <span className="qid-badge">#{q.id}</span>
                     </td>
                     <td>
-                      <span className={`status-badge ${q.status === 'published' ? 'status-published' : 'status-staging'}`}>
-                        {q.status === 'published' ? <CheckCircle size={12} /> : <Clock size={12} />}
-                        {q.status}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                        <span className={`status-badge ${q.status === 'published' ? 'status-published' : 'status-staging'}`}>
+                          {q.status === 'published' ? <CheckCircle size={12} /> : <Clock size={12} />}
+                          {q.status}
+                        </span>
+                        {q.verificationStatus && (
+                          <span className={`verif-badge-${q.verificationStatus}`}>
+                            {q.verificationStatus === 'verified' && <CheckCircle2 size={11} />}
+                            {q.verificationStatus === 'needs_review' && <AlertCircle size={11} />}
+                            {q.verificationStatus === 'rejected' && <X size={11} />}
+                            {q.verificationStatus === 'verified' ? 'Verified' : q.verificationStatus === 'needs_review' ? 'Needs Review' : 'Rejected'}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -1886,6 +2240,15 @@ const Admin = () => {
                           </div>
                         ))}
                       </div>
+                      {(q.sourcePage || q.sourceReference) && (
+                        <div style={{ marginTop: '0.45rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span className="source-page-pill">
+                            <BookOpen size={11} />
+                            <span>{q.sourceReference ? q.sourceReference : 'Samacheer Kalvi'}</span>
+                            {q.sourcePage ? ` (Page ${q.sourcePage})` : ''}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td>
                       <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
@@ -1943,14 +2306,279 @@ const Admin = () => {
             </div>
           )}
         </div>
+        </>
+        )}
 
-        {/* Study Notes Management Section */}
-        <div className="admin-section-header" style={{ marginTop: '2rem' }}>
-          <div>
-            <h2 className="admin-section-title">Study Notes Management</h2>
-            <p className="admin-section-subtitle">Filter, select and delete study notes independently from MCQ questions</p>
+        {/* Section 2: Textbook Management */}
+        {adminSection === 'textbooks' && (
+          <div className="admin-textbooks-section">
+            <div className="admin-section-header">
+              <div>
+                <h2 className="admin-section-title">Samacheer Kalvi Textbook Management</h2>
+                <p className="admin-section-subtitle">
+                  Upload, process, and manage Classes 6–12 Samacheer Kalvi textbooks in Tamil & English. Texts are extracted, OCR-verified, and mapped to syllabus units for AI generation.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  className="admin-btn admin-btn-primary"
+                  onClick={() => {
+                    setReplacingTextbookId(null)
+                    setTbBookName('')
+                    setTbFile(null)
+                    setTbUploadError(null)
+                    setIsUploadTextbookModalOpen(true)
+                  }}
+                >
+                  <UploadCloud size={16} />
+                  <span>Upload Textbook PDF</span>
+                </button>
+                <button className="admin-btn admin-btn-secondary" onClick={fetchTextbooks} title="Refresh textbooks">
+                  <RefreshCw size={15} className={textbooksLoading ? 'spin-icon' : ''} />
+                </button>
+              </div>
+            </div>
+
+            {/* Textbook Stats HUD */}
+            <div className="tb-stats-grid">
+              <div className="tb-stat-card">
+                <span className="tb-stat-label">Total Textbooks</span>
+                <span className="tb-stat-value">{textbooksList.length}</span>
+              </div>
+              <div className="tb-stat-card">
+                <span className="tb-stat-label">Completed & Indexed</span>
+                <span className="tb-stat-value" style={{ color: '#34d399' }}>
+                  {textbooksList.filter((t) => t.status === 'completed').length}
+                </span>
+              </div>
+              <div className="tb-stat-card">
+                <span className="tb-stat-label">Processing / OCR</span>
+                <span className="tb-stat-value" style={{ color: '#fbbf24' }}>
+                  {textbooksList.filter((t) => t.status === 'processing' || t.status === 'uploaded').length}
+                </span>
+              </div>
+              <div className="tb-stat-card">
+                <span className="tb-stat-label">Failed</span>
+                <span className="tb-stat-value" style={{ color: '#f87171' }}>
+                  {textbooksList.filter((t) => t.status === 'failed').length}
+                </span>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="admin-filter-bar glass">
+              <div className="admin-filter-pills">
+                <div className="admin-search-wrapper" style={{ minWidth: '220px', flex: '1' }}>
+                  <Search size={15} className="admin-search-icon" />
+                  <input
+                    type="text"
+                    className="admin-search-input"
+                    placeholder="Search by book name, subject, standard..."
+                    value={textbookSearch}
+                    onChange={(e) => setTextbookSearch(e.target.value)}
+                  />
+                </div>
+                <div className="admin-filter-group">
+                  <select
+                    className="filter-select"
+                    value={textbookGroupFilter}
+                    onChange={(e) => setTextbookGroupFilter(e.target.value)}
+                  >
+                    <option value="all">All Groups</option>
+                    <option value="group1">Group 1</option>
+                    <option value="group2">Group 2</option>
+                    <option value="group4">Group 4</option>
+                  </select>
+
+                  <select
+                    className="filter-select"
+                    value={textbookStandardFilter}
+                    onChange={(e) => setTextbookStandardFilter(e.target.value)}
+                  >
+                    <option value="all">All Standards (6th–12th)</option>
+                    {STANDARDS.map((s) => (
+                      <option key={s.id} value={`${s.id}th`}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="filter-select"
+                    value={textbookMediumFilter}
+                    onChange={(e) => setTextbookMediumFilter(e.target.value)}
+                  >
+                    <option value="all">All Mediums</option>
+                    <option value="English">English</option>
+                    <option value="Tamil">Tamil</option>
+                  </select>
+
+                  <select
+                    className="filter-select"
+                    value={textbookStatusFilter}
+                    onChange={(e) => setTextbookStatusFilter(e.target.value)}
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="completed">Completed</option>
+                    <option value="processing">Processing</option>
+                    <option value="uploaded">Uploaded</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Textbooks Table */}
+            <div className="admin-table-wrapper glass" style={{ marginTop: '1rem' }}>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '60px' }}>ID</th>
+                    <th style={{ width: '90px' }}>Group</th>
+                    <th style={{ width: '130px' }}>Standard</th>
+                    <th style={{ width: '160px' }}>Subject</th>
+                    <th style={{ width: '110px' }}>Medium</th>
+                    <th>Book Name</th>
+                    <th style={{ width: '100px' }}>Pages / Size</th>
+                    <th style={{ width: '140px' }}>Status</th>
+                    <th style={{ width: '130px', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {textbooksLoading ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                        Loading textbooks...
+                      </td>
+                    </tr>
+                  ) : textbooksList.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
+                        <BookOpen size={36} style={{ margin: '0 auto 0.75rem', opacity: 0.4 }} />
+                        <p style={{ fontWeight: 600 }}>No textbooks uploaded yet</p>
+                        <p style={{ fontSize: '0.82rem', marginTop: '0.25rem' }}>
+                          Upload Classes 6–12 Samacheer Kalvi PDFs to begin AI question generation.
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    textbooksList
+                      .filter((tb) => {
+                        if (!textbookSearch.trim()) return true
+                        const q = textbookSearch.toLowerCase()
+                        return (
+                          tb.bookName.toLowerCase().includes(q) ||
+                          tb.subject.toLowerCase().includes(q) ||
+                          String(tb.standard).toLowerCase().includes(q)
+                        )
+                      })
+                      .map((tb) => (
+                        <tr key={tb.id}>
+                          <td>
+                            <span className="qid-badge">#{tb.id}</span>
+                          </td>
+                          <td>
+                            <span className="ai-tag-pill ai-tag-group" style={{ fontSize: '0.7rem' }}>
+                              {tb.groupId?.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{tb.standard}</td>
+                          <td>{tb.subject}</td>
+                          <td>
+                            <span style={{ fontSize: '0.8rem', color: tb.medium === 'Tamil' ? '#fbbf24' : '#38bdf8' }}>
+                              {tb.medium} {tb.term && tb.term !== 'Full Year' ? `(${tb.term})` : ''}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{tb.bookName}</td>
+                          <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            {tb.pageCount > 0 ? `${tb.pageCount} pgs` : 'Pending'}
+                            {tb.fileSize ? ` • ${(tb.fileSize / (1024 * 1024)).toFixed(1)}MB` : ''}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <span className={`status-pill-${tb.status}`}>
+                                {tb.status === 'completed' && <CheckCircle size={11} />}
+                                {tb.status === 'processing' && <RefreshCw size={11} className="spin-icon" />}
+                                {tb.status === 'uploaded' && <Clock size={11} />}
+                                {tb.status === 'failed' && <AlertTriangle size={11} />}
+                                <span>{tb.status.toUpperCase()}</span>
+                              </span>
+                              {tb.status === 'processing' && tb.job && (
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                  <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden', marginTop: '2px' }}>
+                                    <div style={{ width: `${tb.job.progressPercent || 20}%`, height: '100%', background: 'var(--gold-primary)' }} />
+                                  </div>
+                                  <span style={{ fontSize: '0.68rem' }}>{tb.job.stepDescription || 'Extracting...'}</span>
+                                </div>
+                              )}
+                              {tb.status === 'failed' && tb.errorMessage && (
+                                <span style={{ fontSize: '0.7rem', color: '#f87171' }} title={tb.errorMessage}>
+                                  {tb.errorMessage.slice(0, 30)}...
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
+                              <button
+                                className="table-action-btn"
+                                title="View Details & Extracted Pages"
+                                onClick={() => handleViewTextbookDetails(tb)}
+                              >
+                                <Eye size={14} />
+                              </button>
+                              <button
+                                className="table-action-btn"
+                                title="Reprocess Text & OCR"
+                                onClick={() => handleReprocessTextbook(tb)}
+                              >
+                                <RefreshCw size={14} />
+                              </button>
+                              <button
+                                className="table-action-btn"
+                                title="Replace Textbook PDF"
+                                onClick={() => {
+                                  setReplacingTextbookId(tb.id)
+                                  setTbGroup(tb.groupId as any)
+                                  setTbStandard(typeof tb.standard === 'number' ? `${tb.standard}th` : String(tb.standard))
+                                  setTbSubject(tb.subject)
+                                  setTbMedium(tb.medium)
+                                  setTbTerm(tb.term || 'Full Year')
+                                  setTbBookName(tb.bookName)
+                                  setTbFile(null)
+                                  setTbUploadError(null)
+                                  setIsUploadTextbookModalOpen(true)
+                                }}
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                className="table-action-btn table-action-delete"
+                                title="Delete Textbook"
+                                onClick={() => setDeletingTextbook(tb)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Section 3: Study Notes Management */}
+        {adminSection === 'notes' && (
+          <>
+            <div className="admin-section-header" style={{ marginTop: '0.5rem' }}>
+              <div>
+                <h2 className="admin-section-title">Study Notes Management</h2>
+                <p className="admin-section-subtitle">Filter, select and delete study notes independently from MCQ questions</p>
+              </div>
+            </div>
 
         <div className="admin-filter-bar glass">
           <div className="admin-filter-pills">
@@ -2055,6 +2683,8 @@ const Admin = () => {
             </tbody>
           </table>
         </div>
+          </>
+        )}
       </div>
 
       {/* Add / Edit Question Modal */}
@@ -2895,6 +3525,448 @@ const Admin = () => {
         )}
       </AnimatePresence>
 
+      {/* Upload / Replace Textbook Modal */}
+      <AnimatePresence>
+        {isUploadTextbookModalOpen && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{ maxWidth: '640px' }}
+            >
+              <div className="admin-modal-header">
+                <div>
+                  <h2 className="admin-modal-title">
+                    {replacingTextbookId ? `Replace Textbook #${replacingTextbookId}` : 'Upload Samacheer Kalvi Textbook'}
+                  </h2>
+                  <p className="admin-modal-subtitle">
+                    Upload Classes 6–12 official textbooks in PDF format for RAG-based AI question generation.
+                  </p>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    setIsUploadTextbookModalOpen(false)
+                    setReplacingTextbookId(null)
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleUploadTextbook}>
+                <div className="admin-modal-body">
+                  {tbUploadError && (
+                    <div
+                      className="admin-toast-error"
+                      style={{
+                        padding: '0.75rem 1rem',
+                        borderRadius: '8px',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        fontSize: '0.88rem',
+                      }}
+                    >
+                      <AlertTriangle size={16} />
+                      <span>{tbUploadError}</span>
+                    </div>
+                  )}
+
+                  {/* 1. Group & 2. Standard */}
+                  <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                    <div className="form-field">
+                      <label>1. TNPSC Group *</label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        value={tbGroup}
+                        onChange={(e) => setTbGroup(e.target.value as any)}
+                        required
+                      >
+                        <option value="group1">Group 1</option>
+                        <option value="group2">Group 2 / 2A</option>
+                        <option value="group4">Group 4</option>
+                      </select>
+                    </div>
+
+                    <div className="form-field">
+                      <label>2. Standard / Class *</label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        value={tbStandard}
+                        onChange={(e) => setTbStandard(e.target.value)}
+                        required
+                      >
+                        {['6th', '7th', '8th', '9th', '10th', '11th', '12th'].map((std) => (
+                          <option key={std} value={std}>
+                            Class {std}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 3. Subject & 4. Medium */}
+                  <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                    <div className="form-field">
+                      <label>3. Subject *</label>
+                      <input
+                        type="text"
+                        className="admin-auth-input"
+                        placeholder="e.g. Science, Social Science, History..."
+                        value={tbSubject}
+                        onChange={(e) => setTbSubject(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-field">
+                      <label>4. Medium *</label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        value={tbMedium}
+                        onChange={(e) => setTbMedium(e.target.value as any)}
+                        required
+                      >
+                        <option value="English">English Medium</option>
+                        <option value="Tamil">Tamil Medium (தமிழ்)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 5. Term & 6. Book Name */}
+                  <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                    <div className="form-field">
+                      <label>5. Term (where applicable)</label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        value={tbTerm}
+                        onChange={(e) => setTbTerm(e.target.value)}
+                      >
+                        <option value="Full Year">Full Year (Combined)</option>
+                        <option value="Term 1">Term 1</option>
+                        <option value="Term 2">Term 2</option>
+                        <option value="Term 3">Term 3</option>
+                      </select>
+                    </div>
+
+                    <div className="form-field">
+                      <label>6. Book Name *</label>
+                      <input
+                        type="text"
+                        className="admin-auth-input"
+                        placeholder="e.g. Samacheer Kalvi 10th Science"
+                        value={tbBookName}
+                        onChange={(e) => setTbBookName(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* 7. PDF Upload Dropzone */}
+                  <div className="form-field" style={{ marginTop: '0.5rem' }}>
+                    <label>7. PDF Textbook File * (Max 50MB)</label>
+                    <div
+                      className="bulk-dropzone"
+                      style={{ padding: '1.5rem', textAlign: 'center', cursor: 'pointer' }}
+                      onClick={() => document.getElementById('tb-file-input')?.click()}
+                    >
+                      <UploadCloud size={32} style={{ color: 'var(--gold-primary)', margin: '0 auto 0.5rem' }} />
+                      <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                        {tbFile ? tbFile.name : 'Click to select Samacheer Kalvi PDF'}
+                      </p>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {tbFile
+                          ? `${(tbFile.size / (1024 * 1024)).toFixed(2)} MB • PDF file selected`
+                          : 'Supports searchable and scanned Tamil & English textbooks'}
+                      </p>
+                      <input
+                        id="tb-file-input"
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) {
+                            setTbFile(file)
+                            if (!tbBookName.trim()) {
+                              setTbBookName(file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '))
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Upload Progress */}
+                  {tbUploading && (
+                    <div style={{ marginTop: '1rem' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          fontSize: '0.8rem',
+                          marginBottom: '0.25rem',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        <span>Uploading & Queuing Background Indexing...</span>
+                        <span>{tbUploadProgress}%</span>
+                      </div>
+                      <div
+                        style={{
+                          width: '100%',
+                          height: '6px',
+                          background: 'rgba(255,255,255,0.1)',
+                          borderRadius: '3px',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${tbUploadProgress}%`,
+                            height: '100%',
+                            background: 'var(--gold-primary)',
+                            transition: 'width 0.3s ease',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="admin-modal-footer">
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-secondary"
+                    onClick={() => {
+                      setIsUploadTextbookModalOpen(false)
+                      setReplacingTextbookId(null)
+                    }}
+                    disabled={tbUploading}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="admin-btn admin-btn-primary" disabled={tbUploading || !tbFile}>
+                    <UploadCloud size={16} />
+                    <span>{tbUploading ? 'Uploading...' : replacingTextbookId ? 'Replace & Reprocess' : 'Upload & Start Indexing'}</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* View Textbook Details & Excerpts Modal */}
+      <AnimatePresence>
+        {selectedTextbookDetail && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{ maxWidth: '800px', maxHeight: '85vh' }}
+            >
+              <div className="admin-modal-header">
+                <div>
+                  <div className="admin-badge-row">
+                    <span className="admin-badge">
+                      <BookOpen size={13} />
+                      {selectedTextbookDetail.standard} • {selectedTextbookDetail.subject}
+                    </span>
+                    <span className={`status-pill-${selectedTextbookDetail.status}`}>
+                      {selectedTextbookDetail.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <h2 className="admin-modal-title">{selectedTextbookDetail.bookName}</h2>
+                </div>
+                <button className="admin-modal-close" onClick={() => setSelectedTextbookDetail(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+                {/* Metadata summary */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                    gap: '0.75rem',
+                    padding: '0.75rem',
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.07)',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Group</div>
+                    <div style={{ fontWeight: 600 }}>{selectedTextbookDetail.groupId?.toUpperCase()}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Standard</div>
+                    <div style={{ fontWeight: 600 }}>{selectedTextbookDetail.standard}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Medium</div>
+                    <div style={{ fontWeight: 600 }}>{selectedTextbookDetail.medium}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Term</div>
+                    <div style={{ fontWeight: 600 }}>{selectedTextbookDetail.term || 'Full Year'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Indexed Pages</div>
+                    <div style={{ fontWeight: 600, color: 'var(--gold-primary)' }}>
+                      {selectedTextbookDetail.pageCount || 0} pages
+                    </div>
+                  </div>
+                </div>
+
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
+                  Extracted Content Preview (Sample Passages)
+                </h3>
+
+                {isLoadingExcerpts ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    Loading extracted pages...
+                  </div>
+                ) : textbookExcerpts.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    {selectedTextbookDetail.status === 'processing'
+                      ? 'Text extraction is currently running in background. Please refresh in a moment.'
+                      : 'No extracted pages available for this textbook.'}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {textbookExcerpts.map((excerpt: any, idx: number) => (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '0.75rem',
+                          background: 'rgba(255,255,255,0.02)',
+                          border: '1px solid rgba(255,255,255,0.06)',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            marginBottom: '0.35rem',
+                            fontSize: '0.78rem',
+                          }}
+                        >
+                          <span className="source-page-pill">
+                            <BookOpen size={11} />
+                            Page {excerpt.pageNumber || 'N/A'}
+                            {excerpt.lessonTitle ? ` • ${excerpt.lessonTitle}` : ''}
+                          </span>
+                          {excerpt.isOcr && (
+                            <span style={{ fontSize: '0.7rem', color: '#fbbf24' }}>OCR Extracted</span>
+                          )}
+                        </div>
+                        <p
+                          style={{
+                            fontSize: '0.82rem',
+                            color: 'var(--text-secondary)',
+                            lineHeight: 1.5,
+                            margin: 0,
+                            whiteSpace: 'pre-line',
+                          }}
+                        >
+                          {excerpt.content?.slice(0, 350)}...
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="admin-modal-footer">
+                <button className="admin-btn admin-btn-secondary" onClick={() => setSelectedTextbookDetail(null)}>
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Textbook Confirmation Modal */}
+      <AnimatePresence>
+        {deletingTextbook && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{ maxWidth: '480px' }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f87171' }}>
+                  <AlertTriangle size={20} />
+                  <h2 className="admin-modal-title" style={{ color: '#f87171' }}>
+                    Confirm Textbook Deletion
+                  </h2>
+                </div>
+                <button className="admin-modal-close" onClick={() => setDeletingTextbook(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                  Are you sure you want to permanently delete <strong>"{deletingTextbook.bookName}"</strong> (Class{' '}
+                  {deletingTextbook.standard})?
+                </p>
+                <p
+                  style={{
+                    color: '#f87171',
+                    fontSize: '0.8rem',
+                    background: 'rgba(239,68,68,0.1)',
+                    padding: '0.65rem',
+                    borderRadius: '6px',
+                    marginTop: '0.75rem',
+                  }}
+                >
+                  Warning: This will delete the physical PDF file and all cascaded extracted textbook content from the database.
+                </p>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setDeletingTextbook(null)}
+                  disabled={isDeletingTextbook}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="admin-btn"
+                  style={{ background: '#ef4444', color: '#fff' }}
+                  onClick={handleDeleteTextbook}
+                  disabled={isDeletingTextbook}
+                >
+                  <Trash2 size={16} />
+                  <span>{isDeletingTextbook ? 'Deleting...' : 'Delete Textbook'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Gemini AI Question Generator Modal */}
       <AnimatePresence>
         {isAIGeneratorOpen && (
@@ -3172,6 +4244,173 @@ const Admin = () => {
                       </div>
                     )}
 
+                    {/* 6. Textbook Source Selection */}
+                    {aiMode === 'mcq' && (
+                      <div className="ai-textbook-source-box">
+                        <label style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.88rem' }}>
+                          <BookOpen size={15} style={{ color: 'var(--gold-primary)' }} />
+                          <span>6. Textbook Source Selection *</span>
+                        </label>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                          <label className={`ai-source-radio-card ${aiTextbookMode === 'auto' ? 'active' : ''}`}>
+                            <input
+                              type="radio"
+                              name="tbSourceMode"
+                              checked={aiTextbookMode === 'auto'}
+                              onChange={() => setAiTextbookMode('auto')}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Use Uploaded Automatically</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                Matches {currentClassId}th Standard {selectedSubjectObj?.name}
+                              </div>
+                            </div>
+                          </label>
+
+                          <label className={`ai-source-radio-card ${aiTextbookMode === 'specific' ? 'active' : ''}`}>
+                            <input
+                              type="radio"
+                              name="tbSourceMode"
+                              checked={aiTextbookMode === 'specific'}
+                              onChange={() => setAiTextbookMode('specific')}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Select Specific Textbook</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                Choose from existing uploaded books
+                              </div>
+                            </div>
+                          </label>
+
+                          <label className={`ai-source-radio-card ${aiTextbookMode === 'upload' ? 'active' : ''}`}>
+                            <input
+                              type="radio"
+                              name="tbSourceMode"
+                              checked={aiTextbookMode === 'upload'}
+                              onChange={() => setAiTextbookMode('upload')}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Upload New Textbook PDF</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                Upload and index directly here
+                              </div>
+                            </div>
+                          </label>
+                        </div>
+
+                        {/* Mode: specific */}
+                        {aiTextbookMode === 'specific' && (
+                          <div className="ai-field" style={{ marginTop: '0.5rem' }}>
+                            <label>Choose Uploaded Textbook ({textbooksList.filter((t) => t.status === 'completed').length} Available)</label>
+                            <select
+                              className="ai-select"
+                              value={aiSelectedTextbookId || ''}
+                              onChange={(e) => setAiSelectedTextbookId(Number(e.target.value))}
+                            >
+                              <option value="">-- Auto-select or Pick Textbook --</option>
+                              {textbooksList.map((t) => (
+                                <option key={t.id} value={t.id} disabled={t.status !== 'completed'}>
+                                  #{t.id} [{t.standard} - {t.subject} - {t.medium}] {t.bookName} ({t.status})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* Mode: upload */}
+                        {aiTextbookMode === 'upload' && (
+                          <div
+                            style={{
+                              padding: '0.75rem',
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(255, 255, 255, 0.08)',
+                              marginTop: '0.5rem',
+                            }}
+                          >
+                            <div className="form-grid-2" style={{ marginBottom: '0.5rem' }}>
+                              <div className="ai-field">
+                                <label>Book Name / Title</label>
+                                <input
+                                  type="text"
+                                  className="admin-auth-input"
+                                  placeholder={`Class ${currentClassId} ${selectedSubjectObj.name}`}
+                                  value={aiInlineBookName}
+                                  onChange={(e) => setAiInlineBookName(e.target.value)}
+                                />
+                              </div>
+                              <div className="ai-field">
+                                <label>Medium</label>
+                                <select
+                                  className="ai-select"
+                                  value={aiInlineMedium}
+                                  onChange={(e) => setAiInlineMedium(e.target.value as any)}
+                                >
+                                  <option value="English">English Medium</option>
+                                  <option value="Tamil">Tamil Medium (தமிழ்)</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="form-grid-2" style={{ marginBottom: '0.5rem' }}>
+                              <div className="ai-field">
+                                <label>Term</label>
+                                <select
+                                  className="ai-select"
+                                  value={aiInlineTerm}
+                                  onChange={(e) => setAiInlineTerm(e.target.value)}
+                                >
+                                  <option value="Full Year">Full Year (Combined)</option>
+                                  <option value="Term 1">Term 1</option>
+                                  <option value="Term 2">Term 2</option>
+                                  <option value="Term 3">Term 3</option>
+                                </select>
+                              </div>
+                              <div className="ai-field">
+                                <label>PDF File (Classes 6–12 Samacheer Kalvi)</label>
+                                <input
+                                  type="file"
+                                  accept=".pdf,application/pdf"
+                                  onChange={(e) => setAiInlineFile(e.target.files?.[0] || null)}
+                                />
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              className="admin-btn admin-btn-primary"
+                              onClick={handleInlineUploadTextbook}
+                              disabled={aiInlineUploading || !aiInlineFile}
+                              style={{ width: '100%', justifyContent: 'center' }}
+                            >
+                              <UploadCloud size={16} />
+                              <span>{aiInlineUploading ? `Uploading PDF (${aiInlineProgress}%)...` : 'Upload & Start Background Indexing'}</span>
+                            </button>
+
+                            {/* Processing Progress Notification */}
+                            {aiInlineProcessingJob && (
+                              <div style={{ marginTop: '0.75rem', padding: '0.65rem', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '6px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#fbbf24', fontWeight: 600 }}>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                    <RefreshCw size={13} className="spin-icon" />
+                                    <span>{aiInlineProcessingJob.stepDescription}</span>
+                                  </span>
+                                  <span>{aiInlineProcessingJob.progressPercent}%</span>
+                                </div>
+                                <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.35rem' }}>
+                                  <div style={{ width: `${aiInlineProcessingJob.progressPercent}%`, height: '100%', background: '#fbbf24' }} />
+                                </div>
+                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', marginBottom: 0 }}>
+                                  Question generation will be unlocked as soon as indexing is complete.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Generation Settings */}
                     {aiMode === 'mcq' ? (
                       <div className="ai-generation-options">
@@ -3442,6 +4681,34 @@ const Admin = () => {
                                 <Trash2 size={14} />
                               </button>
                             </div>
+                          </div>
+
+                          {/* Verification Badge & Source Citation */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                            <span className={`verif-badge-${q.verificationStatus || 'verified'}`}>
+                              {q.verificationStatus === 'needs_review' ? (
+                                <AlertCircle size={12} />
+                              ) : q.verificationStatus === 'rejected' ? (
+                                <X size={12} />
+                              ) : (
+                                <CheckCircle2 size={12} />
+                              )}
+                              <span>
+                                {q.verificationStatus === 'needs_review'
+                                  ? 'Verification: Needs Review'
+                                  : q.verificationStatus === 'rejected'
+                                  ? 'Verification: Rejected'
+                                  : 'Verification: Verified'}
+                              </span>
+                            </span>
+
+                            {(q.sourcePage || q.sourceReference) && (
+                              <span className="source-page-pill">
+                                <BookOpen size={11} />
+                                <span>{q.sourceReference || 'Textbook Source'}</span>
+                                {q.sourcePage ? ` (Page ${q.sourcePage})` : ''}
+                              </span>
+                            )}
                           </div>
 
                           {/* Question Text */}
