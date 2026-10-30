@@ -14,6 +14,9 @@ import textbooksRouter from './routes/textbooks';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Disable ETag generation globally so dynamic API endpoints never return HTTP 304 (Not Modified)
+app.set('etag', false);
+
 const allowedOrigins = [
   'https://tnpsc-quiz-lrkivhxrn-moonzoro.vercel.app',
   'https://tnpsc-quiz-1rra490pf-moonzoro.vercel.app',
@@ -71,13 +74,38 @@ const corsOptions: CorsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Cache-Control',
+    'Pragma',
+    'Expires',
+    'If-None-Match',
+    'If-Modified-Since',
+  ],
   optionsSuccessStatus: 200,
 };
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
+
+// Prevent HTTP 304 (Not Modified) and stale edge/browser caching on all API endpoints
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  delete req.headers['if-none-match'];
+  delete req.headers['if-modified-since'];
+  delete req.headers['if-match'];
+  delete req.headers['if-unmodified-since'];
+
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
 
 // Routes
 app.get('/', (_req, res) => {

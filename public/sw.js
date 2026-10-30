@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tnpsc-hub-v2';
+const CACHE_NAME = 'tnpsc-hub-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

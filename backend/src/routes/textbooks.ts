@@ -11,9 +11,19 @@ import { retrieveRelevantTextbookContent } from '../services/textbookRag';
 
 const router = Router();
 
-// Ensure PostgreSQL schema (textbooks, textbook_content, textbook_processing_jobs) is initialized
-router.use(async (_req: Request, _res: Response, next: NextFunction) => {
+// Ensure PostgreSQL schema is initialized and prevent HTTP 304 / caching on all textbook endpoints
+router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
+    delete req.headers['if-none-match'];
+    delete req.headers['if-modified-since'];
+    delete req.headers['if-match'];
+    delete req.headers['if-unmodified-since'];
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+
     await ensureDatabaseSchema();
     next();
   } catch (err) {
@@ -293,31 +303,32 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
       textbookId = insertRes.rows[0].id;
     }
 
-    // On serverless hosts (Vercel), await PDF extraction before returning so the container is not frozen mid-indexing.
-    // On persistent Node servers (local dev / dedicated server), run asynchronously in background.
-    if (process.env.VERCEL) {
-      await processTextbookPdf({
-        textbookId,
-        filePath: uploadedFilePath,
-        groupId: cleanGroupId,
-        standard: parsedStandard,
-        subject: cleanSubject,
-        medium: cleanMedium,
-        term: cleanTerm,
-      });
+    // Await PDF extraction and database indexing so the response always reflects the verified database state
+    await processTextbookPdf({
+      textbookId,
+      filePath: uploadedFilePath,
+      groupId: cleanGroupId,
+      standard: parsedStandard,
+      subject: cleanSubject,
+      medium: cleanMedium,
+      term: cleanTerm,
+    });
 
-      const finalRes = await pool.query(
-        `SELECT status, page_count, error_message FROM textbooks WHERE id = $1`,
-        [textbookId]
-      );
-      const finalRow = finalRes.rows[0] || { status: 'completed', page_count: 0, error_message: null };
+    const finalRes = await pool.query(
+      `SELECT status, page_count, error_message, file_size FROM textbooks WHERE id = $1`,
+      [textbookId]
+    );
+    const finalRow = finalRes.rows[0] || {
+      status: 'completed',
+      page_count: 0,
+      error_message: null,
+      file_size: fileSize,
+    };
 
-      return res.status(201).json({
-        status: 'success',
-        message:
-          finalRow.status === 'completed'
-            ? `Textbook uploaded and indexed successfully (${finalRow.page_count || 0} pages).`
-            : 'Textbook uploaded. Processing initiated.',
+    if (finalRow.status === 'failed') {
+      return res.status(422).json({
+        status: 'error',
+        message: finalRow.error_message || 'PDF uploaded, but text extraction and indexing failed.',
         data: {
           id: textbookId,
           groupId: cleanGroupId,
@@ -326,6 +337,7 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
           medium: cleanMedium,
           term: cleanTerm,
           bookName: cleanBookName,
+          fileSize: Number(finalRow.file_size || fileSize),
           pageCount: finalRow.page_count || 0,
           status: finalRow.status,
           errorMessage: finalRow.error_message,
@@ -333,22 +345,12 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
       });
     }
 
-    // Persistent server: trigger asynchronous PDF processing engine
-    processTextbookPdf({
-      textbookId,
-      filePath: uploadedFilePath,
-      groupId: cleanGroupId,
-      standard: parsedStandard,
-      subject: cleanSubject,
-      medium: cleanMedium,
-      term: cleanTerm,
-    }).catch((err) => {
-      console.error(`[Textbook Route] Async processing failure for ${textbookId}:`, err);
-    });
-
     return res.status(201).json({
       status: 'success',
-      message: 'Textbook uploaded successfully. Processing and indexing started.',
+      message:
+        finalRow.status === 'completed'
+          ? `Textbook uploaded and indexed successfully (${finalRow.page_count || 0} pages).`
+          : 'Textbook uploaded and processing started.',
       data: {
         id: textbookId,
         groupId: cleanGroupId,
@@ -357,7 +359,10 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
         medium: cleanMedium,
         term: cleanTerm,
         bookName: cleanBookName,
-        status: 'uploaded',
+        fileSize: Number(finalRow.file_size || fileSize),
+        pageCount: finalRow.page_count || 0,
+        status: finalRow.status,
+        errorMessage: finalRow.error_message,
       },
     });
   } catch (error: any) {
@@ -623,36 +628,36 @@ router.post('/:id/reprocess', requireAdminAuth, async (req: Request, res: Respon
 
     const r = tbRes.rows[0];
 
-    if (process.env.VERCEL) {
-      await processTextbookPdf({
-        textbookId: r.id,
-        filePath: r.file_path,
-        groupId: r.group_id,
-        standard: r.standard,
-        subject: r.subject,
-        medium: r.medium,
-      });
-
-      return res.status(200).json({
-        status: 'success',
-        message: `Reprocessing completed for "${r.book_name}".`,
-      });
-    }
-
-    processTextbookPdf({
+    await processTextbookPdf({
       textbookId: r.id,
       filePath: r.file_path,
       groupId: r.group_id,
       standard: r.standard,
       subject: r.subject,
       medium: r.medium,
-    }).catch((err) => {
-      console.error(`[Textbooks Route] Reprocess failure for ${id}:`, err);
     });
+
+    const finalRes = await pool.query(
+      `SELECT status, page_count, error_message FROM textbooks WHERE id = $1`,
+      [id]
+    );
+    const finalRow = finalRes.rows[0] || { status: 'completed', page_count: 0, error_message: null };
+
+    if (finalRow.status === 'failed') {
+      return res.status(422).json({
+        status: 'error',
+        message: finalRow.error_message || `Reprocessing failed for "${r.book_name}".`,
+      });
+    }
 
     return res.status(200).json({
       status: 'success',
-      message: `Reprocessing initiated for "${r.book_name}".`,
+      message: `Reprocessing completed for "${r.book_name}" (${finalRow.page_count || 0} pages).`,
+      data: {
+        id: r.id,
+        status: finalRow.status,
+        pageCount: finalRow.page_count || 0,
+      },
     });
   } catch (error: any) {
     console.error('[Textbooks Route] Reprocess error:', error);

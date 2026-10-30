@@ -59,11 +59,14 @@ export interface ApiFetchOptions extends RequestInit {
 }
 
 export async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Response> {
-  const { timeoutMs = 30000, ...fetchOptions } = options;
+  const { timeoutMs = 30000, cache = 'no-store', ...fetchOptions } = options;
   const url = getApiUrl(path);
 
   if (fetchOptions.signal || timeoutMs <= 0) {
-    return fetch(url, fetchOptions);
+    return fetch(url, {
+      ...fetchOptions,
+      cache,
+    });
   }
 
   const controller = new AbortController();
@@ -74,6 +77,7 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
   try {
     return await fetch(url, {
       ...fetchOptions,
+      cache,
       signal: controller.signal,
     });
   } catch (err: any) {
@@ -116,8 +120,15 @@ export function classifyApiError(
   const target = endpointLabel ? ` (${endpointLabel})` : '';
 
   switch (res.status) {
+    case 304:
+      return (
+        backendMessage ||
+        `Not Modified (304): The server or cache returned an unmodified response instead of completing the request${target}. Please retry.`
+      );
     case 400:
       return backendMessage || `Bad Request (400): Invalid request parameters or file format${target}.`;
+    case 422:
+      return backendMessage || `Unprocessable PDF (422): The PDF was uploaded, but text extraction failed${target}.`;
     case 401:
       return (
         backendMessage ||

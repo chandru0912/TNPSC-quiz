@@ -1255,8 +1255,13 @@ const Admin = () => {
 
       const res = await apiFetch('/api/textbooks/upload', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
         body: formData,
+        cache: 'no-store',
         timeoutMs: 180000,
       })
 
@@ -1274,7 +1279,7 @@ const Admin = () => {
         return
       }
 
-      if (!res.ok) {
+      if (res.status === 304 || !res.ok || !data?.data?.id || data?.data?.status === 'failed') {
         const errMsg = classifyApiError(res, data, rawText, 'POST /api/textbooks/upload')
         setTbUploadError(errMsg)
         showToast('error', errMsg)
@@ -1420,8 +1425,13 @@ const Admin = () => {
 
       const res = await apiFetch('/api/textbooks/upload', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
         body: formData,
+        cache: 'no-store',
         timeoutMs: 180000,
       })
       const { data, rawText } = await parseApiResponse(res)
@@ -1438,7 +1448,7 @@ const Admin = () => {
         return
       }
 
-      if (!res.ok || !data?.data) {
+      if (res.status === 304 || !res.ok || !data?.data?.id || data?.data?.status === 'failed') {
         const errMsg = classifyApiError(res, data, rawText, 'POST /api/textbooks/upload')
         showToast('error', errMsg)
         setAiInlineUploading(false)
