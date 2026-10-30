@@ -211,19 +211,97 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 /**
+ * Helper: Apply syllabus Subject filter condition to SQL query
+ * Supports both subject IDs ('general-studies', 'aptitude', 'general-english', 'general-tamil')
+ * and display names ('General Studies', 'Aptitude and Mental Ability', 'General English', 'General Tamil', etc.)
+ */
+function applySubjectFilterCondition(
+  rawSubject: unknown,
+  queryConditions: string[],
+  values: any[],
+  paramIndex: number
+): number {
+  if (!rawSubject || typeof rawSubject !== 'string') return paramIndex;
+  const norm = rawSubject.trim().toLowerCase();
+  if (!norm || norm === 'all') return paramIndex;
+
+  if (norm === 'general-studies' || norm === 'general studies') {
+    queryConditions.push(
+      `LOWER(TRIM(subject)) IN ('general studies', 'general-studies', 'general science', 'geography', 'history & inm', 'indian polity', 'economy & tn admin', 'tamil nadu heritage', 'science', 'social science')`
+    );
+  } else if (
+    norm === 'aptitude' ||
+    norm === 'aptitude and mental ability' ||
+    norm === 'aptitude & mental ability'
+  ) {
+    queryConditions.push(
+      `(LOWER(TRIM(subject)) IN ('aptitude', 'aptitude and mental ability', 'aptitude & mental ability') OR LOWER(subject) LIKE '%aptitude%')`
+    );
+  } else if (norm === 'general-english' || norm === 'general english') {
+    queryConditions.push(
+      `(LOWER(TRIM(subject)) IN ('general-english', 'general english', 'english') OR LOWER(subject) LIKE '%english%')`
+    );
+  } else if (
+    norm === 'general-tamil' ||
+    norm === 'general tamil' ||
+    norm.includes('tamil') ||
+    norm.includes('தமிழ்')
+  ) {
+    queryConditions.push(
+      `(LOWER(TRIM(subject)) IN ('general-tamil', 'general tamil', 'tamil', 'பொதுத் தமிழ்', 'பொதுத்தமிழ்') OR LOWER(subject) LIKE '%tamil%' OR subject LIKE '%தமிழ்%')`
+    );
+  } else {
+    queryConditions.push(`LOWER(TRIM(subject)) = $${paramIndex++}`);
+    values.push(norm);
+  }
+  return paramIndex;
+}
+
+/**
+ * Helper: Apply syllabus Lesson Title filter condition to SQL query
+ */
+function applyLessonFilterCondition(
+  rawLesson: unknown,
+  queryConditions: string[],
+  values: any[],
+  paramIndex: number
+): number {
+  if (!rawLesson || typeof rawLesson !== 'string') return paramIndex;
+  const trimmed = rawLesson.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'all') return paramIndex;
+
+  queryConditions.push(`LOWER(TRIM(lesson_title)) = LOWER(TRIM($${paramIndex++}))`);
+  values.push(trimmed);
+  return paramIndex;
+}
+
+/**
  * GET /api/questions/admin (Protected Admin Endpoint)
- * Full management search and filter across ID, question_text, lesson, unit, status
+ * Full management search and filter across ID, question_text, group (category), subject, standard (classId), unit (unitId), lessonTitle, status, difficulty
  * Returns total, stagingCount, publishedCount metrics
  */
 router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const { search, unitId, classId, status, difficulty, category, topic, limit = '50', offset = '0' } = req.query;
+    const {
+      search,
+      unitId,
+      classId,
+      subject,
+      lessonTitle,
+      lesson,
+      status,
+      difficulty,
+      category,
+      topic,
+      limit = '50',
+      offset = '0',
+    } = req.query;
 
     const queryConditions: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
 
-    // Filter by category / group
+    // 1. Filter by TNPSC Group (category)
     if (category && typeof category === 'string' && category !== 'all') {
       const lowerCat = category.trim().toLowerCase();
       if (lowerCat === 'group2_2a' || lowerCat === 'group2' || lowerCat === 'group2a') {
@@ -235,6 +313,24 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
         values.push(lowerCat);
       }
     }
+
+    // 2. Filter by Subject Selection
+    paramIndex = applySubjectFilterCondition(subject, queryConditions, values, paramIndex);
+
+    // 3. Filter by Standard (classId)
+    if (classId && classId !== 'all' && !isNaN(Number(classId))) {
+      queryConditions.push(`class_id = $${paramIndex++}`);
+      values.push(Number(classId));
+    }
+
+    // 4. Filter by Unit (unitId)
+    if (unitId && unitId !== 'all' && !isNaN(Number(unitId))) {
+      queryConditions.push(`unit_id = $${paramIndex++}`);
+      values.push(Number(unitId));
+    }
+
+    // 5. Filter by Lesson Title
+    paramIndex = applyLessonFilterCondition(lessonTitle || lesson, queryConditions, values, paramIndex);
 
     // Filter by topic
     if (topic && typeof topic === 'string' && topic.trim() && topic !== 'all') {
@@ -255,16 +351,6 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
         values.push(`%${trimmed.toLowerCase()}%`);
         paramIndex++;
       }
-    }
-
-    if (unitId && !isNaN(Number(unitId))) {
-      queryConditions.push(`unit_id = $${paramIndex++}`);
-      values.push(Number(unitId));
-    }
-
-    if (classId && !isNaN(Number(classId))) {
-      queryConditions.push(`class_id = $${paramIndex++}`);
-      values.push(Number(classId));
     }
 
     if (status && typeof status === 'string' && status !== 'all') {
@@ -621,12 +707,24 @@ router.patch('/:id(\\d+)', requireAdminAuth, async (req: Request, res: Response)
 
 /**
  * DELETE /api/questions (Protected) - Bulk delete
- * Supports: { ids: [...] } or filters { category, classId, unitId, lesson, subject, status, difficulty }
+ * Supports: { ids: [...] } or filters { category, subject, classId, unitId, lessonTitle, lesson, status, difficulty, search }
  */
 router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
-    const { ids, category, classId, unitId, lesson, subject, status, difficulty, deleteAll = false } = req.body || {};
+    const {
+      ids,
+      category,
+      subject,
+      classId,
+      unitId,
+      lessonTitle,
+      lesson,
+      status,
+      difficulty,
+      search,
+      deleteAll = false,
+    } = req.body || {};
 
     if (Array.isArray(ids) && ids.length > 0) {
       const validIds = ids.filter((id: any) => !isNaN(Number(id))).map((id: any) => Number(id));
@@ -649,29 +747,41 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
       if (category && typeof category === 'string' && category !== 'all') {
         const cleanCat = category.trim().toLowerCase();
         if (cleanCat === 'group2_2a' || cleanCat === 'group2' || cleanCat === 'group2a') {
-          queryConditions.push(`category IN ('group2', 'group2a', 'group2_2a')`);
+          queryConditions.push(`LOWER(category) IN ('group2', 'group2a', 'group2_2a')`);
         } else if (cleanCat === 'group4_vao' || cleanCat === 'group4' || cleanCat === 'vao') {
-          queryConditions.push(`category IN ('group4', 'vao', 'group4_vao')`);
+          queryConditions.push(`LOWER(category) IN ('group4', 'vao', 'group4_vao')`);
         } else {
-          queryConditions.push(`category = $${paramIndex++}`);
+          queryConditions.push(`LOWER(category) = $${paramIndex++}`);
           values.push(cleanCat);
         }
       }
-      if (classId && !isNaN(Number(classId))) {
+      paramIndex = applySubjectFilterCondition(subject, queryConditions, values, paramIndex);
+      if (classId && classId !== 'all' && !isNaN(Number(classId))) {
         queryConditions.push(`class_id = $${paramIndex++}`);
         values.push(Number(classId));
       }
-      if (unitId && !isNaN(Number(unitId))) {
+      if (unitId && unitId !== 'all' && !isNaN(Number(unitId))) {
         queryConditions.push(`unit_id = $${paramIndex++}`);
         values.push(Number(unitId));
       }
-      if (subject && typeof subject === 'string' && subject.trim()) {
-        queryConditions.push(`LOWER(subject) = $${paramIndex++}`);
-        values.push(subject.trim().toLowerCase());
-      }
-      if (lesson && typeof lesson === 'string' && lesson.trim()) {
-        queryConditions.push(`LOWER(lesson_title) = $${paramIndex++}`);
-        values.push(lesson.trim().toLowerCase());
+      paramIndex = applyLessonFilterCondition(lessonTitle || lesson, queryConditions, values, paramIndex);
+
+      if (search && typeof search === 'string' && search.trim()) {
+        const trimmed = search.trim();
+        if (!isNaN(Number(trimmed))) {
+          queryConditions.push(
+            `(id = $${paramIndex} OR LOWER(question_text) LIKE $${paramIndex + 1} OR LOWER(lesson_title) LIKE $${paramIndex + 1})`
+          );
+          values.push(Number(trimmed));
+          values.push(`%${trimmed.toLowerCase()}%`);
+          paramIndex += 2;
+        } else {
+          queryConditions.push(
+            `(LOWER(question_text) LIKE $${paramIndex} OR LOWER(lesson_title) LIKE $${paramIndex} OR LOWER(subject) LIKE $${paramIndex} OR LOWER(topic) LIKE $${paramIndex})`
+          );
+          values.push(`%${trimmed.toLowerCase()}%`);
+          paramIndex++;
+        }
       }
       if (status && typeof status === 'string' && status !== 'all') {
         queryConditions.push(`status = $${paramIndex++}`);

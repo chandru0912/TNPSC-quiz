@@ -43,10 +43,13 @@ import {
 } from 'lucide-react'
 import './Admin.css'
 import {
+  SyllabusCascadeSelector,
+  useSyllabusCascade,
+} from '../components/SyllabusCascadeSelector'
+import {
   TNPSC_GROUPS,
   STANDARDS,
   getSubjectsForGroup,
-  getStandardsForSubject,
   getUnitsForSubjectStandard,
   getLessonsForSelection,
   getTopicsForSelection,
@@ -210,15 +213,25 @@ const Admin = () => {
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<number>>(new Set())
   const [notesBulkDeleting, setNotesBulkDeleting] = useState(false)
 
-  // Filter Bar state
+  // Filter Bar state (reuses shared Gemini AI Generator cascading syllabus logic)
   const [searchQuery, setSearchQuery] = useState('')
-  const [groupFilter, setGroupFilter] = useState('all')
-  const [standardFilter, setStandardFilter] = useState('all')
-  const [unitFilter, setUnitFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [difficultyFilter, setDifficultyFilter] = useState('all')
   const [page, setPage] = useState(1)
-  const pageSize = 25
+  const pageSize = 50
+
+  const qbSyllabusCascade = useSyllabusCascade({
+    allowAll: true,
+    onChange: () => setPage(1),
+  })
+  const {
+    groupId: groupFilter,
+    subjectId: subjectFilter,
+    classId: standardFilter,
+    unitId: unitFilter,
+    lessonTitle: lessonFilter,
+    selectedSubjectObj: qbSelectedSubjectObj,
+  } = qbSyllabusCascade
 
   // Modals state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -253,11 +266,36 @@ const Admin = () => {
     isAIGeneratorOpen
   useScrollLock(hasOpenAdminModal)
 
-  const [aiGroupId, setAiGroupId] = useState<'group1' | 'group2' | 'group4'>('group1')
-  const [aiSubjectId, setAiSubjectId] = useState<string>('general-studies')
-  const [aiClassId, setAiClassId] = useState<number>(6)
-  const [aiUnitId, setAiUnitId] = useState<number>(1)
-  const [aiLessonTitle, setAiLessonTitle] = useState<string>('')
+  // Shared Gemini AI Generator Syllabus Cascade (strict mode: allowAll = false)
+  const aiSyllabusCascade = useSyllabusCascade({
+    allowAll: false,
+    initialGroupId: 'group1',
+    initialSubjectId: 'general-studies',
+    initialClassId: 6,
+    initialUnitId: 1,
+  })
+  const {
+    effectiveGroupId: aiGroupId,
+    unitId: rawAiUnitId,
+    lessonTitle: aiLessonTitle,
+    currentSubjectId,
+    currentClassId,
+    currentUnitId,
+    currentLessonTitle,
+    availableSubjects,
+    availableStandards,
+    availableUnits,
+    availableLessons,
+    selectedSubjectObj: rawAiSelectedSubjectObj,
+    selectedStandardObj,
+    currentUnit,
+    selectedLessonObj,
+    handleUnitChange,
+    handleLessonChange,
+  } = aiSyllabusCascade
+  const aiUnitId = typeof rawAiUnitId === 'number' ? rawAiUnitId : currentUnitId
+  const selectedSubjectObj = rawAiSelectedSubjectObj || availableSubjects[0]
+
   const [aiQuestionCount, setAiQuestionCount] = useState<number>(50)
   const [aiDifficulty, setAiDifficulty] = useState<'Medium' | 'Easy' | 'Hard' | 'Mixed'>('Medium')
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('tnpsc_gemini_api_key') || '')
@@ -269,133 +307,8 @@ const Admin = () => {
   const [aiUploadSuccess, setAiUploadSuccess] = useState<{ count: number; lessonTitle: string } | null>(null)
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null)
 
-  // ---------------------------------------------------------------------------
-  // 6-TIER CASCADING RESOLUTION: Group -> Subject -> Standard -> Unit -> Lesson -> Topic
-  // ---------------------------------------------------------------------------
-
-  // 1. Available subjects for selected Group
-  const availableSubjects = getSubjectsForGroup(aiGroupId)
-  const selectedSubjectObj = availableSubjects.find((s) => s.id === aiSubjectId) || availableSubjects[0]
-  const currentSubjectId = selectedSubjectObj?.id || 'general-studies'
-
-  // 2. Available standards for selected Group & Subject
-  const availableStandards = getStandardsForSubject(aiGroupId, currentSubjectId)
-  const selectedStandardObj = availableStandards.find((s) => s.id === aiClassId) || availableStandards[0]
-  const currentClassId = selectedStandardObj?.id || 6
-
-  // 3. Available units for selected Group, Subject, and Standard
-  const availableUnits = getUnitsForSubjectStandard(aiGroupId, currentSubjectId, currentClassId)
-  const currentUnit = availableUnits.find((u) => u.id === aiUnitId) || availableUnits[0]
-  const currentUnitId = currentUnit?.id || 1
-
-  // 4. Available lessons for selected Group, Subject, Standard, and Unit
-  const availableLessons = getLessonsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId)
-  const selectedLessonObj = availableLessons.find((l) => l.title === aiLessonTitle) || availableLessons[0]
-  const currentLessonTitle = selectedLessonObj?.title || ''
-
   // Topics no longer used in generator UI
   const currentTopicName = ''
-
-  // ---------------------------------------------------------------------------
-  // EXPLICIT DOWNSTREAM RESET HANDLERS
-  // ---------------------------------------------------------------------------
-
-  // 1. When Group changes: resets Subject, Standard, Unit, Lesson
-  const handleGroupChange = (newGroupId: 'group1' | 'group2' | 'group4') => {
-    setAiGroupId(newGroupId)
-    const nextSubjects = getSubjectsForGroup(newGroupId)
-    const nextSubj = nextSubjects[0]?.id || 'general-studies'
-    setAiSubjectId(nextSubj)
-
-    const nextStandards = getStandardsForSubject(newGroupId, nextSubj)
-    const nextStd = nextStandards[0]?.id || 6
-    setAiClassId(nextStd)
-
-    const nextUnits = getUnitsForSubjectStandard(newGroupId, nextSubj, nextStd)
-    const nextUnit = nextUnits[0]?.id || 1
-    setAiUnitId(nextUnit)
-
-    const nextLessons = getLessonsForSelection(newGroupId, nextSubj, nextStd, nextUnit)
-    const nextLesson = nextLessons[0]?.title || ''
-    setAiLessonTitle(nextLesson)
-  }
-
-  // 2. When Subject changes: resets Standard, Unit, Lesson
-  const handleSubjectChange = (newSubj: string) => {
-    setAiSubjectId(newSubj)
-
-    const nextStandards = getStandardsForSubject(aiGroupId, newSubj)
-    const nextStd = nextStandards[0]?.id || 6
-    setAiClassId(nextStd)
-
-    const nextUnits = getUnitsForSubjectStandard(aiGroupId, newSubj, nextStd)
-    const nextUnit = nextUnits[0]?.id || 1
-    setAiUnitId(nextUnit)
-
-    const nextLessons = getLessonsForSelection(aiGroupId, newSubj, nextStd, nextUnit)
-    const nextLesson = nextLessons[0]?.title || ''
-    setAiLessonTitle(nextLesson)
-  }
-
-  // 3. When Standard changes: resets Unit, Lesson
-  const handleStandardChange = (newStd: number) => {
-    setAiClassId(newStd)
-
-    const nextUnits = getUnitsForSubjectStandard(aiGroupId, currentSubjectId, newStd)
-    const nextUnit = nextUnits[0]?.id || 1
-    setAiUnitId(nextUnit)
-
-    const nextLessons = getLessonsForSelection(aiGroupId, currentSubjectId, newStd, nextUnit)
-    const nextLesson = nextLessons[0]?.title || ''
-    setAiLessonTitle(nextLesson)
-  }
-
-  // 4. When Unit changes: resets Lesson
-  const handleUnitChange = (newUnit: number) => {
-    setAiUnitId(newUnit)
-
-    const nextLessons = getLessonsForSelection(aiGroupId, currentSubjectId, currentClassId, newUnit)
-    const nextLesson = nextLessons[0]?.title || ''
-    setAiLessonTitle(nextLesson)
-  }
-
-  // 5. When Lesson changes
-  const handleLessonChange = (newLesson: string) => {
-    setAiLessonTitle(newLesson)
-  }
-
-  // Defensive fallback synchronization effects
-  useEffect(() => {
-    const subjects = getSubjectsForGroup(aiGroupId)
-    if (!subjects.some((s) => s.id === aiSubjectId)) {
-      setAiSubjectId(subjects[0]?.id || 'general-studies')
-    }
-  }, [aiGroupId, aiSubjectId])
-
-  useEffect(() => {
-    const standards = getStandardsForSubject(aiGroupId, currentSubjectId)
-    if (!standards.some((s) => s.id === aiClassId)) {
-      setAiClassId(standards[0]?.id || 6)
-    }
-  }, [aiGroupId, currentSubjectId, aiClassId])
-
-  useEffect(() => {
-    const units = getUnitsForSubjectStandard(aiGroupId, currentSubjectId, currentClassId)
-    if (!units.some((u) => u.id === aiUnitId)) {
-      setAiUnitId(units[0]?.id || 1)
-    }
-  }, [aiGroupId, currentSubjectId, currentClassId, aiUnitId])
-
-  useEffect(() => {
-    const lessons = getLessonsForSelection(aiGroupId, currentSubjectId, currentClassId, currentUnitId)
-    if (lessons.length > 0) {
-      if (!lessons.some((l) => l.title === aiLessonTitle)) {
-        setAiLessonTitle(lessons[0].title)
-      }
-    } else if (aiLessonTitle) {
-      setAiLessonTitle('')
-    }
-  }, [aiGroupId, currentSubjectId, currentClassId, currentUnitId, aiLessonTitle])
 
   // Save API key to localStorage when updated
   const handleApiKeyChange = (val: string) => {
@@ -1050,7 +963,7 @@ const Admin = () => {
     }
   }, [token])
 
-  // Fetch Questions
+  // Fetch Questions (supports all 5 Gemini AI Generator syllabus filters + status, difficulty, search)
   const fetchQuestions = useCallback(async () => {
     if (!token) return
     setIsLoading(true)
@@ -1058,8 +971,14 @@ const Admin = () => {
       const params = new URLSearchParams()
       if (searchQuery.trim()) params.set('search', searchQuery.trim())
       if (groupFilter !== 'all') params.set('category', groupFilter)
-      if (standardFilter !== 'all') params.set('classId', standardFilter)
-      if (unitFilter !== 'all') params.set('unitId', unitFilter)
+      if (subjectFilter !== 'all') {
+        params.set('subject', qbSelectedSubjectObj?.name || subjectFilter)
+      }
+      if (standardFilter !== 'all') params.set('classId', String(standardFilter))
+      if (unitFilter !== 'all') params.set('unitId', String(unitFilter))
+      if (lessonFilter !== 'all' && lessonFilter.trim()) {
+        params.set('lessonTitle', lessonFilter.trim())
+      }
       if (statusFilter !== 'all') params.set('status', statusFilter)
       if (difficultyFilter !== 'all') params.set('difficulty', difficultyFilter)
       params.set('limit', pageSize.toString())
@@ -1091,20 +1010,79 @@ const Admin = () => {
         // Fallback for static hosts (Vercel) when backend is not connected
         const localStagedRaw = localStorage.getItem('tnpsc_staged_questions')
         const localStaged: QuestionItem[] = localStagedRaw ? JSON.parse(localStagedRaw) : []
-        setQuestions(localStaged)
+        const filteredLocal = localStaged.filter((q) => {
+          if (groupFilter !== 'all' && q.category?.toLowerCase() !== groupFilter.toLowerCase()) {
+            return false
+          }
+          if (subjectFilter !== 'all') {
+            const targetSubj = (qbSelectedSubjectObj?.name || subjectFilter).toLowerCase()
+            const qSubj = (q.subject || '').toLowerCase()
+            if (targetSubj.includes('tamil')) {
+              if (!qSubj.includes('tamil') && !qSubj.includes('தமிழ்')) return false
+            } else if (targetSubj.includes('english')) {
+              if (!qSubj.includes('english')) return false
+            } else if (targetSubj.includes('aptitude')) {
+              if (!qSubj.includes('aptitude')) return false
+            } else if (qSubj !== targetSubj) {
+              return false
+            }
+          }
+          if (standardFilter !== 'all' && Number(q.classId) !== Number(standardFilter)) {
+            return false
+          }
+          if (unitFilter !== 'all' && Number(q.unitId) !== Number(unitFilter)) {
+            return false
+          }
+          if (
+            lessonFilter !== 'all' &&
+            lessonFilter.trim() &&
+            (q.lessonTitle || '').trim().toLowerCase() !== lessonFilter.trim().toLowerCase()
+          ) {
+            return false
+          }
+          if (statusFilter !== 'all' && q.status !== statusFilter) {
+            return false
+          }
+          if (difficultyFilter !== 'all' && q.difficulty !== difficultyFilter) {
+            return false
+          }
+          if (searchQuery.trim()) {
+            const sq = searchQuery.trim().toLowerCase()
+            const matches =
+              String(q.id) === sq ||
+              (q.question || '').toLowerCase().includes(sq) ||
+              (q.lessonTitle || '').toLowerCase().includes(sq) ||
+              (q.subject || '').toLowerCase().includes(sq)
+            if (!matches) return false
+          }
+          return true
+        })
+        setQuestions(filteredLocal)
         setMetrics({
           totalQuestions: 320 + localStaged.length,
           stagingCount: localStaged.length,
           publishedCount: 320,
         })
-        setFilteredTotal(localStaged.length)
+        setFilteredTotal(filteredLocal.length)
       }
     } catch (err: any) {
       console.error('Failed to load questions:', err)
     } finally {
       setIsLoading(false)
     }
-  }, [token, searchQuery, groupFilter, standardFilter, unitFilter, statusFilter, difficultyFilter, page])
+  }, [
+    token,
+    searchQuery,
+    groupFilter,
+    subjectFilter,
+    qbSelectedSubjectObj,
+    standardFilter,
+    unitFilter,
+    lessonFilter,
+    statusFilter,
+    difficultyFilter,
+    page,
+  ])
 
   const fetchNotes = useCallback(async () => {
     if (!token) return
@@ -1493,7 +1471,17 @@ const Admin = () => {
 
   useEffect(() => {
     setSelectedQuestionIds(new Set())
-  }, [searchQuery, groupFilter, standardFilter, unitFilter, statusFilter, difficultyFilter, page])
+  }, [
+    searchQuery,
+    groupFilter,
+    subjectFilter,
+    standardFilter,
+    unitFilter,
+    lessonFilter,
+    statusFilter,
+    difficultyFilter,
+    page,
+  ])
 
   useEffect(() => {
     setSelectedNoteIds(new Set())
@@ -1580,10 +1568,19 @@ const Admin = () => {
         body: JSON.stringify({
           deleteAll: true,
           category: groupFilter !== 'all' ? groupFilter : undefined,
-          classId: standardFilter !== 'all' ? standardFilter : undefined,
-          unitId: unitFilter !== 'all' ? unitFilter : undefined,
+          subject:
+            subjectFilter !== 'all'
+              ? qbSelectedSubjectObj?.name || subjectFilter
+              : undefined,
+          classId: standardFilter !== 'all' ? String(standardFilter) : undefined,
+          unitId: unitFilter !== 'all' ? String(unitFilter) : undefined,
+          lessonTitle:
+            lessonFilter !== 'all' && lessonFilter.trim()
+              ? lessonFilter.trim()
+              : undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
           difficulty: difficultyFilter !== 'all' ? difficultyFilter : undefined,
+          search: searchQuery.trim() ? searchQuery.trim() : undefined,
         }),
       })
       const data = await res.json()
@@ -2206,89 +2203,78 @@ const Admin = () => {
           </div>
 
           <div className="admin-filter-pills">
-            <div className="admin-filter-group">
-              <select
-                className="filter-select"
-                value={groupFilter}
-                onChange={(e) => {
-                  setGroupFilter(e.target.value)
-                  setPage(1)
-                }}
-              >
-                <option value="all">All TNPSC Groups</option>
-                {TNPSC_GROUPS.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
+            <SyllabusCascadeSelector
+              cascade={qbSyllabusCascade}
+              allowAll={true}
+              variant="filter"
+              extraFilters={
+                <>
+                  <div className="ai-field">
+                    <label>Status</label>
+                    <select
+                      className="ai-select qb-syllabus-select"
+                      aria-label="Status"
+                      value={statusFilter}
+                      onChange={(e) => {
+                        setStatusFilter(e.target.value)
+                        setPage(1)
+                      }}
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="staging">Staging Only (Under Review)</option>
+                      <option value="published">Published Only (Live)</option>
+                    </select>
+                  </div>
 
-              <select
-                className="filter-select"
-                value={standardFilter}
-                onChange={(e) => {
-                  setStandardFilter(e.target.value)
-                  setPage(1)
-                }}
-              >
-                <option value="all">All Standards (6th–12th)</option>
-                {STANDARDS.map((s) => (
-                  <option key={s.id} value={s.id.toString()}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
+                  <div className="ai-field">
+                    <label>Difficulty</label>
+                    <select
+                      className="ai-select qb-syllabus-select"
+                      aria-label="Difficulty"
+                      value={difficultyFilter}
+                      onChange={(e) => {
+                        setDifficultyFilter(e.target.value)
+                        setPage(1)
+                      }}
+                    >
+                      <option value="all">All Difficulties</option>
+                      <option value="Easy">Easy</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Hard">Hard</option>
+                    </select>
+                  </div>
+                </>
+              }
+            />
 
-              <select
-                className="filter-select"
-                value={unitFilter}
-                onChange={(e) => {
-                  setUnitFilter(e.target.value)
-                  setPage(1)
-                }}
-              >
-                <option value="all">All Units (1–6)</option>
-                <option value="1">Unit 1: General Science</option>
-                <option value="2">Unit 2: Geography of India</option>
-                <option value="3">Unit 3: History & INM</option>
-                <option value="4">Unit 4: Indian Polity</option>
-                <option value="5">Unit 5: Indian Economy & TN Admin</option>
-                <option value="6">Unit 6: Tamil Nadu Culture</option>
-              </select>
-
-              <select
-                className="filter-select"
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value)
-                  setPage(1)
-                }}
-              >
-                <option value="all">All Statuses</option>
-                <option value="staging">Staging Only (Under Review)</option>
-                <option value="published">Published Only (Live)</option>
-              </select>
-
-              <select
-                className="filter-select"
-                value={difficultyFilter}
-                onChange={(e) => {
-                  setDifficultyFilter(e.target.value)
-                  setPage(1)
-                }}
-              >
-                <option value="all">All Difficulties</option>
-                <option value="Easy">Easy</option>
-                <option value="Medium">Medium</option>
-                <option value="Hard">Hard</option>
-              </select>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+            <div className="qb-filter-actions-row">
               <div className="admin-filter-count">
                 Showing <strong>{questions.length}</strong> of <strong>{filteredTotal}</strong> matching questions | Selected: <strong>{selectedQuestionIds.size}</strong>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {(groupFilter !== 'all' ||
+                  subjectFilter !== 'all' ||
+                  standardFilter !== 'all' ||
+                  unitFilter !== 'all' ||
+                  lessonFilter !== 'all' ||
+                  statusFilter !== 'all' ||
+                  difficultyFilter !== 'all' ||
+                  searchQuery.trim() !== '') && (
+                  <button
+                    className="admin-btn admin-btn-secondary"
+                    onClick={() => {
+                      qbSyllabusCascade.resetFilters()
+                      setStatusFilter('all')
+                      setDifficultyFilter('all')
+                      setSearchQuery('')
+                      setPage(1)
+                    }}
+                    title="Reset all syllabus and status filters"
+                  >
+                    <RefreshCcw size={14} />
+                    <span>Reset Filters</span>
+                  </button>
+                )}
                 <button className="admin-btn admin-btn-secondary" onClick={toggleSelectAllVisible} disabled={questions.length === 0}>
                   {selectedQuestionIds.size === questions.length && questions.length > 0 ? 'Deselect All Visible' : 'Select All Visible'}
                 </button>
@@ -4284,95 +4270,12 @@ const Admin = () => {
                       <span>Syllabus MCQ Configuration (1 to 6)</span>
                     </h3>
 
-                    {/* Row 1: 1. TNPSC Group, 2. Subject Selection, 3. Standard */}
-                    <div className="ai-selection-tier-1">
-                      {/* 1. TNPSC Group */}
-                      <div className="ai-field">
-                        <label>1. TNPSC Group *</label>
-                        <select
-                          className="ai-select"
-                          value={aiGroupId}
-                          onChange={(e) => handleGroupChange(e.target.value as any)}
-                        >
-                          {TNPSC_GROUPS.map((g) => (
-                            <option key={g.id} value={g.id}>
-                              {g.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* 2. Subject Selection */}
-                      <div className="ai-field">
-                        <label>2. Subject Selection ({availableSubjects.length} Subjects) *</label>
-                        <select
-                          className="ai-select"
-                          value={currentSubjectId}
-                          onChange={(e) => handleSubjectChange(e.target.value)}
-                        >
-                          {availableSubjects.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* 3. Standard */}
-                      <div className="ai-field">
-                        <label>3. Standard ({availableStandards.length} Standards) *</label>
-                        <select
-                          className="ai-select"
-                          value={currentClassId}
-                          onChange={(e) => handleStandardChange(Number(e.target.value))}
-                        >
-                          {availableStandards.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Row 2: 4. Unit, 5. Lesson Title */}
-                    <div className="ai-selection-tier-2" style={{ marginTop: '0.85rem' }}>
-                      {/* 4. Unit */}
-                      <div className="ai-field">
-                        <label>4. Unit ({availableUnits.length} Units) *</label>
-                        <select
-                          className="ai-select"
-                          value={currentUnitId}
-                          onChange={(e) => handleUnitChange(Number(e.target.value))}
-                        >
-                          {availableUnits.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.unitNumber}: {u.title}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* 5. Lesson Title */}
-                      <div className="ai-field">
-                        <label>5. Lesson Title ({availableLessons.length} Lessons) *</label>
-                        <select
-                          className="ai-select"
-                          value={currentLessonTitle}
-                          onChange={(e) => handleLessonChange(e.target.value)}
-                        >
-                          {availableLessons.length === 0 ? (
-                            <option value="" disabled>No lessons mapped for this selection</option>
-                          ) : (
-                            availableLessons.map((l) => (
-                              <option key={l.id} value={l.title}>
-                                {l.lessonNumber} {l.title}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </div>
-                    </div>
+                    {/* Shared 5-Dropdown Syllabus Cascade Selector (1. Group -> 2. Subject -> 3. Standard -> 4. Unit -> 5. Lesson Title) */}
+                    <SyllabusCascadeSelector
+                      cascade={aiSyllabusCascade}
+                      allowAll={false}
+                      variant="generator"
+                    />
 
 
 
