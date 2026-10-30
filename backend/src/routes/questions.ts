@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { PoolClient } from 'pg';
 import pool from '../db';
 import { requireAdminAuth } from '../middleware/auth';
 
@@ -454,7 +455,7 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
  * Specifically supports updating individual fields, including a single option,
  * without changing other fields.
  */
-router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
+router.patch('/:id(\\d+)', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -1026,36 +1027,83 @@ router.post('/batch', requireAdminAuth, async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/questions/publish (Protected)
- * Explicit admin confirmation required to publish questions
+ * Publishes ONLY the explicitly selected staging questions.
+ * Never falls back to publishing all staging questions.
  */
 router.patch('/publish', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { ids } = req.body;
-    let query: string;
-    let values: any[] = [];
+  const { ids } = req.body || {};
 
-    if (Array.isArray(ids) && ids.length > 0) {
-      query = `UPDATE questions SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ANY($1) RETURNING id`;
-      values = [ids];
-    } else {
-      query = `UPDATE questions SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE status = 'staging' RETURNING id`;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'A non-empty ids array is required. Bulk publishing never publishes all staging questions.',
+    });
+  }
+
+  const parsedIds = ids.map((id: any) => Number(id));
+  if (parsedIds.some((id: number) => !Number.isInteger(id) || id <= 0)) {
+    return res.status(400).json({ status: 'error', message: 'All question IDs must be positive integers.' });
+  }
+  const uniqueIds = [...new Set(parsedIds)];
+
+  let client: PoolClient | undefined;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Lock the selected rows so status cannot change between validation and update.
+    const existing = await client.query('SELECT id, status FROM questions WHERE id = ANY($1) FOR UPDATE', [uniqueIds]);
+    const foundStatus = new Map<number, string>(existing.rows.map((row: any) => [row.id, row.status] as [number, string]));
+    const missingIds = uniqueIds.filter((id) => !foundStatus.has(id));
+    const ineligibleIds = uniqueIds.filter((id) => foundStatus.has(id) && foundStatus.get(id) !== 'staging');
+
+    if (missingIds.length > 0 || ineligibleIds.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        status: 'error',
+        message: `Cannot publish: ${missingIds.length} question(s) not found and ${ineligibleIds.length} not in staging. No questions were published.`,
+        missingIds,
+        ineligibleIds,
+      });
     }
 
-    const result = await pool.query(query, values);
+    const result = await client.query(
+      `UPDATE questions SET status = 'published', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ANY($1) AND status = 'staging'
+       RETURNING id`,
+      [uniqueIds]
+    );
 
-    res.status(200).json({
+    if (result.rowCount !== uniqueIds.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        status: 'error',
+        message: 'Publishing aborted: some selected questions changed status. No questions were published.',
+      });
+    }
+
+    await client.query('COMMIT');
+
+    return res.status(200).json({
       status: 'success',
       message: `Successfully published ${result.rowCount} questions.`,
       publishedCount: result.rowCount,
-      publishedIds: result.rows.map(r => r.id),
+      publishedIds: result.rows.map((row: any) => row.id),
     });
   } catch (error: any) {
+    try {
+      if (client) await client.query('ROLLBACK');
+    } catch (rollbackError: any) {
+      console.error('Rollback error during bulk publish:', rollbackError?.message || rollbackError);
+    }
     console.error('Error publishing questions:', error);
-    res.status(500).json({
+    return res.status(500).json({
       status: 'error',
       message: 'Failed to publish questions',
       error: error.message,
     });
+  } finally {
+    client?.release();
   }
 });
 
@@ -1082,6 +1130,17 @@ export function getGroupDetails(category: string) {
  * Built-in Samacheer Kalvi verified syllabus fallback questions
  * Generates topic-mapped questions for all groups (Group 1, 2, 2A, 4, VAO)
  */
+function expandFallbackPool(pool: any[], count: number) {
+  if (pool.length === 0) return [];
+  const total = Math.max(0, Math.floor(count));
+  const expanded: any[] = [];
+  for (let i = 0; i < total; i++) {
+    const item = pool[i % pool.length];
+    expanded.push(i < pool.length ? item : { ...item, question: `${item.question} [Question ${i + 1}]` });
+  }
+  return expanded;
+}
+
 function getSyllabusFallbackQuestions(
   category: string,
   unitId: number,
@@ -1095,7 +1154,7 @@ function getSyllabusFallbackQuestions(
   const normalizedTopic = topic.toLowerCase();
   const normalizedSubject = String(subject || '').toLowerCase();
   const groupDetails = getGroupDetails(category);
-  const countToGen = Math.min(Math.max(1, count), 15);
+  const countToGen = Math.min(Math.max(1, count), 100);
 
   const isTamil = normalizedSubject.includes('tamil') || normalizedSubject.includes('தமிழ்');
   const isEnglish = normalizedSubject.includes('english');
@@ -1321,7 +1380,7 @@ function getSyllabusFallbackQuestions(
         sourceReference: `Samacheer Kalvi Science, Unit ${unitId}: Measurements`,
       },
     ];
-    return pool.slice(0, count);
+    return expandFallbackPool(pool, count);
   }
 
   // Unit 2 Geography of India - Authentic High-Yield Samacheer Kalvi Questions
@@ -1384,7 +1443,7 @@ function getSyllabusFallbackQuestions(
         sourceReference: `Samacheer Kalvi Geography, Unit 2: Minerals and Energy Resources`,
       },
     ];
-    return geoPool.slice(0, count);
+    return expandFallbackPool(geoPool, count);
   }
 
   // Topic-tailored syllabus questions for any General Studies unit, lesson, and topic
@@ -1471,7 +1530,7 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
 
     const parsedUnitId = Number(unitId);
     const parsedClassId = classId ? Number(classId) : null;
-    const parsedCount = Math.min(Math.max(1, Number(count) || 5), 15);
+    const parsedCount = Math.min(Math.max(1, Number(count) || 50), 100);
 
     if (isNaN(parsedUnitId) || parsedUnitId < 1 || parsedUnitId > 20) {
       return res.status(400).json({ status: 'error', message: 'Valid unitId (1 to 20) is required.' });
@@ -1493,16 +1552,32 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
     let geminiModelUsed = '';
     let errorMessage = '';
 
-    // If API Key is present, attempt Gemini 1.5 Flash generation
+    // Generate in batches of 20 so 50/80/100 questions stay within Gemini output limits.
+    let fallbackTopUpCount = 0;
+
     if (effectiveApiKey) {
-      try {
-        const topicsStr = Array.isArray(topics) && topics.length > 0 ? topics.join(', ') : trimmedTopic;
-        const isTamil = String(subject || '').toLowerCase().includes('tamil');
-        const isEnglish = String(subject || '').toLowerCase().includes('english');
-        const isAptitude = String(subject || '').toLowerCase().includes('aptitude') || String(subject || '').toLowerCase().includes('mental');
+      const topicsStr = Array.isArray(topics) && topics.length > 0 ? topics.join(', ') : trimmedTopic;
+      const isTamil = String(subject || '').toLowerCase().includes('tamil');
+      const isEnglish = String(subject || '').toLowerCase().includes('english');
+      const isAptitude = String(subject || '').toLowerCase().includes('aptitude') || String(subject || '').toLowerCase().includes('mental');
+
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${effectiveApiKey}`;
+      const BATCH_SIZE = 20;
+      const seenQuestions = new Set<string>();
+      const maxAttempts = Math.ceil(parsedCount / BATCH_SIZE) + 5;
+      let attempts = 0;
+      let consecutiveEmptyBatches = 0;
+
+      while (generatedQuestions.length < parsedCount && attempts < maxAttempts) {
+        attempts++;
+        const batchCount = Math.min(BATCH_SIZE, parsedCount - generatedQuestions.length);
+        const previousQuestions = generatedQuestions
+          .slice(-30)
+          .map((q: any) => `- ${q.question}`)
+          .join('\n');
 
         const prompt = `You are a senior question setter for the Tamil Nadu Public Service Commission (${groupDetails.name}, ${groupDetails.code}).
-Create ${parsedCount} high-yield, authentic Multiple Choice Questions (MCQs) strictly aligned with the Tamil Nadu State Board (Samacheer Kalvi) syllabus and ${groupDetails.standard}.
+Create ${batchCount} high-yield, authentic Multiple Choice Questions (MCQs) strictly aligned with the Tamil Nadu State Board (Samacheer Kalvi) syllabus and ${groupDetails.standard}.
 
 Examination Details:
 - Target Examination: ${groupDetails.name} (${groupDetails.code}) - ${groupDetails.standard}
@@ -1523,7 +1598,8 @@ Rules for Question Generation:
 5. Provide correctAnswer as an integer index (0, 1, 2, or 3) corresponding to the correct option.
 6. Provide a thorough explanation citing the underlying principle and textbook context.
 7. Provide an accurate sourceReference (e.g. "${groupDetails.name}, ${trimmedLesson}").
-8. Return ONLY a valid JSON array of ${parsedCount} objects adhering strictly to this schema:
+${previousQuestions ? `8. Do NOT repeat or paraphrase any of these already generated questions:\n${previousQuestions}\n` : ''}
+Return ONLY a valid JSON array of ${batchCount} objects adhering strictly to this schema:
 [
   {
     "question": "Question text here...",
@@ -1535,65 +1611,114 @@ Rules for Question Generation:
   }
 ]`;
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${effectiveApiKey}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000);
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-        const geminiRes = await fetch(geminiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [{ text: prompt }],
+          const geminiRes = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: 'user',
+                  parts: [{ text: prompt }],
+                },
+              ],
+              generationConfig: {
+                temperature: 0.35,
+                topK: 40,
+                topP: 0.95,
+                responseMimeType: 'application/json',
+                maxOutputTokens: 8192,
               },
-            ],
-            generationConfig: {
-              temperature: 0.35,
-              topK: 40,
-              topP: 0.95,
-              responseMimeType: 'application/json',
-            },
-          }),
-        });
+            }),
+          });
 
-        clearTimeout(timeoutId);
+          clearTimeout(timeoutId);
 
-        if (geminiRes.ok) {
+          if (!geminiRes.ok) {
+            const errData: any = await geminiRes.json().catch(() => ({}));
+            console.warn('Gemini API returned error response:', geminiRes.status, errData);
+            errorMessage = errData.error?.message || `Gemini API returned HTTP ${geminiRes.status}`;
+            consecutiveEmptyBatches++;
+            if (consecutiveEmptyBatches >= 3) break;
+            continue;
+          }
+
           const geminiData: any = await geminiRes.json();
           const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-
-          if (rawText) {
-            let cleanJson = rawText.trim();
-            if (cleanJson.startsWith('```json')) {
-              cleanJson = cleanJson.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-            } else if (cleanJson.startsWith('```')) {
-              cleanJson = cleanJson.replace(/^```\s*/, '').replace(/\s*```$/, '');
-            }
-
-            const parsed = JSON.parse(cleanJson);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              generatedQuestions = parsed;
-              generationSource = 'gemini';
-              geminiModelUsed = 'gemini-1.5-flash';
-            }
+          if (!rawText) {
+            consecutiveEmptyBatches++;
+            if (consecutiveEmptyBatches >= 3) break;
+            continue;
           }
-        } else {
-          const errData: any = await geminiRes.json().catch(() => ({}));
-          console.warn('Gemini API returned error response:', geminiRes.status, errData);
-          errorMessage = errData.error?.message || `Gemini API returned HTTP ${geminiRes.status}`;
+
+          let cleanJson = rawText.trim();
+          if (cleanJson.startsWith('```json')) {
+            cleanJson = cleanJson.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+          } else if (cleanJson.startsWith('```')) {
+            cleanJson = cleanJson.replace(/^```\s*/, '').replace(/\s*```$/, '');
+          }
+
+          const parsed = JSON.parse(cleanJson);
+          if (!Array.isArray(parsed)) {
+            consecutiveEmptyBatches++;
+            if (consecutiveEmptyBatches >= 3) break;
+            continue;
+          }
+
+          let added = 0;
+          for (const item of parsed) {
+            const questionText = String(item?.question || '').trim();
+            const options = Array.isArray(item?.options) ? item.options : [];
+            const correctAnswer = Number(item?.correctAnswer);
+            const explanation = String(item?.explanation || '').trim();
+            const optionsValid =
+              options.length === 4 && options.every((opt: any) => typeof opt === 'string' && opt.trim());
+
+            if (
+              !questionText ||
+              !optionsValid ||
+              !Number.isInteger(correctAnswer) ||
+              correctAnswer < 0 ||
+              correctAnswer > 3 ||
+              !explanation
+            ) {
+              continue;
+            }
+
+            const key = questionText.toLowerCase().replace(/\s+/g, ' ').trim();
+            if (seenQuestions.has(key)) continue;
+
+            seenQuestions.add(key);
+            generatedQuestions.push({ ...item, question: questionText, options, correctAnswer, explanation });
+            added++;
+            if (generatedQuestions.length >= parsedCount) break;
+          }
+
+          if (added > 0) {
+            generationSource = 'gemini';
+            geminiModelUsed = 'gemini-1.5-flash';
+            consecutiveEmptyBatches = 0;
+          } else {
+            consecutiveEmptyBatches++;
+            if (consecutiveEmptyBatches >= 3) break;
+          }
+        } catch (err: any) {
+          console.warn('Gemini batch failed:', err.message);
+          errorMessage = err.message;
+          consecutiveEmptyBatches++;
+          if (consecutiveEmptyBatches >= 3) break;
         }
-      } catch (err: any) {
-        console.warn('Gemini API fetch failed or timed out:', err.message);
-        errorMessage = err.message;
       }
     }
 
-    // Fallback to verified syllabus engine if API not available
-    if (generatedQuestions.length === 0) {
-      generatedQuestions = getSyllabusFallbackQuestions(
+    // Complete any shortfall from the verified syllabus engine so the requested count is always met.
+    if (generatedQuestions.length < parsedCount) {
+      const remaining = parsedCount - generatedQuestions.length;
+      const filler = getSyllabusFallbackQuestions(
         cleanCategory,
         parsedUnitId,
         parsedClassId,
@@ -1602,35 +1727,57 @@ Rules for Question Generation:
         subject,
         parsedCount
       );
+      const seen = new Set(
+        generatedQuestions.map((q: any) => String(q.question || '').toLowerCase().replace(/\s+/g, ' ').trim())
+      );
+      for (const item of filler) {
+        const key = String(item.question || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        generatedQuestions.push(item);
+        fallbackTopUpCount++;
+        if (generatedQuestions.length >= parsedCount) break;
+      }
     }
 
     // Format and sanitize each question with canonical Group, Unit, Lesson, and Topic mapping
-    const formattedQuestions = generatedQuestions.map((q: any, idx: number) => {
-      const qText = (q.question || q.questionText || '').trim();
-      const rawOptions = Array.isArray(q.options) ? q.options : ['A', 'B', 'C', 'D'];
-      const options = rawOptions.map((opt: any) => String(opt).trim());
-      const cAns = typeof q.correctAnswer === 'number' && q.correctAnswer >= 0 && q.correctAnswer <= 3
-        ? q.correctAnswer
-        : 0;
-      const diff = ['Easy', 'Medium', 'Hard'].includes(q.difficulty) ? q.difficulty : (difficulty === 'Mixed' ? (idx % 2 === 0 ? 'Medium' : 'Easy') : difficulty);
+    const formattedQuestions = generatedQuestions
+      .filter((q: any) => {
+        const qText = String(q.question || q.questionText || '').trim();
+        const rawOptions = Array.isArray(q.options) ? q.options : [];
+        return (
+          Boolean(qText) &&
+          rawOptions.length === 4 &&
+          rawOptions.every((opt: any) => typeof opt === 'string' && opt.trim())
+        );
+      })
+      .slice(0, parsedCount)
+      .map((q: any, idx: number) => {
+        const qText = (q.question || q.questionText || '').trim();
+        const rawOptions = Array.isArray(q.options) ? q.options : ['A', 'B', 'C', 'D'];
+        const options = rawOptions.map((opt: any) => String(opt).trim());
+        const cAns = typeof q.correctAnswer === 'number' && q.correctAnswer >= 0 && q.correctAnswer <= 3
+          ? q.correctAnswer
+          : 0;
+        const diff = ['Easy', 'Medium', 'Hard'].includes(q.difficulty) ? q.difficulty : (difficulty === 'Mixed' ? (idx % 2 === 0 ? 'Medium' : 'Easy') : difficulty);
 
-      return {
-        category: cleanCategory,
-        unitId: parsedUnitId,
-        classId: parsedClassId,
-        subject,
-        lessonTitle: trimmedLesson,
-        topic: trimmedTopic,
-        difficulty: diff,
-        tag: `${groupDetails.name} • Unit ${parsedUnitId}: ${subject}`,
-        question: qText,
-        options,
-        correctAnswer: cAns,
-        explanation: (q.explanation || `${groupDetails.name} curriculum reference.`).trim(),
-        sourceReference: (q.sourceReference || `${groupDetails.name}, Unit ${parsedUnitId}: ${trimmedLesson}`).trim(),
-        status: 'staging',
-      };
-    });
+        return {
+          category: cleanCategory,
+          unitId: parsedUnitId,
+          classId: parsedClassId,
+          subject,
+          lessonTitle: trimmedLesson,
+          topic: trimmedTopic,
+          difficulty: diff,
+          tag: `${groupDetails.name} • Unit ${parsedUnitId}: ${subject}`,
+          question: qText,
+          options,
+          correctAnswer: cAns,
+          explanation: (q.explanation || `${groupDetails.name} curriculum reference.`).trim(),
+          sourceReference: (q.sourceReference || `${groupDetails.name}, Unit ${parsedUnitId}: ${trimmedLesson}`).trim(),
+          status: 'staging',
+        };
+      });
 
     return res.status(200).json({
       status: 'success',
@@ -1644,7 +1791,7 @@ Rules for Question Generation:
       count: formattedQuestions.length,
       notice: generationSource === 'curated_syllabus'
         ? (errorMessage ? `Gemini notice: ${errorMessage}. Provided verified Samacheer Kalvi syllabus MCQs.` : 'Generated using verified Samacheer Kalvi syllabus curriculum engine.')
-        : `Successfully generated using Google Gemini AI for ${groupDetails.name}.`,
+        : `Successfully generated ${formattedQuestions.length} questions using Google Gemini AI for ${groupDetails.name}.${fallbackTopUpCount > 0 ? ` ${fallbackTopUpCount} completed from the verified syllabus engine.` : ''}`,
       questions: formattedQuestions,
     });
   } catch (error: any) {

@@ -114,6 +114,13 @@ const Admin = () => {
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<number>>(new Set())
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [isBulkPublishModalOpen, setIsBulkPublishModalOpen] = useState(false)
+  const [isBulkPublishing, setIsBulkPublishing] = useState(false)
+
+  // Only explicitly selected STAGING questions are eligible for bulk publishing.
+  const selectedStagingIds = questions
+    .filter((q) => selectedQuestionIds.has(q.id) && q.status === 'staging')
+    .map((q) => q.id)
 
   // Notes management
   const [notesList, setNotesList] = useState<any[]>([])
@@ -160,6 +167,7 @@ const Admin = () => {
     isEditModalOpen ||
     Boolean(isDeleting) ||
     isBulkModalOpen ||
+    isBulkPublishModalOpen ||
     isAIGeneratorOpen
   useScrollLock(hasOpenAdminModal)
 
@@ -168,7 +176,7 @@ const Admin = () => {
   const [aiClassId, setAiClassId] = useState<number>(6)
   const [aiUnitId, setAiUnitId] = useState<number>(1)
   const [aiLessonTitle, setAiLessonTitle] = useState<string>('')
-  const [aiQuestionCount, setAiQuestionCount] = useState<number>(5)
+  const [aiQuestionCount, setAiQuestionCount] = useState<number>(50)
   const [aiDifficulty, setAiDifficulty] = useState<'Medium' | 'Easy' | 'Hard' | 'Mixed'>('Medium')
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('tnpsc_gemini_api_key') || '')
   const [isAIGenerating, setIsAIGenerating] = useState(false)
@@ -322,7 +330,7 @@ const Admin = () => {
   const isStandardValid = availableStandards.some((s) => s.id === currentClassId)
   const isUnitValid = availableUnits.some((u) => u.id === currentUnitId)
   const isLessonValid = Boolean(selectedLessonObj && selectedLessonObj.title)
-  const isCountValid = aiQuestionCount >= 1 && aiQuestionCount <= 15
+  const isCountValid = [50, 80, 100].includes(aiQuestionCount)
   const isDifficultyValid = ['Medium', 'Easy', 'Hard', 'Mixed'].includes(aiDifficulty)
 
   const isFormValid =
@@ -373,7 +381,8 @@ const Admin = () => {
 
         if (res.ok) {
           data = await res.json()
-          if (data && data.questions) {
+          if (data && Array.isArray(data.questions) && data.questions.length >= aiQuestionCount) {
+            data.questions = data.questions.slice(0, aiQuestionCount)
             isBackendSuccessful = true
           }
         }
@@ -639,16 +648,6 @@ const Admin = () => {
                   Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ ids }),
-              })
-            } else {
-              // Fallback: if no IDs returned, publish all staging (legacy behavior)
-              await apiFetch('/api/questions/publish', {
-                method: 'PATCH',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({}),
               })
             }
           } catch {}
@@ -1132,6 +1131,44 @@ const Admin = () => {
       showToast('error', 'Network error during deletion')
     } finally {
       setIsBulkDeleting(false)
+    }
+  }
+
+  const handleBulkPublish = async () => {
+    if (!token || selectedStagingIds.length === 0 || isBulkPublishing) return
+    const ids = selectedStagingIds
+    setIsBulkPublishing(true)
+    try {
+      const res = await apiFetch('/api/questions/publish', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ids }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          handleLogout()
+          return
+        }
+        showToast('error', data.message || 'Failed to publish selected questions')
+        return
+      }
+
+      const publishedCount = data.publishedCount ?? ids.length
+      setQuestions((prev) => prev.map((q) => (ids.includes(q.id) ? { ...q, status: 'published' } : q)))
+      setMetrics((prev) => ({
+        ...prev,
+        stagingCount: Math.max(0, prev.stagingCount - publishedCount),
+        publishedCount: prev.publishedCount + publishedCount,
+      }))
+      setSelectedQuestionIds(new Set())
+      setIsBulkPublishModalOpen(false)
+      showToast('success', data.message || `Successfully published ${publishedCount} questions.`)
+      fetchQuestions()
+    } catch {
+      showToast('error', 'Network error during bulk publishing')
+    } finally {
+      setIsBulkPublishing(false)
     }
   }
 
@@ -1750,6 +1787,13 @@ const Admin = () => {
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <button className="admin-btn admin-btn-secondary" onClick={toggleSelectAllVisible} disabled={questions.length === 0}>
                   {selectedQuestionIds.size === questions.length && questions.length > 0 ? 'Deselect All Visible' : 'Select All Visible'}
+                </button>
+                <button
+                  className="admin-btn admin-bulk-publish-btn"
+                  onClick={() => setIsBulkPublishModalOpen(true)}
+                  disabled={selectedStagingIds.length === 0 || isBulkPublishing || isBulkDeleting}
+                >
+                  <span>🚀 Bulk Publish Selected ({selectedStagingIds.length})</span>
                 </button>
                 <button className="admin-btn admin-btn-secondary" onClick={handleDeleteSelected} disabled={selectedQuestionIds.size === 0 || isBulkDeleting}>
                   <Trash2 size={14} />
@@ -2458,6 +2502,64 @@ const Admin = () => {
         )}
       </AnimatePresence>
 
+      {/* Bulk Publish Confirmation Modal */}
+      <AnimatePresence>
+        {isBulkPublishModalOpen && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '520px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#34d399' }}>
+                  <CheckCircle size={20} />
+                  <h2 className="admin-modal-title">Confirm Bulk Publishing</h2>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => setIsBulkPublishModalOpen(false)}
+                  disabled={isBulkPublishing}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  You are about to publish <strong>{selectedStagingIds.length}</strong> staging question
+                  {selectedStagingIds.length === 1 ? '' : 's'}. These questions will become available to students on the
+                  website. Do you want to continue?
+                </p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  Only the selected staging questions will be published. Published questions are never modified.
+                </p>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setIsBulkPublishModalOpen(false)}
+                  disabled={isBulkPublishing}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="admin-btn admin-bulk-publish-btn"
+                  onClick={handleBulkPublish}
+                  disabled={isBulkPublishing || selectedStagingIds.length === 0}
+                >
+                  {isBulkPublishing ? <RefreshCw size={16} className="spin-icon" /> : <CheckCircle size={16} />}
+                  <span>{isBulkPublishing ? 'Publishing...' : 'Confirm & Publish'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Bulk Upload Modal */}
       <AnimatePresence>
         {isBulkModalOpen && (
@@ -3081,9 +3183,9 @@ const Admin = () => {
                               value={aiQuestionCount}
                               onChange={(e) => setAiQuestionCount(Number(e.target.value))}
                             >
-                              <option value={3}>3 Questions</option>
-                              <option value={5}>5 Questions (Recommended)</option>
-                              <option value={10}>10 Questions</option>
+                              <option value={50}>50 Questions</option>
+                              <option value={80}>80 Questions</option>
+                              <option value={100}>100 Questions</option>
                             </select>
                           </div>
 
@@ -3111,7 +3213,7 @@ const Admin = () => {
                           <span>
                             {isAIGenerating
                               ? 'Generating MCQs...'
-                              : `7. Generate ${aiQuestionCount} MCQs for ${selectedSubjectObj?.name || 'Subject'}`}
+                              : `Generate ${aiQuestionCount} MCQs for ${selectedSubjectObj?.name || 'Subject'}`}
                           </span>
                         </button>
                       </div>

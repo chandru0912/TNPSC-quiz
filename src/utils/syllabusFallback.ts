@@ -19,6 +19,22 @@ export interface GeneratedQuestionItem {
   selected?: boolean;
 }
 
+const GEMINI_BATCH_SIZE = 20;
+
+function normalizeQuestionKey(text: string): string {
+  return String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function isValidGeneratedQuestion(q: any): boolean {
+  if (!q || typeof q.question !== 'string' || !q.question.trim()) return false;
+  if (!Array.isArray(q.options) || q.options.length !== 4) return false;
+  if (q.options.some((opt: any) => typeof opt !== 'string' || !opt.trim())) return false;
+  const answer = Number(q.correctAnswer);
+  if (!Number.isInteger(answer) || answer < 0 || answer > 3) return false;
+  if (typeof q.explanation !== 'string' || !q.explanation.trim()) return false;
+  return true;
+}
+
 export async function generateClientGeminiQuestions(
   apiKey: string,
   params: {
@@ -34,6 +50,7 @@ export async function generateClientGeminiQuestions(
   }
 ): Promise<GeneratedQuestionItem[]> {
   const { category, subject, classId, unitId, unitTitle, lessonTitle, topic, count, difficulty } = params;
+  const requestedCount = Math.max(1, Math.floor(count));
 
   const isTamil = subject.includes('Tamil') || subject.includes('தமிழ்');
   const isEnglish = subject.includes('English');
@@ -48,8 +65,24 @@ export async function generateClientGeminiQuestions(
     subjectDirective = 'Provide authentic mathematical aptitude/reasoning questions with step-by-step numerical explanations.';
   }
 
-  const prompt = `You are a Senior Question Paper Setter for the Tamil Nadu Public Service Commission (TNPSC).
-Generate ${count} high-standard multiple choice questions (MCQs) for:
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const collected: GeneratedQuestionItem[] = [];
+  const seenQuestions = new Set<string>();
+  const maxAttempts = Math.ceil(requestedCount / GEMINI_BATCH_SIZE) + 5;
+  let attempts = 0;
+  let consecutiveEmptyBatches = 0;
+  let lastError: Error | null = null;
+
+  while (collected.length < requestedCount && attempts < maxAttempts) {
+    attempts++;
+    const batchCount = Math.min(GEMINI_BATCH_SIZE, requestedCount - collected.length);
+    const previousQuestions = collected
+      .slice(-30)
+      .map((q) => `- ${q.question}`)
+      .join('\n');
+
+    const prompt = `You are a Senior Question Paper Setter for the Tamil Nadu Public Service Commission (TNPSC).
+Generate ${batchCount} high-standard multiple choice questions (MCQs) for:
 - Examination: ${category.toUpperCase()}
 - Subject: ${subject}
 - Standard / Class: ${classId}th Standard (Samacheer Kalvi)
@@ -60,7 +93,8 @@ Generate ${count} high-standard multiple choice questions (MCQs) for:
 
 ${subjectDirective}
 
-Return strictly a valid JSON array of objects with no markdown code fences:
+${previousQuestions ? `Do NOT repeat or paraphrase any of these already generated questions:\n${previousQuestions}\n` : ''}
+Return strictly a valid JSON array of ${batchCount} objects with no markdown code fences:
 [
   {
     "question": "Question text here",
@@ -70,31 +104,76 @@ Return strictly a valid JSON array of objects with no markdown code fences:
   }
 ]`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.3,
-        responseMimeType: 'application/json',
-      },
-    }),
-  });
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.35,
+            responseMimeType: 'application/json',
+            maxOutputTokens: 8192,
+          },
+        }),
+      });
 
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${errBody}`);
+      if (!response.ok) {
+        const errBody = await response.text();
+        throw new Error(`Gemini API error (${response.status}): ${errBody}`);
+      }
+
+      const data = await response.json();
+      let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error('No content received from Gemini model');
+
+      text = text.trim();
+      if (text.startsWith('```json')) {
+        text = text.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (text.startsWith('```')) {
+        text = text.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) throw new Error('Unexpected format returned from Gemini');
+
+      let added = 0;
+      for (const item of parsed) {
+        if (!isValidGeneratedQuestion(item)) continue;
+        const key = normalizeQuestionKey(item.question);
+        if (!key || seenQuestions.has(key)) continue;
+        seenQuestions.add(key);
+        collected.push({ ...item, correctAnswer: Number(item.correctAnswer) });
+        added++;
+        if (collected.length >= requestedCount) break;
+      }
+
+      if (added === 0) {
+        consecutiveEmptyBatches++;
+        if (consecutiveEmptyBatches >= 3) {
+          throw new Error('Gemini returned no new valid questions after multiple attempts');
+        }
+      } else {
+        consecutiveEmptyBatches = 0;
+      }
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      consecutiveEmptyBatches++;
+      if (consecutiveEmptyBatches >= 3) {
+        throw lastError;
+      }
+    }
   }
 
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('No content received from Gemini model');
+  if (collected.length < requestedCount) {
+    throw new Error(
+      lastError
+        ? `Gemini generation failed after ${attempts} attempt(s): ${lastError.message}`
+        : `Gemini could not generate ${requestedCount} unique questions (received ${collected.length})`
+    );
+  }
 
-  const parsed = JSON.parse(text);
-  if (!Array.isArray(parsed)) throw new Error('Unexpected format returned from Gemini');
-  return parsed;
+  return collected.slice(0, requestedCount);
 }
 
 export function generateClientSyllabusFallback(params: {
