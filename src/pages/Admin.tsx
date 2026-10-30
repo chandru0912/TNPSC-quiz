@@ -732,7 +732,7 @@ const Admin = () => {
     setAiNotice(null)
   }
 
-  // Login handler
+  // Login handler (single POST attempt with distinct error classification)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoginError('')
@@ -750,16 +750,42 @@ const Admin = () => {
     try {
       let res: Response | null = null
       let data: any = {}
+      let rawText = ''
 
       try {
         res = await apiFetch('/api/admin/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: cleanUser, password: cleanPass }),
+          timeoutMs: 15000,
         })
-        data = await res.json().catch(() => ({}))
-      } catch (networkErr) {
-        console.warn('Backend network request failed:', networkErr)
+        rawText = await res.text().catch(() => '')
+        if (rawText) {
+          try {
+            data = JSON.parse(rawText)
+          } catch {
+            data = {}
+          }
+        }
+      } catch (requestErr: any) {
+        console.warn('Admin login request failed:', requestErr)
+
+        if (requestErr?.name === 'TimeoutError' || requestErr?.name === 'AbortError') {
+          setLoginError(
+            'Authentication request timed out. The backend server may be waking up from a cold start—please try again.'
+          )
+          return
+        }
+
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          setLoginError('Network failure: You appear to be offline. Please check your internet connection.')
+          return
+        }
+
+        setLoginError(
+          'Backend server is unreachable or unavailable. Please verify that the backend service is running and accessible.'
+        )
+        return
       }
 
       if (res && res.ok && data.token) {
@@ -776,24 +802,76 @@ const Admin = () => {
       }
 
       if (!res) {
-        setLoginError('Authentication server is unreachable. Please verify network or backend server connection.')
+        setLoginError(
+          'Backend server is unreachable. Please verify network or backend server connection.'
+        )
+        return
+      }
+
+      if (res.status === 400) {
+        setLoginError(data.message || 'Invalid login request: Username and password are required.')
         return
       }
 
       if (res.status === 401) {
-        setLoginError(data.message || 'Invalid admin username or password.')
+        setLoginError(data.message || 'Unauthorized (401): Invalid admin username or password.')
         return
       }
 
-      if (res.status === 503 || res.status === 500) {
-        setLoginError(data.message || 'Database connection error. Please verify the PostgreSQL service health.')
+      if (res.status === 403) {
+        setLoginError(
+          data.message || 'Forbidden (403): You do not have permission to access the Admin Portal.'
+        )
         return
       }
 
-      setLoginError(data.message || `Login failed (Status ${res.status}). Please try again.`)
-    } catch (err) {
+      if (res.status === 404) {
+        setLoginError(
+          data.message ||
+            'Authentication endpoint not found (404): Verify the backend API URL and /api/admin/login route.'
+        )
+        return
+      }
+
+      if (res.status === 408 || res.status === 504) {
+        setLoginError(
+          data.message || 'Request timeout (504): The authentication server took too long to respond.'
+        )
+        return
+      }
+
+      // Distinguish database connection failure from general 500/502/503 errors
+      if (
+        data.dbStatus === 'disconnected' ||
+        (typeof data.message === 'string' && /database|postgres/i.test(data.message))
+      ) {
+        setLoginError(
+          data.message ||
+            'Database connection failure: Unable to reach PostgreSQL. Please verify database configuration and health.'
+        )
+        return
+      }
+
+      if (res.status === 502 || res.status === 503) {
+        setLoginError(
+          data.message ||
+            `Service unavailable (${res.status}): The backend authentication service is temporarily unavailable.`
+        )
+        return
+      }
+
+      if (res.status === 500) {
+        const vercelCrash = rawText.includes('FUNCTION_INVOCATION_FAILED')
+          ? 'Backend serverless function failed during invocation (500).'
+          : 'Internal server error (500) occurred on the backend authentication service.'
+        setLoginError(data.message || vercelCrash)
+        return
+      }
+
+      setLoginError(data.message || `Login failed (HTTP ${res.status}). Please try again.`)
+    } catch (err: any) {
       console.error('Admin login error:', err)
-      setLoginError('Failed to connect to authentication server. Please check your network.')
+      setLoginError('Unexpected error during authentication. Please try again.')
     } finally {
       setIsLoggingIn(false)
     }
@@ -942,15 +1020,23 @@ const Admin = () => {
     }
   }
 
-  // Auto-sync session user profile
+  // Auto-sync session user profile and handle expired/invalid tokens cleanly
   useEffect(() => {
     if (token) {
       apiFetch('/api/admin/verify', {
         headers: { Authorization: `Bearer ${token}` },
+        timeoutMs: 10000,
       })
-        .then((res) => res.json())
+        .then(async (res) => {
+          if (res.status === 401 || res.status === 403) {
+            handleLogout()
+            setLoginError('Your admin session has expired. Please sign in again.')
+            return null
+          }
+          return res.json().catch(() => null)
+        })
         .then((data) => {
-          if (data.status === 'success' && data.user) {
+          if (data && data.status === 'success' && data.user) {
             setAdminUser(data.user)
             localStorage.setItem('tnpsc_admin_user', JSON.stringify(data.user))
           }

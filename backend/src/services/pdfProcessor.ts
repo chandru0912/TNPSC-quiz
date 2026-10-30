@@ -1,7 +1,66 @@
 import fs from 'fs';
 import path from 'path';
-import { PDFParse } from 'pdf-parse';
 import pool from '../db';
+
+function ensureServerlessPdfGlobals(): void {
+  const g = globalThis as any;
+  if (typeof g.DOMMatrix === 'undefined') {
+    g.DOMMatrix = class DOMMatrix {
+      a = 1;
+      b = 0;
+      c = 0;
+      d = 1;
+      e = 0;
+      f = 0;
+      constructor(init?: number[]) {
+        if (Array.isArray(init) && init.length >= 6) {
+          [this.a, this.b, this.c, this.d, this.e, this.f] = init;
+        }
+      }
+      translate() {
+        return this;
+      }
+      scale() {
+        return this;
+      }
+      multiplySelf() {
+        return this;
+      }
+      preMultiplySelf() {
+        return this;
+      }
+      invertSelf() {
+        return this;
+      }
+    };
+  }
+  if (typeof g.ImageData === 'undefined') {
+    g.ImageData = class ImageData {
+      width: number;
+      height: number;
+      data: Uint8ClampedArray;
+      constructor(width: number, height: number) {
+        this.width = width;
+        this.height = height;
+        this.data = new Uint8ClampedArray(width * height * 4);
+      }
+    };
+  }
+  if (typeof g.Path2D === 'undefined') {
+    g.Path2D = class Path2D {
+      addPath() {}
+      rect() {}
+    };
+  }
+}
+
+function getPdfParseClass(): any {
+  ensureServerlessPdfGlobals();
+  // Lazy-load pdf-parse only when processing a PDF so server startup and auth routes never load canvas/pdfjs
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mod = require('pdf-parse');
+  return mod.PDFParse || mod.default || mod;
+}
 
 export interface ProcessPdfOptions {
   textbookId: number;
@@ -268,8 +327,9 @@ export async function processTextbookPdf(options: ProcessPdfOptions): Promise<vo
       throw new Error('Uploaded PDF file is empty (0 bytes).');
     }
 
-    // Initialize PDF parser
-    parser = new PDFParse({ data: fileBuffer });
+    // Initialize PDF parser lazily
+    const PDFParseClass = getPdfParseClass();
+    parser = new PDFParseClass({ data: fileBuffer });
     const textResult = await parser.getText();
 
     const totalPages = textResult?.total || textResult?.pages?.length || 0;

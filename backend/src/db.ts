@@ -15,6 +15,8 @@ const config: PoolConfig = connectionString
   ? {
       connectionString,
       ssl: isProductionOrCloud ? { rejectUnauthorized: false } : undefined,
+      connectionTimeoutMillis: 8000,
+      idleTimeoutMillis: 30000,
     }
   : {
       host: process.env.PGHOST || 'localhost',
@@ -23,8 +25,15 @@ const config: PoolConfig = connectionString
       user: process.env.PGUSER || 'postgres',
       password: process.env.PGPASSWORD || '',
       ssl: isProductionOrCloud ? { rejectUnauthorized: false } : undefined,
+      connectionTimeoutMillis: 8000,
+      idleTimeoutMillis: 30000,
     };
 
 export const pool = new Pool(config);
+
+// Prevent unhandled idle client errors from crashing the Node/Express process
+pool.on('error', (err) => {
+  console.error('Unexpected PostgreSQL pool idle client error:', err.message);
+});
 
 export default pool;

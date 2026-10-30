@@ -59,16 +59,22 @@ export async function ensureAdminUsersTable() {
   }
 }
 
-// Auto-initialize on module load
-ensureAdminUsersTable().catch((err) => {
-  console.error('Admin table initialization failed on startup:', err.message);
-});
+// Auto-initialize on module load in non-serverless environments
+if (!process.env.VERCEL) {
+  ensureAdminUsersTable().catch((err) => {
+    console.error('Admin table initialization failed on startup:', err.message);
+  });
+}
 
 interface EnvAdmin {
   username: string;
   password: string;
   name: string;
   role: string;
+}
+
+export function getConfiguredAdminCount(): number {
+  return getEnvAdmins().length;
 }
 
 function getEnvAdmins(): EnvAdmin[] {
@@ -121,19 +127,18 @@ router.post('/login', async (req: Request, res: Response) => {
   const cleanUser = String(username).trim();
   const cleanPass = String(password).trim();
 
-  try {
-    await ensureAdminUsersTable();
-  } catch (err: any) {
-    console.error('Admin table initialization error:', err.message);
-  }
-
-  // 1. Check in Environment variables (.env) first for production reliability
+  // 1. Check in Environment variables (.env) first for immediate production reliability
   const envAdmins = getEnvAdmins();
   const envMatch = envAdmins.find(
     (a) => a.username.toLowerCase() === cleanUser.toLowerCase() && a.password === cleanPass
   );
 
   if (envMatch) {
+    // Non-blocking background table initialization
+    ensureAdminUsersTable().catch((err) => {
+      console.error('Background admin table initialization notice:', err.message);
+    });
+
     const token = generateAdminToken(envMatch.username, envMatch.name, envMatch.role);
     return res.status(200).json({
       status: 'success',
@@ -145,6 +150,18 @@ router.post('/login', async (req: Request, res: Response) => {
         role: envMatch.role,
       },
     });
+  }
+
+  // If the username matches an environment admin account but the password did not match,
+  // check if it was overridden in DB; if DB is unreachable, return 401 Invalid credentials immediately.
+  const isKnownEnvUsername = envAdmins.some(
+    (a) => a.username.toLowerCase() === cleanUser.toLowerCase()
+  );
+
+  try {
+    await ensureAdminUsersTable();
+  } catch (err: any) {
+    console.error('Admin table initialization error:', err.message);
   }
 
   // 2. Check in Database admin_users table
@@ -172,6 +189,10 @@ router.post('/login', async (req: Request, res: Response) => {
         });
       } else {
         console.warn('Admin login failed: password mismatch for existing DB user');
+        return res.status(401).json({
+          status: 'error',
+          message: 'Invalid admin username or password',
+        });
       }
     } else {
       console.warn('Admin login failed: user not found in DB and not in env');
@@ -181,7 +202,7 @@ router.post('/login', async (req: Request, res: Response) => {
     console.error('Error querying admin_users table during login:', err.message);
   }
 
-  if (dbError) {
+  if (dbError && !isKnownEnvUsername) {
     return res.status(503).json({
       status: 'error',
       message: 'Database service is currently unavailable. Please verify the database connection configuration.',

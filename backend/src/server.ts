@@ -1,13 +1,14 @@
-import express from 'express';
-import cors, { CorsOptions } from 'cors';
 import dotenv from 'dotenv';
+dotenv.config();
+
+import express, { Request, Response, NextFunction } from 'express';
+import cors, { CorsOptions } from 'cors';
 import pool from './db';
 import questionsRouter from './routes/questions';
-import authRouter from './routes/auth';
+import authRouter, { getConfiguredAdminCount } from './routes/auth';
+import { generateAdminToken, verifyAdminToken } from './middleware/auth';
 import notesRouter from './routes/notes';
 import textbooksRouter from './routes/textbooks';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -118,17 +119,59 @@ app.use('/api/questions', questionsRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/textbooks', textbooksRouter);
 
-// Preserved existing health check endpoint
-app.get('/api/health', (_req, res) => {
+// Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
+app.get('/api/health', async (_req: Request, res: Response) => {
+  const startDb = Date.now();
+  let dbStatus: 'connected' | 'disconnected' = 'disconnected';
+  let dbLatencyMs: number | null = null;
+
+  try {
+    await Promise.race([
+      pool.query('SELECT 1 AS result'),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Database health check timeout')), 3000)),
+    ]);
+    dbStatus = 'connected';
+    dbLatencyMs = Date.now() - startDb;
+  } catch {
+    dbStatus = 'disconnected';
+  }
+
+  let jwtOk = false;
+  try {
+    const probeToken = generateAdminToken('__health_probe__', 'Health Probe', 'admin');
+    const verified = verifyAdminToken(probeToken);
+    jwtOk = Boolean(verified && verified.username === '__health_probe__');
+  } catch {
+    jwtOk = false;
+  }
+
+  const configuredAdmins = getConfiguredAdminCount();
+  const authReady = jwtOk && configuredAdmins > 0;
+
   res.status(200).json({
     status: 'ok',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
+    services: {
+      backendServer: {
+        status: 'ok',
+        uptime: process.uptime(),
+      },
+      database: {
+        status: dbStatus,
+        latencyMs: dbLatencyMs,
+      },
+      authentication: {
+        status: authReady ? 'ready' : 'degraded',
+        jwtVerification: jwtOk ? 'ok' : 'error',
+        configuredAdminAccounts: configuredAdmins,
+      },
+    },
   });
 });
 
 // Database health check endpoint running SELECT 1
-app.get('/api/db-health', async (_req, res) => {
+app.get('/api/db-health', async (_req: Request, res: Response) => {
   try {
     const result = await pool.query('SELECT 1 AS result');
     res.status(200).json({
@@ -139,8 +182,9 @@ app.get('/api/db-health', async (_req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    res.status(500).json({
+    res.status(503).json({
       status: 'error',
+      dbStatus: 'disconnected',
       message: 'Failed to connect to PostgreSQL database',
       error: error.message || 'Database connection error',
       timestamp: new Date().toISOString(),
@@ -148,8 +192,20 @@ app.get('/api/db-health', async (_req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Global JSON error handler to ensure runtime or middleware errors never drop CORS headers or return raw HTML
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[Server Error]:', err?.message || err);
+  const statusCode = typeof err?.status === 'number' ? err.status : typeof err?.statusCode === 'number' ? err.statusCode : 500;
+  res.status(statusCode).json({
+    status: 'error',
+    message: err?.message || 'Internal server error',
+  });
 });
+
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
 
 export default app;

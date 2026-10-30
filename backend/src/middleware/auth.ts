@@ -1,7 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
-const SECRET = process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_2026';
+function getJwtSecret(): string {
+  return process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_2026';
+}
 
 export interface AdminPayload {
   username: string;
@@ -11,6 +13,7 @@ export interface AdminPayload {
 }
 
 export function generateAdminToken(username: string, name?: string, role: string = 'admin'): string {
+  const secret = getJwtSecret();
   const payload: AdminPayload = {
     username,
     name: name || username,
@@ -18,18 +21,21 @@ export function generateAdminToken(username: string, name?: string, role: string
     exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
   };
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.createHmac('sha256', SECRET).update(payloadB64).digest('hex');
+  const signature = crypto.createHmac('sha256', secret).update(payloadB64).digest('hex');
   return `${payloadB64}.${signature}`;
 }
 
 export function verifyAdminToken(token: string): AdminPayload | null {
   try {
+    const secret = getJwtSecret();
     const parts = token.split('.');
     if (parts.length !== 2) return null;
     const [payloadB64, signature] = parts;
-    const expectedSig = crypto.createHmac('sha256', SECRET).update(payloadB64).digest('hex');
+    const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('hex');
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
+    const sigBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSig);
+    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
       return null;
     }
 

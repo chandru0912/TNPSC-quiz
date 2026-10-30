@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import pool from '../db';
 import { requireAdminAuth } from '../middleware/auth';
 import { processTextbookPdf } from '../services/pdfProcessor';
@@ -9,11 +10,31 @@ import { retrieveRelevantTextbookContent } from '../services/textbookRag';
 
 const router = Router();
 
-// Configure upload storage directory
-const UPLOADS_DIR = path.resolve(__dirname, '../../uploads/textbooks');
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+// Configure upload storage directory safely (supports read-only serverless filesystems like Vercel)
+function resolveUploadsDir(): string {
+  const preferredDir = process.env.VERCEL
+    ? path.join(os.tmpdir(), 'tnpsc-uploads', 'textbooks')
+    : path.resolve(__dirname, '../../uploads/textbooks');
+
+  try {
+    if (!fs.existsSync(preferredDir)) {
+      fs.mkdirSync(preferredDir, { recursive: true });
+    }
+    return preferredDir;
+  } catch {
+    const fallbackDir = path.join(os.tmpdir(), 'tnpsc-uploads', 'textbooks');
+    try {
+      if (!fs.existsSync(fallbackDir)) {
+        fs.mkdirSync(fallbackDir, { recursive: true });
+      }
+    } catch {
+      // Ignore directory creation errors at startup; handled on upload
+    }
+    return fallbackDir;
+  }
 }
+
+const UPLOADS_DIR = resolveUploadsDir();
 
 // Multer disk storage configuration
 const storage = multer.diskStorage({
