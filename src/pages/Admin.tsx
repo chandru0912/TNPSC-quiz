@@ -278,6 +278,19 @@ const Admin = () => {
     initialClassId: 6,
     initialUnitId: 1,
   })
+
+  // Handle ESC key to dismiss Gemini AI Generator
+  useEffect(() => {
+    if (!isAIGeneratorOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAIGeneratorOpen(false)
+        setAiUploadSuccess(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isAIGeneratorOpen])
   const {
     effectiveGroupId: aiGroupId,
     unitId: rawAiUnitId,
@@ -4218,7 +4231,15 @@ const Admin = () => {
       {/* Gemini AI Question Generator Modal */}
       <AnimatePresence>
         {isAIGeneratorOpen && (
-          <div className="admin-modal-backdrop ai-modal-backdrop">
+          <div
+            className="admin-modal-backdrop ai-modal-backdrop"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setIsAIGeneratorOpen(false)
+                setAiUploadSuccess(null)
+              }
+            }}
+          >
             <motion.div
               className="admin-modal ai-modal-container"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -4246,9 +4267,9 @@ const Admin = () => {
                       setAiUploadSuccess(null)
                     }}
                     aria-label="Close generator modal"
-                    title="Close Generator"
+                    title="Close Generator (Esc)"
                   >
-                    <X size={18} />
+                    <X size={20} strokeWidth={2.5} />
                   </button>
                 </div>
 
