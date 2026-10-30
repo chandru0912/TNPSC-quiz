@@ -4227,7 +4227,8 @@ const Admin = () => {
             >
               {/* Header */}
               <div className="ai-modal-header">
-                <div className="ai-modal-header-info">
+                {/* Top Bar: Brand Badges & Close Button */}
+                <div className="ai-modal-top-bar">
                   <div className="ai-badge-row">
                     <span className="ai-header-badge">
                       <Sparkles size={13} />
@@ -4237,59 +4238,62 @@ const Admin = () => {
                       {TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name} • {selectedSubjectObj?.name} • {selectedStandardObj?.label}
                     </span>
                   </div>
-                  <h2 className="ai-modal-title">{aiMode === 'mcq' ? 'Syllabus-Wise MCQ Generator' : 'Study Notes Generator'}</h2>
-                  <p className="ai-modal-subtitle">
-                    {aiMode === 'mcq'
-                      ? 'Select Group, Subject, Standard, Unit, and Lesson to generate authentic syllabus MCQs with Google Gemini.'
-                      : 'Select Group, Class/Standard, Subject, Unit, and Lesson to generate study notes in Tamil or English for student Study Materials.'}
-                  </p>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-                    <button
-                      type="button"
-                      className={`admin-btn ${aiMode === 'mcq' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}
-                      style={{ padding: '0.4rem 0.9rem' }}
-                      onClick={() => setAiMode('mcq')}
-                    >
-                      MCQ Questions
-                    </button>
-                    <button
-                      type="button"
-                      className={`admin-btn ${aiMode === 'notes' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}
-                      style={{ padding: '0.4rem 0.9rem' }}
-                      onClick={() => setAiMode('notes')}
-                    >
-                      Study Notes
-                    </button>
+                  <button
+                    type="button"
+                    className="ai-modal-close-btn"
+                    onClick={() => {
+                      setIsAIGeneratorOpen(false)
+                      setAiUploadSuccess(null)
+                    }}
+                    aria-label="Close generator modal"
+                    title="Close Generator"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Title & Description Section */}
+                <div className="ai-modal-title-section">
+                  <div className="ai-title-icon-box">
+                    {aiMode === 'mcq' ? <Sparkles size={22} /> : <BookOpen size={22} />}
+                  </div>
+                  <div className="ai-title-text-group">
+                    <h2 className="ai-modal-title">
+                      {aiMode === 'mcq' ? 'Syllabus-Wise MCQ Generator' : 'Study Notes Generator'}
+                    </h2>
+                    <p className="ai-modal-subtitle">
+                      {aiMode === 'mcq'
+                        ? 'Select Group, Subject, Standard, Unit, and Lesson to generate authentic syllabus MCQs with Google Gemini.'
+                        : 'Select Group, Class/Standard, Subject, Unit, and Lesson to generate study notes in Tamil or English for student Study Materials.'}
+                    </p>
                   </div>
                 </div>
-                <button
-                  className="admin-modal-close"
-                  onClick={() => {
-                    setIsAIGeneratorOpen(false)
-                    setAiUploadSuccess(null)
-                  }}
-                  aria-label="Close generator modal"
-                >
-                  <X size={20} />
-                </button>
+
+                {/* Top Navigation Tabs (Segmented Switcher) */}
+                <div className="ai-modal-nav-tabs">
+                  <button
+                    type="button"
+                    className={`ai-nav-tab ${aiMode === 'mcq' ? 'active' : ''}`}
+                    onClick={() => setAiMode('mcq')}
+                  >
+                    <Sparkles size={15} />
+                    <span>MCQ Questions Generator</span>
+                    <span className="ai-nav-tab-pill">Classes 6–12</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`ai-nav-tab ${aiMode === 'notes' ? 'active' : ''}`}
+                    onClick={() => setAiMode('notes')}
+                  >
+                    <BookOpen size={15} />
+                    <span>Study Notes Generator</span>
+                    <span className="ai-nav-tab-pill">Tamil & English</span>
+                  </button>
+                </div>
               </div>
 
               {/* Body */}
-              <div
-                className="ai-modal-body"
-                style={{
-                  overflowY: 'scroll',
-                  overflowX: 'hidden',
-                  WebkitOverflowScrolling: 'touch',
-                  flex: '1 1 0%',
-                  minHeight: 0,
-                  overscrollBehavior: 'contain',
-                  touchAction: 'pan-y',
-                  scrollbarWidth: 'thin',
-                  scrollbarColor: '#c084fc rgba(15, 23, 42, 0.85)',
-                  scrollbarGutter: 'stable',
-                }}
-              >
+              <div className="ai-modal-body">
 
                 {/* 1. API Key Config Card */}
                 <div className="ai-api-card">
