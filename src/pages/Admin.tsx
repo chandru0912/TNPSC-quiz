@@ -62,6 +62,7 @@ interface QuestionItem {
   classId: number | null
   subject: string
   lessonTitle: string
+  lessonId?: string | null
   topic: string | null
   difficulty: 'Easy' | 'Medium' | 'Hard'
   tag: string
@@ -231,6 +232,7 @@ const Admin = () => {
     unitId: unitFilter,
     lessonTitle: lessonFilter,
     selectedSubjectObj: qbSelectedSubjectObj,
+    selectedLessonObj: qbSelectedLessonObj,
   } = qbSyllabusCascade
 
   // Modals state
@@ -367,6 +369,7 @@ const Admin = () => {
           unitId: currentUnitId,
           unitTitle: currentUnit?.title,
           lessonTitle: currentLessonTitle,
+          lessonId: selectedLessonObj?.id,
           topic: activeTopic,
           topics: [],
           description: selectedLessonObj?.description || '',
@@ -404,6 +407,7 @@ const Admin = () => {
           standard: currentClassId,
           unitId: currentUnitId,
           lessonTitle: currentLessonTitle,
+          lessonId: selectedLessonObj?.id || q.lessonId,
           topic: activeTopic,
           selected: true,
         }))
@@ -978,6 +982,9 @@ const Admin = () => {
       if (unitFilter !== 'all') params.set('unitId', String(unitFilter))
       if (lessonFilter !== 'all' && lessonFilter.trim()) {
         params.set('lessonTitle', lessonFilter.trim())
+        if (qbSelectedLessonObj?.id) {
+          params.set('lessonId', qbSelectedLessonObj.id)
+        }
       }
       if (statusFilter !== 'all') params.set('status', statusFilter)
       if (difficultyFilter !== 'all') params.set('difficulty', difficultyFilter)
@@ -1079,6 +1086,7 @@ const Admin = () => {
     standardFilter,
     unitFilter,
     lessonFilter,
+    qbSelectedLessonObj,
     statusFilter,
     difficultyFilter,
     page,
@@ -1478,6 +1486,7 @@ const Admin = () => {
     standardFilter,
     unitFilter,
     lessonFilter,
+    qbSelectedLessonObj,
     statusFilter,
     difficultyFilter,
     page,
@@ -1713,6 +1722,7 @@ const Admin = () => {
       unitId: defaultUnitId,
       subject: subjects[0]?.name || units[0]?.subjectName || 'General Science',
       lessonTitle: lessons[0]?.title || '',
+      lessonId: lessons[0]?.id || null,
       topic: topics[0]?.name || '',
       difficulty: 'Medium',
       question: '',
@@ -1909,6 +1919,7 @@ const Admin = () => {
     const mappedQuestions = parsed.map((item: any) => ({
       ...item,
       category: bulkGroupId,
+      lessonId: item.lessonId || (selectedLessonObj && selectedLessonObj.title === item.lessonTitle ? selectedLessonObj.id : null),
       topic: item.topic || (item.lessonTitle ? `${item.lessonTitle}: General Practice` : 'General Practice'),
       status: 'staging',
     }))
@@ -2877,6 +2888,7 @@ const Admin = () => {
                             unitId: defaultUnitId,
                             subject: subjects[0]?.name || units[0]?.subjectName || 'General Studies',
                             lessonTitle: lessons[0]?.title || '',
+                            lessonId: lessons[0]?.id || null,
                             topic: topics[0]?.name || '',
                           })
                         }}
@@ -2918,6 +2930,7 @@ const Admin = () => {
                             subject: selectedSubjectName,
                             unitId: defaultUnitId,
                             lessonTitle: lessons[0]?.title || '',
+                            lessonId: lessons[0]?.id || null,
                             topic: topics[0]?.name || '',
                           })
                         }}
@@ -2958,6 +2971,7 @@ const Admin = () => {
                             ...editingQuestion,
                             classId: newClassId,
                             lessonTitle: lessons[0]?.title || '',
+                            lessonId: lessons[0]?.id || null,
                             topic: topics[0]?.name || '',
                             sourceReference: `Samacheer Kalvi Class ${newClassId}`,
                           })
@@ -2998,6 +3012,7 @@ const Admin = () => {
                             unitId: newUnitId,
                             subject: unitObj?.subjectName || subj?.name || editingQuestion.subject || 'General Studies',
                             lessonTitle: lessons[0]?.title || '',
+                            lessonId: lessons[0]?.id || null,
                             topic: topics[0]?.name || '',
                           })
                         }}
@@ -3038,10 +3053,12 @@ const Admin = () => {
                             value={editingQuestion.lessonTitle || ''}
                             onChange={(e) => {
                               const val = e.target.value
+                              const matchedLesson = availableEditLessons.find((l: any) => l.title === val)
                               const topics = getTopicsForSelection(currentCat, subjId, currentClassId, currentUnitId, val)
                               setEditingQuestion({
                                 ...editingQuestion,
                                 lessonTitle: val,
+                                lessonId: matchedLesson?.id || null,
                                 topic: topics[0]?.name || '',
                               })
                             }}

@@ -32,6 +32,7 @@ interface QuestionItem {
   classId?: number
   subject?: string
   lessonTitle?: string
+  lessonId?: string
   topic?: string
   difficulty?: 'Easy' | 'Medium' | 'Hard'
   tag: string
@@ -52,6 +53,7 @@ const MCQPractice = () => {
   const urlUnitId = searchParams.get('unitId') ? parseInt(searchParams.get('unitId')!, 10) : null
   const urlUnitTitle = searchParams.get('unitTitle')
   const urlLesson = searchParams.get('lesson')
+  const urlLessonId = searchParams.get('lessonId')
   const urlTopic = searchParams.get('topic')
   const urlClassId = searchParams.get('classId') ? parseInt(searchParams.get('classId')!, 10) : null
 
@@ -122,7 +124,7 @@ const MCQPractice = () => {
     setIsQuizCompleted(false)
     setIsReviewMode(false)
     setUserAnswers({})
-  }, [urlGroup, urlUnitId, urlClassId, urlLesson, urlTopic])
+  }, [urlGroup, urlUnitId, urlClassId, urlLesson, urlLessonId, urlTopic])
 
   // Fetch directly from PostgreSQL Questions API with multi-tier progressive matching
   useEffect(() => {
@@ -133,6 +135,7 @@ const MCQPractice = () => {
         if (selectedGroup) queryParams.set('category', selectedGroup)
         if (activeUnitFilter) queryParams.set('unitId', activeUnitFilter.toString())
         if (urlClassId) queryParams.set('classId', urlClassId.toString())
+        if (urlLessonId) queryParams.set('lessonId', urlLessonId)
         if (urlLesson) queryParams.set('lesson', urlLesson)
         if (urlTopic) queryParams.set('topic', urlTopic)
         if (urlSubjectId && urlSubjectId !== 'general-studies' && urlSubjectId !== 'all') {
@@ -146,9 +149,9 @@ const MCQPractice = () => {
         let questions: QuestionItem[] = (data?.status === 'success' && Array.isArray(data?.data)) ? data.data : []
         let notice: string | null = null
 
-        // 2. Secondary Relaxation: If 0 questions found with both classId and lesson,
-        // retry matching the lesson across standards within the unit (accommodating flexible syllabus assignments)
-        if (questions.length === 0 && urlClassId && urlLesson) {
+        // 2. Secondary Relaxation: If 0 questions found with classId and lesson,
+        // retry matching the exact lesson across standards (in case question was tagged without classId)
+        if (questions.length === 0 && urlClassId && (urlLesson || urlLessonId)) {
           const relaxClassParams = new URLSearchParams(queryParams)
           relaxClassParams.delete('classId')
           const relaxRes = await apiFetch(`/api/questions?${relaxClassParams.toString()}`)
@@ -156,14 +159,15 @@ const MCQPractice = () => {
             const relaxData = await relaxRes.json()
             if (relaxData.status === 'success' && Array.isArray(relaxData.data) && relaxData.data.length > 0) {
               questions = relaxData.data
-              notice = `Found ${questions.length} questions for "${urlLesson}" across standards`
+              notice = `Found ${questions.length} questions for "${urlLesson || 'this lesson'}" across standards`
             }
           }
         }
 
-        // 3. Tertiary Relaxation: If this exact lesson has no dedicated questions in DB yet,
-        // but an active unit is selected, pull available questions for the Unit so students can practice!
-        if (questions.length === 0 && activeUnitFilter) {
+        // 3. Unit-level fallback ONLY if the student clicked on the Unit as a whole without selecting any lesson.
+        // If a specific lesson was requested, STRICT lesson-wise mapping applies (never leak unit questions into an empty lesson)!
+        const isLessonSpecific = Boolean(urlLesson || urlLessonId)
+        if (!isLessonSpecific && questions.length === 0 && activeUnitFilter) {
           const fallbackParams = new URLSearchParams()
           if (selectedGroup) fallbackParams.set('category', selectedGroup)
           fallbackParams.set('unitId', activeUnitFilter.toString())
@@ -175,7 +179,7 @@ const MCQPractice = () => {
             const fallbackData = await fallbackRes.json()
             if (fallbackData.status === 'success' && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
               questions = fallbackData.data
-              notice = `Specific questions for "${urlLesson || 'this lesson'}" coming soon. Displaying ${questions.length} questions for Unit ${activeUnitFilter}.`
+              notice = `Displaying ${questions.length} questions for Unit ${activeUnitFilter}.`
             }
           }
         }
@@ -213,7 +217,7 @@ const MCQPractice = () => {
     return () => {
       isMounted = false
     }
-  }, [selectedGroup, activeUnitFilter, urlClassId, urlLesson, urlTopic, urlSubjectId])
+  }, [selectedGroup, activeUnitFilter, urlClassId, urlLesson, urlLessonId, urlTopic, urlSubjectId])
 
   const groups = [
     { id: 'group1', name: 'TNPSC Group 1' },

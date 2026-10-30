@@ -20,6 +20,7 @@ export interface QuestionDTO {
   classId: number | null;
   subject: string;
   lessonTitle: string;
+  lessonId?: string | null;
   topic: string | null;
   difficulty: 'Easy' | 'Medium' | 'Hard';
   tag: string;
@@ -45,6 +46,7 @@ export function mapRowToQuestion(row: any): QuestionDTO {
     classId: row.class_id,
     subject: row.subject,
     lessonTitle: row.lesson_title,
+    lessonId: row.lesson_id || null,
     topic: row.topic,
     difficulty: row.difficulty,
     tag: row.tag || `Group 1 • Unit ${row.unit_id}: ${row.subject}`,
@@ -69,7 +71,7 @@ export function mapRowToQuestion(row: any): QuestionDTO {
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, unitId, classId, lesson, topic, subject, status, limit = '200', offset = '0' } = req.query;
+    const { category, unitId, classId, lesson, lessonId, topic, subject, status, limit = '200', offset = '0' } = req.query;
 
     const queryConditions: string[] = [];
     const values: any[] = [];
@@ -96,7 +98,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (classId && !isNaN(Number(classId))) {
       // If a specific lesson search is also provided, allow matching questions mapped to this class OR without explicit classId
-      if (lesson && typeof lesson === 'string' && lesson.trim().length > 0) {
+      if ((lesson && typeof lesson === 'string' && lesson.trim().length > 0) || (lessonId && typeof lessonId === 'string' && lessonId.trim().length > 0)) {
         queryConditions.push(`(class_id = $${paramIndex} OR class_id IS NULL)`);
         values.push(Number(classId));
         paramIndex++;
@@ -111,50 +113,24 @@ router.get('/', async (req: Request, res: Response) => {
       values.push(subject.trim().toLowerCase());
     }
 
-    if (lesson && typeof lesson === 'string' && lesson.trim().length > 0) {
-      const rawLesson = lesson.trim();
-      const normLesson = rawLesson.toLowerCase().replace(/&/g, 'and');
-      
-      // Clean prefix before colon, em-dash, en-dash, or hyphen
-      const prefix = normLesson.split(/[:–\-]/)[0].trim();
-      // Main clause before " and "
-      const mainFirstPart = prefix.includes(' and ') ? prefix.split(' and ')[0].trim() : prefix;
-      
-      // Extract significant keywords (length >= 3, excluding stopwords)
-      const stopWords = new Set(['and', 'the', 'for', 'with', 'from', 'into', 'under', 'that', 'this', 'lesson', 'unit', 'chapter']);
-      const keywords = normLesson
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length >= 3 && !stopWords.has(w));
+    // Strict Lesson Mapping:
+    // If lessonId is provided, query strictly by lesson_id (or exact lesson_title if legacy row)
+    // If only lesson (title) is provided, match by exact lesson_title (case-insensitive, trimmed)
+    // NEVER use loose keyword/substring matching which causes questions from one lesson to leak into others!
+    const cleanLessonId = lessonId && typeof lessonId === 'string' && lessonId.trim() !== 'all' ? lessonId.trim() : null;
+    const cleanLesson = lesson && typeof lesson === 'string' && lesson.trim() !== 'all' ? lesson.trim() : null;
 
-      const lessonClauses: string[] = [
-        `LOWER(lesson_title) LIKE $${paramIndex++}`,
-        `LOWER($${paramIndex++}) LIKE '%' || LOWER(lesson_title) || '%'`,
-      ];
-      values.push(`%${normLesson}%`);
-      values.push(normLesson);
-
-      if (prefix && prefix !== normLesson) {
-        lessonClauses.push(`LOWER(lesson_title) LIKE $${paramIndex++}`);
-        values.push(`%${prefix}%`);
-        lessonClauses.push(`LOWER($${paramIndex++}) LIKE '%' || LOWER(lesson_title) || '%'`);
-        values.push(prefix);
-      }
-
-      if (mainFirstPart && mainFirstPart !== prefix && mainFirstPart.length > 3) {
-        lessonClauses.push(`LOWER(lesson_title) LIKE $${paramIndex++}`);
-        values.push(`%${mainFirstPart}%`);
-      }
-
-      // Check significant keywords across lesson_title
-      keywords.slice(0, 5).forEach((kw) => {
-        if (kw.length >= 4) {
-          lessonClauses.push(`LOWER(lesson_title) LIKE $${paramIndex++}`);
-          values.push(`%${kw}%`);
-        }
-      });
-
-      queryConditions.push(`(${lessonClauses.join(' OR ')})`);
+    if (cleanLessonId && cleanLesson) {
+      queryConditions.push(`(lesson_id = $${paramIndex} OR (lesson_id IS NULL AND LOWER(TRIM(lesson_title)) = LOWER(TRIM($${paramIndex + 1}))))`);
+      values.push(cleanLessonId);
+      values.push(cleanLesson);
+      paramIndex += 2;
+    } else if (cleanLessonId) {
+      queryConditions.push(`lesson_id = $${paramIndex++}`);
+      values.push(cleanLessonId);
+    } else if (cleanLesson) {
+      queryConditions.push(`LOWER(TRIM(lesson_title)) = LOWER(TRIM($${paramIndex++}))`);
+      values.push(cleanLesson);
     }
 
     // Strict Topic Filtering (when passed explicitly without full lesson):
@@ -289,6 +265,7 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       subject,
       lessonTitle,
       lesson,
+      lessonId,
       status,
       difficulty,
       category,
@@ -329,7 +306,13 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       values.push(Number(unitId));
     }
 
-    // 5. Filter by Lesson Title
+    // 5. Filter by Lesson ID (exact)
+    if (lessonId && typeof lessonId === 'string' && lessonId.trim() && lessonId.trim() !== 'all') {
+      queryConditions.push(`lesson_id = $${paramIndex++}`);
+      values.push(lessonId.trim());
+    }
+
+    // 6. Filter by Lesson Title
     paramIndex = applyLessonFilterCondition(lessonTitle || lesson, queryConditions, values, paramIndex);
 
     // Filter by topic
@@ -488,6 +471,7 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
     }
 
     const classId = q.classId || q.class_id || q.standard || null;
+    const lessonId = (q.lessonId || q.lesson_id || '').trim() || null;
     const subject = q.subject || 'General Studies';
     const topic = (q.topic || lessonTitle || '').trim();
     if (!topic) {
@@ -532,11 +516,11 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
 
     const insertQuery = `
       INSERT INTO questions (
-        category, unit_id, class_id, subject, lesson_title, topic,
+        category, unit_id, class_id, subject, lesson_title, lesson_id, topic,
         difficulty, tag, question_text, options, correct_answer,
         explanation, source_reference, status, textbook_id, source_page, verification_status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       ON CONFLICT (lesson_title, question_text) DO NOTHING
       RETURNING *;
     `;
@@ -546,6 +530,7 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       classId,
       subject,
       lessonTitle.trim(),
+      lessonId,
       topic,
       difficulty,
       tag,
@@ -644,6 +629,11 @@ router.patch('/:id(\\d+)', requireAdminAuth, async (req: Request, res: Response)
     if (b.lessonTitle !== undefined) {
       updateClauses.push(`lesson_title = $${pIdx++}`);
       values.push(String(b.lessonTitle).trim());
+    }
+
+    if (b.lessonId !== undefined) {
+      updateClauses.push(`lesson_id = $${pIdx++}`);
+      values.push(b.lessonId ? String(b.lessonId).trim() : null);
     }
 
     if (b.unitId !== undefined && !isNaN(Number(b.unitId))) {
@@ -929,12 +919,15 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
         return;
       }
 
+      const resolvedLessonId = (q.lessonId || q.lesson_id || req.body?.lessonId || '').trim() || null;
+
       validQuestions.push({
         category: rawCategory,
         unitId,
         classId: q.classId || q.class_id || q.standard || null,
         subject: q.subject || 'General Studies',
         lessonTitle: lessonTitle.trim(),
+        lessonId: resolvedLessonId,
         topic,
         difficulty: ['Easy', 'Medium', 'Hard'].includes(q.difficulty) ? q.difficulty : 'Medium',
         tag: q.tag || `TNPSC ${groupName} • Unit ${unitId}: ${q.subject || 'General Studies'}`,
@@ -1003,11 +996,11 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
 
       const insertQuery = `
         INSERT INTO questions (
-          category, unit_id, class_id, subject, lesson_title, topic,
+          category, unit_id, class_id, subject, lesson_title, lesson_id, topic,
           difficulty, tag, question_text, options, correct_answer,
           explanation, source_reference, status, textbook_id, source_page, verification_status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'staging', $14, $15, $16)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'staging', $15, $16, $17)
         ON CONFLICT (lesson_title, question_text) DO NOTHING
         RETURNING id;
       `;
@@ -1017,6 +1010,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
         q.classId,
         q.subject,
         q.lessonTitle,
+        q.lessonId,
         q.topic,
         q.difficulty,
         q.tag,
@@ -1143,12 +1137,15 @@ router.post('/batch', requireAdminAuth, async (req: Request, res: Response) => {
       const groupName = rawCategory === 'group1' ? 'Group 1' : rawCategory === 'group2' ? 'Group 2' : rawCategory === 'group2a' ? 'Group 2A' : rawCategory === 'group4' ? 'Group 4' : 'VAO';
       const topic = (q.topic || '').trim() || lessonTitle.trim();
 
+      const resolvedLessonId = (q.lessonId || q.lesson_id || req.body?.lessonId || '').trim() || null;
+
       validQuestions.push({
         category: rawCategory,
         unitId,
         classId: q.classId || q.class_id || q.standard || null,
         subject: q.subject || 'General Studies',
         lessonTitle: lessonTitle.trim(),
+        lessonId: resolvedLessonId,
         topic,
         difficulty: ['Easy', 'Medium', 'Hard'].includes(q.difficulty) ? q.difficulty : 'Medium',
         tag: q.tag || `TNPSC ${groupName} • Unit ${unitId}: ${q.subject || 'General Studies'}`,
@@ -1201,11 +1198,11 @@ router.post('/batch', requireAdminAuth, async (req: Request, res: Response) => {
 
       const insertQuery = `
         INSERT INTO questions (
-          category, unit_id, class_id, subject, lesson_title, topic,
+          category, unit_id, class_id, subject, lesson_title, lesson_id, topic,
           difficulty, tag, question_text, options, correct_answer,
           explanation, source_reference, status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         ON CONFLICT (lesson_title, question_text) DO NOTHING
         RETURNING id;
       `;
@@ -1215,6 +1212,7 @@ router.post('/batch', requireAdminAuth, async (req: Request, res: Response) => {
         q.classId,
         q.subject,
         q.lessonTitle,
+        q.lessonId,
         q.topic,
         q.difficulty,
         q.tag,
@@ -1286,7 +1284,10 @@ router.patch('/publish', requireAdminAuth, async (req: Request, res: Response) =
     await client.query('BEGIN');
 
     // Lock the selected rows so status cannot change between validation and update.
-    const existing = await client.query('SELECT id, status FROM questions WHERE id = ANY($1) FOR UPDATE', [uniqueIds]);
+    const existing = await client.query(
+      'SELECT id, status, lesson_id, lesson_title, unit_id, category FROM questions WHERE id = ANY($1) FOR UPDATE',
+      [uniqueIds]
+    );
     const foundStatus = new Map<number, string>(existing.rows.map((row: any) => [row.id, row.status] as [number, string]));
     const missingIds = uniqueIds.filter((id) => !foundStatus.has(id));
     const ineligibleIds = uniqueIds.filter((id) => foundStatus.has(id) && foundStatus.get(id) !== 'staging');
@@ -1298,6 +1299,23 @@ router.patch('/publish', requireAdminAuth, async (req: Request, res: Response) =
         message: `Cannot publish: ${missingIds.length} question(s) not found and ${ineligibleIds.length} not in staging. No questions were published.`,
         missingIds,
         ineligibleIds,
+      });
+    }
+
+    // Strict Lesson Mapping Validation:
+    // Reject publishing if any question lacks required lesson metadata (must have either lesson_id or non-empty lesson_title)
+    const invalidLessonQuestions = existing.rows.filter((row: any) => {
+      const hasLessonId = row.lesson_id && String(row.lesson_id).trim().length > 0;
+      const hasLessonTitle = row.lesson_title && String(row.lesson_title).trim().length > 0;
+      return !hasLessonId && !hasLessonTitle;
+    });
+
+    if (invalidLessonQuestions.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({
+        status: 'error',
+        message: `Cannot publish: ${invalidLessonQuestions.length} question(s) lack required lesson metadata. Strict lesson-wise publishing requires an associated lesson.`,
+        invalidIds: invalidLessonQuestions.map((row: any) => row.id),
       });
     }
 
@@ -1375,6 +1393,7 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
       standard,
       lessonTitle,
       lesson,
+      lessonId,
       topic,
       topics = [],
       description = '',
@@ -1583,6 +1602,7 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
           unit: `Unit ${parsedUnitId}`,
           lesson: trimmedLesson,
           lessonTitle: trimmedLesson,
+          lessonId: String(lessonId || req.body?.lesson_id || '').trim() || null,
           topic: topicName,
           difficulty: ['Easy', 'Medium', 'Hard'].includes(q.difficulty)
             ? q.difficulty

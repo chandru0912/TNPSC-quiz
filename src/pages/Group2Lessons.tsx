@@ -79,6 +79,7 @@ const Group2Lessons = () => {
                 correctAnswer: q.correctAnswer,
                 explanation: q.explanation,
                 lessonTitle: q.lessonTitle,
+                lessonId: q.lessonId,
               })
             })
           }
@@ -101,7 +102,10 @@ const Group2Lessons = () => {
         const clonedUnit: any = JSON.parse(JSON.stringify(baseUnit))
         clonedUnit.chapters?.forEach((chapter: any) => {
           chapter.lessons?.forEach((lesson: any) => {
-            const matchingDbQs = dbQuestions.filter((dq) => dq.lessonTitle && lesson.title && dq.lessonTitle.toLowerCase() === lesson.title.toLowerCase())
+            const matchingDbQs = dbQuestions.filter((dq) => 
+              (dq.lessonId && lesson.id && dq.lessonId === lesson.id) ||
+              (dq.lessonTitle && lesson.title && dq.lessonTitle.trim().toLowerCase() === lesson.title.trim().toLowerCase())
+            )
             if (matchingDbQs.length > 0) {
               if (!lesson.practiceQuestions) lesson.practiceQuestions = []
               matchingDbQs.forEach((mq) => {

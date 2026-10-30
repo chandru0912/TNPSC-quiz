@@ -305,7 +305,7 @@ const Group1UnitClass = () => {
                 const translated = translateLesson(lesson, language)
                 const practiceUrl = `/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
                   data.unitTitle
-                )}&lesson=${encodeURIComponent(lesson.title)}&classId=${data.classId}`
+                )}&lesson=${encodeURIComponent(lesson.title)}&lessonId=${encodeURIComponent(lesson.id || '')}&classId=${data.classId}`
 
                 return (
                   <motion.div
@@ -581,7 +581,7 @@ const Group1UnitClass = () => {
                         navigate(
                           `/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
                             data.unitTitle
-                          )}&lesson=${encodeURIComponent(activeReadingLesson.title)}&classId=${data.classId}`
+                          )}&lesson=${encodeURIComponent(activeReadingLesson.title)}&lessonId=${encodeURIComponent(activeReadingLesson.id || '')}&classId=${data.classId}`
                         )
                       }}
                     >

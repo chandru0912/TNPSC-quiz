@@ -141,6 +141,13 @@ export async function runMigration() {
         ) THEN
           ALTER TABLE questions ADD COLUMN verification_status VARCHAR(30) DEFAULT 'needs_review' CHECK (verification_status IN ('verified', 'needs_review', 'rejected'));
         END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'questions' AND column_name = 'lesson_id'
+        ) THEN
+          ALTER TABLE questions ADD COLUMN lesson_id VARCHAR(100);
+        END IF;
       END $$;
     `);
 
@@ -153,6 +160,16 @@ export async function runMigration() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_questions_lesson_title 
       ON questions (lesson_title);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_questions_lesson_id 
+      ON questions (lesson_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_questions_category_lesson_id 
+      ON questions (category, lesson_id, status);
     `);
 
     await client.query(`

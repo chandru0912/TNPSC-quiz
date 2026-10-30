@@ -293,7 +293,7 @@ const Group4UnitClass = () => {
                 const tLesson = translateLesson(lesson, language)
                 const practiceUrl = `/practice?group=group4_vao&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
                   data.unitTitle
-                )}&lesson=${encodeURIComponent(lesson.title)}&classId=${data.classId}`
+                )}&lesson=${encodeURIComponent(lesson.title)}&lessonId=${encodeURIComponent(lesson.id || '')}&classId=${data.classId}`
 
                 return (
                   <motion.div
@@ -494,7 +494,7 @@ const Group4UnitClass = () => {
                         <Link
                           to={`/practice?group=group4_vao&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(
                             data.unitTitle
-                          )}&lesson=${encodeURIComponent(activeModalLesson.title)}&classId=${data.classId}`}
+                          )}&lesson=${encodeURIComponent(activeModalLesson.title)}&lessonId=${encodeURIComponent(activeModalLesson.id || '')}&classId=${data.classId}`}
                           className="lesson-practice-btn"
                           style={{ padding: '0.65rem 1.25rem', textDecoration: 'none' }}
                           onClick={() => setActiveModalLesson(null)}
