@@ -5,6 +5,14 @@ import {
   TextbookChunk,
 } from './textbookRag';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
+import {
+  deduplicateMarkdownContent,
+  mergeAndDeduplicateChunks,
+  checkDuplicateNoteInDb,
+  computeContentHash,
+  DeduplicationStats,
+  DuplicateCheckResult,
+} from './notesDeduplicator';
 
 export interface GenerateNotesRequestParams {
   category: string;
@@ -52,6 +60,9 @@ export interface GeneratedNotesResult {
   detectedChaptersCount?: number;
   coverageReport?: CoverageReport;
   topics?: string[];
+  deduplicationStats?: DeduplicationStats;
+  duplicateDetection?: DuplicateCheckResult;
+  contentHash?: string;
 }
 
 const GEMINI_MODELS = [
@@ -126,7 +137,11 @@ ${params.passagesText}
 4. தூய தமிழ் யுனிகோட் விதி (MANDATORY TAMIL UNICODE RULE):
    - PDF-ல் உள்ள எழுத்துரு சிதைவுகளோ, சொல்லுக்குள் தேவையற்ற இடைவெளிகளோ (OCR artifacts like 'இலக் ்க ணம்' or 'எ ழு த் து') இருந்தால் அவற்றை முற்றிலும் நீக்கி, இயல்பான, இலக்கணப் பிழையற்ற, தூய தமிழ் யுனிகோட் (UTF-8, NFC) சொற்களாக மட்டுமே எழுத வேண்டும் ('இலக்கணம்', 'எழுத்து').
 
-5. வெளியீட்டு கட்டமைப்பு (MANDATORY 11-SECTION STRUCTURE):
+5. நகல் தவிர்வு விதி (STRICT NON-DUPLICATION RULE):
+   - எக்காரணத்தைக் கொண்டும் ஒரே தலைப்பையோ, விளக்கத்தையோ, வரையறையையோ, எடுத்துக்காட்டையோ, அட்டவணைப் பதிவையோ அல்லது தேர்வு மையக் குறிப்பையோ பாடத்திற்குள் மீண்டும் மீண்டும் எழுதக் கூடாது (NEVER REPEAT ANY INFORMATION).
+   - ஒவ்வொரு கல்வித் தகவலும் பாடக் குறிப்புகளுக்குள் ஒரே ஒரு முறை மட்டுமே இடம்பெற வேண்டும்.
+
+6. வெளியீட்டு கட்டமைப்பு (MANDATORY 11-SECTION STRUCTURE):
 பின்வரும் 11 பிரிவுகளையும் வரிசைப்படி முழுமையான Markdown வடிவில் கட்டாயம் வழங்கவும்:
 
 # ${params.chapterTitle}
@@ -221,7 +236,11 @@ STRICT INSTRUCTIONS (MUST FOLLOW WITHOUT EXCEPTION):
 3. NO ARTIFICIAL LIMITS:
    - There are no arbitrary caps on points, examples, or length. Capture every piece of information present in the source pages.
 
-4. MANDATORY 11-SECTION OUTPUT FORMAT:
+4. STRICT NON-DUPLICATION RULE:
+   - NEVER repeat any topic, explanation, definition, example, fact, or table row across sections.
+   - Every educational point, term, and exam pointer must appear exactly once in the notes.
+
+5. MANDATORY 11-SECTION OUTPUT FORMAT:
 You must organize your output into the exact 11 sections below using Markdown:
 
 # ${params.chapterTitle}
@@ -810,7 +829,7 @@ export async function generateStudyNotesWithRag(
     }
 
     if (allChunksOk && chunkResults.length > 0) {
-      generatedMainMarkdown = chunkResults.join('\n\n---\n\n');
+      generatedMainMarkdown = mergeAndDeduplicateChunks(chunkResults);
     }
   }
 
@@ -859,7 +878,11 @@ export async function generateStudyNotesWithRag(
     );
   }
 
-  // 5. Page-by-Page Coverage Verification & Quality Audit
+  // 5. Strict Intra-Lesson Content Deduplication
+  const dedupResult = deduplicateMarkdownContent(generatedMainMarkdown);
+  generatedMainMarkdown = dedupResult.cleanedMarkdown;
+
+  // 6. Page-by-Page Coverage Verification & Quality Audit
   const topicsCovered = topicsIdentified.length > 0
     ? topicsIdentified.filter((t) => generatedMainMarkdown.toLowerCase().includes(t.toLowerCase().slice(0, 15)))
     : ['முழுமையான பாடக் கோட்பாடுகள்'];
@@ -883,6 +906,25 @@ export async function generateStudyNotesWithRag(
   const auditMarkdown = buildCoverageAuditSection(coverageReport, resolvedBookName, lang);
   const finalFullContent = cleanTamilUnicodeText(generatedMainMarkdown + auditMarkdown);
 
+  const candidateHash = computeContentHash(finalFullContent);
+
+  // 7. Check Candidate Note against Database (Staging and Published)
+  let duplicateDetection: DuplicateCheckResult | undefined;
+  try {
+    duplicateDetection = await checkDuplicateNoteInDb(pool, {
+      category: cleanCategory,
+      subject,
+      classId: parsedClassId,
+      unitId: parsedUnitId,
+      lessonId: params.lessonId || null,
+      lessonTitle: trimmedLesson,
+      language: lang,
+      content: finalFullContent,
+    });
+  } catch (err: any) {
+    console.warn('Database duplicate check error (proceeding with generation):', err.message);
+  }
+
   const sourceRef = `${resolvedBookName} (Pages ${relevantPages[0] || 1}–${relevantPages[relevantPages.length - 1] || relevantPages[0] || 1})`;
 
   return {
@@ -901,5 +943,8 @@ export async function generateStudyNotesWithRag(
     detectedChaptersCount: 1,
     coverageReport,
     topics: topicsIdentified,
+    deduplicationStats: dedupResult.stats,
+    duplicateDetection,
+    contentHash: candidateHash,
   };
 }

@@ -3,6 +3,12 @@ import pool from '../db';
 import { requireAdminAuth } from '../middleware/auth';
 import { generateStudyNotesWithRag } from '../services/studyNotesEngine';
 import { cleanTamilUnicodeText } from '../services/tamilUnicodeCleaner';
+import {
+  computeContentHash,
+  checkDuplicateNoteInDb,
+  deduplicateMarkdownContent,
+  getEquivalentCategories,
+} from '../services/notesDeduplicator';
 
 const router = Router();
 
@@ -26,6 +32,8 @@ function mapRowToNote(row: any) {
     sourceReference: row.source_reference,
     coverageReport: row.coverage_report || null,
     topics: row.topics || null,
+    contentHash: row.content_hash || null,
+    deduplicationMeta: row.deduplication_meta || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -347,8 +355,9 @@ router.get('/metrics', async (_req: Request, res: Response) => {
   }
 });
 
-// Bulk publish study notes
+// Bulk publish study notes with strict duplicate prevention
 router.post('/bulk-publish', requireAdminAuth, async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -359,26 +368,77 @@ router.post('/bulk-publish', requireAdminAuth, async (req: Request, res: Respons
       return res.status(400).json({ status: 'error', message: 'No valid note IDs provided' });
     }
 
-    const result = await pool.query(
-      `UPDATE study_notes 
-       SET status = 'published', updated_at = CURRENT_TIMESTAMP 
-       WHERE id = ANY($1) 
-       RETURNING id`,
+    await client.query('BEGIN');
+
+    // 1. Fetch details of all requested notes
+    const notesQuery = await client.query(
+      `SELECT id, category, subject, unit_id, class_id, lesson_id, lesson_title, content_hash
+       FROM study_notes
+       WHERE id = ANY($1)
+       ORDER BY id DESC`,
       [validIds]
     );
 
+    // 2. Deduplicate within the requested batch: keep at most 1 note per lesson
+    const lessonSeen = new Set<string>();
+    const noteIdsToPublish: number[] = [];
+    let duplicatesSkipped = 0;
+
+    for (const note of notesQuery.rows) {
+      const normCat = getEquivalentCategories(note.category)[0];
+      const lessonKey = `${normCat}::${note.subject}::${note.unit_id}::${note.lesson_id || note.lesson_title.toLowerCase().trim()}`;
+      if (lessonSeen.has(lessonKey)) {
+        duplicatesSkipped++;
+        continue;
+      }
+      lessonSeen.add(lessonKey);
+      noteIdsToPublish.push(note.id);
+
+      // 3. Archive any existing published note for this lesson to prevent duplicate live notes
+      await client.query(
+        `UPDATE study_notes
+         SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+         WHERE status = 'published'
+           AND id != $1
+           AND category = ANY($2)
+           AND unit_id = $3
+           AND (lesson_id = $4 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($5)))`,
+        [note.id, getEquivalentCategories(note.category), note.unit_id, note.lesson_id, note.lesson_title]
+      );
+    }
+
+    if (noteIdsToPublish.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ status: 'error', message: 'No unique notes available to publish' });
+    }
+
+    // 4. Mark the unique chosen notes as published
+    const publishRes = await client.query(
+      `UPDATE study_notes
+       SET status = 'published', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ANY($1)
+       RETURNING id`,
+      [noteIdsToPublish]
+    );
+
+    await client.query('COMMIT');
+
     return res.status(200).json({
       status: 'success',
-      message: `Published ${result.rowCount} study note(s) successfully`,
-      publishedCount: result.rowCount,
+      message: `Published ${publishRes.rowCount} unique study note(s) successfully.${duplicatesSkipped > 0 ? ` (${duplicatesSkipped} duplicate lesson notes prevented).` : ''}`,
+      publishedCount: publishRes.rowCount,
+      duplicatesSkipped,
     });
   } catch (error: any) {
+    await client.query('ROLLBACK');
     console.error('Error in bulk-publish study notes:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to publish study notes', error: error.message });
+  } finally {
+    client.release();
   }
 });
 
-// Bulk upload study notes
+// Bulk upload study notes with strict duplicate detection
 router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
@@ -389,9 +449,25 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
 
     await client.query('BEGIN');
     const insertedNotes = [];
+    const batchSeenHashes = new Set<string>();
+    let duplicatesSkipped = 0;
 
     for (const n of notes) {
-      const content = cleanTamilUnicodeText(n.content || n.contentText || '');
+      let rawContent = cleanTamilUnicodeText(n.content || n.contentText || '');
+      if (!rawContent || rawContent.trim().length < 5) continue;
+
+      // Intra-note deduplication
+      const dedup = deduplicateMarkdownContent(rawContent);
+      const content = dedup.cleanedMarkdown;
+      const contentHash = dedup.stats.contentHash;
+
+      // Check within uploaded batch
+      if (batchSeenHashes.has(contentHash)) {
+        duplicatesSkipped++;
+        continue;
+      }
+      batchSeenHashes.add(contentHash);
+
       const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title || 'General Lesson');
       const lessonId = (n.lessonId || n.lesson_id || null) ? String(n.lessonId || n.lesson_id).trim() : null;
       const lessonNumber = (n.lessonNumber || n.lesson_number || null) ? String(n.lessonNumber || n.lesson_number).trim() : null;
@@ -405,18 +481,37 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
       const sourceReference = n.sourceReference || n.source_reference || null;
       const coverageReport = n.coverageReport || n.coverage_report || null;
       const topics = Array.isArray(n.topics) ? JSON.stringify(n.topics) : (n.topics ? JSON.stringify(n.topics) : null);
-      // All uploaded notes initially enter staging
       const status = n.status === 'published' ? 'published' : 'staging';
 
-      if (!content || content.trim().length < 5) continue;
+      // Check against database for duplicate
+      const dupCheck = await checkDuplicateNoteInDb(client, {
+        category,
+        subject,
+        classId,
+        unitId,
+        lessonId,
+        lessonTitle,
+        language,
+        content,
+      });
+
+      if (dupCheck.isDuplicate) {
+        duplicatesSkipped++;
+        continue;
+      }
+
+      const deduplicationMeta = JSON.stringify({
+        contentHash,
+        dedupStats: dedup.stats,
+      });
 
       const res = await client.query(
         `INSERT INTO study_notes (
-           category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, status, source_reference, coverage_report, topics
+           category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, status, source_reference, coverage_report, topics, content_hash, deduplication_meta
          )
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          RETURNING id`,
-        [category, unitId, classId, subject, lessonId, lessonNumber, lessonTitle, topic, language, title, content, status, sourceReference, coverageReport ? JSON.stringify(coverageReport) : null, topics]
+        [category, unitId, classId, subject, lessonId, lessonNumber, lessonTitle, topic, language, title, content, status, sourceReference, coverageReport ? JSON.stringify(coverageReport) : null, topics, contentHash, deduplicationMeta]
       );
       insertedNotes.push(res.rows[0]);
     }
@@ -424,8 +519,9 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
     await client.query('COMMIT');
     return res.status(201).json({
       status: 'success',
-      message: `Successfully uploaded ${insertedNotes.length} study note(s) to Staging`,
+      message: `Successfully uploaded ${insertedNotes.length} study note(s) to Staging.${duplicatesSkipped > 0 ? ` (${duplicatesSkipped} duplicate note(s) skipped).` : ''}`,
       count: insertedNotes.length,
+      duplicatesSkipped,
       data: insertedNotes,
     });
   } catch (error: any) {
@@ -510,6 +606,9 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
         sourceReference: result.sourceReference,
         coverageReport: result.coverageReport,
         topics: result.topics,
+        deduplicationStats: result.deduplicationStats,
+        duplicateDetection: result.duplicateDetection,
+        contentHash: result.contentHash,
       },
     });
   } catch (error: any) {
@@ -525,7 +624,7 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
 router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const n = req.body;
-    const content = cleanTamilUnicodeText(n.content || n.contentText || '');
+    let rawContent = cleanTamilUnicodeText(n.content || n.contentText || '');
     const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title);
     const lessonId = (n.lessonId || n.lesson_id || null) ? String(n.lessonId || n.lesson_id).trim() : null;
     const lessonNumber = (n.lessonNumber || n.lesson_number || null) ? String(n.lessonNumber || n.lesson_number).trim() : null;
@@ -543,7 +642,7 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
     const coverageReport = n.coverageReport || n.coverage_report || null;
     const topics = Array.isArray(n.topics) ? JSON.stringify(n.topics) : (n.topics ? JSON.stringify(n.topics) : null);
 
-    if (!content || content.trim().length < 10) {
+    if (!rawContent || rawContent.trim().length < 10) {
       return res.status(400).json({ status: 'error', message: 'Content is required (minimum 10 chars)' });
     }
     if (!lessonTitle || typeof lessonTitle !== 'string') {
@@ -553,11 +652,88 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ status: 'error', message: 'Valid unitId is required' });
     }
 
+    // 1. Strict intra-note deduplication
+    const dedup = deduplicateMarkdownContent(rawContent);
+    const content = dedup.cleanedMarkdown;
+    const contentHash = dedup.stats.contentHash;
+    const deduplicationMeta = JSON.stringify({
+      contentHash,
+      dedupStats: dedup.stats,
+    });
+
+    // 2. Strict database duplicate check against Staging and Published notes
+    const dupCheck = await checkDuplicateNoteInDb(pool, {
+      category,
+      subject,
+      classId,
+      unitId,
+      lessonId,
+      lessonTitle,
+      language,
+      content,
+    });
+
+    if (dupCheck.isDuplicate && dupCheck.existingNote) {
+      // If client explicitly requests replacing/updating existing note
+      if (n.forceUpdate || n.replaceExisting) {
+        const updateRes = await pool.query(
+          `UPDATE study_notes
+           SET content = $1, title = $2, lesson_title = $3, lesson_number = $4,
+               source_reference = $5, coverage_report = $6, topics = $7,
+               content_hash = $8, deduplication_meta = $9, status = $10,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $11
+           RETURNING *;`,
+          [
+            content,
+            title.trim(),
+            lessonTitle.trim(),
+            lessonNumber,
+            sourceReference,
+            coverageReport ? JSON.stringify(coverageReport) : null,
+            topics,
+            contentHash,
+            deduplicationMeta,
+            status,
+            dupCheck.existingNote.id,
+          ]
+        );
+        return res.status(200).json({
+          status: 'success',
+          message: `Existing study note (#${dupCheck.existingNote.id}) successfully updated with verified non-duplicate content.`,
+          data: mapRowToNote(updateRes.rows[0]),
+          isUpdatedExisting: true,
+        });
+      }
+
+      // Reject duplicate insertion
+      return res.status(409).json({
+        status: 'duplicate_prevented',
+        message: `Duplicate Study Note Prevented: An identical study note (#${dupCheck.existingNote.id}) already exists in ${dupCheck.existingNote.status.toUpperCase()} (${Math.round((dupCheck.similarityScore || 1) * 100)}% match).`,
+        existingNote: dupCheck.existingNote,
+        isDuplicate: true,
+        similarityScore: dupCheck.similarityScore,
+      });
+    }
+
+    // 3. If publishing directly, archive any prior published note for this lesson
+    if (status === 'published') {
+      await pool.query(
+        `UPDATE study_notes
+         SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+         WHERE status = 'published'
+           AND category = ANY($1)
+           AND unit_id = $2
+           AND (lesson_id = $3 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($4)))`,
+        [getEquivalentCategories(category), unitId, lessonId, lessonTitle.trim()]
+      );
+    }
+
     const insertQuery = `
       INSERT INTO study_notes (
-        category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, content_html, tags, status, source_reference, coverage_report, topics
+        category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, content_html, tags, status, source_reference, coverage_report, topics, content_hash, deduplication_meta
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
       RETURNING *;
     `;
     const values = [
@@ -578,6 +754,8 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       sourceReference,
       coverageReport ? JSON.stringify(coverageReport) : null,
       topics,
+      contentHash,
+      deduplicationMeta,
     ];
 
     const result = await pool.query(insertQuery, values);
@@ -599,7 +777,34 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     const values: any[] = [];
     let pIdx = 1;
 
-    if (b.content !== undefined) { updateClauses.push(`content = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.content)); }
+    // Deduplication check when publishing
+    if (b.status === 'published') {
+      const curr = await pool.query(`SELECT category, unit_id, lesson_id, lesson_title FROM study_notes WHERE id = $1`, [id]);
+      if (curr.rows.length > 0) {
+        const cNote = curr.rows[0];
+        // Archive any prior published note for this lesson to prevent duplicate published notes
+        await pool.query(
+          `UPDATE study_notes
+           SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+           WHERE status = 'published'
+             AND id != $1
+             AND category = ANY($2)
+             AND unit_id = $3
+             AND (lesson_id = $4 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($5)))`,
+          [id, getEquivalentCategories(cNote.category), cNote.unit_id, cNote.lesson_id, cNote.lesson_title]
+        );
+      }
+    }
+
+    if (b.content !== undefined) {
+      const dedup = deduplicateMarkdownContent(cleanTamilUnicodeText(b.content));
+      updateClauses.push(`content = $${pIdx++}`);
+      values.push(dedup.cleanedMarkdown);
+      updateClauses.push(`content_hash = $${pIdx++}`);
+      values.push(dedup.stats.contentHash);
+      updateClauses.push(`deduplication_meta = $${pIdx++}`);
+      values.push(JSON.stringify(dedup.stats));
+    }
     if (b.contentHtml !== undefined) { updateClauses.push(`content_html = $${pIdx++}`); values.push(b.contentHtml); }
     if (b.title !== undefined) { updateClauses.push(`title = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.title)); }
     if (b.lessonId !== undefined || b.lesson_id !== undefined) { updateClauses.push(`lesson_id = $${pIdx++}`); values.push((b.lessonId || b.lesson_id) ? String(b.lessonId || b.lesson_id).trim() : null); }

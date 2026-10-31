@@ -423,6 +423,30 @@ const Admin = () => {
       statusVerdict: '100% Complete' | 'Partially Complete' | 'Requires Review'
     }
     topics?: string[]
+    deduplicationStats?: {
+      duplicateLinesRemoved: number
+      duplicateParagraphsRemoved: number
+      duplicateDefinitionsRemoved: number
+      duplicateExamplesRemoved: number
+      duplicateFactsRemoved: number
+      duplicateTableRowsRemoved: number
+      uniqueTopicsCount: number
+      contentHash: string
+    }
+    duplicateDetection?: {
+      isDuplicate: boolean
+      duplicateType?: 'exact' | 'near_duplicate' | 'none'
+      similarityScore?: number
+      existingNote?: {
+        id: number
+        title: string
+        status: 'staging' | 'published' | 'archived'
+        lessonId?: string | null
+        similarity: number
+      }
+      recommendation?: 'skip' | 'update_existing' | 'allow'
+    }
+    contentHash?: string
   } | null>(null)
   const [isNotesUploading, setIsNotesUploading] = useState(false)
 
@@ -6066,10 +6090,19 @@ const Admin = () => {
                                   lessonNumber: data.data.lessonNumber || selectedLessonObj?.lessonNumber,
                                   coverageReport: data.data.coverageReport || undefined,
                                   topics: data.data.topics || undefined,
+                                  deduplicationStats: data.data.deduplicationStats || undefined,
+                                  duplicateDetection: data.data.duplicateDetection || undefined,
+                                  contentHash: data.data.contentHash || undefined,
                                 })
                                 const pagesStr = data.textbookUsed?.pages?.length
                                   ? `Pages ${data.textbookUsed.pages.join(', ')} (${data.textbookUsed.pages.length} Pages - 100% Complete)`
                                   : ''
+                                if (data.data.duplicateDetection?.isDuplicate) {
+                                  showToast(
+                                    'error',
+                                    `Duplicate Notice: Identical note (#${data.data.duplicateDetection.existingNote?.id}) already exists in ${data.data.duplicateDetection.existingNote?.status.toUpperCase()}.`
+                                  )
+                                }
                                 setAiNotice(
                                   data.source === 'gemini'
                                     ? `Complete Study Notes generated via Gemini AI referencing "${data.textbookUsed?.name || 'Textbook'}" [${pagesStr}].`
@@ -6149,10 +6182,12 @@ const Admin = () => {
                                 }),
                               })
                               const data = await res.json()
-                              if (res.ok) {
-                                showToast('success', 'Study notes saved to Staging for review!')
+                              if (res.ok && data.status === 'success') {
+                                showToast('success', data.message || 'Study notes saved to Staging for review!')
                                 setNotesPreview(null)
                                 fetchNotes()
+                              } else if (data.status === 'duplicate_prevented' || res.status === 409) {
+                                showToast('error', data.message || 'Duplicate study note prevented.')
                               } else {
                                 showToast('error', data.message || 'Failed to stage notes')
                               }
@@ -6195,10 +6230,12 @@ const Admin = () => {
                                 }),
                               })
                               const data = await res.json()
-                              if (res.ok) {
-                                showToast('success', 'Study notes published directly to Study Materials!')
+                              if (res.ok && data.status === 'success') {
+                                showToast('success', data.message || 'Study notes published directly to Study Materials!')
                                 setNotesPreview(null)
                                 fetchNotes()
+                              } else if (data.status === 'duplicate_prevented' || res.status === 409) {
+                                showToast('error', data.message || 'Duplicate study note prevented.')
                               } else {
                                 showToast('error', data.message || 'Failed to publish notes')
                               }
@@ -6214,6 +6251,91 @@ const Admin = () => {
                         </button>
                       </div>
                     </div>
+
+                    {/* Duplicate Detection Alert & Action Banner */}
+                    {notesPreview.duplicateDetection?.isDuplicate && notesPreview.duplicateDetection.existingNote && (
+                      <div
+                        style={{
+                          marginBottom: '1rem',
+                          padding: '0.85rem 1.15rem',
+                          background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(185, 28, 28, 0.15) 100%)',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          borderRadius: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '0.75rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                          <AlertCircle size={22} style={{ color: '#ef4444', flexShrink: 0 }} />
+                          <div>
+                            <span style={{ fontWeight: 700, color: '#f87171', fontSize: '0.88rem' }}>
+                              Duplicate Content Prevention: Identical Note Exists ({Math.round((notesPreview.duplicateDetection.similarityScore || 1) * 100)}% Match)
+                            </span>
+                            <span style={{ display: 'block', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                              An identical note for this lesson already exists in <strong>{notesPreview.duplicateDetection.existingNote.status.toUpperCase()}</strong> (#{notesPreview.duplicateDetection.existingNote.id}).
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="admin-btn admin-btn-secondary"
+                          style={{
+                            borderColor: 'rgba(239, 68, 68, 0.5)',
+                            color: '#fca5a5',
+                            padding: '0.4rem 0.85rem',
+                            fontSize: '0.82rem',
+                            fontWeight: 600,
+                          }}
+                          disabled={isNotesUploading}
+                          onClick={async () => {
+                            if (!token || !notesPreview || !notesPreview.duplicateDetection?.existingNote) return
+                            setIsNotesUploading(true)
+                            try {
+                              const res = await apiFetch('/api/notes', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({
+                                  category: aiGroupId,
+                                  subject: selectedSubjectObj.name,
+                                  classId: currentClassId,
+                                  unitId: currentUnitId,
+                                  lessonId: notesPreview.lessonId || selectedLessonObj?.id,
+                                  lessonNumber: notesPreview.lessonNumber || selectedLessonObj?.lessonNumber,
+                                  lessonTitle: currentLessonTitle,
+                                  topic: currentTopicName || currentLessonTitle,
+                                  language: notesLanguage,
+                                  title: notesPreview.title,
+                                  content: notesPreview.content,
+                                  sourceReference: notesPreview.sourceReference,
+                                  status: notesPreview.duplicateDetection.existingNote.status,
+                                  coverageReport: notesPreview.coverageReport || null,
+                                  topics: notesPreview.topics || null,
+                                  forceUpdate: true,
+                                }),
+                              })
+                              const data = await res.json()
+                              if (res.ok) {
+                                showToast('success', `Existing Note #${notesPreview.duplicateDetection.existingNote.id} updated with verified content!`)
+                                setNotesPreview(null)
+                                fetchNotes()
+                              } else {
+                                showToast('error', data.message || 'Failed to update existing note')
+                              }
+                            } catch (err: any) {
+                              showToast('error', err.message || 'Error updating note')
+                            } finally {
+                              setIsNotesUploading(false)
+                            }
+                          }}
+                        >
+                          <RefreshCw size={14} />
+                          <span>Update Existing #{notesPreview.duplicateDetection.existingNote.id}</span>
+                        </button>
+                      </div>
+                    )}
 
                     {/* Quality Verification & Coverage Audit Card */}
                     {notesPreview.coverageReport && (
@@ -6286,20 +6408,38 @@ const Admin = () => {
                               {notesPreview.coverageReport.missingTopics.length === 0 ? 'None (0)' : notesPreview.coverageReport.missingTopics.length}
                             </div>
                           </div>
+                          <div style={{ background: 'var(--surface-primary, rgba(255,255,255,0.03))', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>Deduplication Status</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#34d399' }}>
+                              {notesPreview.deduplicationStats?.duplicateLinesRemoved || notesPreview.deduplicationStats?.duplicateParagraphsRemoved
+                                ? `${(notesPreview.deduplicationStats.duplicateLinesRemoved || 0) + (notesPreview.deduplicationStats.duplicateParagraphsRemoved || 0)} Dups Removed`
+                                : '0 Duplicates (Clean)'}
+                            </div>
+                          </div>
                         </div>
 
-                        {/* Covered pages chips */}
-                        {notesPreview.coverageReport.processedPages.length > 0 && (
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 600 }}>Covered Textbook Pages:</span>
-                            <span style={{ color: 'var(--gold-primary, #ffd700)', fontWeight: 700 }}>
-                              [ {notesPreview.coverageReport.processedPages.join(', ')} ]
-                            </span>
-                            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>
-                              (Full lesson isolated with zero adjacent chapter bleed)
-                            </span>
-                          </div>
-                        )}
+                        {/* Covered pages chips & Content Hash */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          {notesPreview.coverageReport.processedPages.length > 0 && (
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: 600 }}>Covered Textbook Pages:</span>
+                              <span style={{ color: 'var(--gold-primary, #ffd700)', fontWeight: 700 }}>
+                                [ {notesPreview.coverageReport.processedPages.join(', ')} ]
+                              </span>
+                              <span style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>
+                                (Full lesson isolated with zero adjacent chapter bleed)
+                              </span>
+                            </div>
+                          )}
+                          {notesPreview.deduplicationStats?.contentHash && (
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                              <span>Deduplication Content Hash:</span>
+                              <code style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', color: '#94a3b8' }}>
+                                {notesPreview.deduplicationStats.contentHash.slice(0, 24)}...
+                              </code>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
 
