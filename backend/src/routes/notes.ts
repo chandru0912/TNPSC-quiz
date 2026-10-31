@@ -207,9 +207,27 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     const dataValues = [...values, safeLimit, safeOffset];
     const dataResult = await pool.query(dataQuery, dataValues);
 
+    // Global Metrics for Study Notes HUD
+    const metricsResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total_count,
+        COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
+        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+        COUNT(DISTINCT class_id) as standards_count
+      FROM study_notes;
+    `);
+    const metricsRow = metricsResult.rows[0];
+    const metrics = {
+      totalNotes: parseInt(metricsRow?.total_count || '0', 10),
+      stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
+      publishedCount: parseInt(metricsRow?.published_count || '0', 10),
+      classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
+    };
+
     res.status(200).json({
       status: 'success',
       total,
+      metrics,
       limit: safeLimit,
       offset: safeOffset,
       data: dataResult.rows.map(mapRowToNote),
@@ -221,6 +239,36 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       message: 'Failed to retrieve admin study notes',
       error: error.message,
     });
+  }
+});
+
+/**
+ * GET /api/notes/metrics (Public / Admin)
+ * Returns live HUD metrics for Study Notes.
+ */
+router.get('/metrics', async (_req: Request, res: Response) => {
+  try {
+    const metricsResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total_count,
+        COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
+        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+        COUNT(DISTINCT class_id) as standards_count
+      FROM study_notes;
+    `);
+    const metricsRow = metricsResult.rows[0];
+    return res.status(200).json({
+      status: 'success',
+      metrics: {
+        totalNotes: parseInt(metricsRow?.total_count || '0', 10),
+        stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
+        publishedCount: parseInt(metricsRow?.published_count || '0', 10),
+        classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
+      },
+    });
+  } catch (error: any) {
+    console.error('Error in study notes metrics query:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to retrieve study notes metrics' });
   }
 });
 

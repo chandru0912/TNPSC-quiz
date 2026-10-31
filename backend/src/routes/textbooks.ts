@@ -443,9 +443,28 @@ router.get('/', async (req: Request, res: Response) => {
     `;
 
     const result = await pool.query(query, values);
+
+    // Global Metrics for Textbooks HUD
+    const metricsResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total_count,
+        COUNT(CASE WHEN status IN ('uploaded', 'processing', 'staging') THEN 1 END) as staging_count,
+        COUNT(CASE WHEN status IN ('completed', 'published') THEN 1 END) as published_count,
+        COUNT(DISTINCT standard) as standards_count
+      FROM textbooks;
+    `);
+    const metricsRow = metricsResult.rows[0];
+    const metrics = {
+      totalTextbooks: parseInt(metricsRow?.total_count || '0', 10),
+      stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
+      publishedCount: parseInt(metricsRow?.published_count || '0', 10),
+      classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
+    };
+
     return res.status(200).json({
       status: 'success',
       count: result.rows.length,
+      metrics,
       data: result.rows.map((r) => ({
         id: r.id,
         groupId: r.group_id,
@@ -499,6 +518,36 @@ router.get('/search-content', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Textbooks Route] Search content error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to retrieve textbook content.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/metrics (Public / Admin)
+ * Returns live HUD metrics for Textbook Management.
+ */
+router.get('/metrics', async (_req: Request, res: Response) => {
+  try {
+    const metricsResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total_count,
+        COUNT(CASE WHEN status IN ('uploaded', 'processing', 'staging') THEN 1 END) as staging_count,
+        COUNT(CASE WHEN status IN ('completed', 'published') THEN 1 END) as published_count,
+        COUNT(DISTINCT standard) as standards_count
+      FROM textbooks;
+    `);
+    const metricsRow = metricsResult.rows[0];
+    return res.status(200).json({
+      status: 'success',
+      metrics: {
+        totalTextbooks: parseInt(metricsRow?.total_count || '0', 10),
+        stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
+        publishedCount: parseInt(metricsRow?.published_count || '0', 10),
+        classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
+      },
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Route] Metrics error:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to retrieve textbook metrics.' });
   }
 });
 

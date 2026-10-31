@@ -276,7 +276,9 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       SELECT 
         COUNT(*) as total_count,
         COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
-        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count
+        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+        COUNT(DISTINCT unit_id) as units_count,
+        COUNT(DISTINCT class_id) as classes_count
       FROM questions
       WHERE target_system = 'study_materials';
     `);
@@ -299,9 +301,11 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       status: 'success',
       targetSystem: 'study_materials',
       metrics: {
-        totalQuestions: parseInt(metrics.total_count, 10),
-        stagingCount: parseInt(metrics.staging_count, 10),
-        publishedCount: parseInt(metrics.published_count, 10),
+        totalQuestions: parseInt(metrics?.total_count || '0', 10),
+        stagingCount: parseInt(metrics?.staging_count || '0', 10),
+        publishedCount: parseInt(metrics?.published_count || '0', 10),
+        unitsCount: parseInt(metrics?.units_count || '0', 10),
+        classesCount: parseInt(metrics?.classes_count || '0', 10),
       },
       filteredTotal,
       data: dataResult.rows.map(mapRowToQuestion),

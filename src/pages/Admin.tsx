@@ -108,6 +108,22 @@ interface AdminMetrics {
   totalQuestions: number
   stagingCount: number
   publishedCount: number
+  unitsCount?: number
+  classesCount?: number
+}
+
+interface TextbookMetrics {
+  totalTextbooks: number
+  stagingCount: number
+  publishedCount: number
+  classesCovered: number
+}
+
+interface StudyNotesMetrics {
+  totalNotes: number
+  stagingCount: number
+  publishedCount: number
+  classesCovered: number
 }
 
 interface AdminUserItem {
@@ -148,7 +164,9 @@ const Admin = () => {
 
   // Data & Filters
   const [questions, setQuestions] = useState<QuestionItem[]>([])
-  const [metrics, setMetrics] = useState<AdminMetrics>({ totalQuestions: 0, stagingCount: 0, publishedCount: 0 })
+  const [metrics, setMetrics] = useState<AdminMetrics>({ totalQuestions: 0, stagingCount: 0, publishedCount: 0, unitsCount: 0, classesCount: 0 })
+  const [textbookMetrics, setTextbookMetrics] = useState<TextbookMetrics>({ totalTextbooks: 0, stagingCount: 0, publishedCount: 0, classesCovered: 0 })
+  const [notesMetrics, setNotesMetrics] = useState<StudyNotesMetrics>({ totalNotes: 0, stagingCount: 0, publishedCount: 0, classesCovered: 0 })
   const [filteredTotal, setFilteredTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -1196,6 +1214,9 @@ const Admin = () => {
       if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
         setNotesList(data.data)
         setNotesFilteredTotal(data.total || 0)
+        if (data.metrics) {
+          setNotesMetrics(data.metrics)
+        }
       } else {
         setNotesList([])
         setNotesFilteredTotal(0)
@@ -1237,6 +1258,9 @@ const Admin = () => {
       const { data } = await parseApiResponse(res)
       if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
         setTextbooksList(data.data)
+        if (data.metrics) {
+          setTextbookMetrics(data.metrics)
+        }
       }
     } catch (err) {
       console.error('Failed to fetch textbooks:', err)
@@ -1250,6 +1274,39 @@ const Admin = () => {
       fetchTextbooks()
     }
   }, [fetchTextbooks, token])
+
+  // Fetch All Global Metrics for Question Bank, Textbooks, and Study Notes
+  const fetchAllMetrics = useCallback(async () => {
+    try {
+      const authHeader: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+      const [qRes, tRes, nRes] = await Promise.all([
+        apiFetch(`/api/questions/metrics?target_system=${targetSystemFilter}`, { headers: authHeader }).catch(() => null),
+        apiFetch('/api/textbooks/metrics', { headers: authHeader }).catch(() => null),
+        apiFetch('/api/notes/metrics', { headers: authHeader }).catch(() => null),
+      ])
+
+      if (qRes && qRes.ok) {
+        const qData = await qRes.json()
+        if (qData.metrics) setMetrics(qData.metrics)
+      }
+      if (tRes && tRes.ok) {
+        const tData = await tRes.json()
+        if (tData.metrics) setTextbookMetrics(tData.metrics)
+      }
+      if (nRes && nRes.ok) {
+        const nData = await nRes.json()
+        if (nData.metrics) setNotesMetrics(nData.metrics)
+      }
+    } catch (e) {
+      console.warn('Failed to fetch initial metrics:', e)
+    }
+  }, [token, targetSystemFilter])
+
+  useEffect(() => {
+    if (token) {
+      fetchAllMetrics()
+    }
+  }, [fetchAllMetrics, token, adminSection])
 
   // Poll active processing jobs
   useEffect(() => {
@@ -2510,9 +2567,15 @@ const Admin = () => {
                 PostgreSQL Connected
               </span>
             </div>
-            <h1 className="admin-title">Question Bank Management</h1>
+            <h1 className="admin-title">
+              {adminSection === 'questions' && 'Question Bank Management'}
+              {adminSection === 'textbooks' && 'Textbook Management'}
+              {adminSection === 'notes' && 'Study Notes Management'}
+            </h1>
             <p className="admin-subtitle">
-              Review, edit, stage, and publish verified Samacheer Kalvi topic-wise MCQs directly into the database.
+              {adminSection === 'questions' && 'Review, edit, stage, and publish verified Samacheer Kalvi topic-wise MCQs directly into the database.'}
+              {adminSection === 'textbooks' && 'Upload, index, and organize Samacheer Kalvi PDF textbooks for AI study notes and MCQ generation.'}
+              {adminSection === 'notes' && 'Review, edit, stage, and publish comprehensive TNPSC One-Liner Study Notes directly into the database.'}
             </p>
           </div>
 
@@ -2542,49 +2605,6 @@ const Admin = () => {
           </div>
         </div>
 
-        {/* Metrics Cards HUD */}
-        <div className="admin-metrics-grid">
-          <div className="admin-metric-card glass">
-            <div className="metric-icon-box metric-icon-gold">
-              <Database size={24} />
-            </div>
-            <div className="metric-info">
-              <span className="metric-value">{metrics.totalQuestions}</span>
-              <span className="metric-label">Total in Database</span>
-            </div>
-          </div>
-
-          <div className="admin-metric-card glass">
-            <div className="metric-icon-box metric-icon-amber">
-              <Clock size={24} />
-            </div>
-            <div className="metric-info">
-              <span className="metric-value">{metrics.stagingCount}</span>
-              <span className="metric-label">In Review (Staging)</span>
-            </div>
-          </div>
-
-          <div className="admin-metric-card glass">
-            <div className="metric-icon-box metric-icon-emerald">
-              <CheckCircle size={24} />
-            </div>
-            <div className="metric-info">
-              <span className="metric-value">{metrics.publishedCount}</span>
-              <span className="metric-label">Live on Website</span>
-            </div>
-          </div>
-
-          <div className="admin-metric-card glass">
-            <div className="metric-icon-box metric-icon-cyan">
-              <Layers size={24} />
-            </div>
-            <div className="metric-info">
-              <span className="metric-value">6 Units</span>
-              <span className="metric-label">Classes 6–12</span>
-            </div>
-          </div>
-        </div>
-
         {/* Navigation Section Tabs */}
         <div className="admin-section-nav">
           <button
@@ -2604,7 +2624,7 @@ const Admin = () => {
           >
             <BookOpen size={16} />
             <span>Textbook Management</span>
-            <span className="admin-section-tab-count">{textbooksList.length}</span>
+            <span className="admin-section-tab-count">{textbookMetrics.totalTextbooks}</span>
           </button>
           <button
             className={`admin-section-tab ${adminSection === 'notes' ? 'active' : ''}`}
@@ -2615,9 +2635,150 @@ const Admin = () => {
           >
             <FileText size={16} />
             <span>Study Notes</span>
-            <span className="admin-section-tab-count">{notesList.length}</span>
+            <span className="admin-section-tab-count">{notesMetrics.totalNotes}</span>
           </button>
         </div>
+
+        {/* Dynamic 4 Dashboard Statistics Cards HUD for Active Management Tab */}
+        {adminSection === 'questions' && (
+          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-gold">
+                <Database size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{metrics.totalQuestions}</span>
+                <span className="metric-label">Total in Database</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-amber">
+                <Clock size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{metrics.stagingCount}</span>
+                <span className="metric-label">In Review (Staging)</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-emerald">
+                <CheckCircle size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{metrics.publishedCount}</span>
+                <span className="metric-label">Live on Website</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-cyan">
+                <Layers size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">
+                  {metrics.unitsCount ? `${metrics.unitsCount} Units` : '6 Units'}
+                </span>
+                <span className="metric-label">
+                  {metrics.classesCount ? `${metrics.classesCount} Classes (6–12)` : 'Total Units / Classes'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {adminSection === 'textbooks' && (
+          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-gold">
+                <BookOpen size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{textbookMetrics.totalTextbooks}</span>
+                <span className="metric-label">Total Textbooks in Database</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-amber">
+                <Clock size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{textbookMetrics.stagingCount}</span>
+                <span className="metric-label">In Review (Staging)</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-emerald">
+                <CheckCircle size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{textbookMetrics.publishedCount}</span>
+                <span className="metric-label">Published Textbooks</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-cyan">
+                <Layers size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">
+                  {textbookMetrics.classesCovered ? `${textbookMetrics.classesCovered} Standards` : 'Classes 6–12'}
+                </span>
+                <span className="metric-label">Total Standards / Classes Covered</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {adminSection === 'notes' && (
+          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-gold">
+                <FileText size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{notesMetrics.totalNotes}</span>
+                <span className="metric-label">Total Study Notes in Database</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-amber">
+                <Clock size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{notesMetrics.stagingCount}</span>
+                <span className="metric-label">In Review (Staging)</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-emerald">
+                <CheckCircle size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{notesMetrics.publishedCount}</span>
+                <span className="metric-label">Published Notes (Live on Website)</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-cyan">
+                <Layers size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">
+                  {notesMetrics.classesCovered ? `${notesMetrics.classesCovered} Standards` : 'Classes 6–12'}
+                </span>
+                <span className="metric-label">Total Standards / Classes Covered</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Section 1: Question Bank Management */}
         {adminSection === 'questions' && (
@@ -3018,32 +3179,6 @@ const Admin = () => {
                 <button className="admin-btn admin-btn-secondary" onClick={fetchTextbooks} title="Refresh textbooks">
                   <RefreshCw size={15} className={textbooksLoading ? 'spin-icon' : ''} />
                 </button>
-              </div>
-            </div>
-
-            {/* Textbook Stats HUD */}
-            <div className="tb-stats-grid">
-              <div className="tb-stat-card">
-                <span className="tb-stat-label">Total Textbooks</span>
-                <span className="tb-stat-value">{textbooksList.length}</span>
-              </div>
-              <div className="tb-stat-card">
-                <span className="tb-stat-label">Completed & Indexed</span>
-                <span className="tb-stat-value" style={{ color: '#34d399' }}>
-                  {textbooksList.filter((t) => t.status === 'completed').length}
-                </span>
-              </div>
-              <div className="tb-stat-card">
-                <span className="tb-stat-label">Processing / OCR</span>
-                <span className="tb-stat-value" style={{ color: '#fbbf24' }}>
-                  {textbooksList.filter((t) => t.status === 'processing' || t.status === 'uploaded').length}
-                </span>
-              </div>
-              <div className="tb-stat-card">
-                <span className="tb-stat-label">Failed</span>
-                <span className="tb-stat-value" style={{ color: '#f87171' }}>
-                  {textbooksList.filter((t) => t.status === 'failed').length}
-                </span>
               </div>
             </div>
 

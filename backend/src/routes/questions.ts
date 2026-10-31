@@ -379,7 +379,9 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       SELECT 
         COUNT(*) as total_count,
         COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
-        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count
+        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+        COUNT(DISTINCT unit_id) as units_count,
+        COUNT(DISTINCT class_id) as classes_count
       FROM questions
       WHERE (target_system = 'main_practice' OR target_system IS NULL);
     `);
@@ -403,9 +405,11 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     res.status(200).json({
       status: 'success',
       metrics: {
-        totalQuestions: parseInt(metrics.total_count, 10),
-        stagingCount: parseInt(metrics.staging_count, 10),
-        publishedCount: parseInt(metrics.published_count, 10),
+        totalQuestions: parseInt(metrics?.total_count || '0', 10),
+        stagingCount: parseInt(metrics?.staging_count || '0', 10),
+        publishedCount: parseInt(metrics?.published_count || '0', 10),
+        unitsCount: parseInt(metrics?.units_count || '0', 10),
+        classesCount: parseInt(metrics?.classes_count || '0', 10),
       },
       filteredTotal,
       limit: safeLimit,
@@ -421,6 +425,47 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       message: 'Failed to retrieve admin questions',
       error: error?.message || 'Unknown database error',
     });
+  }
+});
+
+/**
+ * GET /api/questions/metrics (Public / Admin)
+ * Returns live HUD metrics for Question Bank.
+ */
+router.get('/metrics', async (req: Request, res: Response) => {
+  try {
+    const targetSystem = req.query.target_system as string | undefined;
+    let whereFilter = "(target_system = 'main_practice' OR target_system IS NULL)";
+    if (targetSystem === 'study_materials') {
+      whereFilter = "target_system = 'study_materials'";
+    } else if (targetSystem === 'all') {
+      whereFilter = "1=1";
+    }
+
+    const metricsResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total_count,
+        COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
+        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+        COUNT(DISTINCT unit_id) as units_count,
+        COUNT(DISTINCT class_id) as classes_count
+      FROM questions
+      WHERE ${whereFilter};
+    `);
+    const metrics = metricsResult.rows[0];
+    return res.status(200).json({
+      status: 'success',
+      metrics: {
+        totalQuestions: parseInt(metrics?.total_count || '0', 10),
+        stagingCount: parseInt(metrics?.staging_count || '0', 10),
+        publishedCount: parseInt(metrics?.published_count || '0', 10),
+        unitsCount: parseInt(metrics?.units_count || '0', 10),
+        classesCount: parseInt(metrics?.classes_count || '0', 10),
+      },
+    });
+  } catch (error: any) {
+    console.error('Error fetching questions metrics:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to retrieve question metrics' });
   }
 });
 
