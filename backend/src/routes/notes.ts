@@ -13,6 +13,8 @@ function mapRowToNote(row: any) {
     unitId: row.unit_id,
     classId: row.class_id,
     subject: row.subject,
+    lessonId: row.lesson_id || null,
+    lessonNumber: row.lesson_number || null,
     lessonTitle: cleanTamilUnicodeText(row.lesson_title || ''),
     topic: row.topic,
     language: row.language,
@@ -30,7 +32,7 @@ function mapRowToNote(row: any) {
 // Public: Get notes
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, unitId, classId, lesson, subject, language, status, limit = '100', offset = '0', strictLanguage } = req.query;
+    const { category, unitId, classId, lessonId, lesson_id, lesson, subject, language, status, limit = '100', offset = '0', strictLanguage } = req.query;
 
     const queryConditions: string[] = [];
     const values: any[] = [];
@@ -71,7 +73,23 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    if (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all') {
+    // Exact lessonId matching with backward-compatible fallback
+    const effectiveLessonId = (typeof lessonId === 'string' && lessonId.trim() && lessonId !== 'all')
+      ? lessonId.trim()
+      : (typeof lesson_id === 'string' && lesson_id.trim() && lesson_id !== 'all')
+        ? lesson_id.trim()
+        : null;
+
+    if (effectiveLessonId) {
+      if (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all') {
+        queryConditions.push(`(lesson_id = $${paramIndex} OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($${paramIndex + 1})))`);
+        values.push(effectiveLessonId, lesson.trim());
+        paramIndex += 2;
+      } else {
+        queryConditions.push(`lesson_id = $${paramIndex++}`);
+        values.push(effectiveLessonId);
+      }
+    } else if (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all') {
       const trimmedLesson = lesson.trim();
       const stripped = trimmedLesson.replace(/^[0-9]+(\.[0-9]+)*[:\s-]*/, '').trim();
       queryConditions.push(`(
@@ -147,6 +165,8 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       subject,
       classId,
       unitId,
+      lessonId,
+      lesson_id,
       lesson,
       status,
       language,
@@ -207,7 +227,22 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       values.push(Number(unitId));
     }
 
-    if (lesson && typeof lesson === 'string' && lesson !== 'all' && lesson.trim()) {
+    const effectiveAdminLessonId = (typeof lessonId === 'string' && lessonId.trim() && lessonId !== 'all')
+      ? lessonId.trim()
+      : (typeof lesson_id === 'string' && lesson_id.trim() && lesson_id !== 'all')
+        ? lesson_id.trim()
+        : null;
+
+    if (effectiveAdminLessonId) {
+      if (lesson && typeof lesson === 'string' && lesson !== 'all' && lesson.trim()) {
+        queryConditions.push(`(lesson_id = $${paramIndex} OR (lesson_id IS NULL AND LOWER(lesson_title) LIKE $${paramIndex + 1}))`);
+        values.push(effectiveAdminLessonId, `%${lesson.trim().toLowerCase()}%`);
+        paramIndex += 2;
+      } else {
+        queryConditions.push(`lesson_id = $${paramIndex++}`);
+        values.push(effectiveAdminLessonId);
+      }
+    } else if (lesson && typeof lesson === 'string' && lesson !== 'all' && lesson.trim()) {
       const trimmedLesson = lesson.trim();
       const stripped = trimmedLesson.replace(/^[0-9]+(\.[0-9]+)*[:\s-]*/, '').trim();
       queryConditions.push(`(
@@ -356,6 +391,8 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
     for (const n of notes) {
       const content = cleanTamilUnicodeText(n.content || n.contentText || '');
       const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title || 'General Lesson');
+      const lessonId = (n.lessonId || n.lesson_id || null) ? String(n.lessonId || n.lesson_id).trim() : null;
+      const lessonNumber = (n.lessonNumber || n.lesson_number || null) ? String(n.lessonNumber || n.lesson_number).trim() : null;
       const unitId = Number(n.unitId || n.unit_id) || 1;
       const category = (n.category || 'group1').trim().toLowerCase();
       const subject = n.subject || 'General Studies';
@@ -371,11 +408,11 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
 
       const res = await client.query(
         `INSERT INTO study_notes (
-           category, unit_id, class_id, subject, lesson_title, topic, language, title, content, status, source_reference
+           category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, status, source_reference
          )
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          RETURNING id`,
-        [category, unitId, classId, subject, lessonTitle, topic, language, title, content, status, sourceReference]
+        [category, unitId, classId, subject, lessonId, lessonNumber, lessonTitle, topic, language, title, content, status, sourceReference]
       );
       insertedNotes.push(res.rows[0]);
     }
@@ -403,6 +440,8 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
       category = 'group1',
       unitId,
       classId,
+      lessonId,
+      lessonNumber,
       lessonTitle,
       topic,
       subject = 'General Studies',
@@ -433,6 +472,8 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
       subject,
       classId: parsedClassId,
       unitId: parsedUnitId,
+      lessonId: lessonId ? String(lessonId).trim() : undefined,
+      lessonNumber: lessonNumber ? String(lessonNumber).trim() : undefined,
       lessonTitle: trimmedLesson,
       topic: trimmedTopic,
       language: lang,
@@ -454,6 +495,8 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
         unitId: parsedUnitId,
         classId: parsedClassId,
         subject,
+        lessonId: (lessonId ? String(lessonId).trim() : result.lessonId) || null,
+        lessonNumber: (lessonNumber ? String(lessonNumber).trim() : result.lessonNumber) || null,
         lessonTitle: trimmedLesson || result.title,
         topic: trimmedTopic,
         language: lang,
@@ -478,6 +521,8 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
     const n = req.body;
     const content = cleanTamilUnicodeText(n.content || n.contentText || '');
     const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title);
+    const lessonId = (n.lessonId || n.lesson_id || null) ? String(n.lessonId || n.lesson_id).trim() : null;
+    const lessonNumber = (n.lessonNumber || n.lesson_number || null) ? String(n.lessonNumber || n.lesson_number).trim() : null;
     const unitId = Number(n.unitId || n.unit_id);
     const category = (n.category || 'group1').trim().toLowerCase();
     const subject = n.subject || 'General Studies';
@@ -502,12 +547,12 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
 
     const insertQuery = `
       INSERT INTO study_notes (
-        category, unit_id, class_id, subject, lesson_title, topic, language, title, content, content_html, tags, status, source_reference
+        category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, content_html, tags, status, source_reference
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       RETURNING *;
     `;
-    const values = [category, unitId, classId, subject, lessonTitle.trim(), topic, language, title.trim(), content, contentHtml, tags, status, sourceReference];
+    const values = [category, unitId, classId, subject, lessonId, lessonNumber, lessonTitle.trim(), topic, language, title.trim(), content, contentHtml, tags, status, sourceReference];
 
     const result = await pool.query(insertQuery, values);
     return res.status(201).json({ status: 'success', message: 'Study notes created successfully', data: mapRowToNote(result.rows[0]) });
@@ -531,6 +576,8 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     if (b.content !== undefined) { updateClauses.push(`content = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.content)); }
     if (b.contentHtml !== undefined) { updateClauses.push(`content_html = $${pIdx++}`); values.push(b.contentHtml); }
     if (b.title !== undefined) { updateClauses.push(`title = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.title)); }
+    if (b.lessonId !== undefined || b.lesson_id !== undefined) { updateClauses.push(`lesson_id = $${pIdx++}`); values.push((b.lessonId || b.lesson_id) ? String(b.lessonId || b.lesson_id).trim() : null); }
+    if (b.lessonNumber !== undefined || b.lesson_number !== undefined) { updateClauses.push(`lesson_number = $${pIdx++}`); values.push((b.lessonNumber || b.lesson_number) ? String(b.lessonNumber || b.lesson_number).trim() : null); }
     if (b.lessonTitle !== undefined || b.lesson_title !== undefined) { updateClauses.push(`lesson_title = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.lessonTitle || b.lesson_title)); }
     if (b.subject !== undefined) { updateClauses.push(`subject = $${pIdx++}`); values.push(b.subject); }
     if (b.category !== undefined) { updateClauses.push(`category = $${pIdx++}`); values.push(b.category); }
@@ -549,6 +596,58 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error updating study note:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to update study notes', error: error.message });
+  }
+});
+
+// Explicitly reassign study note to canonical syllabus lesson
+router.post('/:id/reassign', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ status: 'error', message: 'Invalid note ID' });
+
+    const { category, subject, classId, unitId, lessonId, lessonNumber, lessonTitle } = req.body;
+    if (!lessonId || !lessonTitle) {
+      return res.status(400).json({ status: 'error', message: 'lessonId and lessonTitle are required for reassignment' });
+    }
+
+    const updateQuery = `
+      UPDATE study_notes
+      SET 
+        category = COALESCE($1, category),
+        subject = COALESCE($2, subject),
+        class_id = COALESCE($3, class_id),
+        unit_id = COALESCE($4, unit_id),
+        lesson_id = $5,
+        lesson_number = $6,
+        lesson_title = $7,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $8
+      RETURNING *;
+    `;
+    const values = [
+      category ? String(category).trim().toLowerCase() : null,
+      subject ? String(subject).trim() : null,
+      classId ? Number(classId) : null,
+      unitId ? Number(unitId) : null,
+      String(lessonId).trim(),
+      lessonNumber ? String(lessonNumber).trim() : null,
+      cleanTamilUnicodeText(String(lessonTitle).trim()),
+      id,
+    ];
+
+    const result = await pool.query(updateQuery, values);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Study note not found' });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: `Study Note #${id} safely reassigned to ${lessonNumber ? `Lesson ${lessonNumber}` : lessonId}`,
+      data: mapRowToNote(result.rows[0]),
+    });
+  } catch (error: any) {
+    console.error('Error reassigning study note:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to reassign note', error: error.message });
   }
 });
 

@@ -348,6 +348,7 @@ const Admin = () => {
     classId: notesStandardFilter,
     unitId: notesUnitFilter,
     lessonTitle: notesLessonFilter,
+    selectedLessonObj: notesSelectedLessonObj,
   } = notesSyllabusCascade
 
   // Modals state for Study Notes
@@ -403,7 +404,13 @@ const Admin = () => {
   const [notesLanguage, setNotesLanguage] = useState<'english' | 'tamil'>('english')
   const [notesScope, setNotesScope] = useState<'chapter' | 'full_book'>('chapter')
   const [isNotesGenerating, setIsNotesGenerating] = useState(false)
-  const [notesPreview, setNotesPreview] = useState<{ content: string; title: string; sourceReference?: string } | null>(null)
+  const [notesPreview, setNotesPreview] = useState<{
+    content: string
+    title: string
+    sourceReference?: string
+    lessonId?: string
+    lessonNumber?: string
+  } | null>(null)
   const [isNotesUploading, setIsNotesUploading] = useState(false)
 
   // Lock background page scrolling strictly when any admin modal is open
@@ -1291,6 +1298,9 @@ const Admin = () => {
       if (notesSubjectFilter !== 'all') params.set('subject', notesSubjectFilter)
       if (notesStandardFilter !== 'all') params.set('classId', String(notesStandardFilter))
       if (notesUnitFilter !== 'all') params.set('unitId', String(notesUnitFilter))
+      if (notesSelectedLessonObj?.id) {
+        params.set('lessonId', notesSelectedLessonObj.id)
+      }
       if (notesLessonFilter !== 'all') params.set('lesson', notesLessonFilter)
       if (notesStatusFilter !== 'all') params.set('status', notesStatusFilter)
       if (notesLanguageFilter !== 'all') params.set('language', notesLanguageFilter)
@@ -1326,6 +1336,7 @@ const Admin = () => {
     notesStandardFilter,
     notesUnitFilter,
     notesLessonFilter,
+    notesSelectedLessonObj,
     notesStatusFilter,
     notesLanguageFilter,
     notesPage,
@@ -2300,14 +2311,26 @@ const Admin = () => {
 
   // Open add note modal
   const handleOpenAddNoteModal = () => {
+    const defaultGroup = notesGroupFilter !== 'all' ? notesGroupFilter : 'group2'
+    const subjects = getSubjectsForGroup(defaultGroup as any)
+    const defaultSubject = subjects.find(s => s.id === notesSubjectFilter || s.name === notesSubjectFilter) || subjects[0]
+    const defaultClassId = notesStandardFilter !== 'all' ? Number(notesStandardFilter) : 6
+    const units = getUnitsForSubjectStandard(defaultGroup as any, defaultSubject?.id || 'general-studies', defaultClassId)
+    const defaultUnit = units.find(u => u.id === notesUnitFilter) || units[0]
+    const defaultUnitId = defaultUnit?.id || 1
+    const lessons = getLessonsForSelection(defaultGroup as any, defaultSubject?.id || 'general-studies', defaultClassId, defaultUnitId)
+    const defaultLesson = lessons.find(l => l.id === notesSelectedLessonObj?.id) || lessons[0]
+
     setEditingNote({
       title: '',
       content: '',
-      category: notesGroupFilter !== 'all' ? notesGroupFilter : 'group1',
-      subject: notesSubjectFilter !== 'all' ? notesSubjectFilter : 'General Studies',
-      classId: notesStandardFilter !== 'all' ? Number(notesStandardFilter) : 6,
-      unitId: notesUnitFilter !== 'all' ? Number(notesUnitFilter) : 1,
-      lessonTitle: notesLessonFilter !== 'all' ? notesLessonFilter : '',
+      category: defaultGroup,
+      subject: defaultSubject?.name || 'General Studies',
+      classId: defaultClassId,
+      unitId: defaultUnitId,
+      lessonId: defaultLesson?.id || '',
+      lessonNumber: defaultLesson?.lessonNumber || '',
+      lessonTitle: defaultLesson?.title || (notesLessonFilter !== 'all' ? notesLessonFilter : ''),
       topic: '',
       language: notesLanguageFilter !== 'all' ? notesLanguageFilter : 'tamil',
       status: 'staging',
@@ -2339,6 +2362,8 @@ const Admin = () => {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           ...editingNote,
+          lessonId: editingNote.lessonId || undefined,
+          lessonNumber: editingNote.lessonNumber || undefined,
           status: editingNote.status || 'staging',
         }),
       })
@@ -2380,6 +2405,8 @@ const Admin = () => {
           title: ch.split('\n')[0].replace(/^#+\s*/, '').trim() || `Chapter ${idx + 1}`,
           content: ch.trim(),
           lessonTitle: notesLessonFilter !== 'all' ? notesLessonFilter : `Chapter ${idx + 1}`,
+          lessonId: notesSelectedLessonObj?.id || undefined,
+          lessonNumber: notesSelectedLessonObj?.lessonNumber || undefined,
           unitId: notesUnitFilter !== 'all' ? Number(notesUnitFilter) : idx + 1,
           classId: notesStandardFilter !== 'all' ? Number(notesStandardFilter) : 6,
           subject: notesSubjectFilter !== 'all' ? notesSubjectFilter : 'General Studies',
@@ -3848,10 +3875,22 @@ const Admin = () => {
                           </div>
                         </td>
                         <td>
-                          <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
-                            {n.lessonTitle}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.2rem' }}>
+                            {n.lessonNumber && (
+                              <span className="source-page-pill" style={{ color: 'var(--gold-primary)', borderColor: 'rgba(255, 215, 0, 0.4)', fontWeight: 700, fontSize: '0.75rem', padding: '0.15rem 0.45rem' }}>
+                                Lesson {n.lessonNumber}
+                              </span>
+                            )}
+                            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                              {n.lessonTitle}
+                            </span>
                           </div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{n.subject}</div>
+                          {n.lessonId && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'monospace', opacity: 0.85, marginTop: '0.15rem' }}>
+                              ID: {n.lessonId}
+                            </div>
+                          )}
                           {n.topic && (
                             <div style={{ fontSize: '0.72rem', color: '#c084fc', marginTop: '0.25rem', fontWeight: 500 }}>
                               📌 {n.topic}
@@ -3887,7 +3926,19 @@ const Admin = () => {
                               className="table-action-btn"
                               title="Edit Study Note"
                               onClick={() => {
-                                setEditingNote({ ...n })
+                                const noteToEdit = { ...n }
+                                if (!noteToEdit.lessonId && noteToEdit.lessonTitle) {
+                                  const currentCat = noteToEdit.category || 'group2'
+                                  const subjects = getSubjectsForGroup(currentCat as any)
+                                  const subj = subjects.find((s: any) => s.name === noteToEdit.subject || s.id === noteToEdit.subject) || subjects[0]
+                                  const lessons = getLessonsForSelection(currentCat as any, subj?.id || 'general-studies', noteToEdit.classId || 6, noteToEdit.unitId || 1)
+                                  const matched = lessons.find((l: any) => l.title === noteToEdit.lessonTitle || l.title.includes(noteToEdit.lessonTitle) || noteToEdit.lessonTitle.includes(l.title))
+                                  if (matched) {
+                                    noteToEdit.lessonId = matched.id
+                                    noteToEdit.lessonNumber = matched.lessonNumber
+                                  }
+                                }
+                                setEditingNote(noteToEdit)
                                 setNotesPreviewTab('edit')
                                 setIsNotesEditModalOpen(true)
                               }}
@@ -5976,6 +6027,8 @@ const Admin = () => {
                                   subject: selectedSubjectObj.name,
                                   classId: currentClassId,
                                   unitId: currentUnitId,
+                                  lessonId: selectedLessonObj?.id,
+                                  lessonNumber: selectedLessonObj?.lessonNumber,
                                   lessonTitle: currentLessonTitle,
                                   topic: currentTopicName || currentLessonTitle,
                                   language: notesLanguage,
@@ -5996,6 +6049,8 @@ const Admin = () => {
                                   content: cleanedContent,
                                   title: cleanTamilUnicodeText(data.data.title || currentLessonTitle),
                                   sourceReference: data.data.sourceReference || undefined,
+                                  lessonId: data.data.lessonId || selectedLessonObj?.id,
+                                  lessonNumber: data.data.lessonNumber || selectedLessonObj?.lessonNumber,
                                 })
                                 setAiNotice(
                                   data.source === 'gemini'
@@ -6062,6 +6117,8 @@ const Admin = () => {
                                   subject: selectedSubjectObj.name,
                                   classId: currentClassId,
                                   unitId: currentUnitId,
+                                  lessonId: notesPreview.lessonId || selectedLessonObj?.id,
+                                  lessonNumber: notesPreview.lessonNumber || selectedLessonObj?.lessonNumber,
                                   lessonTitle: currentLessonTitle,
                                   topic: currentTopicName || currentLessonTitle,
                                   language: notesLanguage,
@@ -6104,6 +6161,8 @@ const Admin = () => {
                                   subject: selectedSubjectObj.name,
                                   classId: currentClassId,
                                   unitId: currentUnitId,
+                                  lessonId: notesPreview.lessonId || selectedLessonObj?.id,
+                                  lessonNumber: notesPreview.lessonNumber || selectedLessonObj?.lessonNumber,
                                   lessonTitle: currentLessonTitle,
                                   topic: currentTopicName || currentLessonTitle,
                                   language: notesLanguage,
@@ -6379,83 +6438,183 @@ const Admin = () => {
               </div>
 
               <div className="admin-modal-body" style={{ maxHeight: '75vh', overflowY: 'auto' }}>
-                <div className="form-grid-3" style={{ marginBottom: '0.75rem' }}>
-                  <div className="ai-field">
-                    <label>TNPSC Group</label>
-                    <select
-                      className="ai-select"
-                      value={editingNote.category || 'group1'}
-                      onChange={(e) => setEditingNote({ ...editingNote, category: e.target.value })}
-                    >
-                      <option value="group1">Group 1</option>
-                      <option value="group2">Group 2</option>
-                      <option value="group2a">Group 2A</option>
-                      <option value="group4">Group 4</option>
-                      <option value="vao">VAO</option>
-                    </select>
-                  </div>
+                {/* Dynamic 5-Tier Syllabus Selector for Study Note */}
+                {(() => {
+                  const currentCat = (editingNote.category as any) || 'group2'
+                  const currentClassId = editingNote.classId || 6
+                  const subjects = getSubjectsForGroup(currentCat)
+                  const currentSubj = subjects.find((s: any) => s.name === editingNote.subject || s.id === editingNote.subject) || subjects[0]
+                  const currentSubjId = currentSubj?.id || 'general-studies'
+                  const units = getUnitsForSubjectStandard(currentCat, currentSubjId, currentClassId)
+                  const currentUnitObj = units.find((u: any) => u.id === editingNote.unitId) || units[0]
+                  const currentUnitId = currentUnitObj?.id || 1
+                  const lessons = getLessonsForSelection(currentCat, currentSubjId, currentClassId, currentUnitId)
 
-                  <div className="ai-field">
-                    <label>Subject</label>
-                    <input
-                      type="text"
-                      className="admin-auth-input"
-                      value={editingNote.subject || ''}
-                      onChange={(e) => setEditingNote({ ...editingNote, subject: e.target.value })}
-                      placeholder="e.g. General Tamil, General Studies"
-                    />
-                  </div>
+                  return (
+                    <>
+                      <div className="form-grid-3" style={{ marginBottom: '0.75rem' }}>
+                        <div className="ai-field">
+                          <label>1. TNPSC Group *</label>
+                          <select
+                            className="ai-select"
+                            value={currentCat}
+                            onChange={(e) => {
+                              const newCat = e.target.value as any
+                              const newSubjects = getSubjectsForGroup(newCat)
+                              const newSubj = newSubjects[0]
+                              const newUnits = getUnitsForSubjectStandard(newCat, newSubj?.id || 'general-studies', currentClassId)
+                              const newUnit = newUnits[0]
+                              const newLessons = getLessonsForSelection(newCat, newSubj?.id || 'general-studies', currentClassId, newUnit?.id || 1)
+                              const newLesson = newLessons[0]
+                              setEditingNote({
+                                ...editingNote,
+                                category: newCat,
+                                subject: newSubj?.name || 'General Studies',
+                                unitId: newUnit?.id || 1,
+                                lessonId: newLesson?.id || '',
+                                lessonNumber: newLesson?.lessonNumber || '',
+                                lessonTitle: newLesson?.title || '',
+                              })
+                            }}
+                          >
+                            {TNPSC_GROUPS.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.name} ({g.code})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                  <div className="ai-field">
-                    <label>Standard / Class</label>
-                    <select
-                      className="ai-select"
-                      value={editingNote.classId || 6}
-                      onChange={(e) => setEditingNote({ ...editingNote, classId: Number(e.target.value) })}
-                    >
-                      {[6, 7, 8, 9, 10, 11, 12].map((std) => (
-                        <option key={std} value={std}>{std}th Standard</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                        <div className="ai-field">
+                          <label>2. Subject *</label>
+                          <select
+                            className="ai-select"
+                            value={currentSubj?.name || editingNote.subject}
+                            onChange={(e) => {
+                              const selectedSubjName = e.target.value
+                              const matchedSubj = subjects.find((s: any) => s.name === selectedSubjName) || subjects[0]
+                              const newUnits = getUnitsForSubjectStandard(currentCat, matchedSubj?.id || 'general-studies', currentClassId)
+                              const newUnit = newUnits[0]
+                              const newLessons = getLessonsForSelection(currentCat, matchedSubj?.id || 'general-studies', currentClassId, newUnit?.id || 1)
+                              const newLesson = newLessons[0]
+                              setEditingNote({
+                                ...editingNote,
+                                subject: matchedSubj?.name || selectedSubjName,
+                                unitId: newUnit?.id || 1,
+                                lessonId: newLesson?.id || '',
+                                lessonNumber: newLesson?.lessonNumber || '',
+                                lessonTitle: newLesson?.title || '',
+                              })
+                            }}
+                          >
+                            {subjects.map((s: any) => (
+                              <option key={s.id} value={s.name}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                <div className="form-grid-3" style={{ marginBottom: '0.75rem' }}>
-                  <div className="ai-field">
-                    <label>Unit ID (Number)</label>
-                    <input
-                      type="number"
-                      className="admin-auth-input"
-                      value={editingNote.unitId || 1}
-                      onChange={(e) => setEditingNote({ ...editingNote, unitId: Number(e.target.value) })}
-                      min={1}
-                      max={20}
-                    />
-                  </div>
+                        <div className="ai-field">
+                          <label>3. Standard / Class *</label>
+                          <select
+                            className="ai-select"
+                            value={currentClassId}
+                            onChange={(e) => {
+                              const newClassId = Number(e.target.value) || 6
+                              const newUnits = getUnitsForSubjectStandard(currentCat, currentSubjId, newClassId)
+                              const newUnit = newUnits[0]
+                              const newLessons = getLessonsForSelection(currentCat, currentSubjId, newClassId, newUnit?.id || 1)
+                              const newLesson = newLessons[0]
+                              setEditingNote({
+                                ...editingNote,
+                                classId: newClassId,
+                                unitId: newUnit?.id || 1,
+                                lessonId: newLesson?.id || '',
+                                lessonNumber: newLesson?.lessonNumber || '',
+                                lessonTitle: newLesson?.title || '',
+                              })
+                            }}
+                          >
+                            {[6, 7, 8, 9, 10, 11, 12].map((std) => (
+                              <option key={std} value={std}>{std}th Standard</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
 
-                  <div className="ai-field">
-                    <label>Lesson Title *</label>
-                    <input
-                      type="text"
-                      className="admin-auth-input"
-                      value={editingNote.lessonTitle || ''}
-                      onChange={(e) => setEditingNote({ ...editingNote, lessonTitle: e.target.value })}
-                      placeholder="e.g. 1.1 Measurements and SI Units"
-                    />
-                  </div>
+                      <div className="form-grid-3" style={{ marginBottom: '0.75rem' }}>
+                        <div className="ai-field">
+                          <label>4. Unit *</label>
+                          <select
+                            className="ai-select"
+                            value={currentUnitId}
+                            onChange={(e) => {
+                              const newUnitId = Number(e.target.value) || 1
+                              const newLessons = getLessonsForSelection(currentCat, currentSubjId, currentClassId, newUnitId)
+                              const newLesson = newLessons[0]
+                              setEditingNote({
+                                ...editingNote,
+                                unitId: newUnitId,
+                                lessonId: newLesson?.id || '',
+                                lessonNumber: newLesson?.lessonNumber || '',
+                                lessonTitle: newLesson?.title || '',
+                              })
+                            }}
+                          >
+                            {units.map((u: any) => (
+                              <option key={u.id} value={u.id}>
+                                {u.unitNumber ? `Unit ${u.unitNumber}: ` : ''}{u.title}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                  <div className="ai-field">
-                    <label>Language</label>
-                    <select
-                      className="ai-select"
-                      value={editingNote.language || 'tamil'}
-                      onChange={(e) => setEditingNote({ ...editingNote, language: e.target.value })}
-                    >
-                      <option value="tamil">Tamil (தமிழ்)</option>
-                      <option value="english">English</option>
-                    </select>
-                  </div>
-                </div>
+                        <div className="ai-field">
+                          <label>5. Lesson Selection (Exact Lesson) *</label>
+                          <select
+                            className="ai-select"
+                            value={editingNote.lessonId || editingNote.lessonTitle || ''}
+                            onChange={(e) => {
+                              const chosen = e.target.value
+                              const matched = lessons.find((l: any) => l.id === chosen) || lessons.find((l: any) => l.title === chosen)
+                              setEditingNote({
+                                ...editingNote,
+                                lessonId: matched?.id || (chosen.startsWith('gt-') || chosen.startsWith('gs-') ? chosen : ''),
+                                lessonNumber: matched?.lessonNumber || '',
+                                lessonTitle: matched?.title || chosen,
+                              })
+                            }}
+                          >
+                            <option value="" disabled>-- Select Lesson ({lessons.length} available) --</option>
+                            {lessons.map((l: any) => (
+                              <option key={l.id} value={l.id}>
+                                {l.lessonNumber ? `Lesson ${l.lessonNumber} – ` : ''}{l.title}
+                              </option>
+                            ))}
+                            {editingNote.lessonTitle && !lessons.some((l: any) => l.id === editingNote.lessonId || l.title === editingNote.lessonTitle) && (
+                              <option value={editingNote.lessonTitle}>
+                                {editingNote.lessonNumber ? `Lesson ${editingNote.lessonNumber} – ` : ''}{editingNote.lessonTitle}
+                              </option>
+                            )}
+                          </select>
+                        </div>
+
+                        <div className="ai-field">
+                          <label>Language *</label>
+                          <select
+                            className="ai-select"
+                            value={editingNote.language || 'tamil'}
+                            onChange={(e) => setEditingNote({ ...editingNote, language: e.target.value })}
+                          >
+                            <option value="tamil">Tamil (தமிழ்)</option>
+                            <option value="english">English</option>
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  )
+                })()}
 
                 <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
                   <div className="ai-field">
@@ -6611,7 +6770,13 @@ const Admin = () => {
                       {previewingNote.status}
                     </span>
                     <span className="ai-tag-pill ai-tag-group">{previewingNote.category?.toUpperCase()}</span>
+                    {previewingNote.lessonNumber && (
+                      <span className="ai-tag-pill" style={{ color: 'var(--gold-primary)', borderColor: 'rgba(255, 215, 0, 0.4)', fontWeight: 700 }}>
+                        Lesson {previewingNote.lessonNumber}
+                      </span>
+                    )}
                     <span className="ai-tag-pill">Unit {previewingNote.unitId}</span>
+                    <span className="ai-tag-pill">Class {previewingNote.classId || '6'}</span>
                     <span className="ai-tag-pill">{previewingNote.subject}</span>
                   </div>
                   <h3 className="admin-modal-title" style={{ fontSize: '1.15rem' }}>

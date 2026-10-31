@@ -651,11 +651,19 @@ export const SyllabusCascadeSelector: React.FC<SyllabusCascadeSelectorProps> = (
                 </option>
               )
             ) : (
-              availableLessons.map((l) => (
-                <option key={l.id} value={l.title}>
-                  {l.lessonNumber} {l.title}
-                </option>
-              ))
+              availableLessons.map((l) => {
+                const numPrefix = l.lessonNumber
+                  ? l.lessonNumber.toLowerCase().startsWith('lesson')
+                    ? l.lessonNumber
+                    : `Lesson ${l.lessonNumber}`
+                  : ''
+                const displayLabel = numPrefix ? `${numPrefix} – ${l.title}` : l.title
+                return (
+                  <option key={l.id} value={l.title}>
+                    {displayLabel}
+                  </option>
+                )
+              })
             )}
           </select>
         </div>

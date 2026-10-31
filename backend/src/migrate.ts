@@ -51,6 +51,8 @@ export async function runMigration() {
         unit_id INT NOT NULL,
         class_id INT,
         subject VARCHAR(100) NOT NULL,
+        lesson_id VARCHAR(100),
+        lesson_number VARCHAR(50),
         lesson_title VARCHAR(255) NOT NULL,
         topic VARCHAR(255),
         language VARCHAR(10) NOT NULL DEFAULT 'english' CHECK (language IN ('tamil', 'english')),
@@ -63,6 +65,27 @@ export async function runMigration() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Ensure lesson_id and lesson_number exist in study_notes for migrations
+    await client.query(`
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_id VARCHAR(100);
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_number VARCHAR(50);
+    `);
+
+    // Safe backfill for existing Study Notes missing lesson_id
+    await client.query(`
+      UPDATE study_notes
+      SET 
+        lesson_id = 'gt-1-6-t1-l1',
+        lesson_number = '1.1',
+        lesson_title = '6-ஆம் வகுப்பு (பருவம் 1): எழுத்து இலக்கணம், வகை, தொகை & மாத்திரை அளவுகள்'
+      WHERE 
+        (lesson_id IS NULL OR lesson_id = '')
+        AND unit_id = 1 
+        AND (class_id = 6 OR class_id IS NULL)
+        AND (LOWER(subject) LIKE '%tamil%' OR LOWER(category) LIKE '%group2%')
+        AND (lesson_title LIKE '%எழுத்து இலக்கணம்%' OR lesson_title LIKE '%1.1%');
     `);
 
     // 4. Create textbooks table
@@ -253,6 +276,16 @@ export async function runMigration() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_study_notes_category_lesson 
       ON study_notes (category, lesson_title, status);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_study_notes_lesson_id 
+      ON study_notes (lesson_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_study_notes_lookup 
+      ON study_notes (category, subject, class_id, unit_id, lesson_id, status);
     `);
 
     await client.query(`

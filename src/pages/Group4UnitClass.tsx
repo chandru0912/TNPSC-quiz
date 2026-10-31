@@ -323,7 +323,7 @@ const Group4UnitClass = () => {
                         className="lesson-read-btn"
                         onClick={() => {
                           const lessonTitle = lesson.title
-                          navigate(`/study-notes/group4_vao/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}`)
+                          navigate(`/study-notes/group4_vao/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}`)
                         }}
                         title={isTamil ? `${lesson.title} பாடக் குறிப்புகளைப் படிக்க` : `Read study notes for ${lesson.title}`}
                       >

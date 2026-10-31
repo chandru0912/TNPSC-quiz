@@ -115,7 +115,10 @@ const Group4Lessons = () => {
                 }
               })
             }
-            const matchingDbNotes = dbNotes.filter((dn) => dn.lessonTitle && lesson.title && dn.lessonTitle.toLowerCase() === lesson.title.toLowerCase())
+            const matchingDbNotes = dbNotes.filter((dn) =>
+              (dn.lessonId && lesson.id && dn.lessonId === lesson.id) ||
+              (!dn.lessonId && dn.lessonTitle && lesson.title && dn.lessonTitle.toLowerCase() === lesson.title.toLowerCase())
+            )
             if (matchingDbNotes.length > 0) {
               if (!lesson.studyNotes) lesson.studyNotes = []
               matchingDbNotes.forEach((mn) => {
@@ -301,7 +304,7 @@ const Group4Lessons = () => {
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={() =>
-                          navigate(`/study-notes/group4_vao/subject/${subject.id}/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}`)
+                          navigate(`/study-notes/group4_vao/subject/${subject.id}/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}`)
                         }
                       >
                         <FileQuestion size={16} />

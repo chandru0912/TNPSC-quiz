@@ -8,6 +8,8 @@ export interface GenerateNotesRequestParams {
   subject: string;
   classId: number | null;
   unitId: number;
+  lessonId?: string;
+  lessonNumber?: string;
   lessonTitle: string;
   topic?: string;
   language: 'tamil' | 'english';
@@ -23,6 +25,8 @@ export interface GeneratedNotesResult {
   content: string;
   source: 'gemini' | 'textbook_rag';
   modelUsed: string;
+  lessonId?: string | null;
+  lessonNumber?: string | null;
   textbookUsed: {
     id: number | null;
     name: string;
@@ -600,6 +604,8 @@ export async function generateStudyNotesWithRag(
         content: combinedContent,
         source: finalSource,
         modelUsed: activeModel,
+        lessonId: params.lessonId || null,
+        lessonNumber: params.lessonNumber || null,
         textbookUsed: {
           id: resolvedTextbookId,
           name: resolvedBookName,
@@ -669,6 +675,8 @@ export async function generateStudyNotesWithRag(
     content: cleanTamilUnicodeText(content),
     source: finalSource,
     modelUsed: activeModel,
+    lessonId: params.lessonId || null,
+    lessonNumber: params.lessonNumber || null,
     textbookUsed: {
       id: resolvedTextbookId,
       name: resolvedBookName,

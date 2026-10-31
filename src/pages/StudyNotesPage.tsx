@@ -21,6 +21,7 @@ import {
 import { useLanguage } from '../context/LanguageContext'
 import { apiFetch } from '../utils/api'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
+import { getLessonsForSelection } from '../data/unifiedSyllabusRegistry'
 import './StudyNotesPage.css'
 
 interface StudyNoteRecord {
@@ -29,6 +30,8 @@ interface StudyNoteRecord {
   unitId: number
   classId: number | null
   subject: string
+  lessonId?: string | null
+  lessonNumber?: string | null
   lessonTitle: string
   topic?: string
   language: string
@@ -276,6 +279,9 @@ const StudyNotesPage: React.FC = () => {
   const rawTitle = lessonTitle || searchParams.get('lessonTitle') || ''
   const decodedLessonTitle = decodeURIComponent(rawTitle)
 
+  const queryLessonId = searchParams.get('lessonId') || ''
+  const queryLessonNumber = searchParams.get('lessonNumber') || ''
+
   const queryClassId = searchParams.get('classId')
   const effectiveClassId = paramClassId || (queryClassId && !isNaN(Number(queryClassId)) ? queryClassId : '')
 
@@ -303,6 +309,57 @@ const StudyNotesPage: React.FC = () => {
     return 'general-tamil'
   }, [subjectId, normalizedCategory])
 
+  // Canonical lesson ID and number resolution
+  const canonicalLessonId = useMemo(() => {
+    if (queryLessonId) return queryLessonId
+    if (effectiveClassId && unitId && decodedLessonTitle) {
+      try {
+        const lessons = getLessonsForSelection(
+          normalizedCategory as any,
+          effectiveSubject,
+          Number(effectiveClassId),
+          Number(unitId)
+        )
+        const matched = lessons.find(
+          (l) =>
+            (queryLessonNumber && l.lessonNumber === queryLessonNumber) ||
+            l.title === decodedLessonTitle ||
+            l.title.toLowerCase() === decodedLessonTitle.toLowerCase() ||
+            decodedLessonTitle.includes(l.title) ||
+            l.title.includes(decodedLessonTitle)
+        )
+        return matched?.id || ''
+      } catch {
+        return ''
+      }
+    }
+    return ''
+  }, [queryLessonId, queryLessonNumber, effectiveClassId, unitId, decodedLessonTitle, normalizedCategory, effectiveSubject])
+
+  const canonicalLessonNumber = useMemo(() => {
+    if (queryLessonNumber) return queryLessonNumber
+    if (effectiveClassId && unitId && decodedLessonTitle) {
+      try {
+        const lessons = getLessonsForSelection(
+          normalizedCategory as any,
+          effectiveSubject,
+          Number(effectiveClassId),
+          Number(unitId)
+        )
+        const matched = lessons.find(
+          (l) =>
+            l.id === canonicalLessonId ||
+            l.title === decodedLessonTitle ||
+            l.title.toLowerCase() === decodedLessonTitle.toLowerCase()
+        )
+        return matched?.lessonNumber || ''
+      } catch {
+        return ''
+      }
+    }
+    return ''
+  }, [queryLessonNumber, canonicalLessonId, effectiveClassId, unitId, decodedLessonTitle, normalizedCategory, effectiveSubject])
+
   const fetchNotes = async () => {
     setLoading(true)
     setError(null)
@@ -312,6 +369,9 @@ const StudyNotesPage: React.FC = () => {
       if (unitId && !isNaN(Number(unitId))) params.set('unitId', unitId)
       if (effectiveClassId) params.set('classId', effectiveClassId)
       params.set('subject', effectiveSubject)
+      if (canonicalLessonId) {
+        params.set('lessonId', canonicalLessonId)
+      }
       params.set('lesson', decodedLessonTitle)
       if (selectedLang !== 'all') {
         params.set('language', selectedLang)
@@ -337,7 +397,7 @@ const StudyNotesPage: React.FC = () => {
 
   useEffect(() => {
     fetchNotes()
-  }, [normalizedCategory, unitId, effectiveClassId, effectiveSubject, decodedLessonTitle, selectedLang])
+  }, [normalizedCategory, unitId, effectiveClassId, effectiveSubject, decodedLessonTitle, canonicalLessonId, selectedLang])
 
   const groupDisplayName = useMemo(() => {
     if (normalizedCategory === 'group1') return isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1'
@@ -441,6 +501,11 @@ const StudyNotesPage: React.FC = () => {
               <BookOpen size={13} />
               <span>{isTamil ? 'பாடக் குறிப்புகள்' : 'Study Notes'}</span>
             </span>
+            {(canonicalLessonNumber || activeNote?.lessonNumber) && (
+              <span className="study-meta-pill study-meta-pill-gold" style={{ fontWeight: 700 }}>
+                <span>{isTamil ? `பாடம் ${canonicalLessonNumber || activeNote?.lessonNumber}` : `Lesson ${canonicalLessonNumber || activeNote?.lessonNumber}`}</span>
+              </span>
+            )}
             <span className="study-meta-pill study-meta-pill-blue">
               <Layers size={13} />
               <span>{groupDisplayName}</span>
