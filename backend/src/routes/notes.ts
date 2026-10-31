@@ -114,29 +114,80 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// Admin: list all
+// Admin: list all with rich search, syllabus cascade filters, pagination
 router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const { category, lesson, status, language, limit = '50', offset = '0' } = req.query;
+    const {
+      search,
+      category,
+      subject,
+      classId,
+      unitId,
+      lesson,
+      status,
+      language,
+      limit = '50',
+      offset = '0',
+    } = req.query;
+
     const queryConditions: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
 
-    if (category && typeof category === 'string' && category !== 'all') {
-      queryConditions.push(`category = $${paramIndex++}`);
-      values.push(category);
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = `%${search.trim().toLowerCase()}%`;
+      const numQ = Number(search.trim());
+      if (!isNaN(numQ) && numQ > 0) {
+        queryConditions.push(`(id = $${paramIndex} OR LOWER(title) LIKE $${paramIndex + 1} OR LOWER(lesson_title) LIKE $${paramIndex + 1} OR LOWER(content) LIKE $${paramIndex + 1})`);
+        values.push(numQ, q);
+        paramIndex += 2;
+      } else {
+        queryConditions.push(`(LOWER(title) LIKE $${paramIndex} OR LOWER(lesson_title) LIKE $${paramIndex} OR LOWER(subject) LIKE $${paramIndex} OR LOWER(content) LIKE $${paramIndex} OR LOWER(source_reference) LIKE $${paramIndex})`);
+        values.push(q);
+        paramIndex++;
+      }
     }
-    if (lesson && typeof lesson === 'string' && lesson.trim()) {
+
+    if (category && typeof category === 'string' && category !== 'all') {
+      const cleanCat = category.trim().toLowerCase();
+      if (cleanCat === 'group2_2a' || cleanCat === 'group2' || cleanCat === 'group2a') {
+        queryConditions.push(`category IN ('group2', 'group2a', 'group2_2a')`);
+      } else if (cleanCat === 'group4_vao' || cleanCat === 'group4' || cleanCat === 'vao') {
+        queryConditions.push(`category IN ('group4', 'vao', 'group4_vao')`);
+      } else {
+        queryConditions.push(`category = $${paramIndex++}`);
+        values.push(cleanCat);
+      }
+    }
+
+    if (subject && typeof subject === 'string' && subject !== 'all' && subject.trim()) {
+      queryConditions.push(`LOWER(subject) = $${paramIndex++}`);
+      values.push(subject.trim().toLowerCase());
+    }
+
+    if (classId && classId !== 'all' && !isNaN(Number(classId))) {
+      queryConditions.push(`class_id = $${paramIndex++}`);
+      values.push(Number(classId));
+    }
+
+    if (unitId && unitId !== 'all' && !isNaN(Number(unitId))) {
+      queryConditions.push(`unit_id = $${paramIndex++}`);
+      values.push(Number(unitId));
+    }
+
+    if (lesson && typeof lesson === 'string' && lesson !== 'all' && lesson.trim()) {
       queryConditions.push(`LOWER(lesson_title) LIKE $${paramIndex++}`);
       values.push(`%${lesson.trim().toLowerCase()}%`);
     }
+
     if (status && typeof status === 'string' && status !== 'all') {
       queryConditions.push(`status = $${paramIndex++}`);
       values.push(status);
     }
+
     if (language && typeof language === 'string' && language !== 'all') {
       queryConditions.push(`language = $${paramIndex++}`);
-      values.push(language);
+      values.push(language.toLowerCase());
     }
 
     const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(' AND ')}` : '';
@@ -170,6 +221,92 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       message: 'Failed to retrieve admin study notes',
       error: error.message,
     });
+  }
+});
+
+// Bulk publish study notes
+router.post('/bulk-publish', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No note IDs provided for bulk publish' });
+    }
+    const validIds = ids.map(id => Number(id)).filter(id => !isNaN(id) && id > 0);
+    if (validIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No valid note IDs provided' });
+    }
+
+    const result = await pool.query(
+      `UPDATE study_notes 
+       SET status = 'published', updated_at = CURRENT_TIMESTAMP 
+       WHERE id = ANY($1) 
+       RETURNING id`,
+      [validIds]
+    );
+
+    return res.status(200).json({
+      status: 'success',
+      message: `Published ${result.rowCount} study note(s) successfully`,
+      publishedCount: result.rowCount,
+    });
+  } catch (error: any) {
+    console.error('Error in bulk-publish study notes:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to publish study notes', error: error.message });
+  }
+});
+
+// Bulk upload study notes
+router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const { notes } = req.body;
+    if (!Array.isArray(notes) || notes.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No notes provided in bulk upload' });
+    }
+
+    await client.query('BEGIN');
+    const insertedNotes = [];
+
+    for (const n of notes) {
+      const content = n.content || n.contentText || '';
+      const lessonTitle = n.lessonTitle || n.lesson_title || 'General Lesson';
+      const unitId = Number(n.unitId || n.unit_id) || 1;
+      const category = (n.category || 'group1').trim().toLowerCase();
+      const subject = n.subject || 'General Studies';
+      const classId = n.classId ? Number(n.classId) : (n.class_id ? Number(n.class_id) : 6);
+      const topic = n.topic || '';
+      const language = (n.language || 'english').trim().toLowerCase();
+      const title = n.title || lessonTitle;
+      const sourceReference = n.sourceReference || n.source_reference || null;
+      // All uploaded notes initially enter staging
+      const status = n.status === 'published' ? 'published' : 'staging';
+
+      if (!content || content.trim().length < 5) continue;
+
+      const res = await client.query(
+        `INSERT INTO study_notes (
+           category, unit_id, class_id, subject, lesson_title, topic, language, title, content, status, source_reference
+         )
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         RETURNING id`,
+        [category, unitId, classId, subject, lessonTitle, topic, language, title, content, status, sourceReference]
+      );
+      insertedNotes.push(res.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    return res.status(201).json({
+      status: 'success',
+      message: `Successfully uploaded ${insertedNotes.length} study note(s) to Staging`,
+      count: insertedNotes.length,
+      data: insertedNotes,
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error in bulk-upload study notes:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to bulk upload study notes', error: error.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -308,6 +445,13 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     if (b.content !== undefined) { updateClauses.push(`content = $${pIdx++}`); values.push(b.content); }
     if (b.contentHtml !== undefined) { updateClauses.push(`content_html = $${pIdx++}`); values.push(b.contentHtml); }
     if (b.title !== undefined) { updateClauses.push(`title = $${pIdx++}`); values.push(b.title); }
+    if (b.lessonTitle !== undefined || b.lesson_title !== undefined) { updateClauses.push(`lesson_title = $${pIdx++}`); values.push(b.lessonTitle || b.lesson_title); }
+    if (b.subject !== undefined) { updateClauses.push(`subject = $${pIdx++}`); values.push(b.subject); }
+    if (b.category !== undefined) { updateClauses.push(`category = $${pIdx++}`); values.push(b.category); }
+    if (b.unitId !== undefined || b.unit_id !== undefined) { updateClauses.push(`unit_id = $${pIdx++}`); values.push(Number(b.unitId || b.unit_id)); }
+    if (b.classId !== undefined || b.class_id !== undefined) { updateClauses.push(`class_id = $${pIdx++}`); values.push(Number(b.classId || b.class_id)); }
+    if (b.language !== undefined) { updateClauses.push(`language = $${pIdx++}`); values.push(b.language); }
+    if (b.sourceReference !== undefined || b.source_reference !== undefined) { updateClauses.push(`source_reference = $${pIdx++}`); values.push(b.sourceReference || b.source_reference); }
     if (b.status !== undefined && ['staging','published','archived'].includes(b.status)) { updateClauses.push(`status = $${pIdx++}`); values.push(b.status); }
     if (b.tags !== undefined) { updateClauses.push(`tags = $${pIdx++}`); values.push(JSON.stringify(Array.isArray(b.tags) ? b.tags : [])); }
 

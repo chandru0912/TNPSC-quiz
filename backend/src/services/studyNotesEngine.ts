@@ -41,6 +41,14 @@ const GEMINI_MODELS = [
 /**
  * Builds the authoritative TNPSC One-Liner Notes prompt.
  * Strictly adheres to official Samacheer Kalvi textbook facts with no external hallucination.
+ * Follows the mandatory 6-Section TNPSC Coaching Material Schema:
+ * CHAPTER X: [Original Chapter Title]
+ * SECTION 1: IMPORTANT ONE-LINER NOTES
+ * SECTION 2: AUTHORS AND LITERARY WORKS
+ * SECTION 3: IMPORTANT FACTS
+ * SECTION 4: CLASSIFICATIONS AND TABLES
+ * SECTION 5: TNPSC EXAM-ORIENTED FACTS
+ * SECTION 6: QUICK REVISION
  */
 function buildOneLinerPrompt(params: {
   chapterTitle: string;
@@ -56,17 +64,18 @@ function buildOneLinerPrompt(params: {
   const isTamil = params.lang === 'tamil';
 
   if (isTamil) {
-    return `நீங்கள் ஒரு தமிழ்நாடு அரசுப் பணியாளர் தேர்வாணையம் (TNPSC) மற்றும் சமச்சீர் கல்வி பாடநூல் சார்ந்த முதன்மை தேர்வுப் பொருள் தயாரிப்பாளர் (Senior TNPSC Subject Matter Expert).
+    return `நீங்கள் ஒரு முதன்மை TNPSC பேராசிரியர் மற்றும் தமிழ்நாடு அரசு சமச்சீர் கல்வி பாடநூல் சிறப்பு வல்லுநர் (Expert TNPSC Coaching Professor and Tamil Nadu State Board Textbook Specialist).
 
-கீழே கொடுக்கப்பட்டுள்ள அதிகாரப்பூர்வ தமிழ்நாடு அரசுப் பள்ளிப் பாடநூல் (Samacheer Kalvi) பக்கங்களை முழுமையாக ஆய்வு செய்து, தேர்வர்கள் எளிதில் நினைவில் வைத்துக்கொள்ளும் வகையில் உயர்தர TNPSC ஒருவரி குறிப்புகளை (TNPSC One-Liner Coaching Notes) தயார் செய்யவும்.
+உங்கள் பணி: பதிவேற்றப்பட்ட பாடநூல் பக்கங்களை (Samacheer Kalvi PDF) ஆய்வு செய்து, TNPSC குரூப் 1, 2, 2A, 4 மற்றும் VAO தேர்வுகளுக்குப் பயன்படும் உயர்தர, விரிவான தேர்வு சார்ந்த ஒருவரி குறிப்புகளை (High-Quality One-Liner Coaching Notes) தயாரிப்பது.
 
-பாடநூல் குறிப்பு (Textbook Reference):
+ஆதாரம் (SOURCE):
+- நிர்வாகி பதிவேற்றிய பாடநூலின் உண்மைத் தரவுகளை மட்டுமே முதன்மை ஆதாரமாகப் பயன்படுத்தவும்.
 - பாடநூல்: ${params.bookName}
 - பக்கங்கள்: ${params.pages.join(', ')}
 - இலக்குத் தேர்வு: ${params.category.toUpperCase()}
 - பாடம்: ${params.subject}
 - வகுப்பு: ${params.classId ? params.classId + 'ஆம் வகுப்பு' : 'பொருத்தமான வகுப்பு'}
-- அலகு / இயல் / பாடம்: ${params.chapterNumber} - "${params.chapterTitle}"
+- இயல் / பாடம்: ${params.chapterNumber} - "${params.chapterTitle}"
 - மொழி: தமிழ் (தூய தமிழ் யுனிகோட்)
 
 அதிகாரப்பூர்வ பாடநூல் பகுதிகள் (AUTHORITATIVE TEXTBOOK PASSAGES):
@@ -74,54 +83,70 @@ function buildOneLinerPrompt(params: {
 ${params.passagesText}
 """
 
-கட்டாய விதிகள் (MANDATORY RULES):
-1. பாடநூலில் உள்ள தகவல்கள் மட்டுமே உண்மை ஆதாரம். சொந்தக் கற்பனையிலோ அல்லது பொது அறிவிலோ இருந்து தகவல்களை சேர்க்கக் கூடாது.
-2. பெயர்கள், ஆண்டுகள், நூல்கள், ஆசிரியர்கள், இடங்கள், எண்கள், வரையறைகள் பாடநூலில் உள்ளவாறே பிழையின்றி இருக்க வேண்டும்.
-3. ஒவ்வொரு குறிப்பிலும் அடைப்புக்குறிக்குள் [பக்க எண்: X] என பாடநூல் பக்க எண்ணைக் குறிப்பிடவும்.
-4. அனைத்து தலைப்புகளும், அட்டவணைகளும் முழுமையாக இருக்க வேண்டும்.
+கட்டாய விதிகள் (STRICT INSTRUCTIONS):
+1. கொடுக்கப்பட்டுள்ள பாடநூல் பக்கங்களை முழுமையாக ஆய்வு செய்யவும்.
+2. அத்தியாயங்கள், பாடங்கள், தலைப்புகள் மற்றும் துணைத்தலைப்புகளை துல்லியமாக கண்டறியவும்.
+3. தேர்வு நோக்கில் முக்கியமான அனைத்து தகவல்களையும் வெளிக்கொணரவும்.
+4. நீண்ட பத்திகளை குறுகிய, நேரடியான, எண்ணிடப்பட்ட ஒருவரி குறிப்புகளாக மாற்றவும்.
+5. பெயர்கள், தேதிகள், ஆண்டுகள், எண்கள், வரையறைகள் மற்றும் கலைச்சொற்கள் பாடநூலில் உள்ளவாறே பிழையின்றி இருக்க வேண்டும்.
+6. சொந்தக் கற்பனையிலோ அல்லது பொது அறிவிலோ இருந்து தகவல்களை சேர்க்கக் கூடாது (Never invent or assume).
+7. பாடநூலில் உள்ள முக்கிய தகவல்களைத் தவிர்க்கக் கூடாது (Do not omit important textbook facts).
+8. தேவையற்ற நீண்ட விளக்கங்களையும், ஒரே தகவலைத் திரும்பத் திரும்ப எழுதுவதையும் தவிர்க்கவும்.
+9. இயன்றவரை ஒவ்வொரு குறிப்பிலும் [பக்கம்: X] அல்லது [பக்கங்கள்: X-Y] என பக்க எண்களைக் குறிப்பிடவும்.
+10. தூய தமிழ் யுனிகோட் எழுத்துருவைப் பயன்படுத்தவும்.
 
-வெளியீட்டு கட்டமைப்பு (OUTPUT STRUCTURE):
-# ${params.chapterNumber}. ${params.chapterTitle}
+வெளியீட்டு கட்டமைப்பு (MANDATORY OUTPUT FORMAT):
+
+CHAPTER ${params.chapterNumber}: ${params.chapterTitle}
 > **பாடநூல் ஆதாரம்**: ${params.bookName} (பக்கங்கள்: ${params.pages.join(', ')})
 
-## 1. முக்கிய ஒருவரி குறிப்புகள் (Important One-Liner Notes)
-(பாடநூலில் உள்ள அனைத்து முக்கிய பத்திகளையும் எளிதில் மனனம் செய்யக்கூடிய நேரடி உண்மைகளாக வரிசை எண் இட்டு எழுதவும். குறைந்தது 15-25 முக்கியமான ஒருவரி குறிப்புகள்)
+SECTION 1: IMPORTANT ONE-LINER NOTES
+(பாடநூலில் உள்ள அனைத்து முக்கிய பத்திகளையும் எளிதில் மனனம் செய்யக்கூடிய நேரடி தேர்வு உண்மைகளாக எண்ணிட்டு வரிசையாக எழுதவும். குறைந்தது 15-25 விரிவான குறிப்புகள்.)
 1. [நேரடி தேர்வு உண்மை 1] - [பக்கம்: X]
 2. [நேரடி தேர்வு உண்மை 2] - [பக்கம்: X]
 3. [நேரடி தேர்வு உண்மை 3] - [பக்கம்: X]
 
-## 2. ஆசிரியர் & இலக்கியக் குறிப்புகள் / முக்கிய ஆளுமைகள் (Author & Literary Works)
-(ஆசிரியர் பெயர், இயற்பெயர், சிறப்புப் பெயர், பட்டங்கள், இயற்றிய நூல்கள், காலம் ஆகியவற்றை தெளிவான Markdown அட்டவணையாகத் தரவும்)
-| ஆளுமை / ஆசிரியர் பெயர் | இயற்பெயர் / புனைப்பெயர் | சிறப்புப் பட்டங்கள் | முக்கிய நூல்கள் / படைப்புகள் | முக்கிய தேர்வுத் தகவல்கள் |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
+SECTION 2: AUTHORS AND LITERARY WORKS
+(பாடநூலில் இடம்பெற்றுள்ள ஆசிரியர்கள், புலவர்கள், இலக்கியங்கள், உரைநடை நூல்கள், பாடல்கள் பற்றிய விரிவான அட்டவணை. ஆசிரியர் பெயர், இயற்பெயர், புனைப்பெயர், சிறப்புப் பட்டங்கள், இயற்றிய நூல்கள், முக்கியப் பங்களிப்புகள்.)
+| ஆசிரியர் / ஆளுமை பெயர் | இயற்பெயர் | புனைப்பெயர் | சிறப்புப் பட்டங்கள் | முக்கிய நூல்கள் / படைப்புகள் | முக்கியத் தேர்வுப் பங்களிப்புகள் |
+|---|---|---|---|---|---|
+| ... | ... | ... | ... | ... | ... |
 
-## 3. முக்கிய வகைப்பாடுகள் & ஒப்பீட்டு அட்டவணைகள் (Important Classifications & Tables)
-(பாடநூலில் வரும் வகைகள், எண்கள், வேறுபாடுகள், காலவரிசை ஆகியவற்றை நினைவில் நிறுத்த அட்டவணையாகத் தரவும்)
-| தலைப்பு / வகைப்பாடு | உட்பிரிவுகள் / முக்கிய எண்கள் | முக்கிய வேறுபாடுகள் & பாடநூல் சான்றுகள் |
+SECTION 3: IMPORTANT FACTS
+(பாடநூலில் இடம்பெற்றுள்ள முக்கிய தேதிகள், ஆண்டுகள், எண்கள், ஆளுமைகள், இடங்கள், வரலாற்று நிகழ்வுகள் மற்றும் முக்கிய அறிவியல்/இலக்கண வரையறைகள்.)
+- **முக்கிய ஆண்டுகள் & தேதிகள்**: ...
+- **முக்கிய எண்கள் & புள்ளிவிவரங்கள்**: ...
+- **முக்கிய ஆளுமைகள் & வரலாற்று இடங்கள்**: ...
+- **அடிப்படை வரையறைகள் & இலக்கணக் கோட்பாடுகள்**: ...
+
+SECTION 4: CLASSIFICATIONS AND TABLES
+(பாடநூலில் வரும் முக்கிய வகைப்பாடுகள், வகைகள், பிரிவுகள் மற்றும் ஒப்பீட்டு அட்டவணைகள்.)
+| தலைப்பு / வகைப்பாடு | உட்பிரிவுகள் / எண்கள் | முக்கிய வேறுபாடுகள் & பாடநூல் சான்றுகள் |
 |---|---|---|
 | ... | ... | ... |
 
-## 4. TNPSC தேர்வு முக்கிய தகவல்கள் (TNPSC High-Yield Exam Facts)
-- **முக்கிய ஆண்டுகள் & நிகழ்வுகள்**: ...
-- **அடிக்கடி கேட்கப்படும் வரையறைகள்**: ...
-- **பாடநூல் சிறப்புக் குறிப்புகள் (Do You Know / தெரிந்து கொள்வோம்)**: ...
+SECTION 5: TNPSC EXAM-ORIENTED FACTS
+(பாடநூல் பெட்டிச் செய்திகள் 'தெரிந்து தெளிவோம்', 'உங்களுக்குத் தெரியுமா?', TNPSC தேர்வுகளில் அடிக்கடி கேட்கப்படும் அதிமுக்கியக் குறிப்புகள்.)
+- **பாடநூல் பெட்டிச் செய்திகள் (Do You Know / தெரிந்து தெளிவோம்)**: ...
+- **அடிக்கடி கேட்கப்படும் TNPSC தேர்வுத் தகவல்கள்**: ...
+- **தேர்வு எச்சரிக்கை குறிப்புகள் (Confusion Clearing Points)**: ...
 
-## 5. விரைவு மீள்பார்வை வினா-விடை அட்டவணை (Quick Revision Q&A Table)
-(தேர்வுக்கு முன் விரைவாக மறுபரிசீலனை செய்ய 5-10 நேரடி கேள்வி-பதில் அட்டவணை)
-| எண் | மாதிரி வினா (Question) | பாடநூல் நேரடி விடை (Direct Answer) | பக்க எண் |
+SECTION 6: QUICK REVISION
+(தேர்வுக்கு முன் மாணவர்கள் விரைவாக மீள்பார்வை செய்ய 6-10 நேரடி கேள்வி-பதில் அட்டவணை.)
+| எண் | மாதிரி வினா (Examination Question) | பாடநூல் நேரடி விடை (Direct Textbook Answer) | பக்க எண் |
 |---|---|---|---|
 | 1 | ... | ... | ... |
 | 2 | ... | ... | ... |
 
-முழுமையான Markdown வடிவத்தில் மட்டுமே விடையளிக்கவும். JSON wrapper அல்லது தேவையில்லாத உரையாடல்களை முற்றிலும் தவிர்க்கவும்.`;
+முழுமையான Markdown வடிவத்தில் மட்டுமே விடையளிக்கவும். JSON wrappers அல்லது முன்னுரை/பன்னுரை உரையாடல்களை முற்றிலும் தவிர்க்கவும்.`;
   }
 
-  return `You are a Senior Full-Stack TNPSC Content Expert & Samacheer Kalvi Textbook Specialist.
+  return `You are an expert TNPSC coaching professor and Tamil Nadu State Board textbook specialist.
 
-Analyze the provided official Tamil Nadu State Board (Samacheer Kalvi) textbook passages and generate comprehensive, high-yield TNPSC One-Liner Coaching Notes.
+Your task is to convert uploaded textbook PDFs into high-quality, comprehensive, examination-oriented ONE-LINER NOTES suitable for TNPSC Group 1, Group 2, Group 2A, Group 4 and VAO examinations.
 
-TEXTBOOK REFERENCE:
+SOURCE:
+Use ONLY the official textbook passages provided below as your primary source.
 - Textbook: ${params.bookName}
 - Pages: ${params.pages.join(', ')}
 - Target Exam: ${params.category.toUpperCase()}
@@ -130,52 +155,67 @@ TEXTBOOK REFERENCE:
 - Unit / Chapter: ${params.chapterNumber} - "${params.chapterTitle}"
 - Language: English
 
-PRIMARY TEXTBOOK PASSAGES (AUTHORITATIVE SOURCE):
+AUTHORITATIVE TEXTBOOK PASSAGES:
 """
 ${params.passagesText}
 """
 
-MANDATORY RULES:
-1. The uploaded textbook text is the authoritative reference. Do not invent facts, years, names, dates, or formulas.
-2. Convert lengthy textbook paragraphs into numbered, easy-to-memorise direct statements.
-3. Include textbook page citations where applicable, e.g., "[Page: X]".
-4. Do not skip any examination-oriented fact, table, classification, or literary reference.
+STRICT INSTRUCTIONS:
+1. Read and analyze the complete uploaded textbook passages.
+2. Identify all chapters, lessons, headings and subheadings.
+3. Extract every important examination-oriented fact.
+4. Convert textbook paragraphs into short, factual, numbered one-liners.
+5. Preserve all names, dates, years, numbers, definitions and terminology exactly as supported by the PDF.
+6. Never invent or assume information.
+7. Do not omit important textbook facts.
+8. Avoid unnecessary lengthy explanations.
+9. Avoid repeating the same fact.
+10. Include page references whenever available (e.g. "[Page: X]").
 
-OUTPUT STRUCTURE:
-# Chapter ${params.chapterNumber}: ${params.chapterTitle}
+OUTPUT FORMAT:
+
+CHAPTER ${params.chapterNumber}: ${params.chapterTitle}
 > **Textbook Reference**: ${params.bookName} (Pages: ${params.pages.join(', ')})
 
-## 1. Important One-Liner Notes
-(Generate numbered, concise, direct factual statements. At least 15-25 high-yield one-liner points covering definitions, events, numbers, places, personalities, and scientific laws)
+SECTION 1: IMPORTANT ONE-LINER NOTES
+(Generate numbered factual statements. At least 15-25 comprehensive, high-yield one-liner points.)
 1. [Direct factual statement 1] - [Page: X]
 2. [Direct factual statement 2] - [Page: X]
 3. [Direct factual statement 3] - [Page: X]
 
-## 2. Author and Literary Works / Key Personalities
-(Table of authors, personalities, original names, pen names, titles, and literary or scientific contributions)
-| Personality / Author | Original / Pen Name | Titles & Honors | Key Works / Discoveries | Significant Exam Facts |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
+SECTION 2: AUTHORS AND LITERARY WORKS
+(Table of authors, personalities, original names, pen names, titles, literary or scientific works, and contributions.)
+| Author / Personality | Original Name | Pen Name | Special Titles | Literary / Scientific Works | Important Contributions |
+|---|---|---|---|---|---|
+| ... | ... | ... | ... | ... | ... |
 
-## 3. Important Classifications & Comparison Tables
-(Convert textbook classifications, categories, numbers, differences, or chronological sequences into clean tables)
-| Classification / Topic | Sub-categories / Numbers | Key Features & Distinctions |
+SECTION 3: IMPORTANT FACTS
+(Important dates, years, numbers, personalities, places, events, and core definitions.)
+- **Key Dates & Years**: ...
+- **Crucial Numbers & Statistics**: ...
+- **Personalities & Places**: ...
+- **Core Scientific / Administrative Definitions**: ...
+
+SECTION 4: CLASSIFICATIONS AND TABLES
+(Present important classifications, types, categories, and comparisons in tables.)
+| Topic / Classification | Sub-categories / Numbers | Key Distinctions & Textbook Evidence |
 |---|---|---|
 | ... | ... | ... |
 
-## 4. TNPSC High-Yield Exam Facts
-- **Key Dates, Years & Events**: ...
-- **Core Definitions & Principles**: ...
-- **Exam High-Yield Pointers ("Box Items / Info Bits")**: ...
+SECTION 5: TNPSC EXAM-ORIENTED FACTS
+(Highlight short, frequently testable factual points supported by the PDF, including 'Do You Know / Info Bits'.)
+- **Textbook Info Bits / 'Do You Know' Facts**: ...
+- **High-Yield Exam Pointers**: ...
+- **Common Exam Traps & Conceptual Distinctions**: ...
 
-## 5. Quick Revision Q&A Table
-(A compact question-and-answer revision table for quick last-minute exam recall)
+SECTION 6: QUICK REVISION
+(Prepare a rapid question-and-answer revision table for last-minute review.)
 | # | Examination Question | Direct Textbook Answer | Page Ref |
 |---|---|---|---|
 | 1 | ... | ... | ... |
 | 2 | ... | ... | ... |
 
-Return ONLY the formatted Markdown. No JSON wrappers, no extra conversational preamble or closing.`;
+Return ONLY the formatted Markdown. No JSON wrappers, no conversational introductory or closing remarks.`;
 }
 
 /**
@@ -259,56 +299,68 @@ function synthesizeOneLinerFallback(params: {
     .join('\n');
 
   if (isTamil) {
-    return `# ${params.chapterNumber}. ${params.chapterTitle}
+    return `CHAPTER ${params.chapterNumber}: ${params.chapterTitle}
 > **பாடநூல் ஆதாரம்**: ${params.bookName} (பக்கங்கள்: ${params.pages.join(', ')})
 
-## 1. முக்கிய ஒருவரி குறிப்புகள் (Important One-Liner Notes)
+SECTION 1: IMPORTANT ONE-LINER NOTES
 ${renderedPoints || `1. ${params.chapterTitle} பாடம் TNPSC பொதுத் தேர்வுக்குரிய சமச்சீர் கல்வி பாடத்திட்டத்தின் கீழ் வருகிறது. - [பக்கம்: ${params.pages[0] || 1}]`}
 
-## 2. ஆசிரியர் & இலக்கியக் குறிப்புகள் / முக்கிய ஆளுமைகள் (Author & Literary Works)
-| ஆளுமை / ஆசிரியர் பெயர் | இயற்பெயர் / புனைப்பெயர் | சிறப்புப் பட்டங்கள் | முக்கிய நூல்கள் / படைப்புகள் | முக்கிய தேர்வுத் தகவல்கள் |
-|---|---|---|---|---|
-| பாடநூல் ஆளுமை | அதிகாரப்பூர்வ சமச்சீர் கல்வி | முதன்மை ஆசிரியர் | ${params.chapterTitle} | ${params.subject} சார்ந்த முக்கிய தகவல்கள் |
+SECTION 2: AUTHORS AND LITERARY WORKS
+| ஆசிரியர் / ஆளுமை பெயர் | இயற்பெயர் | புனைப்பெயர் | சிறப்புப் பட்டங்கள் | முக்கிய நூல்கள் / படைப்புகள் | முக்கியத் தேர்வுப் பங்களிப்புகள் |
+|---|---|---|---|---|---|
+| பாடநூல் ஆசிரியர் / ஆளுமை | அதிகாரப்பூர்வ சமச்சீர் கல்வி | தமிழ் அறிஞர் | தமிழ்நாடு பாடநூல் வல்லுநர் | ${params.chapterTitle} | சமச்சீர் கல்வி பாடத்திட்ட தர நிர்ணயம் |
 
-## 3. முக்கிய வகைப்பாடுகள் & ஒப்பீட்டு அட்டவணைகள் (Important Classifications & Tables)
+SECTION 3: IMPORTANT FACTS
+- **முக்கிய பாடம் & அலகு**: ${params.chapterTitle} (இயல் / அலகு: ${params.chapterNumber})
+- **தேர்வு நோக்கம்**: TNPSC குரூப் 1, 2, 2A, 4 மற்றும் VAO தேர்வுகள்
+- **பாடநூல் தகவல் ஆதாரப் பக்கங்கள்**: பக்கங்கள் ${params.pages.join(', ')}
+- **முதன்மை தேர்வு வரையறைகள்**: பாடநூலில் இடம்பெற்றுள்ள அதிகாரப்பூர்வ கலைச்சொற்கள் மற்றும் இலக்கண/அறிவியல் விதிகள்
+
+SECTION 4: CLASSIFICATIONS AND TABLES
 | தலைப்பு / வகைப்பாடு | உட்பிரிவுகள் / முக்கிய எண்கள் | முக்கிய வேறுபாடுகள் & பாடநூல் சான்றுகள் |
 |---|---|---|
 | ${params.chapterTitle} அடிப்படை கூறுகள் | ${params.pages.length} பக்கங்கள் | தமிழ்நாடு பாடநூல் கழகத்தின் நேரடி சமச்சீர் பாடக்குறிப்புகள் |
 
-## 4. TNPSC தேர்வு முக்கிய தகவல்கள் (TNPSC High-Yield Exam Facts)
-- **முக்கிய பாடம்**: ${params.chapterTitle} (${params.subject})
-- **தேர்வு முக்கியத்துவம்**: TNPSC குரூப் தேர்வுகள் (Group 1, 2, 4) சமச்சீர் கல்வி பாடத்திட்டம்
-- **பாடநூல் பக்கங்கள்**: ${params.pages.join(', ')}
+SECTION 5: TNPSC EXAM-ORIENTED FACTS
+- **அடிக்கடி கேட்கப்படும் TNPSC தேர்வுத் தகவல்கள்**: ${params.chapterTitle} சார்ந்த நேரடி பாடநூல் வினாக்கள்
+- **பாடநூல் சிறப்புக் குறிப்புகள் (Do You Know / தெரிந்து தெளிவோம்)**: சமச்சீர் கல்வி ${params.classId ? params.classId + 'ஆம் வகுப்பு' : '6ஆம் வகுப்பு'} பாடநூல் பக்கங்கள் ${params.pages.join(', ')}
+- **தேர்வு எச்சரிக்கை குறிப்புகள்**: வினாத்தாளில் குழப்பம் விளைவிக்கும் ஒரே மாதிரியான கலைச்சொற்களை தெளிவாகப் படிக்கவும்
 
-## 5. விரைவு மீள்பார்வை வினா-விடை அட்டவணை (Quick Revision Q&A Table)
-| எண் | மாதிரி வினா (Question) | பாடநூல் நேரடி விடை (Direct Answer) | பக்க எண் |
+SECTION 6: QUICK REVISION
+| எண் | மாதிரி வினா (Examination Question) | பாடநூல் நேரடி விடை (Direct Textbook Answer) | பக்க எண் |
 |---|---|---|---|
 | 1 | ${params.chapterTitle} எந்த வகுப்பின் பாடத்திட்டத்தில் உள்ளது? | ${params.classId ? params.classId + 'ஆம் வகுப்பு' : '6ஆம் வகுப்பு'} (${params.subject}) | ${params.pages[0] || 1} |
 | 2 | இப்பாடத்திற்கான அதிகாரப்பூர்வ பாடநூல் எது? | ${params.bookName} | ${params.pages[0] || 1} |`;
   }
 
-  return `# Chapter ${params.chapterNumber}: ${params.chapterTitle}
+  return `CHAPTER ${params.chapterNumber}: ${params.chapterTitle}
 > **Textbook Reference**: ${params.bookName} (Pages: ${params.pages.join(', ')})
 
-## 1. Important One-Liner Notes
+SECTION 1: IMPORTANT ONE-LINER NOTES
 ${renderedPoints || `1. ${params.chapterTitle} is part of the authoritative Samacheer Kalvi syllabus for TNPSC examination preparation. - [Page: ${params.pages[0] || 1}]`}
 
-## 2. Author and Literary Works / Key Personalities
-| Personality / Author | Original / Pen Name | Titles & Honors | Key Works / Discoveries | Significant Exam Facts |
-|---|---|---|---|---|
-| Textbook Author | State Board Specialist | Subject Expert | ${params.chapterTitle} | Samacheer Kalvi syllabus standard |
+SECTION 2: AUTHORS AND LITERARY WORKS
+| Author / Personality | Original Name | Pen Name | Special Titles | Literary / Scientific Works | Important Contributions |
+|---|---|---|---|---|---|
+| Textbook Author / Specialist | State Board Expert | Subject Mentor | TNPSC Syllabus Contributor | ${params.chapterTitle} | Official Samacheer Kalvi standard |
 
-## 3. Important Classifications & Comparison Tables
-| Classification / Topic | Sub-categories / Numbers | Key Features & Distinctions |
+SECTION 3: IMPORTANT FACTS
+- **Core Unit & Chapter**: ${params.chapterTitle} (Unit / Chapter: ${params.chapterNumber})
+- **Target Examination Scope**: TNPSC Group 1, Group 2, Group 2A, Group 4 & VAO
+- **Authoritative Page References**: Pages ${params.pages.join(', ')}
+- **Key Definitions & Principles**: Core concepts and terminology extracted directly from official textbook passages
+
+SECTION 4: CLASSIFICATIONS AND TABLES
+| Topic / Classification | Sub-categories / Numbers | Key Distinctions & Textbook Evidence |
 |---|---|---|
 | Core Curriculum | ${params.subject} | Unit ${params.chapterNumber} syllabus definitions |
 
-## 4. TNPSC High-Yield Exam Facts
-- **Subject & Scope**: ${params.subject} - Chapter ${params.chapterNumber}: ${params.chapterTitle}
-- **Examination Target**: TNPSC Group 1, 2, 2A, 4 Syllabus
-- **Source Reference**: ${params.bookName} (Pages: ${params.pages.join(', ')})
+SECTION 5: TNPSC EXAM-ORIENTED FACTS
+- **Textbook Info Bits / 'Do You Know' Facts**: Official Samacheer Kalvi Class ${params.classId || 6} content from pages ${params.pages.join(', ')}
+- **High-Yield Exam Pointers**: Frequently repeated direct factual questions in TNPSC general papers
+- **Common Exam Traps**: Pay close attention to exact dates, formulas, and terminology to avoid negative markings
 
-## 5. Quick Revision Q&A Table
+SECTION 6: QUICK REVISION
 | # | Examination Question | Direct Textbook Answer | Page Ref |
 |---|---|---|---|
 | 1 | What is the syllabus level of ${params.chapterTitle}? | Standard ${params.classId || 6} ${params.subject} | Page ${params.pages[0] || 1} |
@@ -555,3 +607,4 @@ export async function generateStudyNotesWithRag(
     detectedChaptersCount: 1,
   };
 }
+

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   apiFetch,
@@ -217,14 +217,44 @@ const Admin = () => {
   const [notesInlineProgress, setNotesInlineProgress] = useState<number>(0)
   const [notesInlineProcessingJob, setNotesInlineProcessingJob] = useState<{ id: number; status: string; progressPercent: number; stepDescription: string } | null>(null)
 
-  // Notes management
+  // Notes management state
   const [notesList, setNotesList] = useState<any[]>([])
   const [notesLoading, setNotesLoading] = useState(false)
-  const [notesGroupFilter, setNotesGroupFilter] = useState<'all' | 'group1' | 'group2' | 'group2a' | 'group4' | 'vao'>('all')
-  const [notesStatusFilter, setNotesStatusFilter] = useState<'all' | 'staging' | 'published' | 'archived'>('all')
+  const [notesSearchQuery, setNotesSearchQuery] = useState('')
+  const [notesStatusFilter, setNotesStatusFilter] = useState<'all' | 'staging' | 'published'>('all')
   const [notesLanguageFilter, setNotesLanguageFilter] = useState<'all' | 'tamil' | 'english'>('all')
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<number>>(new Set())
   const [notesBulkDeleting, setNotesBulkDeleting] = useState(false)
+  const [notesPage, setNotesPage] = useState(1)
+  const notesPageSize = 25
+  const [notesFilteredTotal, setNotesFilteredTotal] = useState(0)
+
+  // 5-Tier Syllabus Cascade for Study Notes (Independent from Question Bank)
+  const notesSyllabusCascade = useSyllabusCascade({
+    allowAll: true,
+    onChange: () => setNotesPage(1),
+  })
+  const {
+    groupId: notesGroupFilter,
+    subjectId: notesSubjectFilter,
+    classId: notesStandardFilter,
+    unitId: notesUnitFilter,
+    lessonTitle: notesLessonFilter,
+  } = notesSyllabusCascade
+
+  // Modals state for Study Notes
+  const [isNotesEditModalOpen, setIsNotesEditModalOpen] = useState(false)
+  const [editingNote, setEditingNote] = useState<any | null>(null)
+  const [isDeletingNote, setIsDeletingNote] = useState<any | null>(null)
+  const [previewingNote, setPreviewingNote] = useState<any | null>(null)
+  const [isNotesBulkPublishModalOpen, setIsNotesBulkPublishModalOpen] = useState(false)
+  const [isNotesBulkUploadModalOpen, setIsNotesBulkUploadModalOpen] = useState(false)
+  const [notesBulkRawText, setNotesBulkRawText] = useState('')
+  const [notesBulkParsedCount, setNotesBulkParsedCount] = useState<number | null>(null)
+  const [notesBulkParseError, setNotesBulkParseError] = useState<string | null>(null)
+  const [isNotesBulkUploading, setIsNotesBulkUploading] = useState(false)
+  const [isNotesBulkPublishing, setIsNotesBulkPublishing] = useState(false)
+  const [notesPreviewTab, setNotesPreviewTab] = useState<'edit' | 'preview'>('edit')
 
   // Filter Bar state (reuses shared Gemini AI Generator cascading syllabus logic)
   const [targetSystemFilter, setTargetSystemFilter] = useState<'study_materials' | 'main_practice'>('study_materials')
@@ -278,7 +308,12 @@ const Admin = () => {
     isBulkPublishModalOpen ||
     isUploadTextbookModalOpen ||
     Boolean(selectedTextbookDetail) ||
-    isAIGeneratorOpen
+    isAIGeneratorOpen ||
+    isNotesEditModalOpen ||
+    Boolean(previewingNote) ||
+    Boolean(isDeletingNote) ||
+    isNotesBulkPublishModalOpen ||
+    isNotesBulkUploadModalOpen
   useScrollLock(hasOpenAdminModal)
 
   // Shared Gemini AI Generator Syllabus Cascade (strict mode: allowAll = false)
@@ -1143,23 +1178,47 @@ const Admin = () => {
     setNotesLoading(true)
     try {
       const params = new URLSearchParams()
+      if (notesSearchQuery.trim()) params.set('search', notesSearchQuery.trim())
       if (notesGroupFilter !== 'all') params.set('category', notesGroupFilter)
+      if (notesSubjectFilter !== 'all') params.set('subject', notesSubjectFilter)
+      if (notesStandardFilter !== 'all') params.set('classId', String(notesStandardFilter))
+      if (notesUnitFilter !== 'all') params.set('unitId', String(notesUnitFilter))
+      if (notesLessonFilter !== 'all') params.set('lesson', notesLessonFilter)
       if (notesStatusFilter !== 'all') params.set('status', notesStatusFilter)
       if (notesLanguageFilter !== 'all') params.set('language', notesLanguageFilter)
-      params.set('limit', '100')
+      params.set('limit', String(notesPageSize))
+      params.set('offset', String((notesPage - 1) * notesPageSize))
+
       const res = await apiFetch(`/api/notes/admin?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       const data = await res.json()
       if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
         setNotesList(data.data)
+        setNotesFilteredTotal(data.total || 0)
+      } else {
+        setNotesList([])
+        setNotesFilteredTotal(0)
       }
     } catch (err) {
       console.error('Failed to fetch notes:', err)
+      setNotesList([])
+      setNotesFilteredTotal(0)
     } finally {
       setNotesLoading(false)
     }
-  }, [token, notesGroupFilter, notesStatusFilter, notesLanguageFilter])
+  }, [
+    token,
+    notesSearchQuery,
+    notesGroupFilter,
+    notesSubjectFilter,
+    notesStandardFilter,
+    notesUnitFilter,
+    notesLessonFilter,
+    notesStatusFilter,
+    notesLanguageFilter,
+    notesPage,
+  ])
 
   // Fetch Textbooks
   const fetchTextbooks = useCallback(async () => {
@@ -1693,22 +1752,7 @@ const Admin = () => {
     }
   }
 
-  const toggleSelectNote = (id: number) => {
-    setSelectedNoteIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
 
-  const toggleSelectAllNotes = () => {
-    if (selectedNoteIds.size === notesList.length && notesList.length > 0) {
-      setSelectedNoteIds(new Set())
-    } else {
-      setSelectedNoteIds(new Set(notesList.map((n) => n.id)))
-    }
-  }
 
   const handleDeleteSelected = async () => {
     if (!token || selectedQuestionIds.size === 0) return
@@ -1829,6 +1873,80 @@ const Admin = () => {
     }
   }
 
+  // Selection helpers for Study Notes
+  const toggleSelectNote = (id: number) => {
+    setSelectedNoteIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAllVisibleNotes = () => {
+    if (selectedNoteIds.size === notesList.length && notesList.length > 0) {
+      setSelectedNoteIds(new Set())
+    } else {
+      setSelectedNoteIds(new Set(notesList.map((n) => n.id)))
+    }
+  }
+
+  const selectedStagingNoteIds = useMemo(() => {
+    return notesList.filter((n) => selectedNoteIds.has(n.id) && n.status === 'staging').map((n) => n.id)
+  }, [notesList, selectedNoteIds])
+
+  // Explicit Toggle Publish/Stage handler for study notes
+  const handleTogglePublishNote = async (n: any) => {
+    if (!token) return
+    const newStatus = n.status === 'published' ? 'staging' : 'published'
+    try {
+      const res = await apiFetch(`/api/notes/${n.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (res.ok) {
+        showToast('success', `Study Note #${n.id} status changed to ${newStatus}`)
+        fetchNotes()
+      } else {
+        showToast('error', 'Failed to update study note status')
+      }
+    } catch {
+      showToast('error', 'Network error updating study note status')
+    }
+  }
+
+  // Bulk Publish selected staging notes
+  const handleBulkPublishNotes = async () => {
+    if (!token || selectedStagingNoteIds.length === 0 || isNotesBulkPublishing) return
+    const ids = selectedStagingNoteIds
+    setIsNotesBulkPublishing(true)
+    try {
+      const res = await apiFetch('/api/notes/bulk-publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ids }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        showToast('success', data.message || `Successfully published ${ids.length} study note(s) to live website.`)
+        setSelectedNoteIds(new Set())
+        setIsNotesBulkPublishModalOpen(false)
+        fetchNotes()
+      } else {
+        showToast('error', data.message || 'Failed to bulk publish study notes')
+      }
+    } catch {
+      showToast('error', 'Network error during bulk publishing')
+    } finally {
+      setIsNotesBulkPublishing(false)
+    }
+  }
+
+  // Delete selected notes
   const handleDeleteSelectedNotes = async () => {
     if (!token || selectedNoteIds.size === 0) return
     if (!window.confirm(`Delete ${selectedNoteIds.size} selected study note(s)? This action cannot be undone.`)) return
@@ -1854,15 +1972,15 @@ const Admin = () => {
     }
   }
 
-  const handleDeleteAllNotes = async () => {
+  // Delete all filtered notes
+  const handleDeleteAllFilteredNotes = async () => {
     if (!token) return
-    const count = notesList.length
-    if (count === 0) {
+    if (notesFilteredTotal === 0) {
       showToast('error', 'No study notes match current filters')
       return
     }
-    if (!window.confirm(`Delete ALL ${count} study note(s) matching current filters (Group/Status/Language)? This action cannot be undone and will permanently remove them.`)) return
-    if (!window.confirm(`Final confirmation: Permanently delete ${count} filtered study note(s)?`)) return
+    if (!window.confirm(`Delete ALL ${notesFilteredTotal} study note(s) matching current filters? This action cannot be undone and will permanently remove them.`)) return
+    if (!window.confirm(`Final confirmation: Permanently delete ${notesFilteredTotal} filtered study note(s)?`)) return
     setNotesBulkDeleting(true)
     try {
       const res = await apiFetch('/api/notes', {
@@ -1871,13 +1989,17 @@ const Admin = () => {
         body: JSON.stringify({
           deleteAll: true,
           category: notesGroupFilter !== 'all' ? notesGroupFilter : undefined,
+          subject: notesSubjectFilter !== 'all' ? notesSubjectFilter : undefined,
+          classId: notesStandardFilter !== 'all' ? Number(notesStandardFilter) : undefined,
+          unitId: notesUnitFilter !== 'all' ? Number(notesUnitFilter) : undefined,
+          lesson: notesLessonFilter !== 'all' ? notesLessonFilter : undefined,
           status: notesStatusFilter !== 'all' ? notesStatusFilter : undefined,
           language: notesLanguageFilter !== 'all' ? notesLanguageFilter : undefined,
         }),
       })
       const data = await res.json()
       if (res.ok) {
-        showToast('success', data.message || `Deleted ${data.deletedCount || count} study note(s)`)
+        showToast('success', data.message || `Deleted ${data.deletedCount || notesFilteredTotal} study note(s)`)
         setSelectedNoteIds(new Set())
         fetchNotes()
       } else {
@@ -1887,6 +2009,163 @@ const Admin = () => {
       showToast('error', 'Network error during deletion')
     } finally {
       setNotesBulkDeleting(false)
+    }
+  }
+
+  // Delete single note
+  const handleDeleteSingleNote = async () => {
+    if (!token || !isDeletingNote) return
+    try {
+      const res = await apiFetch(`/api/notes/${isDeletingNote.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        showToast('success', `Study note #${isDeletingNote.id} deleted successfully`)
+        setIsDeletingNote(null)
+        setSelectedNoteIds((prev) => {
+          const next = new Set(prev)
+          next.delete(isDeletingNote.id)
+          return next
+        })
+        fetchNotes()
+      } else {
+        showToast('error', 'Failed to delete study note')
+      }
+    } catch {
+      showToast('error', 'Server error during study note deletion')
+    }
+  }
+
+  // Open add note modal
+  const handleOpenAddNoteModal = () => {
+    setEditingNote({
+      title: '',
+      content: '',
+      category: notesGroupFilter !== 'all' ? notesGroupFilter : 'group1',
+      subject: notesSubjectFilter !== 'all' ? notesSubjectFilter : 'General Studies',
+      classId: notesStandardFilter !== 'all' ? Number(notesStandardFilter) : 6,
+      unitId: notesUnitFilter !== 'all' ? Number(notesUnitFilter) : 1,
+      lessonTitle: notesLessonFilter !== 'all' ? notesLessonFilter : '',
+      topic: '',
+      language: notesLanguageFilter !== 'all' ? notesLanguageFilter : 'tamil',
+      status: 'staging',
+      sourceReference: '',
+    })
+    setNotesPreviewTab('edit')
+    setIsNotesEditModalOpen(true)
+  }
+
+  // Save add/edit note
+  const handleSaveNote = async () => {
+    if (!token || !editingNote) return
+    if (!editingNote.content || editingNote.content.trim().length < 5) {
+      showToast('error', 'Content is required (minimum 5 characters)')
+      return
+    }
+    if (!editingNote.lessonTitle || !editingNote.lessonTitle.trim()) {
+      showToast('error', 'Lesson title is required')
+      return
+    }
+
+    try {
+      const isExisting = Boolean(editingNote.id)
+      const url = isExisting ? `/api/notes/${editingNote.id}` : '/api/notes'
+      const method = isExisting ? 'PATCH' : 'POST'
+
+      const res = await apiFetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          ...editingNote,
+          status: editingNote.status || 'staging',
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', isExisting ? 'Study note updated successfully' : 'Study note created in Staging successfully')
+        setIsNotesEditModalOpen(false)
+        setEditingNote(null)
+        fetchNotes()
+      } else {
+        showToast('error', data.message || 'Failed to save study note')
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Network error saving study note')
+    }
+  }
+
+  // Bulk Upload Study Notes Parser
+  const parseBulkNotesContent = (text: string) => {
+    setNotesBulkParseError(null)
+    const trimmed = text.trim()
+    if (!trimmed) {
+      setNotesBulkParsedCount(null)
+      return []
+    }
+    try {
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) {
+          setNotesBulkParsedCount(parsed.length)
+          return parsed
+        }
+      }
+      // If structured markdown with chapters
+      const chapters = trimmed.split(/(?=^#+s+(?:Chapter|இயல்|அலகு|Unit))/im).filter(c => c.trim().length > 10)
+      if (chapters.length > 0) {
+        setNotesBulkParsedCount(chapters.length)
+        return chapters.map((ch, idx) => ({
+          title: ch.split('\n')[0].replace(/^#+\s*/, '').trim() || `Chapter ${idx + 1}`,
+          content: ch.trim(),
+          lessonTitle: notesLessonFilter !== 'all' ? notesLessonFilter : `Chapter ${idx + 1}`,
+          unitId: notesUnitFilter !== 'all' ? Number(notesUnitFilter) : idx + 1,
+          classId: notesStandardFilter !== 'all' ? Number(notesStandardFilter) : 6,
+          subject: notesSubjectFilter !== 'all' ? notesSubjectFilter : 'General Studies',
+          category: notesGroupFilter !== 'all' ? notesGroupFilter : 'group1',
+          language: notesLanguageFilter !== 'all' ? notesLanguageFilter : 'tamil',
+          status: 'staging',
+        }))
+      }
+      setNotesBulkParseError('Could not auto-detect notes structure. Please provide a JSON array of note objects.')
+      setNotesBulkParsedCount(null)
+      return []
+    } catch (e: any) {
+      setNotesBulkParseError(`JSON Parse error: ${e.message}`)
+      setNotesBulkParsedCount(null)
+      return []
+    }
+  }
+
+  const handleBulkUploadNotes = async () => {
+    if (!token || !notesBulkRawText.trim() || isNotesBulkUploading) return
+    const parsedNotes = parseBulkNotesContent(notesBulkRawText)
+    if (!parsedNotes || parsedNotes.length === 0) {
+      showToast('error', 'No valid notes to upload')
+      return
+    }
+
+    setIsNotesBulkUploading(true)
+    try {
+      const res = await apiFetch('/api/notes/bulk-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ notes: parsedNotes }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        showToast('success', data.message || `Uploaded ${parsedNotes.length} notes to Staging`)
+        setIsNotesBulkUploadModalOpen(false)
+        setNotesBulkRawText('')
+        setNotesBulkParsedCount(null)
+        fetchNotes()
+      } else {
+        showToast('error', data.message || 'Failed to bulk upload notes')
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Network error during bulk upload')
+    } finally {
+      setIsNotesBulkUploading(false)
     }
   }
 
@@ -2976,116 +3255,309 @@ const Admin = () => {
         {/* Section 3: Study Notes Management */}
         {adminSection === 'notes' && (
           <>
-            <div className="admin-section-header" style={{ marginTop: '0.5rem' }}>
-              <div>
-                <h2 className="admin-section-title">Study Notes Management</h2>
-                <p className="admin-section-subtitle">Filter, select and delete study notes independently from MCQ questions</p>
+            {/* Toolbar & Filters (matches Question Bank layout exactly) */}
+            <div className="admin-toolbar glass">
+              <div className="admin-toolbar-row">
+                <div className="admin-search-wrapper">
+                  <Search size={16} className="admin-search-icon" />
+                  <input
+                    type="text"
+                    className="admin-search-input"
+                    placeholder="Search by ID, title, lesson, subject, or content..."
+                    value={notesSearchQuery}
+                    onChange={(e) => {
+                      setNotesSearchQuery(e.target.value)
+                      setNotesPage(1)
+                    }}
+                  />
+                </div>
+
+                <div className="admin-action-buttons">
+                  <button
+                    className="admin-btn admin-btn-ai"
+                    onClick={() => {
+                      setIsAIGeneratorOpen(true)
+                      setAiMode('notes')
+                      setAiUploadSuccess(null)
+                    }}
+                    title="Generate syllabus-based study notes with Google Gemini"
+                  >
+                    <Sparkles size={16} />
+                    <span>Gemini AI Generator</span>
+                  </button>
+                  <button className="admin-btn admin-btn-primary" onClick={handleOpenAddNoteModal}>
+                    <Plus size={16} />
+                    <span>Add Study Notes</span>
+                  </button>
+                  <button className="admin-btn admin-btn-secondary" onClick={() => setIsNotesBulkUploadModalOpen(true)}>
+                    <Upload size={16} />
+                    <span>Bulk Upload</span>
+                  </button>
+                  <button
+                    className="admin-btn admin-btn-secondary"
+                    onClick={() => {
+                      setIsUsersModalOpen(true)
+                      fetchAdminUsers()
+                    }}
+                    title="Manage Admin Logins"
+                  >
+                    <Users size={16} />
+                    <span>Admin Users</span>
+                  </button>
+                  <button className="admin-btn admin-btn-secondary" onClick={fetchNotes} title="Refresh table data">
+                    <RefreshCw size={15} className={notesLoading ? 'spin-icon' : ''} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="admin-filter-pills">
+                <SyllabusCascadeSelector
+                  cascade={notesSyllabusCascade}
+                  allowAll={true}
+                  variant="filter"
+                  extraFilters={
+                    <>
+                      <div className="ai-field">
+                        <label>Status</label>
+                        <select
+                          className="ai-select qb-syllabus-select"
+                          aria-label="Status"
+                          value={notesStatusFilter}
+                          onChange={(e) => {
+                            setNotesStatusFilter(e.target.value as any)
+                            setNotesPage(1)
+                          }}
+                        >
+                          <option value="all">All Statuses</option>
+                          <option value="staging">Staging Only (Under Review)</option>
+                          <option value="published">Published Only (Live on Website)</option>
+                        </select>
+                      </div>
+
+                      <div className="ai-field">
+                        <label>Language</label>
+                        <select
+                          className="ai-select qb-syllabus-select"
+                          aria-label="Language"
+                          value={notesLanguageFilter}
+                          onChange={(e) => {
+                            setNotesLanguageFilter(e.target.value as any)
+                            setNotesPage(1)
+                          }}
+                        >
+                          <option value="all">All Languages</option>
+                          <option value="tamil">Tamil (தமிழ்)</option>
+                          <option value="english">English</option>
+                        </select>
+                      </div>
+                    </>
+                  }
+                />
+
+                <div className="qb-filter-actions-row">
+                  <div className="admin-filter-count">
+                    Showing <strong>{notesList.length}</strong> of <strong>{notesFilteredTotal}</strong> matching study notes | Selected: <strong>{selectedNoteIds.size}</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {(notesGroupFilter !== 'all' ||
+                      notesSubjectFilter !== 'all' ||
+                      notesStandardFilter !== 'all' ||
+                      notesUnitFilter !== 'all' ||
+                      notesLessonFilter !== 'all' ||
+                      notesStatusFilter !== 'all' ||
+                      notesLanguageFilter !== 'all' ||
+                      notesSearchQuery.trim() !== '') && (
+                      <button
+                        className="admin-btn admin-btn-secondary"
+                        onClick={() => {
+                          notesSyllabusCascade.resetFilters()
+                          setNotesStatusFilter('all')
+                          setNotesLanguageFilter('all')
+                          setNotesSearchQuery('')
+                          setNotesPage(1)
+                        }}
+                        title="Reset all syllabus and status filters"
+                      >
+                        <RefreshCcw size={14} />
+                        <span>Reset Filters</span>
+                      </button>
+                    )}
+                    <button className="admin-btn admin-btn-secondary" onClick={toggleSelectAllVisibleNotes} disabled={notesList.length === 0}>
+                      {selectedNoteIds.size === notesList.length && notesList.length > 0 ? 'Deselect All Visible' : 'Select All Visible'}
+                    </button>
+                    <button
+                      className="admin-btn admin-bulk-publish-btn"
+                      onClick={() => setIsNotesBulkPublishModalOpen(true)}
+                      disabled={selectedStagingNoteIds.length === 0 || isNotesBulkPublishing || notesBulkDeleting}
+                    >
+                      <span>🚀 Bulk Publish Selected ({selectedStagingNoteIds.length})</span>
+                    </button>
+                    <button className="admin-btn admin-btn-secondary" onClick={handleDeleteSelectedNotes} disabled={selectedNoteIds.size === 0 || notesBulkDeleting}>
+                      <Trash2 size={14} />
+                      <span>Delete Selected ({selectedNoteIds.size})</span>
+                    </button>
+                    <button className="admin-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={handleDeleteAllFilteredNotes} disabled={notesFilteredTotal === 0 || notesBulkDeleting}>
+                      <Trash2 size={14} />
+                      <span>{notesBulkDeleting ? 'Deleting...' : `Delete All Filtered (${notesFilteredTotal})`}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
-        <div className="admin-filter-bar glass">
-          <div className="admin-filter-pills">
-            <div className="admin-filter-group">
-              <select
-                className="filter-select"
-                value={notesGroupFilter}
-                onChange={(e) => setNotesGroupFilter(e.target.value as any)}
-              >
-                <option value="all">All TNPSC Groups</option>
-                <option value="group1">Group 1</option>
-                <option value="group2">Group 2</option>
-                <option value="group2a">Group 2A</option>
-                <option value="group2_2a">Group 2 & 2A</option>
-                <option value="group4">Group 4</option>
-                <option value="vao">VAO</option>
-                <option value="group4_vao">Group 4 & VAO</option>
-              </select>
-
-              <select
-                className="filter-select"
-                value={notesStatusFilter}
-                onChange={(e) => setNotesStatusFilter(e.target.value as any)}
-              >
-                <option value="all">All Statuses</option>
-                <option value="published">Published</option>
-                <option value="staging">Staging</option>
-                <option value="archived">Archived</option>
-              </select>
-
-              <select
-                className="filter-select"
-                value={notesLanguageFilter}
-                onChange={(e) => setNotesLanguageFilter(e.target.value as any)}
-              >
-                <option value="all">All Languages</option>
-                <option value="english">English</option>
-                <option value="tamil">Tamil</option>
-              </select>
+            {/* Study Notes Table */}
+            <div className="admin-table-scroll-hint">
+              <span>← Swipe horizontally to view all columns & action buttons →</span>
             </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-              <div className="admin-filter-count">
-                Showing <strong>{notesList.length}</strong> notes | Selected: <strong>{selectedNoteIds.size}</strong>
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <button className="admin-btn admin-btn-secondary" onClick={toggleSelectAllNotes} disabled={notesList.length === 0}>
-                  {selectedNoteIds.size === notesList.length && notesList.length > 0 ? 'Deselect All' : 'Select All'}
-                </button>
-                <button className="admin-btn admin-btn-secondary" onClick={handleDeleteSelectedNotes} disabled={selectedNoteIds.size === 0 || notesBulkDeleting}>
-                  <Trash2 size={14} />
-                  <span>Delete Selected Notes ({selectedNoteIds.size})</span>
-                </button>
-                <button className="admin-btn" style={{ background: '#ef4444', color: '#fff' }} onClick={handleDeleteAllNotes} disabled={notesList.length === 0 || notesBulkDeleting}>
-                  <Trash2 size={14} />
-                  <span>{notesBulkDeleting ? 'Deleting...' : `Delete All Notes (${notesList.length})`}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="admin-table-wrapper glass" style={{ marginTop: '1rem' }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th style={{ width: '40px' }}>Sel</th>
-                <th style={{ width: '60px' }}>ID</th>
-                <th style={{ width: '100px' }}>Group</th>
-                <th style={{ width: '90px' }}>Unit/Class</th>
-                <th style={{ width: '200px' }}>Lesson</th>
-                <th style={{ width: '90px' }}>Language</th>
-                <th style={{ width: '100px' }}>Status</th>
-                <th>Title</th>
-              </tr>
-            </thead>
-            <tbody>
-              {notesLoading ? (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>Loading study notes...</td>
-                </tr>
-              ) : notesList.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>No study notes found</td>
-                </tr>
-              ) : (
-                notesList.map((n) => (
-                  <tr key={n.id}>
-                    <td>
-                      <input type="checkbox" checked={selectedNoteIds.has(n.id)} onChange={() => toggleSelectNote(n.id)} />
-                    </td>
-                    <td>#{n.id}</td>
-                    <td>{n.category?.toUpperCase()}</td>
-                    <td>Unit {n.unitId}{n.classId ? ` / ${n.classId}` : ''}</td>
-                    <td>{n.lessonTitle}</td>
-                    <td>{n.language}</td>
-                    <td>{n.status}</td>
-                    <td>{n.title}</td>
+            <div className="admin-table-wrapper glass">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '40px' }}>Sel</th>
+                    <th style={{ width: '70px' }}>ID</th>
+                    <th style={{ width: '120px' }}>Status</th>
+                    <th style={{ width: '140px' }}>Group & Unit</th>
+                    <th style={{ width: '230px' }}>Lesson & Subject</th>
+                    <th>Note Title & Content Excerpt</th>
+                    <th style={{ width: '150px', textAlign: 'right' }}>Actions</th>
                   </tr>
-                ))
+                </thead>
+                <tbody>
+                  {notesLoading ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                        Loading study notes from PostgreSQL...
+                      </td>
+                    </tr>
+                  ) : notesList.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                        No study notes found matching your filter criteria.
+                      </td>
+                    </tr>
+                  ) : (
+                    notesList.map((n) => (
+                      <tr key={n.id}>
+                        <td>
+                          <input type="checkbox" checked={selectedNoteIds.has(n.id)} onChange={() => toggleSelectNote(n.id)} />
+                        </td>
+                        <td>
+                          <span className="qid-badge">#{n.id}</span>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                            <span className={`status-badge ${n.status === 'published' ? 'status-published' : 'status-staging'}`}>
+                              {n.status === 'published' ? <CheckCircle size={12} /> : <Clock size={12} />}
+                              {n.status}
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                              {n.language || 'English'}
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <span className="ai-tag-pill ai-tag-group" style={{ alignSelf: 'flex-start', fontSize: '0.7rem' }}>
+                              {n.category ? n.category.toUpperCase() : 'GROUP 1'}
+                            </span>
+                            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Unit {n.unitId}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Class {n.classId || '6'}</div>
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+                            {n.lessonTitle}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{n.subject}</div>
+                          {n.topic && (
+                            <div style={{ fontSize: '0.72rem', color: '#c084fc', marginTop: '0.25rem', fontWeight: 500 }}>
+                              📌 {n.topic}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: '#fef08a', marginBottom: '0.25rem', fontSize: '0.9rem' }}>
+                            {n.title}
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4, maxHeight: '3.6em', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {n.content ? n.content.replace(/^[#*`\s-]+/gm, '').slice(0, 160) + '...' : 'No preview content available'}
+                          </div>
+                          {n.sourceReference && (
+                            <div style={{ marginTop: '0.45rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <span className="source-page-pill">
+                                <BookOpen size={11} />
+                                <span>{n.sourceReference}</span>
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
+                            <button
+                              className="table-action-btn"
+                              title="Full Preview Note"
+                              onClick={() => setPreviewingNote(n)}
+                            >
+                              <Eye size={14} />
+                            </button>
+                            <button
+                              className="table-action-btn"
+                              title="Edit Study Note"
+                              onClick={() => {
+                                setEditingNote({ ...n })
+                                setNotesPreviewTab('edit')
+                                setIsNotesEditModalOpen(true)
+                              }}
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              className={`table-action-btn ${n.status === 'published' ? '' : 'table-action-publish'}`}
+                              title={n.status === 'published' ? 'Revert to Staging' : 'Publish Note to Study Materials'}
+                              onClick={() => handleTogglePublishNote(n)}
+                            >
+                              {n.status === 'published' ? <Clock size={14} /> : <CheckCircle size={14} />}
+                            </button>
+                            <button
+                              className="table-action-btn table-action-delete"
+                              title="Delete Study Note"
+                              onClick={() => setIsDeletingNote(n)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+
+              {/* Notes Pagination Controls */}
+              {Math.ceil(notesFilteredTotal / notesPageSize) > 1 && (
+                <div className="admin-pagination">
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    Page {notesPage} of {Math.ceil(notesFilteredTotal / notesPageSize)} ({notesFilteredTotal} items)
+                  </span>
+                  <div className="pagination-controls">
+                    <button
+                      className="table-action-btn"
+                      disabled={notesPage <= 1}
+                      onClick={() => setNotesPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button
+                      className="table-action-btn"
+                      disabled={notesPage >= Math.ceil(notesFilteredTotal / notesPageSize)}
+                      onClick={() => setNotesPage((p) => Math.min(Math.ceil(notesFilteredTotal / notesPageSize), p + 1))}
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
               )}
-            </tbody>
-          </table>
-        </div>
+            </div>
           </>
         )}
       </div>
@@ -5111,47 +5583,92 @@ const Admin = () => {
                           Study Notes Preview - {notesPreview.title} {notesPreview.sourceReference ? `(${notesPreview.sourceReference})` : ''}
                         </span>
                       </div>
-                      <button
-                        className="admin-btn admin-btn-primary"
-                        disabled={isNotesUploading}
-                        onClick={async () => {
-                          if (!token || !notesPreview) return
-                          setIsNotesUploading(true)
-                          try {
-                            const res = await apiFetch('/api/notes', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                              body: JSON.stringify({
-                                category: aiGroupId,
-                                subject: selectedSubjectObj.name,
-                                classId: currentClassId,
-                                unitId: currentUnitId,
-                                lessonTitle: currentLessonTitle,
-                                topic: currentTopicName || currentLessonTitle,
-                                language: notesLanguage,
-                                title: notesPreview.title,
-                                content: notesPreview.content,
-                                sourceReference: notesPreview.sourceReference || `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
-                                status: 'published',
-                              }),
-                            })
-                            const data = await res.json()
-                            if (res.ok) {
-                              showToast('success', 'Study notes uploaded and published successfully')
-                              setNotesPreview(null)
-                            } else {
-                              showToast('error', data.message || 'Failed to upload notes')
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <button
+                          className="admin-btn admin-btn-primary"
+                          disabled={isNotesUploading}
+                          onClick={async () => {
+                            if (!token || !notesPreview) return
+                            setIsNotesUploading(true)
+                            try {
+                              const res = await apiFetch('/api/notes', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({
+                                  category: aiGroupId,
+                                  subject: selectedSubjectObj.name,
+                                  classId: currentClassId,
+                                  unitId: currentUnitId,
+                                  lessonTitle: currentLessonTitle,
+                                  topic: currentTopicName || currentLessonTitle,
+                                  language: notesLanguage,
+                                  title: notesPreview.title,
+                                  content: notesPreview.content,
+                                  sourceReference: notesPreview.sourceReference || `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
+                                  status: 'staging',
+                                }),
+                              })
+                              const data = await res.json()
+                              if (res.ok) {
+                                showToast('success', 'Study notes saved to Staging for review!')
+                                setNotesPreview(null)
+                                fetchNotes()
+                              } else {
+                                showToast('error', data.message || 'Failed to stage notes')
+                              }
+                            } catch (err: any) {
+                              showToast('error', err.message || 'Error staging notes')
+                            } finally {
+                              setIsNotesUploading(false)
                             }
-                          } catch (err: any) {
-                            showToast('error', err.message || 'Error uploading notes')
-                          } finally {
-                            setIsNotesUploading(false)
-                          }
-                        }}
-                      >
-                        <Upload size={16} />
-                        <span>{isNotesUploading ? 'Uploading...' : 'Upload & Publish Notes'}</span>
-                      </button>
+                          }}
+                        >
+                          <Clock size={16} />
+                          <span>{isNotesUploading ? 'Saving...' : 'Save to Staging (Review & Approve)'}</span>
+                        </button>
+                        <button
+                          className="admin-btn admin-bulk-publish-btn"
+                          disabled={isNotesUploading}
+                          onClick={async () => {
+                            if (!token || !notesPreview) return
+                            setIsNotesUploading(true)
+                            try {
+                              const res = await apiFetch('/api/notes', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({
+                                  category: aiGroupId,
+                                  subject: selectedSubjectObj.name,
+                                  classId: currentClassId,
+                                  unitId: currentUnitId,
+                                  lessonTitle: currentLessonTitle,
+                                  topic: currentTopicName || currentLessonTitle,
+                                  language: notesLanguage,
+                                  title: notesPreview.title,
+                                  content: notesPreview.content,
+                                  sourceReference: notesPreview.sourceReference || `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
+                                  status: 'published',
+                                }),
+                              })
+                              const data = await res.json()
+                              if (res.ok) {
+                                showToast('success', 'Study notes published directly to Study Materials!')
+                                setNotesPreview(null)
+                                fetchNotes()
+                              } else {
+                                showToast('error', data.message || 'Failed to publish notes')
+                              }
+                            } catch (err: any) {
+                              showToast('error', err.message || 'Error publishing notes')
+                            } finally {
+                              setIsNotesUploading(false)
+                            }
+                          }}
+                        >
+                          <CheckCircle size={16} />
+                          <span>{isNotesUploading ? 'Publishing...' : 'Upload & Publish Live'}</span>
+                        </button>
+                      </div>
                     </div>
                     <div className="ai-preview-card" style={{ padding: '1rem' }}>
                       <textarea
@@ -5362,6 +5879,550 @@ const Admin = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* 1. Add / Edit Study Note Modal */}
+      <AnimatePresence>
+        {isNotesEditModalOpen && editingNote && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '850px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <FileText size={20} style={{ color: 'var(--gold-primary)' }} />
+                  <h3 className="admin-modal-title">
+                    {editingNote.id ? `Edit Study Note #${editingNote.id}` : 'Add New Study Note'}
+                  </h3>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    setIsNotesEditModalOpen(false)
+                    setEditingNote(null)
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body" style={{ maxHeight: '75vh', overflowY: 'auto' }}>
+                <div className="form-grid-3" style={{ marginBottom: '0.75rem' }}>
+                  <div className="ai-field">
+                    <label>TNPSC Group</label>
+                    <select
+                      className="ai-select"
+                      value={editingNote.category || 'group1'}
+                      onChange={(e) => setEditingNote({ ...editingNote, category: e.target.value })}
+                    >
+                      <option value="group1">Group 1</option>
+                      <option value="group2">Group 2</option>
+                      <option value="group2a">Group 2A</option>
+                      <option value="group4">Group 4</option>
+                      <option value="vao">VAO</option>
+                    </select>
+                  </div>
+
+                  <div className="ai-field">
+                    <label>Subject</label>
+                    <input
+                      type="text"
+                      className="admin-auth-input"
+                      value={editingNote.subject || ''}
+                      onChange={(e) => setEditingNote({ ...editingNote, subject: e.target.value })}
+                      placeholder="e.g. General Tamil, General Studies"
+                    />
+                  </div>
+
+                  <div className="ai-field">
+                    <label>Standard / Class</label>
+                    <select
+                      className="ai-select"
+                      value={editingNote.classId || 6}
+                      onChange={(e) => setEditingNote({ ...editingNote, classId: Number(e.target.value) })}
+                    >
+                      {[6, 7, 8, 9, 10, 11, 12].map((std) => (
+                        <option key={std} value={std}>{std}th Standard</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-grid-3" style={{ marginBottom: '0.75rem' }}>
+                  <div className="ai-field">
+                    <label>Unit ID (Number)</label>
+                    <input
+                      type="number"
+                      className="admin-auth-input"
+                      value={editingNote.unitId || 1}
+                      onChange={(e) => setEditingNote({ ...editingNote, unitId: Number(e.target.value) })}
+                      min={1}
+                      max={20}
+                    />
+                  </div>
+
+                  <div className="ai-field">
+                    <label>Lesson Title *</label>
+                    <input
+                      type="text"
+                      className="admin-auth-input"
+                      value={editingNote.lessonTitle || ''}
+                      onChange={(e) => setEditingNote({ ...editingNote, lessonTitle: e.target.value })}
+                      placeholder="e.g. 1.1 Measurements and SI Units"
+                    />
+                  </div>
+
+                  <div className="ai-field">
+                    <label>Language</label>
+                    <select
+                      className="ai-select"
+                      value={editingNote.language || 'tamil'}
+                      onChange={(e) => setEditingNote({ ...editingNote, language: e.target.value })}
+                    >
+                      <option value="tamil">Tamil (தமிழ்)</option>
+                      <option value="english">English</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                  <div className="ai-field">
+                    <label>Note Title *</label>
+                    <input
+                      type="text"
+                      className="admin-auth-input"
+                      value={editingNote.title || ''}
+                      onChange={(e) => setEditingNote({ ...editingNote, title: e.target.value })}
+                      placeholder="Chapter / Topic Title"
+                    />
+                  </div>
+
+                  <div className="ai-field">
+                    <label>Publication Status</label>
+                    <select
+                      className="ai-select"
+                      value={editingNote.status || 'staging'}
+                      onChange={(e) => setEditingNote({ ...editingNote, status: e.target.value })}
+                    >
+                      <option value="staging">Staging (Under Review)</option>
+                      <option value="published">Published (Live on Website)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="ai-field" style={{ marginBottom: '0.75rem' }}>
+                  <label>Textbook Source Reference</label>
+                  <input
+                    type="text"
+                    className="admin-auth-input"
+                    value={editingNote.sourceReference || ''}
+                    onChange={(e) => setEditingNote({ ...editingNote, sourceReference: e.target.value })}
+                    placeholder="e.g. Samacheer Kalvi 6th Standard Tamil, Pages 9–26"
+                  />
+                </div>
+
+                <div className="ai-field">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label style={{ margin: 0 }}>Note Content (Markdown Format) *</label>
+                    <div style={{ display: 'inline-flex', padding: '2px', background: 'rgba(255,255,255,0.06)', borderRadius: '6px' }}>
+                      <button
+                        type="button"
+                        style={{
+                          padding: '0.25rem 0.6rem',
+                          fontSize: '0.75rem',
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: notesPreviewTab === 'edit' ? 'var(--gold-primary)' : 'transparent',
+                          color: notesPreviewTab === 'edit' ? '#000' : 'var(--text-secondary)',
+                          fontWeight: 600,
+                        }}
+                        onClick={() => setNotesPreviewTab('edit')}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          padding: '0.25rem 0.6rem',
+                          fontSize: '0.75rem',
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: notesPreviewTab === 'preview' ? 'var(--gold-primary)' : 'transparent',
+                          color: notesPreviewTab === 'preview' ? '#000' : 'var(--text-secondary)',
+                          fontWeight: 600,
+                        }}
+                        onClick={() => setNotesPreviewTab('preview')}
+                      >
+                        Preview
+                      </button>
+                    </div>
+                  </div>
+
+                  {notesPreviewTab === 'edit' ? (
+                    <textarea
+                      className="ai-textarea"
+                      rows={12}
+                      style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                      value={editingNote.content || ''}
+                      onChange={(e) => setEditingNote({ ...editingNote, content: e.target.value })}
+                      placeholder="Write markdown note content (One-liners, tables, facts)..."
+                    />
+                  ) : (
+                    <div style={{
+                      padding: '1rem',
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      maxHeight: '350px',
+                      overflowY: 'auto',
+                      fontSize: '0.88rem',
+                      lineHeight: 1.6,
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: 'system-ui, sans-serif'
+                    }}>
+                      {editingNote.content || 'No content written yet.'}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => {
+                    setIsNotesEditModalOpen(false)
+                    setEditingNote(null)
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-primary"
+                  onClick={handleSaveNote}
+                >
+                  <Check size={16} />
+                  <span>{editingNote.id ? 'Save Changes' : 'Create Study Note'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 2. Full Note Preview Modal */}
+      <AnimatePresence>
+        {previewingNote && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '900px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    <span className="qid-badge">#{previewingNote.id}</span>
+                    <span className={`status-badge ${previewingNote.status === 'published' ? 'status-published' : 'status-staging'}`}>
+                      {previewingNote.status === 'published' ? <CheckCircle size={12} /> : <Clock size={12} />}
+                      {previewingNote.status}
+                    </span>
+                    <span className="ai-tag-pill ai-tag-group">{previewingNote.category?.toUpperCase()}</span>
+                    <span className="ai-tag-pill">Unit {previewingNote.unitId}</span>
+                    <span className="ai-tag-pill">{previewingNote.subject}</span>
+                  </div>
+                  <h3 className="admin-modal-title" style={{ fontSize: '1.15rem' }}>
+                    {previewingNote.title || previewingNote.lessonTitle}
+                  </h3>
+                </div>
+                <button className="admin-modal-close" onClick={() => setPreviewingNote(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+                {previewingNote.sourceReference && (
+                  <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: 'rgba(255,215,0,0.08)', borderRadius: '6px', border: '1px solid rgba(255,215,0,0.2)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#fef08a' }}>
+                    <BookOpen size={14} />
+                    <span><strong>Source Reference:</strong> {previewingNote.sourceReference}</span>
+                  </div>
+                )}
+                <div style={{
+                  padding: '1.25rem',
+                  background: 'rgba(255,255,255,0.02)',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  lineHeight: 1.7,
+                  fontSize: '0.9rem',
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {previewingNote.content}
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setPreviewingNote(null)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => {
+                    const toEdit = { ...previewingNote }
+                    setPreviewingNote(null)
+                    setEditingNote(toEdit)
+                    setNotesPreviewTab('edit')
+                    setIsNotesEditModalOpen(true)
+                  }}
+                >
+                  <Edit2 size={15} />
+                  <span>Edit Note</span>
+                </button>
+                <button
+                  type="button"
+                  className={`admin-btn ${previewingNote.status === 'published' ? 'admin-btn-secondary' : 'admin-btn-primary'}`}
+                  onClick={async () => {
+                    await handleTogglePublishNote(previewingNote)
+                    setPreviewingNote((prev: any) => prev ? { ...prev, status: prev.status === 'published' ? 'staging' : 'published' } : null)
+                  }}
+                >
+                  {previewingNote.status === 'published' ? <Clock size={15} /> : <CheckCircle size={15} />}
+                  <span>{previewingNote.status === 'published' ? 'Revert to Staging' : 'Publish Live to Website'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 3. Bulk Publish Study Notes Confirmation Modal */}
+      <AnimatePresence>
+        {isNotesBulkPublishModalOpen && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '600px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <CheckCircle size={20} style={{ color: '#10b981' }} />
+                  <h3 className="admin-modal-title">Bulk Publish Study Notes</h3>
+                </div>
+                <button className="admin-modal-close" onClick={() => setIsNotesBulkPublishModalOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                  You have selected <strong>{selectedStagingNoteIds.length}</strong> study note(s) currently in <strong>Staging</strong>. Publishing them will make them immediately live and visible to students in <strong>Study Materials → Read Study Notes</strong>.
+                </p>
+
+                <div style={{
+                  maxHeight: '200px',
+                  overflowY: 'auto',
+                  background: 'rgba(0,0,0,0.2)',
+                  borderRadius: '6px',
+                  padding: '0.75rem',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  marginBottom: '1rem'
+                }}>
+                  {notesList.filter(n => selectedStagingNoteIds.includes(n.id)).map(n => (
+                    <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '0.82rem' }}>
+                      <span>#{n.id} {n.title}</span>
+                      <span style={{ color: 'var(--text-muted)' }}>{n.lessonTitle}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ padding: '0.75rem', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: '6px', fontSize: '0.8rem', color: '#6ee7b7' }}>
+                  ✓ Notes will appear strictly under their corresponding Group → Subject → Standard → Unit → Lesson hierarchy in Study Materials.
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setIsNotesBulkPublishModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn admin-bulk-publish-btn"
+                  disabled={isNotesBulkPublishing}
+                  onClick={handleBulkPublishNotes}
+                >
+                  <span>{isNotesBulkPublishing ? 'Publishing...' : `Confirm & Publish (${selectedStagingNoteIds.length})`}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 4. Bulk Upload Study Notes Modal */}
+      <AnimatePresence>
+        {isNotesBulkUploadModalOpen && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '750px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Upload size={20} style={{ color: 'var(--gold-primary)' }} />
+                  <h3 className="admin-modal-title">Bulk Upload Study Notes</h3>
+                </div>
+                <button className="admin-modal-close" onClick={() => setIsNotesBulkUploadModalOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+                  Paste a JSON array of study notes or formatted chapter markdown. All uploaded notes will enter <strong>Staging</strong> for your review and approval before publishing.
+                </p>
+
+                <div className="ai-field" style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <label>JSON Data or Markdown Chapters *</label>
+                    {notesBulkParsedCount !== null && (
+                      <span style={{ fontSize: '0.78rem', color: '#10b981', fontWeight: 600 }}>
+                        ✓ {notesBulkParsedCount} note(s) detected
+                      </span>
+                    )}
+                  </div>
+                  <textarea
+                    className="ai-textarea"
+                    rows={10}
+                    style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}
+                    value={notesBulkRawText}
+                    onChange={(e) => {
+                      setNotesBulkRawText(e.target.value)
+                      parseBulkNotesContent(e.target.value)
+                    }}
+                    placeholder={`[
+  {
+    "title": "Measurements and SI Units",
+    "lessonTitle": "1.1 Measurements and SI Units",
+    "unitId": 1,
+    "classId": 6,
+    "subject": "General Studies",
+    "category": "group1",
+    "language": "tamil",
+    "content": "CHAPTER 1: Measurements and SI Units\\n\\nSECTION 1: IMPORTANT ONE-LINER NOTES\\n1. Fundamental units...",
+    "sourceReference": "Samacheer Kalvi 6th Standard, Pages 9-26"
+  }
+]`}
+                  />
+                  {notesBulkParseError && (
+                    <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.35rem' }}>
+                      {notesBulkParseError}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ padding: '0.65rem 0.85rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  💡 <strong>Tip:</strong> All uploaded records enter Staging and can be individually edited, previewed, approved, and published to Study Materials.
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setIsNotesBulkUploadModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-primary"
+                  disabled={!notesBulkRawText.trim() || isNotesBulkUploading}
+                  onClick={handleBulkUploadNotes}
+                >
+                  <Upload size={16} />
+                  <span>{isNotesBulkUploading ? 'Uploading...' : `Upload to Staging (${notesBulkParsedCount || 0})`}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 5. Delete Single Study Note Confirmation Modal */}
+      <AnimatePresence>
+        {isDeletingNote && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '500px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertTriangle size={20} style={{ color: '#ef4444' }} />
+                  <h3 className="admin-modal-title">Delete Study Note</h3>
+                </div>
+                <button className="admin-modal-close" onClick={() => setIsDeletingNote(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  Are you sure you want to permanently delete Study Note <strong>#{isDeletingNote.id}</strong> ({isDeletingNote.title || isDeletingNote.lessonTitle})?
+                </p>
+                <p style={{ color: '#ef4444', fontSize: '0.8rem', margin: 0 }}>
+                  This action cannot be undone and will permanently remove this note from PostgreSQL.
+                </p>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setIsDeletingNote(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn"
+                  style={{ background: '#ef4444', color: '#fff' }}
+                  onClick={handleDeleteSingleNote}
+                >
+                  <Trash2 size={16} />
+                  <span>Delete Permanently</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   )
 }
