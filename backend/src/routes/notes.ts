@@ -29,7 +29,7 @@ function mapRowToNote(row: any) {
 // Public: Get notes
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, unitId, classId, lesson, subject, language, status, limit = '100', offset = '0' } = req.query;
+    const { category, unitId, classId, lesson, subject, language, status, limit = '100', offset = '0', strictLanguage } = req.query;
 
     const queryConditions: string[] = [];
     const values: any[] = [];
@@ -41,8 +41,10 @@ router.get('/', async (req: Request, res: Response) => {
         queryConditions.push(`category IN ('group2', 'group2a', 'group2_2a')`);
       } else if (cleanCat === 'group4_vao' || cleanCat === 'group4' || cleanCat === 'vao') {
         queryConditions.push(`category IN ('group4', 'vao', 'group4_vao')`);
+      } else if (cleanCat === 'group1') {
+        queryConditions.push(`category IN ('group1')`);
       } else {
-        queryConditions.push(`category = $${paramIndex++}`);
+        queryConditions.push(`LOWER(category) = $${paramIndex++}`);
         values.push(cleanCat);
       }
     }
@@ -57,19 +59,40 @@ router.get('/', async (req: Request, res: Response) => {
       values.push(Number(classId));
     }
 
-    if (subject && typeof subject === 'string' && subject.trim()) {
-      queryConditions.push(`LOWER(subject) = $${paramIndex++}`);
-      values.push(subject.trim().toLowerCase());
+    if (subject && typeof subject === 'string' && subject.trim() && subject !== 'all') {
+      const normSub = subject.trim().toLowerCase().replace(/-/g, ' ');
+      queryConditions.push(`(
+        LOWER(REPLACE(subject, '-', ' ')) = $${paramIndex}
+        OR LOWER(subject) LIKE '%' || $${paramIndex} || '%'
+        OR $${paramIndex} LIKE '%' || LOWER(REPLACE(subject, '-', ' ')) || '%'
+      )`);
+      values.push(normSub);
+      paramIndex++;
     }
 
-    if (lesson && typeof lesson === 'string' && lesson.trim()) {
-      queryConditions.push(`LOWER(lesson_title) = LOWER($${paramIndex++})`);
-      values.push(lesson.trim());
+    if (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all') {
+      const trimmedLesson = lesson.trim();
+      const stripped = trimmedLesson.replace(/^[0-9]+(\.[0-9]+)*[:\s-]*/, '').trim();
+      queryConditions.push(`(
+        LOWER(lesson_title) = LOWER($${paramIndex})
+        OR LOWER(title) = LOWER($${paramIndex})
+        OR LOWER(lesson_title) LIKE '%' || LOWER($${paramIndex + 1}) || '%'
+        OR LOWER($${paramIndex}) LIKE '%' || LOWER(lesson_title) || '%'
+      )`);
+      values.push(trimmedLesson, stripped || trimmedLesson);
+      paramIndex += 2;
     }
 
-    if (language && typeof language === 'string') {
-      queryConditions.push(`language = $${paramIndex++}`);
-      values.push(language.trim().toLowerCase());
+    let orderBy = 'created_at DESC, id DESC';
+    if (language && typeof language === 'string' && language !== 'all') {
+      const lang = language.trim().toLowerCase();
+      if (strictLanguage === 'true') {
+        queryConditions.push(`LOWER(language) = $${paramIndex++}`);
+        values.push(lang);
+      } else {
+        const safeLang = lang.replace(/[^a-z0-9]/gi, '');
+        orderBy = `CASE WHEN LOWER(language) = '${safeLang}' THEN 0 ELSE 1 END, created_at DESC, id DESC`;
+      }
     }
 
     if (status && typeof status === 'string' && status !== 'all') {
@@ -90,7 +113,7 @@ router.get('/', async (req: Request, res: Response) => {
     const dataQuery = `
       SELECT * FROM study_notes 
       ${whereClause} 
-      ORDER BY created_at DESC, id DESC 
+      ORDER BY ${orderBy}
       LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
     const dataValues = [...values, safeLimit, safeOffset];
@@ -154,15 +177,23 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
         queryConditions.push(`category IN ('group2', 'group2a', 'group2_2a')`);
       } else if (cleanCat === 'group4_vao' || cleanCat === 'group4' || cleanCat === 'vao') {
         queryConditions.push(`category IN ('group4', 'vao', 'group4_vao')`);
+      } else if (cleanCat === 'group1') {
+        queryConditions.push(`category IN ('group1')`);
       } else {
-        queryConditions.push(`category = $${paramIndex++}`);
+        queryConditions.push(`LOWER(category) = $${paramIndex++}`);
         values.push(cleanCat);
       }
     }
 
     if (subject && typeof subject === 'string' && subject !== 'all' && subject.trim()) {
-      queryConditions.push(`LOWER(subject) = $${paramIndex++}`);
-      values.push(subject.trim().toLowerCase());
+      const normSub = subject.trim().toLowerCase().replace(/-/g, ' ');
+      queryConditions.push(`(
+        LOWER(REPLACE(subject, '-', ' ')) = $${paramIndex}
+        OR LOWER(subject) LIKE '%' || $${paramIndex} || '%'
+        OR $${paramIndex} LIKE '%' || LOWER(REPLACE(subject, '-', ' ')) || '%'
+      )`);
+      values.push(normSub);
+      paramIndex++;
     }
 
     if (classId && classId !== 'all' && !isNaN(Number(classId))) {
@@ -176,8 +207,14 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     }
 
     if (lesson && typeof lesson === 'string' && lesson !== 'all' && lesson.trim()) {
-      queryConditions.push(`LOWER(lesson_title) LIKE $${paramIndex++}`);
-      values.push(`%${lesson.trim().toLowerCase()}%`);
+      const trimmedLesson = lesson.trim();
+      const stripped = trimmedLesson.replace(/^[0-9]+(\.[0-9]+)*[:\s-]*/, '').trim();
+      queryConditions.push(`(
+        LOWER(lesson_title) LIKE $${paramIndex}
+        OR LOWER(lesson_title) LIKE $${paramIndex + 1}
+      )`);
+      values.push(`%${trimmedLesson.toLowerCase()}%`, `%${(stripped || trimmedLesson).toLowerCase()}%`);
+      paramIndex += 2;
     }
 
     if (status && typeof status === 'string' && status !== 'all') {

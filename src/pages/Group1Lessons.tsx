@@ -139,7 +139,7 @@ const Group1Lessons = () => {
                       <button
                         className="view-lesson-btn"
                         onClick={() =>
-                          navigate(`/study-notes/group1/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}`)
+                          navigate(`/study-notes/group1/subject/general-studies/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}`)
                         }
                       >
                         <span>{isTamil ? 'பாடக் குறிப்புகள் படிக்க' : 'Read Study Notes'}</span>
