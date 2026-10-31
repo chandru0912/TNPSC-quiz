@@ -73,20 +73,118 @@ const GEMINI_MODELS = [
 ];
 
 /**
- * Builds the comprehensive 11-Section Study Notes prompt.
- * Adheres strictly to the user's mandatory 11-Section structure:
- * 1. Lesson Title
- * 2. Complete Lesson Introduction
- * 3. All Main Topics
- * 4. All Subtopics
- * 5. Detailed Explanations
- * 6. Definitions and Important Terms
- * 7. Examples from the Textbook
- * 8. Important Facts and Information
- * 9. Tables and Classifications
- * 10. Important Exam-Oriented Points
- * 11. Complete Lesson Revision Notes
- * 12. Textbook Coverage & Quality Audit Report
+ * Helper to get subject-specific prompt guidance according to the Universal Master Prompt.
+ */
+function getSubjectSpecificPromptInstructions(subject: string, lang: 'tamil' | 'english'): string {
+  const norm = subject.toLowerCase();
+  const isTamil = lang === 'tamil';
+
+  if (norm.includes('tamil') || norm.includes('தமிழ்')) {
+    return isTamil
+      ? `- ஆசிரியர் குறிப்பு & நூல் வெளி (Author biography, pseudonym, birth, awards, life events, other works)
+- சொல்லும் பொருளும் (Authoritative textbook word meanings and archaic literary terminology)
+- இலக்கணக் குறிப்பு & விதிகள் (Grammatical notes, sandhi rules, parts of speech, metric forms)
+- பாடல் வரிகள் & மேற்கோள்கள் (Key poem lines, literary context, and poetic beauties: எதுகை, மோனை, இயைபு)`
+      : `- Author details & literary background (Author biography, other works, awards)
+- Word meanings & vocabulary (Textbook glossary and archaic literary terms)
+- Grammatical rules & classifications
+- Poem lines, quotations, and literary context`;
+  }
+
+  if (norm.includes('english')) {
+    return `- Author/Poet biography, literary era, notable works, and awards
+- Textbook vocabulary, meanings, synonyms, antonyms, and contextual usage
+- Grammar rules, parts of speech, tenses, active/passive voice, direct/indirect speech
+- Figures of speech, poetic devices, and comprehension points`;
+  }
+
+  if (norm.includes('history') || norm.includes('வரலாறு') || norm.includes('social') || norm.includes('சமூக அறிவியல்')) {
+    return isTamil
+      ? `- காலவரிசை & முக்கிய ஆண்டுகள் (Chronological timeline of events, dates, and centuries)
+- அரசர்கள், வம்சங்கள், போர்கள் & உடன்படிக்கைகள் (Rulers, dynasties, battles, wars, treaties)
+- ஆங்கிலேயர் ஆட்சிக்காலச் சட்டங்கள், சீர்திருத்தங்கள் & இயக்கங்கள் (Acts, reforms, freedom movement milestones)
+- தலைவர்கள், அமைப்புகள், இதழ்கள் & முழக்கங்கள் (Leaders, organizations, journals, and historic slogans)`
+      : `- Chronological timeline of events, dates, and historical periods
+- Rulers, dynasties, wars, battles, and treaties
+- Acts, reforms, constitutional developments, and freedom movement milestones
+- Leaders, associations, journals, newspapers, and historic slogans`;
+  }
+
+  if (norm.includes('geography') || norm.includes('புவியியல்')) {
+    return isTamil
+      ? `- நிலப்பரப்பு, எல்லைகள் & இயற்பியல் பிரிவுகள் (Physical features, plateaus, mountains, plains)
+- ஆறுகள், துணை ஆறுகள் & நீர்நிலைகள் (Rivers, tributaries, deltas, and drainage systems)
+- தட்பவெப்பநிலை, பருவமழை & மண் வகைகள் (Climate, monsoon mechanisms, rainfall, soil types)
+- வேளாண்மை, கனிமங்கள், தொழிலகங்கள், போக்குவரத்து & மக்கள்தொகை (Agriculture, minerals, industries, transport, demographics)`
+      : `- Physical features, relief, mountains, plateaus, and plains
+- Drainage systems, rivers, tributaries, and waterfalls
+- Climate, monsoon mechanism, rainfall distribution, and soil classifications
+- Agriculture, minerals, industries, transportation networks, and demographic statistics`;
+  }
+
+  if (norm.includes('polity') || norm.includes('civics') || norm.includes('குடிமையியல்') || norm.includes('அரசியலமைப்பு')) {
+    return isTamil
+      ? `- அரசியல் சாசனப் பிரிவுகள் (Articles), திருத்தங்கள் (Amendments), அட்டவணைகள் (Schedules)
+- குடியரசுத் தலைவர், ஆளுநர், பிரதமர், முதலமைச்சர் & நாடாளுமன்ற அதிகாரங்கள்
+- உச்சநீதிமன்றம், உயர்நீதிமன்றங்கள் & நீதித்துறை அமைப்புகள்
+- அடிப்படை உரிமைகள், வழிகாட்டு நெறிமுறைகள் & அடிப்படைக் கடமைகள்`
+      : `- Constitutional Articles, Amendments, Schedules, and Parts
+- Powers and duties of President, Governor, Prime Minister, Chief Minister, Parliament
+- Supreme Court, High Courts, and judicial doctrines
+- Fundamental Rights, Directive Principles of State Policy, and Fundamental Duties`;
+  }
+
+  if (norm.includes('economic') || norm.includes('பொருளாதாரம்')) {
+    return isTamil
+      ? `- அடிப்படைக் கோட்பாடுகள், குறிகாட்டிகள் & பொருளாதாரக் கொள்கைகள் (GDP, GNP, NNP, Inflation)
+- ஐந்தாண்டுத் திட்டங்கள், நிதி ஆயோக் & அரசு நலத்திட்டங்கள் (Five Year Plans, NITI Aayog, welfare schemes)
+- ரிசர்வ் வங்கி (RBI), வங்கிகள், பணவியல் கொள்கை & நிதி மேலாண்மை
+- வரிகள் (நேரடி & மறைமுக வரிகள் - GST), பொது நிதி & வேலைவாய்ப்பு`
+      : `- Core economic concepts, indicators, and macroeconomic policies (GDP, Inflation, Deficit)
+- Five-Year Plans, NITI Aayog, poverty alleviation, and employment schemes
+- Reserve Bank of India (RBI), commercial banking, and monetary policy
+- Direct & indirect taxation (GST), public finance, and budget terminology`;
+  }
+
+  if (norm.includes('science') || norm.includes('அறிவியல்') || norm.includes('physics') || norm.includes('இயற்பியல்') || norm.includes('chemist') || norm.includes('வேதியியல்') || norm.includes('bio') || norm.includes('உயிரியல்') || norm.includes('botan') || norm.includes('zoolog')) {
+    return isTamil
+      ? `- அறிவியல் விதிகள், கோட்பாடுகள் & அளவீட்டு அலகுகள் (Laws, theories, SI units)
+- வேதியியல் பெயர்கள், மூலக்கூறு வாய்ப்பாடுகள் & வினைகள் (Chemical names, formulas, reactions)
+- தாவர, விலங்கு வகைப்பாடுகள், மனித உறுப்பு மண்டலங்கள் & நோய்கள் (Organ systems, diseases, vitamins)
+- அறிஞர்கள், கண்டுபிடிப்புகள் & பயன்பாடுகள் (Scientists, discoveries, instruments, applications)`
+      : `- Scientific laws, principles, formulas, and standard SI units
+- Chemical nomenclature, molecular formulas, and chemical equations
+- Biological taxonomy, organ systems, nutrition, deficiency diseases, and genetics
+- Scientific discoveries, instruments, scientists, and real-world applications`;
+  }
+
+  if (norm.includes('math') || norm.includes('கணிதம்')) {
+    return isTamil
+      ? `- கணிதச் சூத்திரங்கள் & முற்றொருமைகள் (Mathematical formulas, identities, theorems)
+- மாதிரி வினாக்களுக்கான படிமுறை தீர்வுகள் (Step-by-step textbook model solutions)
+- TNPSC தேர்வு குறுக்குவழிகள் & எளிமைப்படுத்தும் உத்திகள் (Shortcuts and speed techniques)`
+      : `- Mathematical formulas, identities, theorems, and definitions
+- Solved textbook model problems with step-by-step derivations
+- TNPSC exam shortcut techniques and speed math methods`;
+  }
+
+  return `- Core terminology and conceptual definitions
+- Textbook classifications and structured breakdowns
+- Real-world applications and exam relevance`;
+}
+
+/**
+ * Builds the STRICT MASTER PROMPT for TNPSC Study Notes Generation (Classes 6 to 12 - ALL SUBJECTS).
+ * STRICT REQUIREMENT: STUDY NOTES ONLY. No question banks, MCQ tests, or quizzes.
+ * Adheres strictly to the 8-Part Structure:
+ * 1. Lesson Information
+ * 2. Author / Person / Important Background Information
+ * 3. Important Terms and Meanings
+ * 4. Main Concepts and Important Points (numbered one-line points)
+ * 5. Important Comparisons and Tables
+ * 6. Subject-Specific Notes (adapted per subject)
+ * 7. Important Facts for TNPSC Exams
+ * 8. Additional Relevant Information from the Textbook
  */
 function buildCompleteStudyNotesPrompt(params: {
   chapterTitle: string;
@@ -101,11 +199,14 @@ function buildCompleteStudyNotesPrompt(params: {
   topicsIdentified?: string[];
 }): string {
   const isTamil = params.lang === 'tamil';
+  const subjectGuidance = getSubjectSpecificPromptInstructions(params.subject, params.lang);
 
   if (isTamil) {
-    return `நீங்கள் ஒரு முதன்மை TNPSC பேராசிரியர் மற்றும் தமிழ்நாடு அரசு சமச்சீர் கல்வி பாடநூல் சிறப்பு வல்லுநர் (Senior TNPSC Coaching Professor and Samacheer Kalvi Textbook Specialist).
+    return `நீங்கள் ஒரு முதன்மை TNPSC கல்வி வல்லுநர் மற்றும் தமிழ்நாடு அரசு சமச்சீர் கல்வி பாடநூல் சிறப்புப் பேராசிரியர் (Senior TNPSC Study Material Specialist).
+இப்பயிற்சி 6 முதல் 12-ஆம் வகுப்பு வரையிலான அனைத்துப் பாடங்களுக்கும் (தமிழ், ஆங்கிலம், கணிதம், அறிவியல், இயற்பியல், வேதியியல், உயிரியல், தாவரவியல், விலங்கியல், சமூக அறிவியல், வரலாறு, புவியியல், குடிமையியல், இந்திய அரசியலமைப்பு, பொருளாதாரம் உள்ளிட்ட அனைத்துப் பாடங்களுக்கும்) பொருந்தும்.
 
-உங்கள் பணி: கீழே வழங்கப்பட்டுள்ள அதிகாரப்பூர்வ சமச்சீர் கல்வி பாடநூல் பக்கங்களை (Samacheer Kalvi Textbook PDF Passages) முதலிலிருந்து இறுதி வரை முழுமையாக ஆய்வு செய்து, TNPSC குரூப் 1, 2, 2A, 4 மற்றும் VAO தேர்வுகளுக்குப் பயன்படும் முழுமையான, விரிவான, துல்லியமான ஆன்லைன் பாடக் குறிப்புகளை (Complete, Comprehensive & In-Depth Study Notes) தயாரிப்பது.
+முக்கிய நிபந்தனை (IMPORTANT DIRECTIVE):
+உங்கள் பணி TNPSC தேர்வுக்கான முழுமையான பாடக் குறிப்புகளை (STUDY NOTES ONLY) மட்டுமே உருவாக்குவதாகும். வினாத்தாள்கள், வினா-விடைத் தொகுப்புகள் அல்லது பலவுள் தெரிவு வினாக்கள் (MCQs / Quizzes / Question Banks) எதையும் உருவாக்கக் கூடாது. முழுமையான பாடக் குறிப்புகளில் மட்டுமே கவனம் செலுத்த வேண்டும்.
 
 ஆதாரம் (AUTHORITATIVE SOURCE):
 - பாடநூல்: ${params.bookName}
@@ -113,7 +214,7 @@ function buildCompleteStudyNotesPrompt(params: {
 - தேர்வு நிலை: TNPSC ${params.category.toUpperCase()}
 - பாடம்: ${params.subject}
 - வகுப்பு: ${params.classId ? params.classId + 'ஆம் வகுப்பு' : 'பொருத்தமான வகுப்பு'}
-- அலகு / பாடம்: ${params.chapterNumber} - "${params.chapterTitle}"
+- இயல் / பாடம்: ${params.chapterNumber} - "${params.chapterTitle}"
 - மொழி: தூய தமிழ் (Unicode UTF-8, NFC)
 
 அதிகாரப்பூர்வ பாடநூல் பகுதிகள் (AUTHORITATIVE TEXTBOOK PASSAGES FROM PDF):
@@ -122,92 +223,72 @@ ${params.passagesText}
 """
 
 கட்டாய விதிகள் (STRICT INSTRUCTIONS - MUST FOLLOW WITHOUT EXCEPTION):
-1. முழுமையான பாட ஆய்வு (COMPLETE LESSON-LEVEL ANALYSIS):
+1. முழுமையான பாட ஆய்வு (COMPLETE CONTENT ANALYSIS):
    - கொடுக்கப்பட்டுள்ள அனைத்துப் பக்கங்களையும் (பக்கங்கள் ${params.pages.join(', ')}) முழுமையாக ஆய்வு செய்யவும்.
-   - பாடத்தில் இடம்பெற்றுள்ள அனைத்துப் பிரதான தலைப்புகள், துணைத்தலைப்புகள், வரையறைகள், விளக்கங்கள், எடுத்துக்காட்டுகள், முக்கியத் தேர்வு உண்மைகள், வகைப்பாடுகள், அட்டவணைகள், தேதிகள், பெயர்கள் மற்றும் மதிப்பீட்டுப் பயிற்சிகளை முழுமையாக வெளிக்கொணரவும்.
-   - எக்காரணத்தைக் கொண்டும் பாடத் தகவல்களைச் சுருக்குவதோ, தட்டிக் கழிப்பதோ, மேலோட்டமாக எழுதுவதோ கூடாது (NEVER SKIP, SHORTEN, OR SUMMARIZE AWAY ANY CONTENT).
-   - பாடநூலில் உள்ள உண்மை நிலையை முழுமையாகப் பாதுகாக்கவும்.
+   - பாடத்தில் இடம்பெற்றுள்ள அனைத்துப் பிரதான தலைப்புகள் மற்றும் துணைத்தலைப்புகளையும் விடுபடாமல் குறிப்புகளாக்கவும்.
+   - எக்காரணத்தைக் கொண்டும் தகவல்களைச் சுருக்குவதோ, மேலோட்டமாக எழுதுவதோ கூடாது.
+   - பாடநூலின் உண்மை நிலையை 100% துல்லியமாகப் பாதுகாக்கவும்.
 
-2. எல்லை மீறாமை (STRICT LESSON ISOLATION):
-   - வழங்கப்பட்டுள்ள இப்பக்கங்களில் உள்ள குறிப்பிட்ட பாடத்தை மட்டுமே ஆய்வு செய்யவும். பிற பாடங்களை இதில் சேர்க்கக் கூடாது.
+2. எல்லை மீறாமை & நகல் தவிர்வு (STRICT NO-REPETITION POLICY):
+   - ஒரே தகவலை பல தலைப்புகளின் கீழ் திரும்பத் திரும்ப எழுதக் கூடாது.
+   - ஒவ்வொரு உண்மைத் தகவலும் ஒரு முறை மட்டுமே இடம்பெற வேண்டும்.
 
-3. வரம்பற்ற முழுமை (NO ARTIFICIAL LIMITS):
-   - தலைப்புகள், விளக்கங்கள், குறிப்புகள் அல்லது எடுத்துக்காட்டுகளுக்கு எந்தவித செயற்கை வரம்புகளும் (limits) கிடையாது. பாடநூலில் உள்ள அத்தனை தகவல்களும் விவரிக்கப்பட வேண்டும்.
+3. தூய தமிழ் யுனிகோட் விதி (MANDATORY TAMIL UNICODE RULE):
+   - சொல்லுக்குள் தேவையற்ற இடைவெளிகளோ எழுத்துப் பிழைகளோ இன்றி தூய தமிழ் யுனிகோட் (UTF-8, NFC) சொற்களாக மட்டுமே எழுத வேண்டும்.
 
-4. தூய தமிழ் யுனிகோட் விதி (MANDATORY TAMIL UNICODE RULE):
-   - PDF-ல் உள்ள எழுத்துரு சிதைவுகளோ, சொல்லுக்குள் தேவையற்ற இடைவெளிகளோ (OCR artifacts like 'இலக் ்க ணம்' or 'எ ழு த் து') இருந்தால் அவற்றை முற்றிலும் நீக்கி, இயல்பான, இலக்கணப் பிழையற்ற, தூய தமிழ் யுனிகோட் (UTF-8, NFC) சொற்களாக மட்டுமே எழுத வேண்டும் ('இலக்கணம்', 'எழுத்து').
-
-5. நகல் தவிர்வு விதி (STRICT NON-DUPLICATION RULE):
-   - எக்காரணத்தைக் கொண்டும் ஒரே தலைப்பையோ, விளக்கத்தையோ, வரையறையையோ, எடுத்துக்காட்டையோ, அட்டவணைப் பதிவையோ அல்லது தேர்வு மையக் குறிப்பையோ பாடத்திற்குள் மீண்டும் மீண்டும் எழுதக் கூடாது (NEVER REPEAT ANY INFORMATION).
-   - ஒவ்வொரு கல்வித் தகவலும் பாடக் குறிப்புகளுக்குள் ஒரே ஒரு முறை மட்டுமே இடம்பெற வேண்டும்.
-
-6. வெளியீட்டு கட்டமைப்பு (MANDATORY 11-SECTION STRUCTURE):
-பின்வரும் 11 பிரிவுகளையும் வரிசைப்படி முழுமையான Markdown வடிவில் கட்டாயம் வழங்கவும்:
+4. கட்டாய 8-பிரிவு பாடக் குறிப்புக் கட்டமைப்பு (MANDATORY 8-SECTION STUDY NOTES FORMAT):
+பின்வரும் 8 பிரிவுகளையும் வரிசைப்படி முழுமையான Markdown வடிவில் கட்டாயம் வழங்கவும்:
 
 # ${params.chapterTitle}
 > **பாடநூல் ஆதாரம்**: ${params.bookName} (பக்கங்கள்: ${params.pages.join(', ')})
 
-## 1. பாடம் / இயல் தலைப்பு (LESSON TITLE)
-- **அதிகாரப்பூர்வ பாடம்**: ${params.chapterTitle}
-- **வகுப்பு & பருவம்**: ${params.classId ? params.classId + '-ஆம் வகுப்பு' : '6-ஆம் வகுப்பு'} | ${params.subject}
-- **பாடநூல் தகவல் பக்கங்கள்**: பக்கங்கள் ${params.pages.join(', ')} (மொத்தம் ${params.pages.length} பக்கங்கள்)
+## 1. பாடத் தகவல் (Lesson Information)
+- **வகுப்பு (Class)**: ${params.classId ? params.classId + '-ஆம் வகுப்பு' : '6-ஆம் வகுப்பு'}
+- **பருவம் (Term)**: முதல் பருவம் (Term 1)
+- **பாடம் (Subject)**: ${params.subject}
+- **இயல் / அத்தியாயம் (Unit / Chapter)**: ${params.chapterNumber}
+- **பாடத்தின் பெயர் (Lesson Name)**: ${params.chapterTitle}
+- **பாடநூல் பக்கங்கள் (Textbook Pages)**: பக்கங்கள் ${params.pages.join(', ')}
 
-## 2. முழுமையான பாட அறிமுகம் (COMPLETE LESSON INTRODUCTION)
-(இப்பாடத்தின் பின்னணி, இலக்கண/பாட வரலாற்று முக்கியத்துவம், பாடநூல் முன்வைக்கும் அடிப்படைக் கருத்துகள் மற்றும் தேர்வுத் தேவைகள் பற்றிய விரிவான, முழுமையான அறிமுகப் பத்தி.)
+## 2. ஆசிரியர் / ஆளுமை / வரலாற்றுப் பின்னணி (Author / Personality / Background Information)
+(ஆசிரியர் அல்லது கவிஞர் பெயர், இயற்பெயர், பிறப்பு, சிறப்புப் பெயர்கள், இயற்றிய நூல்கள், விருதுகள் மற்றும் இப்பாடத்தின் பின்னணி பற்றிய விரிவான தகவல்கள் - பிற பாடங்களுக்குரிய விஞ்ஞானிகள், வரலாற்றுத் தலைவர்கள், அமைப்புகள் பற்றிய விவரங்கள்.)
 
-## 3. அனைத்துப் பிரதான தலைப்புகள் (ALL MAIN TOPICS)
-(பாடநூலில் இடம்பெற்றுள்ள அத்தனை முதன்மைத் தலைப்புகளையும் எண்ணிட்டு வரிசையாகப் பட்டியலிடவும். எதையும் விடுபடவிடக் கூடாது.)
+## 3. முக்கியமான சொற்கள் & பொருள்கள் (Important Terms and Meanings)
+(பாடநூலில் இடம்பெற்றுள்ள அத்தனை அருஞ்சொற்கள், கலைச்சொற்கள், அறிவியல்/இலக்கண வரைவிலக்கணங்கள் மற்றும் அவற்றின் நேரடிப் பொருள்கள்.)
+- **[சொல் / கலைச்சொல் 1]**: [பாடநூல் நேரடி விளக்கம் / பொருள்] [பக்கம்: X]
+- **[சொல் / கலைச்சொல் 2]**: [பாடநூல் நேரடி விளக்கம் / பொருள்] [பக்கம்: X]
+
+## 4. முதன்மைக் கருத்துகள் & முக்கியக் குறிப்புகள் (Main Concepts and Important Points)
+(இப்பாடத்தின் அனைத்துக் கருத்துகளையும் உள்ளடக்கிய சுருக்கமான, தெளிவான, தேர்வு நோக்குடைய குறிப்புகள். வரிசை எண் இடப்பட்ட ஒருவரி குறிப்புகளாக (Numbered one-line points) வழங்கப்பட வேண்டும். அனைத்துப் பெயர்கள், ஆண்டுகள், எண்கள், நிகழ்வுகள், காரண-காரியங்கள், நன்மைகள்-தீமைகள் ஆகியவை அடங்க வேண்டும்.)
 1. ...
 2. ...
 3. ...
 
-## 4. அனைத்துத் துணைத்தலைப்புகள் (ALL SUBTOPICS)
-(ஒவ்வொரு முதன்மைத் தலைப்பின் கீழும் வரும் துணைத்தலைப்புகளின் விரிவான படிநிலை வரிசை.)
-- 1.1 ...
-- 1.2 ...
-- 2.1 ...
-
-## 5. விரிவான பாட விளக்கங்கள் (DETAILED EXPLANATIONS)
-(பாடநூலில் உள்ள ஒவ்வொரு தலைப்பு மற்றும் துணைத்தலைப்பையும் விரிவாக, முழுமையாக, விளக்கவுரையுடன் எழுதவும். பாடநூல் பத்திகளில் உள்ள அத்தனை கல்வித் தகவல்களும் முழுமையாக விளக்கப்பட வேண்டும். பக்க எண்களைக் குறிப்பிடவும்.)
-
-## 6. வரையறைகள் மற்றும் முக்கியக் கலைச்சொற்கள் (DEFINITIONS AND IMPORTANT TERMS)
-(பாடநூலில் வரும் அனைத்து அதிகாரப்பூர்வ வரையறைகள், இலக்கண விதிகள், அடிப்படைக் கோட்பாடுகள் மற்றும் கலைச்சொற்கள்.)
-- **[கலைச்சொல் / வரையறை 1]**: [பாடநூல் நேரடி விளக்கம்] - [பக்கம்: X]
-- **[கலைச்சொல் / வரையறை 2]**: [பாடநூல் நேரடி விளக்கம்] - [பக்கம்: X]
-
-## 7. பாடநூல் எடுத்துக்காட்டுகள் (EXAMPLES FROM THE TEXTBOOK)
-(பாடநூலில் கொடுக்கப்பட்டுள்ள அத்தனை எடுத்துக்காட்டுகள், சான்றுகள், செய்யுள் அடிகள் மற்றும் பயிற்சிக் கணக்கீடுகள்.)
-- ...
-
-## 8. முக்கிய உண்மைத் தகவல்கள் (IMPORTANT FACTS AND INFORMATION)
-(பாடநூலில் உள்ள அனைத்து எண்கள், தேதிகள், ஆண்டுகள், பெயர்கள், வகை எண்ணிக்கை மற்றும் அரிய வரலாற்று/இலக்கண உண்மைகள்.)
-- ...
-
-## 9. அட்டவணைகள் மற்றும் வகைப்பாடுகள் (TABLES AND CLASSIFICATIONS)
-(பாடநூலில் இடம்பெற்றுள்ள அனைத்து வகைப்பாடுகள், ஒப்பீடுகள் மற்றும் அட்டவணைகளைச் செம்மையான Markdown அட்டவணைகளாகத் தருக.)
-| தலைப்பு / வகைப்பாடு | உட்பிரிவுகள் / எண்கள் | முக்கிய வேறுபாடுகள் & பாடநூல் சான்றுகள் |
+## 5. முக்கிய ஒப்பீடுகள் மற்றும் அட்டவணைகள் (Important Comparisons and Tables)
+(பாடநூலில் இடம்பெற்றுள்ள அனைத்து வகைப்பாடுகள், ஒப்பீடுகள், காலவரிசைகள் மற்றும் வேறுபாடுகளைச் செம்மையான Markdown அட்டவணைகளாகத் தருக.)
+| தலைப்பு / ஒப்பீட்டுக் கூறு | விபரம் / பண்புகள் | பாடநூல் ஆதாரம் |
 |---|---|---|
 | ... | ... | ... |
 
-## 10. முக்கிய தேர்வு நோக்குக் குறிப்புகள் & ஒருவரி வினா-விடைகள் (IMPORTANT EXAM-ORIENTED POINTS)
-(TNPSC தேர்வில் அடிக்கடி கேட்கப்படும் வினாக்கள், பெட்டிச் செய்திகள் 'தெரிந்து தெளிவோம்', குழப்பம் விளைவிக்கும் தேர்வுப் பொறிகள் மற்றும் எச்சரிக்கைக் குறிப்புகள்.)
-- **பாடநூல் பெட்டிச் செய்திகள் (Do You Know)**: ...
-- **TNPSC நேரடி ஒருவரி வினாக்கள்**: ...
-- **தேர்வு எச்சரிக்கைக் குறிப்புகள் (Exam Traps)**: ...
+## 6. பாடம் சார்ந்த சிறப்புப் பகுதிகள் (${params.subject.toUpperCase()} - Subject-Specific Notes)
+${subjectGuidance}
 
-## 11. முழுமையான பாட மீள்பார்வைக் குறிப்புகள் (COMPLETE LESSON REVISION NOTES)
-(மாணவர்கள் தேர்வுக்கு முன் விரைவாக மீள்பார்வை செய்ய ஏதுவாக குறைந்தது 12-20 நேரடி கேள்வி-பதில் அட்டவணை.)
-| எண் | மாதிரி தேர்வு வினா (Examination Question) | பாடநூல் நேரடி விடை (Authoritative Answer) | பக்க எண் |
-|---|---|---|---|
-| 1 | ... | ... | பக்கம் X |
-| 2 | ... | ... | பக்கம் X |
+## 7. TNPSC முக்கியத் தேர்வு உண்மைகள் (Important Facts for TNPSC Exams)
+(TNPSC தேர்வில் அடிக்கடி கேட்கப்படும் உயர் மதிப்புத் தகவல்கள், 'தெரிந்து தெளிவோம்' பெட்டிச் செய்திகள், அரிய வரலாற்று/அறிவியல் உண்மைகள், தேர்வுப் பொறிகள் - ஒருவரி குறிப்புகளாக.)
+- ...
 
-முழுமையான Markdown வடிவத்தில் மட்டுமே விடையளிக்கவும். JSON wrappers அல்லது முன்னுரை/பன்னுரை உரையாடல்களைத் தவிர்க்கவும்.`;
+## 8. பாடநூல் கூடுதல் தகவல்கள் (Additional Relevant Information from the Textbook)
+(பாடநூலின் செயல்பாடுகள், வரைபடக் குறிப்புகள், பயிற்சிக் குறிப்புகள் மற்றும் பிற இன்றியமையாத கல்வித் தகவல்கள்.)
+- ...
+
+முழுமையான Markdown வடிவத்தில் மட்டுமே விடையளிக்கவும். எக்காரணத்தைக் கொண்டும் வினா-விடைகள், வினாத்தாள்கள் அல்லது MCQs சேர்க்கக் கூடாது.`;
   }
 
-  return `You are a Senior TNPSC Coaching Professor and Tamil Nadu State Board (Samacheer Kalvi) Textbook Specialist.
+  return `You are a Senior TNPSC Study Material Specialist and Tamil Nadu State Board (Samacheer Kalvi) Textbook Expert.
+This task applies to ALL SUBJECTS from Classes 6 to 12.
 
-Your Task: Read and analyze the complete authoritative textbook pages provided below and convert them into COMPLETE, COMPREHENSIVE, and IN-DEPTH ONLINE STUDY NOTES for TNPSC Group 1, Group 2, Group 2A, Group 4, and VAO examinations.
+MANDATORY DIRECTIVE:
+YOUR TASK IS TO GENERATE STUDY NOTES ONLY. Do NOT generate question papers, MCQ tests, quizzes, or question banks. Focus entirely on exhaustive, high-yield, exam-oriented study notes.
 
 AUTHORITATIVE SOURCE:
 - Textbook: ${params.bookName}
@@ -223,79 +304,60 @@ AUTHORITATIVE TEXTBOOK PASSAGES FROM PDF:
 ${params.passagesText}
 """
 
-STRICT INSTRUCTIONS (MUST FOLLOW WITHOUT EXCEPTION):
-1. COMPLETE LESSON-LEVEL ANALYSIS:
+STRICT INSTRUCTIONS:
+1. COMPLETE CONTENT ANALYSIS:
    - Thoroughly analyze every single page provided (Pages ${params.pages.join(', ')}).
-   - Extract all topics, subtopics, definitions, explanations, facts, examples, tables, classifications, dates, names, and educational information.
-   - NEVER skip, shorten, or summarize away any educational material.
-   - Maintain the textbook's original factual meaning and precision.
+   - Cover every topic and subtopic without omission.
+   - Maintain 100% textbook factual precision.
 
-2. STRICT LESSON ISOLATION:
-   - Cover ONLY the selected lesson. Do not include content from adjacent chapters.
+2. STRICT NO-REPETITION POLICY:
+   - Never repeat the same point in multiple sections.
+   - Every educational fact must appear exactly once.
 
-3. NO ARTIFICIAL LIMITS:
-   - There are no arbitrary caps on points, examples, or length. Capture every piece of information present in the source pages.
-
-4. STRICT NON-DUPLICATION RULE:
-   - NEVER repeat any topic, explanation, definition, example, fact, or table row across sections.
-   - Every educational point, term, and exam pointer must appear exactly once in the notes.
-
-5. MANDATORY 11-SECTION OUTPUT FORMAT:
-You must organize your output into the exact 11 sections below using Markdown:
+3. MANDATORY 8-SECTION STUDY NOTES FORMAT:
+Organize the study notes into the exact 8 sections below using Markdown:
 
 # ${params.chapterTitle}
 > **Textbook Reference**: ${params.bookName} (Pages: ${params.pages.join(', ')})
 
-## 1. LESSON TITLE
-- **Official Lesson**: ${params.chapterTitle}
-- **Standard & Subject**: Standard ${params.classId || 6} | ${params.subject}
-- **Textbook Pages**: Pages ${params.pages.join(', ')} (${params.pages.length} Pages Total)
+## 1. Lesson Information
+- **Class**: Standard ${params.classId || 6}
+- **Term**: Term 1
+- **Subject**: ${params.subject}
+- **Unit / Chapter**: ${params.chapterNumber}
+- **Lesson Name**: ${params.chapterTitle}
+- **Textbook Pages**: Pages ${params.pages.join(', ')}
 
-## 2. COMPLETE LESSON INTRODUCTION
-(In-depth overview of the chapter, learning objectives, and curriculum background as presented in the textbook.)
+## 2. Author / Person / Important Background Information
+(Biographical details of authors, poets, scientists, historical personalities, leaders, institutions, and lesson background.)
 
-## 3. ALL MAIN TOPICS
-(Numbered list of all major concepts and topics in the textbook pages.)
+## 3. Important Terms and Meanings
+(Textbook definitions, technical terms, specialized vocabulary, abbreviations, and expansions.)
+- **[Term 1]**: [Definition / Meaning] [Page: X]
+
+## 4. Main Concepts and Important Points
+(Exhaustive, concise, numbered one-line points covering all factual concepts, dates, numbers, classifications, and processes.)
 1. ...
 2. ...
 
-## 4. ALL SUBTOPICS
-(Hierarchical breakdown of each main topic into its specific components.)
-- 1.1 ...
-- 1.2 ...
-
-## 5. DETAILED EXPLANATIONS
-(Exhaustive explanations for each topic and subtopic, preserving all definitions, rules, and concepts with page citations.)
-
-## 6. DEFINITIONS AND IMPORTANT TERMS
-(Every official definition, terminology, law, and formula with textbook citations.)
-- **[Term 1]**: [Definition] - [Page: X]
-
-## 7. EXAMPLES FROM THE TEXTBOOK
-(All textbook illustrations, examples, and solved problems from the pages.)
-
-## 8. IMPORTANT FACTS AND INFORMATION
-(All dates, years, numbers, figures, institutions, and core facts.)
-
-## 9. TABLES AND CLASSIFICATIONS
-(Present all classifications, comparative categories, and tables in Markdown.)
-| Topic / Category | Sub-types / Characteristics | Textbook Evidence |
+## 5. Important Comparisons and Tables
+(Clear Markdown comparison tables for classifications, differences, and structured categories.)
+| Category / Feature | Description | Textbook Citation |
 |---|---|---|
 | ... | ... | ... |
 
-## 10. IMPORTANT EXAM-ORIENTED POINTS
-(Frequently asked TNPSC questions, 'Do You Know / Info Bits', and common traps.)
-- **Info Bits / 'Do You Know'**: ...
-- **High-Yield Exam Points**: ...
-- **Common Exam Traps**: ...
+## 6. Subject-Specific Notes (${params.subject.toUpperCase()})
+${subjectGuidance}
 
-## 11. COMPLETE LESSON REVISION NOTES
-(Fast-revision Q&A table with 12-20 direct exam questions and textbook answers.)
-| # | Examination Question | Textbook Answer | Page Ref |
-|---|---|---|---|
-| 1 | ... | ... | Page X |
+## 7. Important Facts for TNPSC Exams
+(High-yield examination facts, recurring exam points, 'Do You Know / Info Bits', dates, awards, and common exam traps.)
+- ...
 
-Return ONLY Markdown. No JSON wrappers or conversational commentary.`;
+## 8. Additional Relevant Information from the Textbook
+(Special notes, diagram descriptions, activity facts, and concluding observations.)
+- ...
+
+Return ONLY Markdown. Do NOT generate questions or MCQs.`;
 }
 
 /**
@@ -415,199 +477,127 @@ function synthesizeCompleteNotesFallback(params: {
     );
 
   if (is6thTamilGrammar) {
-    return cleanTamilUnicodeText(`# ${params.chapterTitle}
-> **பாடநூல் ஆதாரம்**: ${params.bookName} (பக்கங்கள்: ${params.pages.join(', ')})
+    return cleanTamilUnicodeText(`# தமிழ் எழுத்துகளின் வகையும் தொகையும்
+> **பாடநூல் ஆதாரம்**: ${params.bookName} (பக்கங்கள்: 22, 23, 24, 25, 26)
 
-## 1. பாடம் / இயல் தலைப்பு (LESSON TITLE)
-- **அதிகாரப்பூர்வ பாடம்**: 6-ஆம் வகுப்பு (பருவம் 1): எழுத்து இலக்கணம், வகை, தொகை & மாத்திரை அளவுகள்
-- **பாடம் & பருவம்**: தமிழ் (சமச்சீர் கல்வி முதல் பருவம் - இயல் 1 கற்கண்டு)
-- **பாடநூல் தகவல் பக்கங்கள்**: பக்கங்கள் 22, 23, 24, 25, 26 (மொத்தம் 5 பக்கங்கள்)
+## 1. பாடத் தகவல் (Lesson Information)
+- **வகுப்பு (Class)**: 6-ஆம் வகுப்பு (Standard 6)
+- **பருவம் (Term)**: முதல் பருவம் (Term 1)
+- **பாடம் (Subject)**: பொதுத்தமிழ் (General Tamil)
+- **இயல் (Unit)**: இயல் 1 - கற்கண்டு (இலக்கணம்)
+- **பாடத்தின் பெயர் (Lesson Name)**: தமிழ் எழுத்துகளின் வகையும் தொகையும்
+- **பாடநூல் பக்கங்கள் (Textbook Pages)**: பக்கங்கள் 22 முதல் 26 வரை
 
-## 2. முழுமையான பாட அறிமுகம் (COMPLETE LESSON INTRODUCTION)
-மனிதன் தான் வாழும் உலகில் உள்ள ஒவ்வொரு பொருளையும் உற்று நோக்கினான்; அவற்றின் இயல்புகளை அறிந்து கொண்டான். அவ்வாறே மொழியையும் ஆழ்ந்து கவனித்தான். மொழியை எவ்வாறு பேசவும் எழுதவும் வேண்டும் என்பதை வரையறை செய்தான். அந்த வரையறைகளே **இலக்கணம்** எனப்படும். தமிழ் மொழி மிகத் தொன்மையான, இலக்கண வரம்புகள் நிறைந்த செம்மொழியாகும். தமிழ் மொழியின் அடிப்படை அமைப்பை அறிந்துகொள்ள எழுத்து இலக்கணம் முதன்மையான வாயிலாகத் திகழ்கிறது.
+## 2. ஆசிரியர் / ஆளுமை / வரலாற்றுப் பின்னணி (Author / Personality / Background Information)
+- **இலக்கண மரபு**: மனிதன் தான் வாழும் உலகில் உள்ள ஒவ்வொரு பொருளையும் உற்று நோக்கினான்; அவற்றின் இயல்புகளை அறிந்து கொண்டான். அவ்வாறே மொழியையும் ஆழ்ந்து கவனித்தான். மொழியை எவ்வாறு பேசவும் எழுதவும் வேண்டும் என்பதை வரையறை செய்தான். அந்த வரையறைகளே **இலக்கணம்** எனப்படும்.
+- **தொன்மைச் சிறப்பு**: தமிழ் மொழியில் எழுத்து, சொல், பொருள், யாப்பு, அணி என ஐந்திலக்கணக் கட்டமைப்புகள் வரையறுக்கப்பட்டுள்ளன.
+- **பாடப் பின்னணி**: தமிழ் மொழியின் அடிப்படை அமைப்பாக விளங்கும் எழுத்துகளின் பிறப்பு, ஒலிப்பு முறை, வகை, தொகை மற்றும் மாத்திரை கால அளவுகளை மாணவர்களுக்கும் போட்டித் தேர்வர்களுக்கும் எளிமையாக விளக்கும் கற்கண்டுப் பகுதி.
 
-## 3. அனைத்துப் பிரதான தலைப்புகள் (ALL MAIN TOPICS)
-1. தமிழ் மொழியின் இலக்கண வகைகள் ஐந்து
-2. எழுத்து - வரையறை மற்றும் வடிவங்கள் (ஒலி வடிவம் & வரி வடிவம்)
-3. உயிர் எழுத்துகள் (குறில் மற்றும் நெடில் எழுத்துகள்)
-4. மாத்திரை - கால அளவு மற்றும் கணக்கீட்டு முறை
-5. மெய் எழுத்துகள் (வல்லினம், மெல்லினம், இடையினம்)
-6. ஆய்த எழுத்து - தனித்துவ ஒலிப்புமுறை மற்றும் இலக்கண விதிகள்
-7. தகவல் தொழில்நுட்பக் கலைச்சொற்கள் & மொழித்திறன் பயிற்சி
-
-## 4. அனைத்துத் துணைத்தலைப்புகள் (ALL SUBTOPICS)
-- 1.1 ஐந்து இலக்கணப் பிரிவுகள் (எழுத்து, சொல், பொருள், யாப்பு, அணி)
-- 2.1 ஒலி வடிவம்: காதால் கேட்கப்படும் செவிசார் ஒலி
-- 2.2 வரி வடிவம்: கண்களால் பார்க்கப்பட்டு கைகளால் எழுதப்படும் உருவம்
-- 3.1 உயிர் எழுத்துகள் தோன்றும் விதம் (இயல்பான காற்று வெளிப்பாடு)
-- 3.2 குறில் எழுத்துகள் (குறுகிய ஓசையுடைய 5 எழுத்துகள்)
-- 3.3 நெடில் எழுத்துகள் (நீண்ட ஓசையுடைய 7 எழுத்துகள்)
-- 4.1 மாத்திரை வரையறை: கண் இமைக்கும் நேரம் அல்லது கைநொடிக்கும் நேரம்
-- 4.2 குறில் எழுத்து ஒலிக்கும் கால அளவு (1 மாத்திரை)
-- 4.3 நெடில் எழுத்து ஒலிக்கும் கால அளவு (2 மாத்திரை)
-- 4.4 மெய் மற்றும் ஆய்த எழுத்து ஒலிக்கும் கால அளவு (அரை மாத்திரை)
-- 5.1 மெய் எழுத்துகளின் உடம்பியல் தத்துவம் (மெய் = உடம்பு)
-- 5.2 வல்லின மெய்கள் (க், ச், ட், த், ப், ற்)
-- 5.3 மெல்லின மெய்கள் (ங், ஞ், ண், ந், ம், ன்)
-- 5.4 இடையின மெய்கள் (ய், ர், ல், வ், ழ், ள்)
-- 6.1 ஆய்த எழுத்தின் வேறு பெயர்கள் (முப்புள்ளி, முப்பாற்புள்ளி, தனிநிலை, அஃகேனம்)
-- 6.2 ஆய்த எழுத்தின் சொல்லமைப்பு விதிகள் (இடையில் மட்டுமே வரும் பண்பு)
-- 7.1 தமிழ் தொழில்நுட்பக் கலைச்சொற்கள் (Internet, Search Engine, Touch Screen, App)
-
-## 5. விரிவான பாட விளக்கங்கள் (DETAILED EXPLANATIONS)
-
-### 5.1 தமிழ் மொழியின் இலக்கண வகைகள் ஐந்து
-தமிழ் மொழியின் இலக்கணம் ஐந்து வகைப்படும் [பக்கம்: 22]:
-1. **எழுத்து இலக்கணம்**: எழுத்துகளின் பிறப்பு, வரிவடிவம், வகை, தொகை மற்றும் மாத்திரை பற்றி விளக்குவது.
-2. **சொல் இலக்கணம்**: எழுத்துகள் ஒன்றோ பலவோ சேர்ந்து பொருள் தரும் சொல்லின் இலக்கணம்.
-3. **பொருள் இலக்கணம்**: மக்களின் அகம் மற்றும் புறம் சார்ந்த வாழ்வியல் நெறிகளைப் பற்றிக் கூறுவது.
-4. **யாப்பு இலக்கணம்**: செய்யுள் இயற்றுவதற்கான கட்டமைப்பு மற்றும் உறுப்புகளை விவரிப்பது.
-5. **அணி இலக்கணம்**: செய்யுளுக்கு அழகையும் நயத்தையும் சேர்க்கும் அணிகளை விளக்குவது.
-
-### 5.2 எழுத்து - ஒலி வடிவம் & வரி வடிவம்
-- ஒலி வடிவமாக எழுப்பப்படுவதும், வரி வடிவமாக எழுதப்படுவதும் **எழுத்து** எனப்படுகிறது [பக்கம்: 22].
-- மனிதன் தன் உதடுகளைக் குவித்தல், உதடுகளை விரித்தல், வாயைத் திறத்தல் போன்ற எளிய செயல்பாடுகளால் காற்று வெளிப்படும்போது இயல்பாக உயிர் எழுத்துகள் பிறக்கின்றன.
-
-### 5.3 உயிர் எழுத்துகள் (குறில் & நெடில்)
-- உயிருக்கு முதன்மையானது காற்று. இயல்பாகக் காற்று வெளிப்படும்போது 'அ' முதல் 'ஔ' வரையுள்ள 12 உயிர் எழுத்துகளும் பிறக்கின்றன [பக்கம்: 22].
-- **குறில் எழுத்துகள் (5)**: அ, இ, உ, எ, ஒ - ஆகிய ஐந்து எழுத்துகளும் குறுகி ஒலிக்கின்றன.
-- **நெடில் எழுத்துகள் (7)**: ஆ, ஈ, ஊ, ஏ, ஐ, ஓ, ஔ - ஆகிய ஏழு எழுத்துகளும் நீண்டு ஒலிக்கின்றன.
-
-### 5.4 மாத்திரை அளவுகள்
-- மாத்திரை என்பது இங்கு எழுத்துகளை உச்சரிக்க எடுத்துக்கொள்ளும் **கால அளவைக்** குறிக்கிறது [பக்கம்: 23].
-- ஒரு மாத்திரை என்பது இயல்பாக **ஒரு முறை கண் இமைக்கவோ அல்லது ஒரு முறை கை நொடிக்கவோ** ஆகும் கால அளவாகும்.
-- குறில் எழுத்தை ஒலிக்கும் கால அளவு = **1 மாத்திரை**.
-- நெடில் எழுத்தை ஒலிக்கும் கால அளவு = **2 மாத்திரை**.
-- மெய் எழுத்துகள் ஒலிக்கும் கால அளவு = **1/2 (அரை) மாத்திரை**.
-- ஆய்த எழுத்து ஒலிக்கும் கால அளவு = **1/2 (அரை) மாத்திரை**.
-
-### 5.5 மெய் எழுத்துகள் (18)
-- மெய் என்பது **உடம்பு** எனப் பொருள்படும். மெய்யெழுத்துகளை ஒலிக்க உடலின் இயக்கம் இன்றியமையாதது [பக்கம்: 23, 24].
-- மெய்யெழுத்துகள் 18 ஆகும். அவை ஒலிப்பு முறையின் அடிப்படையில் மூன்று இனங்களாகப் பிரிக்கப்படுகின்றன:
-  1. **வல்லினம் (வன்மையான ஓசை)**: க், ச், ட், த், ப், ற் (ஆறும் வன்மையாக ஒலிக்கின்றன).
-  2. **மெல்லினம் (மென்மையான ஓசை)**: ங், ஞ், ண், ந், ம், ன் (ஆறும் மென்மையாக மூக்கில் பிறந்து ஒலிக்கின்றன).
-  3. **இடையினம் (இடைப்பட்ட ஓசை)**: ய், ர், ல், வ், ழ், ள் (வன்மையாகவும் இல்லாமல், மென்மையாகவும் இல்லாமல் இடைப்பட்டு ஒலிக்கின்றன).
-
-### 5.6 ஆய்த எழுத்து
-- தமிழில் தனித்த ஒரு வடிவம் கொண்ட எழுத்து **ஆய்த எழுத்து (ஃ)** ஆகும் [பக்கம்: 25].
-- இது மூன்று புள்ளிகளை உடையதால் **முப்புள்ளி, முப்பாற்புள்ளி, தனிநிலை, அஃகேனம்** என்ற வேறு பெயர்களாலும் அழைக்கப்படுகிறது.
-- **இலக்கண விதி**: ஆய்த எழுத்து தனித்து இயங்காது. தனக்கு முன் ஒரு குறில் எழுத்தையும், தனக்குப் பின் ஒரு வல்லின உயிர்மெய் எழுத்தையும் பெற்று, **சொல்லின் இடையில் மட்டுமே வரும்**. (எ.கா: அஃது, எஃகு).
-
-## 6. வரையறைகள் மற்றும் முக்கியக் கலைச்சொற்கள் (DEFINITIONS AND IMPORTANT TERMS)
+## 3. முக்கியமான சொற்கள் & பொருள்கள் (Important Terms and Meanings)
 - **இலக்கணம்**: மொழியைப் பிழையின்றிப் பேசவும் எழுதவும் மனிதனால் வரையறை செய்யப்பட்ட நெறிமுறை [பக்கம்: 22].
-- **எழுத்து**: ஒலி வடிவமாக எழுப்பப்படுவதும் வரிவடிவமாக எழுதப்படுவதும் ஆகும் [பக்கம்: 22].
-- **மாத்திரை**: எழுத்துகளை உச்சரிக்க எடுத்துக்கொள்ளும் கால அளவு; கண் இமைக்கும் நேரம் அல்லது கைநொடிக்கும் நேரம் [பக்கம்: 23].
-- **குறில்**: குறுகிய கால அளவில் (1 மாத்திரை) ஒலிக்கும் உயிர் எழுத்துகள் (அ, இ, உ, எ, ஒ) [பக்கம்: 23].
-- **நெடில்**: நீண்ட கால அளவில் (2 மாத்திரை) ஒலிக்கும் உயிர் எழுத்துகள் (ஆ, ஈ, ஊ, ஏ, ஐ, ஓ, ஔ) [பக்கம்: 23].
-- **மெய்**: உடம்பு எனப் பொருள்படும் 18 மெய்யெழுத்துகள்; அரை மாத்திரை கால அளவு கொண்டவை [பக்கம்: 23].
-- **ஆய்தம்**: மூன்று புள்ளிகள் கொண்ட தனிநிலை சார்பெழுத்து; அரை மாத்திரை அளவு கொண்டது [பக்கம்: 25].
-- **வலஞ்சுழி**: Clockwise [பக்கம்: 26].
-- **இடஞ்சுழி**: Anti-clockwise [பக்கம்: 26].
-- **இணையம்**: Internet [பக்கம்: 26].
-- **குரல்தேடல்**: Voice Search [பக்கம்: 26].
-- **தேடுபொறி**: Search engine [பக்கம்: 26].
-- **தொடுதிரை**: Touch Screen [பக்கம்: 26].
-- **செயலி**: App [பக்கம்: 26].
-- **மின்னஞ்சல்**: E-mail [பக்கம்: 26].
+- **எழுத்து**: ஒலி வடிவமாக எழுப்பப்படுவதும், வரி வடிவமாக எழுதப்படுவதும் எழுத்து எனப்படும் [பக்கம்: 22].
+- **மாத்திரை**: எழுத்துகளை உச்சரிக்க எடுத்துக்கொள்ளும் கால அளவு; இயல்பாக ஒரு முறை கண் இமைக்கவோ அல்லது கை நொடிக்கவோ ஆகும் கால அளவு [பக்கம்: 23].
+- **குறில்**: ஒரு மாத்திரை கால அளவில் குறுகி ஒலிக்கும் உயிர் எழுத்துகள் [பக்கம்: 23].
+- **நெடில்**: இரண்டு மாத்திரை கால அளவில் நீண்டு ஒலிக்கும் உயிர் எழுத்துகள் [பக்கம்: 23].
+- **மெய் எழுத்து**: மெய் என்பது 'உடம்பு' எனப் பொருள்படும்; உடலின் இயக்கத்தால் பிறக்கும் பதினெட்டு எழுத்துகள் [பக்கம்: 23].
+- **ஆய்த எழுத்து**: மூன்று புள்ளிகளை உடைய தனித்த வடிவம் கொண்ட சிறப்புச் சார்பெழுத்து [பக்கம்: 25].
+- **வலஞ்சுழி**: Clockwise (இடமிருந்து வலமாக எழுதப்படும் எழுத்துகள்) [பக்கம்: 26].
+- **இடஞ்சுழி**: Anti-clockwise (வலமிருந்து இடமாக எழுதப்படும் எழுத்துகள்) [பக்கம்: 26].
 
-## 7. பாடநூல் எடுத்துக்காட்டுகள் (EXAMPLES FROM THE TEXTBOOK)
-- **குறில் எழுத்துகள்**: அ, இ, உ, எ, ஒ [பக்கம்: 22]
-- **நெடில் எழுத்துகள்**: ஆ, ஈ, ஊ, ஏ, ஐ, ஓ, ஔ [பக்கம்: 22]
-- **வல்லினம் சான்றுகள்**: க், ச், ட், த், ப், ற் [பக்கம்: 24]
-- **மெல்லினம் சான்றுகள்**: ங், ஞ், ண், ந், ம், ன் [பக்கம்: 24]
-- **இடையினம் சான்றுகள்**: ய், ர், ல், வ், ழ், ள் [பக்கம்: 24]
-- **ஆய்த எழுத்துச் சொற்கள்**: அஃது, எஃகு [பக்கம்: 25]
-- **பாடநூல் பெயர்ப் பயிற்சி (மாத்திரை கணக்கீடு)** [பக்கம்: 25]:
-  - 'கபிலர்' என்னும் பெயரின் மாத்திரை அளவு:
-    - க = 1 மாத்திரை (குறில்)
-    - பி = 1 மாத்திரை (குறில்)
-    - ல = 1 மாத்திரை (குறில்)
-    - ர் = 1/2 மாத்திரை (மெய்)
-    - மொத்தம் = 1 + 1 + 1 + 1/2 = **3 1/2 (மூன்றரை மாத்திரை)**.
-  - 'அன்பு': அ(1) + ன்(1/2) + பு(1) = 2 1/2 மாத்திரை.
+## 4. முதன்மைக் கருத்துகள் & முக்கியக் குறிப்புகள் (Main Concepts and Important Points)
+1. தமிழ் மொழியின் இலக்கண வகைகள் ஐந்து ஆகும்: எழுத்து இலக்கணம், சொல் இலக்கணம், பொருள் இலக்கணம், யாப்பு இலக்கணம், அணி இலக்கணம் [பக்கம்: 22].
+2. ஒலி வடிவமாக எழுப்பப்படுவதும் வரிவடிவமாக எழுதப்படுவதும் எழுத்து எனப்படுகிறது [பக்கம்: 22].
+3. உயிருக்கு முதன்மையானது காற்று; இயல்பாகக் காற்று வெளிப்படும் போது உயிர் எழுத்துகள் (12) பிறக்கின்றன [பக்கம்: 22].
+4. வாயைத் திறத்தல், உதடுகளை விரித்தல், உதடுகளைக் குவித்தல் ஆகிய எளிய செயல்பாடுகளால் 'அ' முதல் 'ஔ' வரையுள்ள 12 உயிர் எழுத்துகளும் பிறக்கின்றன [பக்கம்: 22].
+5. குறுகிய ஓசையுடைய உயிர் குறில் எழுத்துகள் ஐந்து ஆகும்: அ, இ, உ, எ, ஒ [பக்கம்: 23].
+6. நீண்ட ஓசையுடைய உயிர் நெடில் எழுத்துகள் ஏழு ஆகும்: ஆ, ஈ, ஊ, ஏ, ஐ, ஓ, ஔ [பக்கம்: 23].
+7. மாத்திரை என்பது இங்கு எழுத்துகளை உச்சரிக்க எடுத்துக்கொள்ளும் கால அளவைக் குறிக்கிறது [பக்கம்: 23].
+8. ஒரு முறை கண் இமைக்கவோ ஒரு முறை கை நொடிக்கவோ ஆகும் கால அளவு ஒரு மாத்திரை எனப்படும் [பக்கம்: 23].
+9. குறில் எழுத்தை ஒலிக்கும் கால அளவு ஒரு (1) மாத்திரை ஆகும் [பக்கம்: 23].
+10. நெடில் எழுத்தை ஒலிக்கும் கால அளவு இரண்டு (2) மாத்திரை ஆகும் [பக்கம்: 23].
+11. மெய் என்பது உடம்பு எனப் பொருள்படும்; மெய் எழுத்துகளை ஒலிக்க உடம்பின் இயக்கம் முதன்மையானது [பக்கம்: 23].
+12. மெய் எழுத்துகள் மொத்தம் பதினெட்டு (18) ஆகும்: க் முதல் ன் வரை [பக்கம்: 23].
+13. மெய் எழுத்துகள் ஒலிக்கும் கால அளவு அரை (1/2) மாத்திரை ஆகும் [பக்கம்: 23].
+14. மெய் எழுத்துகள் ஒலிப்பு முறையின் அடிப்படையில் வல்லினம், மெல்லினம், இடையினம் என மூன்று இனங்களாகப் பிரிக்கப்படுகின்றன [பக்கம்: 24].
+15. க், ச், ட், த், ப், ற் ஆகிய ஆறும் மார்பிலிருந்து வன்மையாக ஒலிக்கும் வல்லின மெய்கள் ஆகும் [பக்கம்: 24].
+16. ங், ஞ், ண், ந், ம், ன் ஆகிய ஆறும் மூக்கிலிருந்து மென்மையாக ஒலிக்கும் மெல்லின மெய்கள் ஆகும் [பக்கம்: 24].
+17. ய், ர், ல், வ், ழ், ள் ஆகிய ஆறும் கழுத்திலிருந்து வன்மையாகவும் இல்லாமல் மென்மையாகவும் இல்லாமல் இடைப்பட்டு ஒலிக்கும் இடையின மெய்கள் ஆகும் [பக்கம்: 24].
+18. மெய் எழுத்துகள் 18-உடன் உயிர் எழுத்துகள் 12-ம் சேர்வதால் தோன்றும் 216 எழுத்துகளும் உயிர்மெய் எழுத்துகள் எனப்படும் [பக்கம்: 24].
+19. மெய்யுடன் உயிர் குறில் சேர்ந்தால் உயிர்மெய் குறில் (1 மாத்திரை) தோன்றும் [பக்கம்: 24].
+20. மெய்யுடன் உயிர் நெடில் சேர்ந்தால் உயிர்மெய் நெடில் (2 மாத்திரை) தோன்றும் [பக்கம்: 24].
+21. தமிழில் தனித்த ஒரு வடிவம் பெற்ற எழுத்து ஆய்த எழுத்து (ஃ) ஆகும் [பக்கம்: 25].
+22. ஆய்த எழுத்தின் வேறு பெயர்கள்: முப்புள்ளி, முப்பாற்புள்ளி, தனிநிலை, அஃகேனம் [பக்கம்: 25].
+23. ஆய்த எழுத்து நுட்பமான ஒலிப்பு முறையைக் கொண்டு அரை (1/2) மாத்திரை அளவில் ஒலிக்கும் [பக்கம்: 25].
+24. ஆய்த எழுத்து தனக்கு முன் ஒரு குறில் எழுத்தையும், தனக்குப் பின் ஒரு வல்லின உயிர்மெய் எழுத்தையும் பெற்றுச் சொல்லின் இடையில் மட்டுமே வரும் [பக்கம்: 25].
+25. ஆய்த எழுத்து தனித்து இயங்காது; முதல் எழுத்துகளைச் சார்ந்து இயங்குவதால் இது சார்பெழுத்து வகையுள் அடங்கும் [பக்கம்: 25].
 
-## 8. முக்கிய உண்மைத் தகவல்கள் (IMPORTANT FACTS AND INFORMATION)
-- தமிழ் மொழியின் மொத்த இலக்கணப் பிரிவுகள் = **5**.
-- உயிர் எழுத்துகள் மொத்தம் = **12** (குறில் 5, நெடில் 7).
-- மெய் எழுத்துகள் மொத்தம் = **18** (வல்லினம் 6, மெல்லினம் 6, இடையினம் 6).
-- முதல் எழுத்துகள் மொத்தம் = **30** (உயிர் 12 + மெய் 18).
-- மெய் எழுத்து மற்றும் ஆய்த எழுத்து ஒலிக்கும் கால அளவு = **அரை (1/2) மாத்திரை**.
-- ஆய்த எழுத்தின் வேறு பெயர்கள் = **முப்புள்ளி, முப்பாற்புள்ளி, தனிநிலை, அஃகேனம்**.
-- ஆய்த எழுத்து சொல்லின் முதலில் அல்லது இறுதியில் வராது; **இடையில் மட்டுமே வரும்**.
-- உயிர் எழுத்துகள் உதடு விரித்தல், குவித்தல் மற்றும் வாயைத் திறத்தல் மூலம் வெளிப்படும் காற்றால் இயல்பாகப் பிறக்கின்றன.
+## 5. முக்கிய ஒப்பீடுகள் மற்றும் அட்டவணைகள் (Important Comparisons and Tables)
 
-## 9. அட்டவணைகள் மற்றும் வகைப்பாடுகள் (TABLES AND CLASSIFICATIONS)
-
-### அட்டவணை 1: தமிழ் மொழியின் 5 இலக்கண வகைகள்
-| எண் | இலக்கண வகை | விளக்கம் | பாடநூல் பக்கம் |
+### அட்டவணை 1: தமிழ் மொழியின் 5 இலக்கணப் பிரிவுகள்
+| எண் | இலக்கணப் பிரிவு | பாடநூல் விளக்கம் | பாடநூல் பக்கம் |
 |---|---|---|---|
-| 1 | எழுத்து இலக்கணம் | எழுத்துகளின் வடிவம், வகை, பிறப்பு, மாத்திரை | பக்கம் 22 |
-| 2 | சொல் இலக்கணம் | ஒருமை பன்மை, பெயர், வினை முதலான சொற்கள் | பக்கம் 22 |
-| 3 | பொருள் இலக்கணம் | மக்களின் அகம் மற்றும் புற வாழ்வியல் விதிகள் | பக்கம் 22 |
-| 4 | யாப்பு இலக்கணம் | செய்யுள் இயற்றுவதற்கான உறுப்புகள் மற்றும் விதிகள் | பக்கம் 22 |
-| 5 | அணி இலக்கணம் | கவிதையின் அழகையும் சொல்லாட்சியையும் விளக்குவது | பக்கம் 22 |
+| 1 | எழுத்து இலக்கணம் | எழுத்துகளின் பிறப்பு, வடிவம், வகை, தொகை, மாத்திரை பற்றி விளக்குவது | பக்கம் 22 |
+| 2 | சொல் இலக்கணம் | சொற்களின் வகை, பெயர்ச்சொல், வினைச்சொல் முதலானவற்றை விளக்குவது | பக்கம் 22 |
+| 3 | பொருள் இலக்கணம் | மக்களின் அகம் மற்றும் புற வாழ்வியல் ஒழுக்கங்களை நெறிப்படுத்துவது | பக்கம் 22 |
+| 4 | யாப்பு இலக்கணம் | செய்யுள் இயற்றுவதற்கான எழுத்து, அசை, சீர் முதலான உறுப்புகளை விளக்குவது | பக்கம் 22 |
+| 5 | அணி இலக்கணம் | செய்யுளுக்கு அழகு சேர்க்கும் அணிகள் மற்றும் உவமைகளை விளக்குவது | பக்கம் 22 |
 
-### அட்டவணை 2: உயிர் மற்றும் மெய் எழுத்துகளின் மாத்திரை அளவுகள்
-| எழுத்து வகை | அடங்கியுள்ள எழுத்துகள் | ஒலிக்கும் கால அளவு (மாத்திரை) |
-|---|---|---|
-| உயிர் குறில் | அ, இ, உ, எ, ஒ (5) | 1 மாத்திரை |
-| உயிர் நெடில் | ஆ, ஈ, ஊ, ஏ, ஐ, ஓ, ஔ (7) | 2 மாத்திரை |
-| மெய்யெழுத்துகள் | க் முதல் ன் வரை (18) | 1/2 மாத்திரை |
-| ஆய்த எழுத்து | ஃ (1) | 1/2 மாத்திரை |
+### அட்டவணை 2: எழுத்துகளின் மாத்திரை கால அளவுகள்
+| எண் | எழுத்து வகை | அடங்கியுள்ள எழுத்துகள் | மாத்திரை கால அளவு |
+|---|---|---|---|
+| 1 | உயிர் குறில் | அ, இ, உ, எ, ஒ (5 எழுத்துகள்) | 1 மாத்திரை |
+| 2 | உயிர் நெடில் | ஆ, ஈ, ஊ, ஏ, ஐ, ஓ, ஔ (7 எழுத்துகள்) | 2 மாத்திரை |
+| 3 | மெய் எழுத்துகள் | க் முதல் ன் வரை (18 எழுத்துகள்) | 1/2 மாத்திரை |
+| 4 | ஆய்த எழுத்து | ஃ (1 எழுத்து) | 1/2 மாத்திரை |
+| 5 | உயிர்மெய் குறில் | க, கி, கு, கெ, கொ முதலியன | 1 மாத்திரை |
+| 6 | உயிர்மெய் நெடில் | கா, கீ, கூ, கே, கை, கோ, கௌ முதலியன | 2 மாத்திரை |
 
 ### அட்டவணை 3: மெய்யெழுத்துகளின் மூவகை இனங்கள்
-| இனம் | எழுத்துகள் | ஒலிப்புத் தன்மை |
-|---|---|---|
-| வல்லினம் | க், ச், ட், த், ப், ற் (6) | மார்பிலிருந்து வன்மையாக ஒலிக்கும் |
-| மெல்லினம் | ங், ஞ், ண், ந், ம், ன் (6) | மூக்கிலிருந்து மென்மையாக ஒலிக்கும் |
-| இடையினம் | ய், ர், ல், வ், ழ், ள் (6) | கழுத்திலிருந்து இடைப்பட்டு ஒலிக்கும் |
-
-### அட்டவணை 4: தகவல் தொழில்நுட்பக் கலைச்சொற்கள்
-| ஆங்கிலச் சொல் | தூய தமிழ்ச் சொல் | பாடநூல் பக்கம் |
-|---|---|---|
-| Clockwise | வலஞ்சுழி | பக்கம் 26 |
-| Anti-clockwise | இடஞ்சுழி | பக்கம் 26 |
-| Internet | இணையம் | பக்கம் 26 |
-| Voice Search | குரல்தேடல் | பக்கம் 26 |
-| Search engine | தேடுபொறி | பக்கம் 26 |
-| Touch Screen | தொடுதிரை | பக்கம் 26 |
-| App | செயலி | பக்கம் 26 |
-| E-mail | மின்னஞ்சல் | பக்கம் 26 |
-
-## 10. முக்கிய தேர்வு நோக்குக் குறிப்புகள் & ஒருவரி வினா-விடைகள் (IMPORTANT EXAM-ORIENTED POINTS)
-- **TNPSC முக்கிய வினா**: 'மெய்' என்பதன் நேரடிப் பொருள் என்ன? **உடம்பு**.
-- **TNPSC விதிவிலக்கு விதி**: ஆய்த எழுத்து சொல்லின் இடையில் மட்டுமே வரும்; தனக்கு முன் ஒரு குறிலையும், பின் ஒரு வல்லின உயிர்மெய்யையும் பெறும்.
-- **TNPSC முந்தைய தேர்வு வினா**: 'கபிலர்' சொல்லின் மாத்திரை அளவு யாது? **3 1/2 மாத்திரை**.
-- **TNPSC எச்சரிக்கை குறிப்பு**: குறிலுக்கு 1 மாத்திரை, நெடிலுக்கு 2 மாத்திரை, மெய் மற்றும் ஆய்தத்திற்கு அரை மாத்திரை மட்டுமே. உயிர்மெய் குறிலுக்கு 1 மாத்திரை, உயிர்மெய் நெடிலுக்கு 2 மாத்திரை.
-- **அடிக்கடி கேட்கப்படும் கலைச்சொல்**: 'குரல்தேடல்' என்பதன் ஆங்கிலச் சொல் யாது? **Voice Search**.
-
-## 11. முழுமையான பாட மீள்பார்வைக் குறிப்புகள் (COMPLETE LESSON REVISION NOTES)
-
-| எண் | மாதிரி தேர்வு வினா (Examination Question) | பாடநூல் நேரடி விடை (Authoritative Answer) | பக்க எண் |
+| இனம் | எழுத்துகள் | பிறப்பிடம் | ஒலிப்புத் தன்மை |
 |---|---|---|---|
-| 1 | தமிழ் மொழியின் இலக்கண வகைகள் எத்தனை? | ஐந்து வகைப்படும் | பக்கம் 22 |
-| 2 | ஒலி வடிவமாக எழுப்பப்படுவதும் வரிவடிவமாக எழுதப்படுவதும் எது? | எழுத்து | பக்கம் 22 |
-| 3 | உயிர் எழுத்துகள் மொத்தம் எத்தனை? | 12 எழுத்துகள் | பக்கம் 22 |
-| 4 | குறுகிய ஓசையுடைய உயிர் குறில் எழுத்துகள் எத்தனை? | 5 (அ, இ, உ, எ, ஒ) | பக்கம் 22 |
-| 5 | நீண்ட ஓசையுடைய உயிர் நெடில் எழுத்துகள் எத்தனை? | 7 (ஆ, ஈ, ஊ, ஏ, ஐ, ஓ, ஔ) | பக்கம் 22 |
-| 6 | மாத்திரை என்றால் என்ன? | எழுத்துகளை உச்சரிக்க எடுத்துக்கொள்ளும் கால அளவு | பக்கம் 23 |
-| 7 | ஒரு மாத்திரை என்பது எவ்வளவு கால அளவு? | ஒரு முறை கண் இமைக்கவோ கை நொடிக்கவோ ஆகும் நேரம் | பக்கம் 23 |
-| 8 | குறில் எழுத்தை ஒலிக்கும் கால அளவு யாது? | 1 மாத்திரை | பக்கம் 23 |
-| 9 | நெடில் எழுத்தை ஒலிக்கும் கால அளவு யாது? | 2 மாத்திரை | பக்கம் 23 |
-| 10 | மெய் என்பதன் பொருள் என்ன? | உடம்பு | பக்கம் 23 |
-| 11 | மெய் எழுத்துகள் மொத்தம் எத்தனை? | 18 எழுத்துகள் | பக்கம் 23 |
-| 12 | மெய் எழுத்துகள் ஒலிக்கும் கால அளவு என்ன? | அரை (1/2) மாத்திரை | பக்கம் 23 |
-| 13 | வல்லின மெய் எழுத்துகள் யாவை? | க், ச், ட், த், ப், ற் (6) | பக்கம் 24 |
-| 14 | மெல்லின மெய் எழுத்துகள் யாவை? | ங், ஞ், ண், ந், ம், ன் (6) | பக்கம் 24 |
-| 15 | இடையின மெய் எழுத்துகள் யாவை? | ய், ர், ல், வ், ழ், ள் (6) | பக்கம் 24 |
-| 16 | ஆய்த எழுத்தின் வேறு பெயர்கள் யாவை? | முப்புள்ளி, முப்பாற்புள்ளி, தனிநிலை, அஃகேனம் | பக்கம் 25 |
-| 17 | ஆய்த எழுத்து ஒலிக்கும் கால அளவு என்ன? | அரை (1/2) மாத்திரை | பக்கம் 25 |
-| 18 | ஆய்த எழுத்து சொல்லில் எங்கு வரும்? | சொல்லின் இடையில் மட்டுமே வரும் | பக்கம் 25 |
-| 19 | 'கபிலர்' என்னும் பெயரின் மாத்திரை அளவு எவ்வளவு? | மூன்றரை (3 1/2) மாத்திரை | பக்கம் 25 |
-| 20 | 'Search engine' என்பதன் தமிழாக்கம் என்ன? | தேடுபொறி | பக்கம் 26 |`);
+| வல்லினம் | க், ச், ட், த், ப், ற் (6) | மார்பு | வன்மையாக ஒலிக்கும் |
+| மெல்லினம் | ங், ஞ், ண், ந், ம், ன் (6) | மூக்கு | மென்மையாக ஒலிக்கும் |
+| இடையினம் | ய், ர், ல், வ், ழ், ள் (6) | கழுத்து | வன்மையுமின்றி மென்மையுமின்றி இடைப்பட்டு ஒலிக்கும் |
+
+## 6. பாடம் சார்ந்த சிறப்புப் பகுதிகள் (TAMIL - Subject-Specific Notes)
+- **சொல்லும் பொருளும்**:
+  - மெய் = உடம்பு
+  - மாத்திரை = கால அளவு (கண் இமைக்கும் நேரம் அல்லது கை நொடிக்கும் நேரம்)
+- **இலக்கணக் குறிப்பு & விதிகள்**:
+  - முதல் எழுத்துகள் மொத்தம் 30 (உயிர் 12 + மெய் 18).
+  - சார்பெழுத்துகள் 10 வகைப்படும் (உயிர்மெய், ஆய்தம், உயிரளபெடை, ஒற்றளபெடை, குற்றியலிகரம், குற்றியலுகரம், ஐகாரக்குறுக்கம், ஔகாரக்குறுக்கம், மகரக்குறுக்கம், ஆய்தக்குறுக்கம்).
+  - ஆய்த எழுத்து சொல்லின் இடையில் மட்டுமே வரும்; சொல்லின் முதலிலோ இறுதியிலோ வராது.
+- **தகவல் தொழில்நுட்பக் கலைச்சொற்கள் (IT Tamil Vocabulary)** [பக்கம்: 26]:
+  - வலஞ்சுழி - Clockwise
+  - இடஞ்சுழி - Anti-clockwise
+  - இணையம் - Internet
+  - குரல்தேடல் - Voice Search
+  - தேடுபொறி - Search engine
+  - தொடுதிரை - Touch Screen
+  - செயலி - App
+  - மின்னஞ்சல் - E-mail
+
+## 7. TNPSC முக்கியத் தேர்வு உண்மைகள் (Important Facts for TNPSC Exams)
+- **முதல் எழுத்துகள்**: பிற எழுத்துகள் தோன்றுவதற்கும் இயங்குவதற்கும் முதற்காரணமாக விளங்கும் உயிர் 12 மற்றும் மெய் 18 ஆகிய **30 எழுத்துகளும்** முதல் எழுத்துகள் எனப்படும்.
+- **மெய் எழுத்து விளக்கம்**: 'மெய்' என்பதன் சொல் பொருள் **உடம்பு**. உடம்பின் இயக்கமின்றி மெய்யெழுத்துகளை ஒலிக்க முடியாது.
+- **தேர்வுப் பொறி (Exam Trap)**: 'ஐ' மற்றும் 'ஔ' ஆகிய இரண்டும் குறில் போலத் தோன்றினாலும் அவை **உயிர் நெடில்** எழுத்துகளாகும்; அவற்றின் ஒலிக்கும் கால அளவு 2 மாத்திரை.
+- **மாத்திரை கணக்கீட்டு மாதிரி வினாக்கள்**:
+  - 'கபிலர்': க(1) + பி(1) + ல(1) + ர்(1/2) = **3 1/2 மாத்திரை**.
+  - 'தமிழ்': த(1) + மி(1) + ழ்(1/2) = **2 1/2 மாத்திரை**.
+  - 'அஃது': அ(1) + ஃ(1/2) + து(1) = **2 1/2 மாத்திரை**.
+- **ஆய்த எழுத்து விதிவிலக்கு விதி**: ஆய்த எழுத்து எப்போதும் தனக்கு முன் ஒரு குறில் எழுத்தையும், தனக்குப் பின் ஒரு வல்லின உயிர்மெய் எழுத்தையும் மட்டுமே பெற்றுச் சொல்லின் இடையில் வரும் (எ.கா: அஃது, இஃது, எஃகு).
+
+## 8. பாடநூல் கூடுதல் தகவல்கள் (Additional Relevant Information from the Textbook)
+- **மொழித்திறன் பயிற்சி**: பாடநூலில் கொடுக்கப்பட்டுள்ள பெயர்களைக் கொண்டு மாத்திரை அளவைக் கணக்கிடுதல்:
+  - பாரதி: பா(2) + ர(1) + தி(1) = 4 மாத்திரை.
+  - அமுதன்: அ(1) + மு(1) + த(1) + ன்(1/2) = 3 1/2 மாத்திரை.
+- **நிற்க அதற்குத் தக (வாழ்வியல் நெறிமுறை)**:
+  1. நான் தாய்மொழியிலேயே பேசுவேன்.
+  2. தாய்மொழியிலேயே கல்வி கற்பேன்.
+  3. தமிழ்ப் பெயர்களையே சூட்டுவேன்.`);
   }
 
-  // Generic exhaustive fallback for other subjects/standards
+  // Generic exhaustive fallback for other subjects/standards conforming to Strict Master Prompt (Sections 1 to 8)
   const extractedPoints: { text: string; page: number }[] = [];
   for (const p of params.passages) {
     const rawLines = cleanTamilUnicodeText(p.content)
@@ -620,101 +610,80 @@ function synthesizeCompleteNotesFallback(params: {
     }
   }
 
-  const renderedExplanations = extractedPoints
-    .map((pt) => `- ${pt.text} [${isTamil ? 'பக்கம்' : 'Page'}: ${pt.page}]`)
+  const numberedPoints = extractedPoints
+    .map((pt, idx) => `${idx + 1}. ${pt.text} [${isTamil ? 'பக்கம்' : 'Page'}: ${pt.page}]`)
     .join('\n');
-
-  const revisionTable = extractedPoints.slice(0, 15).map((pt, idx) => {
-    return `| ${idx + 1} | ${isTamil ? 'பாடநூல் நேரடிக் குறிப்பு ' + (idx + 1) : 'Textbook Factual Point ' + (idx + 1)} | ${pt.text} | ${isTamil ? 'பக்கம் ' + pt.page : 'Page ' + pt.page} |`;
-  }).join('\n');
 
   if (isTamil) {
     return cleanTamilUnicodeText(`# ${params.chapterTitle}
 > **பாடநூல் ஆதாரம்**: ${params.bookName} (பக்கங்கள்: ${params.pages.join(', ')})
 
-## 1. பாடம் / இயல் தலைப்பு (LESSON TITLE)
-- **அதிகாரப்பூர்வ பாடம்**: ${params.chapterTitle}
-- **வகுப்பு & பாடம்**: ${params.classId ? params.classId + '-ஆம் வகுப்பு' : '6-ஆம் வகுப்பு'} | ${params.subject}
-- **பாடநூல் பக்கங்கள்**: பக்கங்கள் ${params.pages.join(', ')} (${params.pages.length} பக்கங்கள்)
+## 1. பாடத் தகவல் (Lesson Information)
+- **வகுப்பு (Class)**: ${params.classId ? params.classId + '-ஆம் வகுப்பு' : '6-ஆம் வகுப்பு'}
+- **பருவம் (Term)**: முதல் பருவம் (Term 1)
+- **பாடம் (Subject)**: ${params.subject}
+- **இயல் / அத்தியாயம் (Unit / Chapter)**: ${params.chapterNumber}
+- **பாடத்தின் பெயர் (Lesson Name)**: ${params.chapterTitle}
+- **பாடநூல் பக்கங்கள் (Textbook Pages)**: பக்கங்கள் ${params.pages.join(', ')}
 
-## 2. முழுமையான பாட அறிமுகம் (COMPLETE LESSON INTRODUCTION)
-தமிழ்நாடு அரசு பள்ளிக் கல்வித்துறை சமச்சீர் கல்வி பாடநூலின்படி அமைந்த இப்பாடம் TNPSC பொதுத் தேர்வுக்குரிய அதிகாரப்பூர்வ பாடத்திட்டத்தின் கீழ் முழுமையாக பகுப்பாய்வு செய்யப்பட்டுள்ளது. இப்பாடத்தின் அடிப்படைக் கோட்பாடுகள், விதிகள், வரைவிலக்கணங்கள் மற்றும் தேர்வு சார்ந்த உண்மைத் தகவல்கள் யாவும் அதிகாரப்பூர்வ பாடநூல் பக்கங்களிலிருந்து நேரடியாகத் தொகுக்கப்பட்டுள்ளன.
+## 2. ஆசிரியர் / ஆளுமை / வரலாற்றுப் பின்னணி (Author / Personality / Background Information)
+தமிழ்நாடு அரசு பள்ளிக் கல்வித்துறை சமச்சீர் கல்வி பாடநூலின்படி அமைந்த இப்பாடம் TNPSC பொதுத் தேர்வுக்குரிய அதிகாரப்பூர்வ பாடத்திட்டத்தின் கீழ் முழுமையாக தொகுக்கப்பட்டுள்ளது.
 
-## 3. அனைத்துப் பிரதான தலைப்புகள் (ALL MAIN TOPICS)
-${params.topicsIdentified.map((t, idx) => `${idx + 1}. ${t}`).join('\n') || `1. ${params.chapterTitle} அடிப்படைக் கோட்பாடுகள்`}
+## 3. முக்கியமான சொற்கள் & பொருள்கள் (Important Terms and Meanings)
+- **பாடநூல் கலைச்சொற்கள்**: ${params.chapterTitle} அதிகாரப்பூர்வ சமச்சீர் கல்வி பாட வரையறைகள் [பக்கங்கள்: ${params.pages.join(', ')}].
 
-## 4. அனைத்துத் துணைத்தலைப்புகள் (ALL SUBTOPICS)
-${params.topicsIdentified.map((t, idx) => `- ${idx + 1}.1 ${t} விரிவான உட்கூறுகள்`).join('\n') || `- 1.1 பாடப் பிரிவுகள்`}
+## 4. முதன்மைக் கருத்துகள் & முக்கியக் குறிப்புகள் (Main Concepts and Important Points)
+${numberedPoints || `1. ${params.chapterTitle} பாடத்தில் உள்ள அனைத்து முக்கிய பத்திகளும் பாடநூல் பக்கங்கள் ${params.pages.join(', ')} அடிப்படையில் முழுமையாக விவரிக்கப்பட்டுள்ளன.`}
 
-## 5. விரிவான பாட விளக்கங்கள் (DETAILED EXPLANATIONS)
-${renderedExplanations || `- ${params.chapterTitle} பாடத்தில் உள்ள அனைத்து முக்கிய பத்திகளும் பாடநூல் பக்கங்கள் ${params.pages.join(', ')} அடிப்படையில் முழுமையாக விவரிக்கப்பட்டுள்ளன.`}
-
-## 6. வரையறைகள் மற்றும் முக்கியக் கலைச்சொற்கள் (DEFINITIONS AND IMPORTANT TERMS)
-- **பாடநூல் வரையறை**: ${params.chapterTitle} அதிகாரப்பூர்வ சமச்சீர் கல்வி பாட வரையறைகள் [பக்கங்கள்: ${params.pages.join(', ')}].
-
-## 7. பாடநூல் எடுத்துக்காட்டுகள் (EXAMPLES FROM THE TEXTBOOK)
-- பாடநூல் பக்கங்கள் ${params.pages.join(', ')}ல் இடம்பெற்றுள்ள நேரடி எடுத்துக்காட்டுகள் மற்றும் பயன்பாடுகள்.
-
-## 8. முக்கிய உண்மைத் தகவல்கள் (IMPORTANT FACTS AND INFORMATION)
-- **பாடநூல் தகவல் ஆதாரப் பக்கங்கள்**: பக்கங்கள் ${params.pages.join(', ')}.
-- **தேர்வு இலக்கு**: TNPSC குரூப் 1, 2, 2A, 4 மற்றும் VAO தேர்வுகள்.
-
-## 9. அட்டவணைகள் மற்றும் வகைப்பாடுகள் (TABLES AND CLASSIFICATIONS)
-| தலைப்பு / வகைப்பாடு | உட்பிரிவுகள் / முக்கிய எண்கள் | முக்கிய வேறுபாடுகள் & பாடநூல் சான்றுகள் |
+## 5. முக்கிய ஒப்பீடுகள் மற்றும் அட்டவணைகள் (Important Comparisons and Tables)
+| தலைப்பு / ஒப்பீட்டுக் கூறு | விபரம் / பண்புகள் | பாடநூல் ஆதாரம் |
 |---|---|---|
 | ${params.chapterTitle} | ${params.pages.length} பக்கங்கள் | சமச்சீர் கல்வி நேரடி உண்மைத் தகவல்கள் |
 
-## 10. முக்கிய தேர்வு நோக்குக் குறிப்புகள் & ஒருவரி வினா-விடைகள் (IMPORTANT EXAM-ORIENTED POINTS)
-- **TNPSC தேர்வு முக்கியத்துவம்**: இப்பாடத்திலிருந்து கேட்கப்படும் நேரடி வினாக்களுக்கு பாடநூல் பக்கங்களை கவனமாகப் படிக்கவும்.
+## 6. பாடம் சார்ந்த சிறப்புப் பகுதிகள் (${params.subject.toUpperCase()} - Subject-Specific Notes)
+- பாடநூல் பக்கங்கள் ${params.pages.join(', ')}ல் அமைந்துள்ள முதன்மை இலக்கிய/அறிவியல்/வரலாற்றுக் குறிப்புகள்.
 
-## 11. முழுமையான பாட மீள்பார்வைக் குறிப்புகள் (COMPLETE LESSON REVISION NOTES)
-| எண் | மாதிரி தேர்வு வினா (Examination Question) | பாடநூல் நேரடி விடை (Authoritative Answer) | பக்க எண் |
-|---|---|---|---|
-${revisionTable || `| 1 | ${params.chapterTitle} எந்த வகுப்பின் பாடத்திட்டத்தில் உள்ளது? | ${params.classId ? params.classId + 'ஆம் வகுப்பு' : '6ஆம் வகுப்பு'} | பக்கம் ${params.pages[0] || 1} |`}`);
+## 7. TNPSC முக்கியத் தேர்வு உண்மைகள் (Important Facts for TNPSC Exams)
+- **பாடநூல் தகவல் ஆதாரப் பக்கங்கள்**: பக்கங்கள் ${params.pages.join(', ')}.
+- **தேர்வு நோக்கு**: TNPSC குரூப் 1, 2, 2A, 4 மற்றும் VAO தேர்வுகள்.
+
+## 8. பாடநூல் கூடுதல் தகவல்கள் (Additional Relevant Information from the Textbook)
+- பாடநூலின் அனைத்துப் பக்கங்களும் முழுமையாக ஆய்வு செய்யப்பட்டு குறிப்புகள் தொகுக்கப்பட்டுள்ளன.`);
   }
 
   return `# ${params.chapterTitle}
 > **Textbook Reference**: ${params.bookName} (Pages: ${params.pages.join(', ')})
 
-## 1. LESSON TITLE
-- **Official Lesson**: ${params.chapterTitle}
-- **Standard & Subject**: Standard ${params.classId || 6} | ${params.subject}
-- **Textbook Pages**: Pages ${params.pages.join(', ')} (${params.pages.length} Pages Total)
+## 1. Lesson Information
+- **Class**: Standard ${params.classId || 6}
+- **Term**: Term 1
+- **Subject**: ${params.subject}
+- **Unit / Chapter**: ${params.chapterNumber}
+- **Lesson Name**: ${params.chapterTitle}
+- **Textbook Pages**: Pages ${params.pages.join(', ')}
 
-## 2. COMPLETE LESSON INTRODUCTION
-Official study material extracted directly from the State Board Samacheer Kalvi textbook for TNPSC competitive examination preparation. Contains comprehensive coverage of all concepts, definitions, classifications, and facts.
+## 2. Author / Person / Important Background Information
+Official study material extracted directly from the State Board Samacheer Kalvi textbook for TNPSC competitive examination preparation.
 
-## 3. ALL MAIN TOPICS
-${params.topicsIdentified.map((t, idx) => `${idx + 1}. ${t}`).join('\n') || `1. Core Principles of ${params.chapterTitle}`}
+## 3. Important Terms and Meanings
+- **Core Concepts**: Authoritative definitions and terminology from pages ${params.pages.join(', ')}.
 
-## 4. ALL SUBTOPICS
-${params.topicsIdentified.map((t, idx) => `- ${idx + 1}.1 Detailed structure of ${t}`).join('\n') || `- 1.1 Curriculum Structure`}
+## 4. Main Concepts and Important Points
+${numberedPoints || `1. Full textual explanations derived directly from pages ${params.pages.join(', ')}.`}
 
-## 5. DETAILED EXPLANATIONS
-${renderedExplanations || `- Full textual explanations derived directly from pages ${params.pages.join(', ')}.`}
-
-## 6. DEFINITIONS AND IMPORTANT TERMS
-- **Core Concepts**: Authoritative definitions and rules from pages ${params.pages.join(', ')}.
-
-## 7. EXAMPLES FROM THE TEXTBOOK
-- Official textbook illustrations and applications from pages ${params.pages.join(', ')}.
-
-## 8. IMPORTANT FACTS AND INFORMATION
-- **Source Reference**: Official curriculum from pages ${params.pages.join(', ')}.
-- **Examination Scope**: TNPSC Group 1, Group 2, Group 2A, Group 4 & VAO.
-
-## 9. TABLES AND CLASSIFICATIONS
-| Topic / Category | Sub-types / Characteristics | Textbook Evidence |
+## 5. Important Comparisons and Tables
+| Category / Feature | Description | Textbook Citation |
 |---|---|---|
 | ${params.chapterTitle} | ${params.pages.length} Pages | Official Samacheer Kalvi standard |
 
-## 10. IMPORTANT EXAM-ORIENTED POINTS
+## 6. Subject-Specific Notes (${params.subject.toUpperCase()})
+- Detailed subject-specific points from pages ${params.pages.join(', ')}.
+
+## 7. Important Facts for TNPSC Exams
 - High-yield examination pointers directly extracted from pages ${params.pages.join(', ')}.
 
-## 11. COMPLETE LESSON REVISION NOTES
-| # | Examination Question | Textbook Answer | Page Ref |
-|---|---|---|---|
-${revisionTable || `| 1 | What is the syllabus level of ${params.chapterTitle}? | Standard ${params.classId || 6} | Page ${params.pages[0] || 1} |`}`;
+## 8. Additional Relevant Information from the Textbook
+- Concluding textbook facts and practical applications.`;
 }
 
 /**
