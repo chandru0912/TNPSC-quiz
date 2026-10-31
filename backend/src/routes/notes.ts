@@ -24,6 +24,8 @@ function mapRowToNote(row: any) {
     tags: typeof row.tags === 'string' ? JSON.parse(row.tags) : row.tags,
     status: row.status,
     sourceReference: row.source_reference,
+    coverageReport: row.coverage_report || null,
+    topics: row.topics || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -401,6 +403,8 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
       const language = (n.language || 'english').trim().toLowerCase();
       const title = cleanTamilUnicodeText(n.title || lessonTitle);
       const sourceReference = n.sourceReference || n.source_reference || null;
+      const coverageReport = n.coverageReport || n.coverage_report || null;
+      const topics = Array.isArray(n.topics) ? JSON.stringify(n.topics) : (n.topics ? JSON.stringify(n.topics) : null);
       // All uploaded notes initially enter staging
       const status = n.status === 'published' ? 'published' : 'staging';
 
@@ -408,11 +412,11 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
 
       const res = await client.query(
         `INSERT INTO study_notes (
-           category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, status, source_reference
+           category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, status, source_reference, coverage_report, topics
          )
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          RETURNING id`,
-        [category, unitId, classId, subject, lessonId, lessonNumber, lessonTitle, topic, language, title, content, status, sourceReference]
+        [category, unitId, classId, subject, lessonId, lessonNumber, lessonTitle, topic, language, title, content, status, sourceReference, coverageReport ? JSON.stringify(coverageReport) : null, topics]
       );
       insertedNotes.push(res.rows[0]);
     }
@@ -504,6 +508,8 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
         content: result.content,
         contentHtml: null,
         sourceReference: result.sourceReference,
+        coverageReport: result.coverageReport,
+        topics: result.topics,
       },
     });
   } catch (error: any) {
@@ -534,6 +540,8 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
     const tags = Array.isArray(n.tags) ? JSON.stringify(n.tags) : JSON.stringify([]);
     const sourceReference = n.sourceReference || n.source_reference || null;
     const status = n.status === 'staging' ? 'staging' : n.status === 'archived' ? 'archived' : 'published';
+    const coverageReport = n.coverageReport || n.coverage_report || null;
+    const topics = Array.isArray(n.topics) ? JSON.stringify(n.topics) : (n.topics ? JSON.stringify(n.topics) : null);
 
     if (!content || content.trim().length < 10) {
       return res.status(400).json({ status: 'error', message: 'Content is required (minimum 10 chars)' });
@@ -547,12 +555,30 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
 
     const insertQuery = `
       INSERT INTO study_notes (
-        category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, content_html, tags, status, source_reference
+        category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, content_html, tags, status, source_reference, coverage_report, topics
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       RETURNING *;
     `;
-    const values = [category, unitId, classId, subject, lessonId, lessonNumber, lessonTitle.trim(), topic, language, title.trim(), content, contentHtml, tags, status, sourceReference];
+    const values = [
+      category,
+      unitId,
+      classId,
+      subject,
+      lessonId,
+      lessonNumber,
+      lessonTitle.trim(),
+      topic,
+      language,
+      title.trim(),
+      content,
+      contentHtml,
+      tags,
+      status,
+      sourceReference,
+      coverageReport ? JSON.stringify(coverageReport) : null,
+      topics,
+    ];
 
     const result = await pool.query(insertQuery, values);
     return res.status(201).json({ status: 'success', message: 'Study notes created successfully', data: mapRowToNote(result.rows[0]) });
@@ -587,6 +613,15 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     if (b.sourceReference !== undefined || b.source_reference !== undefined) { updateClauses.push(`source_reference = $${pIdx++}`); values.push(b.sourceReference || b.source_reference); }
     if (b.status !== undefined && ['staging','published','archived'].includes(b.status)) { updateClauses.push(`status = $${pIdx++}`); values.push(b.status); }
     if (b.tags !== undefined) { updateClauses.push(`tags = $${pIdx++}`); values.push(JSON.stringify(Array.isArray(b.tags) ? b.tags : [])); }
+    if (b.coverageReport !== undefined || b.coverage_report !== undefined) {
+      updateClauses.push(`coverage_report = $${pIdx++}`);
+      const cr = b.coverageReport !== undefined ? b.coverageReport : b.coverage_report;
+      values.push(cr ? JSON.stringify(cr) : null);
+    }
+    if (b.topics !== undefined) {
+      updateClauses.push(`topics = $${pIdx++}`);
+      values.push(b.topics ? JSON.stringify(b.topics) : null);
+    }
 
     values.push(id);
     const updateQuery = `UPDATE study_notes SET ${updateClauses.join(', ')} WHERE id = $${pIdx} RETURNING *;`;

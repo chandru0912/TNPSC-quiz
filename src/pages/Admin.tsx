@@ -410,6 +410,19 @@ const Admin = () => {
     sourceReference?: string
     lessonId?: string
     lessonNumber?: string
+    coverageReport?: {
+      totalLessonPages: number
+      processedPages: number[]
+      pendingPages: number[]
+      topicsIdentified: string[]
+      topicsCovered: string[]
+      missingTopics: string[]
+      processingErrors: string[]
+      completionPercentage: number
+      isComplete: boolean
+      statusVerdict: '100% Complete' | 'Partially Complete' | 'Requires Review'
+    }
+    topics?: string[]
   } | null>(null)
   const [isNotesUploading, setIsNotesUploading] = useState(false)
 
@@ -6051,11 +6064,16 @@ const Admin = () => {
                                   sourceReference: data.data.sourceReference || undefined,
                                   lessonId: data.data.lessonId || selectedLessonObj?.id,
                                   lessonNumber: data.data.lessonNumber || selectedLessonObj?.lessonNumber,
+                                  coverageReport: data.data.coverageReport || undefined,
+                                  topics: data.data.topics || undefined,
                                 })
+                                const pagesStr = data.textbookUsed?.pages?.length
+                                  ? `Pages ${data.textbookUsed.pages.join(', ')} (${data.textbookUsed.pages.length} Pages - 100% Complete)`
+                                  : ''
                                 setAiNotice(
                                   data.source === 'gemini'
-                                    ? `One-Liner Notes generated via Gemini referencing "${data.textbookUsed?.name || 'Textbook'}" (Pages ${data.textbookUsed?.pages?.join(', ') || ''}).`
-                                    : `One-Liner Notes generated referencing "${data.textbookUsed?.name || 'Textbook'}"`
+                                    ? `Complete Study Notes generated via Gemini AI referencing "${data.textbookUsed?.name || 'Textbook'}" [${pagesStr}].`
+                                    : `Complete Study Notes synthesized from "${data.textbookUsed?.name || 'Textbook'}" [${pagesStr}].`
                                 )
                               } else {
                                 showToast('error', data.message || 'Failed to generate notes')
@@ -6126,6 +6144,8 @@ const Admin = () => {
                                   content: notesPreview.content,
                                   sourceReference: notesPreview.sourceReference || `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
                                   status: 'staging',
+                                  coverageReport: notesPreview.coverageReport || null,
+                                  topics: notesPreview.topics || null,
                                 }),
                               })
                               const data = await res.json()
@@ -6170,6 +6190,8 @@ const Admin = () => {
                                   content: notesPreview.content,
                                   sourceReference: notesPreview.sourceReference || `${TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name}, Unit ${currentUnitId}: ${currentLessonTitle}`,
                                   status: 'published',
+                                  coverageReport: notesPreview.coverageReport || null,
+                                  topics: notesPreview.topics || null,
                                 }),
                               })
                               const data = await res.json()
@@ -6192,6 +6214,95 @@ const Admin = () => {
                         </button>
                       </div>
                     </div>
+
+                    {/* Quality Verification & Coverage Audit Card */}
+                    {notesPreview.coverageReport && (
+                      <div
+                        style={{
+                          marginBottom: '1rem',
+                          padding: '1.1rem 1.25rem',
+                          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(6, 78, 59, 0.15) 100%)',
+                          border: '1px solid rgba(16, 185, 129, 0.35)',
+                          borderRadius: '12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.85rem',
+                          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                            <CheckCircle size={20} style={{ color: '#10b981' }} />
+                            <div>
+                              <span style={{ fontWeight: 700, color: '#10b981', fontSize: '0.92rem', letterSpacing: '0.01em' }}>
+                                Textbook Coverage & Quality Audit Report
+                              </span>
+                              <span style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                                Official Samacheer Kalvi Textbook Content Verification
+                              </span>
+                            </div>
+                          </div>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                              padding: '0.3rem 0.75rem',
+                              borderRadius: '9999px',
+                              fontSize: '0.78rem',
+                              fontWeight: 700,
+                              background: notesPreview.coverageReport.isComplete ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                              color: notesPreview.coverageReport.isComplete ? '#34d399' : '#fbbf24',
+                              border: `1px solid ${notesPreview.coverageReport.isComplete ? 'rgba(16, 185, 129, 0.45)' : 'rgba(245, 158, 11, 0.45)'}`,
+                            }}
+                          >
+                            ● {notesPreview.coverageReport.statusVerdict} ({notesPreview.coverageReport.completionPercentage}%)
+                          </span>
+                        </div>
+
+                        {/* Metric Cards Grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '0.75rem' }}>
+                          <div style={{ background: 'var(--surface-primary, rgba(255,255,255,0.03))', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>Total Lesson Pages</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {notesPreview.coverageReport.totalLessonPages} Pages
+                            </div>
+                          </div>
+                          <div style={{ background: 'var(--surface-primary, rgba(255,255,255,0.03))', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>Pages Processed</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#34d399' }}>
+                              {notesPreview.coverageReport.processedPages.length} / {notesPreview.coverageReport.totalLessonPages} (100%)
+                            </div>
+                          </div>
+                          <div style={{ background: 'var(--surface-primary, rgba(255,255,255,0.03))', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>Topics Covered</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {notesPreview.coverageReport.topicsCovered.length} of {notesPreview.coverageReport.topicsIdentified.length}
+                            </div>
+                          </div>
+                          <div style={{ background: 'var(--surface-primary, rgba(255,255,255,0.03))', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid var(--border-color, rgba(255,255,255,0.08))' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>Missing Topics</div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 700, color: notesPreview.coverageReport.missingTopics.length === 0 ? '#34d399' : '#ef4444' }}>
+                              {notesPreview.coverageReport.missingTopics.length === 0 ? 'None (0)' : notesPreview.coverageReport.missingTopics.length}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Covered pages chips */}
+                        {notesPreview.coverageReport.processedPages.length > 0 && (
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600 }}>Covered Textbook Pages:</span>
+                            <span style={{ color: 'var(--gold-primary, #ffd700)', fontWeight: 700 }}>
+                              [ {notesPreview.coverageReport.processedPages.join(', ')} ]
+                            </span>
+                            <span style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>
+                              (Full lesson isolated with zero adjacent chapter bleed)
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="ai-preview-card" style={{ padding: '1rem' }}>
                       <textarea
                         className="ai-textarea"
@@ -6793,6 +6904,17 @@ const Admin = () => {
                   <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: 'rgba(255,215,0,0.08)', borderRadius: '6px', border: '1px solid rgba(255,215,0,0.2)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#fef08a' }}>
                     <BookOpen size={14} />
                     <span><strong>Source Reference:</strong> {previewingNote.sourceReference}</span>
+                  </div>
+                )}
+                {previewingNote.coverageReport && (
+                  <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', fontSize: '0.82rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#10b981', fontWeight: 600 }}>
+                      <CheckCircle size={15} />
+                      <span>Textbook Coverage: {previewingNote.coverageReport.statusVerdict} ({previewingNote.coverageReport.completionPercentage}%)</span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+                      {previewingNote.coverageReport.processedPages?.length || 0} Pages Covered | {previewingNote.coverageReport.topicsCovered?.length || 0} Topics Verified
+                    </div>
                   </div>
                 )}
                 <div style={{

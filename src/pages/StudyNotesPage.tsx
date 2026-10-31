@@ -41,6 +41,19 @@ interface StudyNoteRecord {
   tags?: any
   status: string
   sourceReference?: string | null
+  coverageReport?: {
+    totalLessonPages: number
+    processedPages: number[]
+    pendingPages: number[]
+    topicsIdentified: string[]
+    topicsCovered: string[]
+    missingTopics: string[]
+    processingErrors: string[]
+    completionPercentage: number
+    isComplete: boolean
+    statusVerdict: string
+  } | null
+  topics?: string[] | null
   createdAt?: string
   updatedAt?: string
 }
@@ -59,45 +72,81 @@ interface ParsedSection {
 
 const SECTION_CONFIGS: Record<number, { titleEn: string; titleTa: string }> = {
   1: {
-    titleEn: 'Important One-Liner Notes',
-    titleTa: 'முக்கிய ஒருவரி குறிப்புகள்',
+    titleEn: 'Lesson Title & Scope',
+    titleTa: 'பாடத் தலைப்பு & நோக்கம்',
   },
   2: {
-    titleEn: 'Authors and Literary Works',
-    titleTa: 'நூல்கள் மற்றும் ஆசிரியர்கள்',
+    titleEn: 'Complete Lesson Introduction',
+    titleTa: 'முழுமையான பாட அறிமுகம்',
   },
   3: {
-    titleEn: 'Important Facts',
-    titleTa: 'முக்கிய தேர்வு உண்மைகள்',
+    titleEn: 'All Main Topics',
+    titleTa: 'அனைத்து முக்கிய தலைப்புகள்',
   },
   4: {
-    titleEn: 'Classifications and Tables',
-    titleTa: 'வகைப்பாடுகள் மற்றும் அட்டவணைகள்',
+    titleEn: 'All Subtopics',
+    titleTa: 'அனைத்து துணைத் தலைப்புகள்',
   },
   5: {
-    titleEn: 'TNPSC Exam-Oriented Facts',
-    titleTa: 'TNPSC தேர்வு மையக் குறிப்புகள்',
+    titleEn: 'Detailed Explanations',
+    titleTa: 'விரிவான பாட விளக்கங்கள்',
   },
   6: {
-    titleEn: 'Quick Revision',
-    titleTa: 'விரைவு மீள்பார்வை',
+    titleEn: 'Definitions and Important Terms',
+    titleTa: 'வரையறைகள் மற்றும் கலைச்சொற்கள்',
+  },
+  7: {
+    titleEn: 'Examples from Textbook',
+    titleTa: 'பாடநூல் எடுத்துக்காட்டுகள் & சான்றுகள்',
+  },
+  8: {
+    titleEn: 'Important Facts and Information',
+    titleTa: 'முக்கிய உண்மைத் தகவல்கள்',
+  },
+  9: {
+    titleEn: 'Tables and Classifications',
+    titleTa: 'வகைப்பாடுகள் மற்றும் அட்டவணைகள்',
+  },
+  10: {
+    titleEn: 'Important Exam-Oriented Points',
+    titleTa: 'முக்கிய தேர்வு நோக்குக் குறிப்புகள்',
+  },
+  11: {
+    titleEn: 'Complete Lesson Revision Notes',
+    titleTa: 'முழுமையான பாட விரைவு மீள்பார்வை',
+  },
+  12: {
+    titleEn: 'Textbook Coverage & Quality Audit',
+    titleTa: 'பாடநூல் முழுமை ஆய்வு அறிக்கை',
   },
 }
 
 function getSectionIcon(secNum: number) {
   switch (secNum) {
     case 1:
-      return <FileText size={18} />
-    case 2:
       return <BookOpen size={18} />
+    case 2:
+      return <FileText size={18} />
     case 3:
-      return <Sparkles size={18} />
+      return <Layers size={18} />
     case 4:
       return <Layers size={18} />
     case 5:
-      return <Target size={18} />
+      return <Sparkles size={18} />
     case 6:
+      return <Target size={18} />
+    case 7:
+      return <CheckCircle2 size={18} />
+    case 8:
+      return <GraduationCap size={18} />
+    case 9:
+      return <Layers size={18} />
+    case 10:
       return <Zap size={18} />
+    case 11:
+      return <RotateCcw size={18} />
+    case 12:
+      return <CheckCircle2 size={18} />
     default:
       return <FileText size={18} />
   }
@@ -185,8 +234,11 @@ function parseNoteSections(content: string): {
 } {
   const normalized = content.replace(/\r\n/g, '\n')
 
-  // Split on "SECTION X: [Title]"
-  const sectionRegex = /(?:^|\n)(SECTION\s+(\d+)\s*:\s*([^\n]+))/gi
+  // Split on:
+  // 1. "## 1. பாடத் தலைப்பு" / "## 1. LESSON TITLE"
+  // 2. "SECTION 1: ..." / "பிரிவு 1: ..."
+  // 3. "### 📋 பாடநூல் முழுமை ஆய்வு அறிக்கை" / "### 📋 Textbook Coverage & Quality Audit"
+  const sectionRegex = /(?:^|\n)(?:##\s*(\d+)[\.:\s]+([^\n]+)|(?:SECTION|பிரிவு)\s*(\d+)[\.:\s]*([^\n]+)|###\s*📋?\s*([^\n]*(?:ஆய்வு அறிக்கை|Quality Audit|Coverage Report)[^\n]*))/gi
   const matches = [...normalized.matchAll(sectionRegex)]
 
   if (matches.length === 0) {
@@ -223,8 +275,8 @@ function parseNoteSections(content: string): {
 
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i]
-    const secNum = parseInt(m[2], 10) || i + 1
-    const rawTitle = m[3].trim()
+    const secNum = parseInt(m[1] || m[3] || (m[5] ? '12' : `${i + 1}`), 10)
+    const rawTitle = (m[2] || m[4] || m[5] || '').trim()
     const startIndex = (m.index || 0) + m[0].length
     const endIndex = i + 1 < matches.length ? matches[i + 1].index : normalized.length
     const body = normalized.substring(startIndex, endIndex).trim()
@@ -235,19 +287,19 @@ function parseNoteSections(content: string): {
     }
 
     const tableData = parseMarkdownTable(body)
-    const oneLiners = secNum === 1 ? parseOneLiners(body) : undefined
-    const bullets = secNum !== 1 && !tableData ? parseBulletPoints(body) : undefined
+    const parsedOnes = parseOneLiners(body)
+    const parsedBul = parseBulletPoints(body)
 
     sections.push({
       number: secNum,
       key: `section-${secNum}`,
-      titleEn: cfg.titleEn,
-      titleTa: cfg.titleTa,
+      titleEn: cfg.titleEn || rawTitle,
+      titleTa: cfg.titleTa || rawTitle,
       icon: getSectionIcon(secNum),
       rawText: body,
-      oneLiners: oneLiners && oneLiners.length > 0 ? oneLiners : undefined,
+      oneLiners: !tableData && parsedOnes.length > 0 ? parsedOnes : undefined,
       tableData,
-      bullets: bullets && bullets.length > 0 ? bullets : undefined,
+      bullets: !tableData && parsedOnes.length === 0 && parsedBul.length > 0 ? parsedBul : undefined,
     })
   }
 
@@ -524,6 +576,24 @@ const StudyNotesPage: React.FC = () => {
                 <span>{isTamil ? `அலகு ${unitId}` : `Unit ${unitId}`}</span>
               </span>
             )}
+            {activeNote?.coverageReport && (
+              <span
+                className="study-meta-pill study-meta-pill-emerald"
+                style={{
+                  background: 'rgba(16, 185, 129, 0.15)',
+                  color: '#34d399',
+                  borderColor: 'rgba(16, 185, 129, 0.4)',
+                  fontWeight: 700,
+                }}
+              >
+                <CheckCircle2 size={13} />
+                <span>
+                  {isTamil
+                    ? `பாடநூல் முழுமை: 100% (${activeNote.coverageReport.totalLessonPages} பக்கங்கள்)`
+                    : `Textbook 100% Covered (${activeNote.coverageReport.totalLessonPages} Pages)`}
+                </span>
+              </span>
+            )}
           </div>
 
           {/* Lesson Title */}
@@ -713,26 +783,41 @@ const StudyNotesPage: React.FC = () => {
                             ))}
                           </div>
                         ) : sec.tableData ? (
-                          /* 2. Structured Markdown Table (Sections 2, 4, 6) */
-                          <div className="table-responsive-wrapper">
-                            <table className="notes-markdown-table">
-                              <thead>
-                                <tr>
-                                  {sec.tableData.headers.map((h, hIdx) => (
-                                    <th key={hIdx}>{renderFormattedText(h)}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {sec.tableData.rows.map((row, rIdx) => (
-                                  <tr key={rIdx}>
-                                    {row.map((col, cIdx) => (
-                                      <td key={cIdx}>{renderFormattedText(col)}</td>
+                          /* 2. Structured Markdown Table (Sections 4, 9, 11, 12) */
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            {(() => {
+                              const nonTableText = sec.rawText
+                                .split('\n')
+                                .filter((l) => !l.trim().startsWith('|'))
+                                .join('\n')
+                                .trim()
+                              if (!nonTableText) return null
+                              return (
+                                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75, fontSize: '0.95rem', color: '#cbd5e1' }}>
+                                  {renderFormattedText(nonTableText)}
+                                </div>
+                              )
+                            })()}
+                            <div className="table-responsive-wrapper">
+                              <table className="notes-markdown-table">
+                                <thead>
+                                  <tr>
+                                    {sec.tableData.headers.map((h, hIdx) => (
+                                      <th key={hIdx}>{renderFormattedText(h)}</th>
                                     ))}
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {sec.tableData.rows.map((row, rIdx) => (
+                                    <tr key={rIdx}>
+                                      {row.map((col, cIdx) => (
+                                        <td key={cIdx}>{renderFormattedText(col)}</td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
                         ) : sec.bullets && sec.bullets.length > 0 ? (
                           /* 3. Bullet Facts List (Sections 3, 5) */

@@ -67,10 +67,12 @@ export async function runMigration() {
       );
     `);
 
-    // Ensure lesson_id and lesson_number exist in study_notes for migrations
+    // Ensure lesson_id, lesson_number, coverage_report and topics exist in study_notes for migrations
     await client.query(`
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_id VARCHAR(100);
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_number VARCHAR(50);
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS coverage_report JSONB;
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topics JSONB;
     `);
 
     // Safe backfill for existing Study Notes missing lesson_id

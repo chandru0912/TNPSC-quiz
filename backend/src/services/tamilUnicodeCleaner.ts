@@ -74,9 +74,6 @@ export function cleanTamilUnicodeText(raw: string): string {
     text = text.replace(re, rep);
   }
 
-  // Connect virama + space + consonant (e.g. ் த -> த்த)
-  text = text.replace(/\u0BCD\s+([க-ஹ])/g, '்$1');
-
   // 9. InDesign 8-bit font CMap & syllable repairs for Tamil textbooks
   text = text
     .replace(/வபா/g, 'போ')
