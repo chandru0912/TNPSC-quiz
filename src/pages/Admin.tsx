@@ -57,8 +57,8 @@ import {
   getTopicsForSelection,
 } from '../data/unifiedSyllabusRegistry'
 import {
-  TNPSC_GROUPS_LIST,
   STANDARDS_LIST,
+  SAMACHEER_CATALOG,
   getSubjectsForStandard,
   getAllowedMediums,
   getAllowedTerms,
@@ -202,6 +202,7 @@ const Admin = () => {
   const [textbookSearch, setTextbookSearch] = useState('')
   const [textbookGroupFilter, setTextbookGroupFilter] = useState('all')
   const [textbookStandardFilter, setTextbookStandardFilter] = useState('all')
+  const [textbookSubjectFilter, setTextbookSubjectFilter] = useState('all')
   const [textbookMediumFilter, setTextbookMediumFilter] = useState('all')
   const [textbookStatusFilter, setTextbookStatusFilter] = useState('all')
 
@@ -264,6 +265,43 @@ const Admin = () => {
         (!replacingTextbookId || t.id !== replacingTextbookId)
     )
   }, [textbooksList, tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, replacingTextbookId])
+
+  // Dynamic subjects for Textbook Management filter bar based on selected Group and Standard
+  const textbookFilterSubjects = useMemo(() => {
+    const subjectsSet = new Set<string>()
+
+    if (textbookStandardFilter !== 'all') {
+      const catalogSubs = getSubjectsForStandard(textbookStandardFilter)
+      catalogSubs.forEach((s) => subjectsSet.add(s.name))
+    } else {
+      // All standards
+      Object.values(SAMACHEER_CATALOG).forEach((entry) => {
+        entry.subjects.forEach((s) => subjectsSet.add(s.name))
+      })
+    }
+
+    // Also include any custom/existing subject from textbooksList matching current group & standard filters
+    textbooksList.forEach((tb) => {
+      const matchesGroup =
+        textbookGroupFilter === 'all' || tb.groupId?.toLowerCase() === textbookGroupFilter.toLowerCase()
+      const matchesStd =
+        textbookStandardFilter === 'all' ||
+        tb.standard === parseInt(textbookStandardFilter, 10) ||
+        String(tb.standard).toLowerCase() === textbookStandardFilter.toLowerCase()
+      if (matchesGroup && matchesStd && tb.subject && tb.subject.trim()) {
+        subjectsSet.add(tb.subject.trim())
+      }
+    })
+
+    return Array.from(subjectsSet).sort()
+  }, [textbookGroupFilter, textbookStandardFilter, textbooksList])
+
+  // Reset subject filter if selected subject is no longer available
+  useEffect(() => {
+    if (textbookSubjectFilter !== 'all' && !textbookFilterSubjects.includes(textbookSubjectFilter)) {
+      setTextbookSubjectFilter('all')
+    }
+  }, [textbookFilterSubjects, textbookSubjectFilter])
 
   // In-Generator Textbook Source states
   const [aiTextbookMode, setAiTextbookMode] = useState<'auto' | 'specific' | 'upload'>('auto')
@@ -1301,6 +1339,7 @@ const Admin = () => {
       const params = new URLSearchParams()
       if (textbookGroupFilter !== 'all') params.set('group', textbookGroupFilter)
       if (textbookStandardFilter !== 'all') params.set('standard', textbookStandardFilter)
+      if (textbookSubjectFilter !== 'all') params.set('subject', textbookSubjectFilter)
       if (textbookMediumFilter !== 'all') params.set('medium', textbookMediumFilter)
       if (textbookStatusFilter !== 'all') params.set('status', textbookStatusFilter)
 
@@ -1319,7 +1358,7 @@ const Admin = () => {
     } finally {
       setTextbooksLoading(false)
     }
-  }, [token, textbookGroupFilter, textbookStandardFilter, textbookMediumFilter, textbookStatusFilter])
+  }, [token, textbookGroupFilter, textbookStandardFilter, textbookSubjectFilter, textbookMediumFilter, textbookStatusFilter])
 
   useEffect(() => {
     if (token) {
@@ -3374,10 +3413,14 @@ const Admin = () => {
                   />
                 </div>
                 <div className="admin-filter-group">
+                  {/* 2. All Groups */}
                   <select
                     className="filter-select"
                     value={textbookGroupFilter}
-                    onChange={(e) => setTextbookGroupFilter(e.target.value)}
+                    onChange={(e) => {
+                      setTextbookGroupFilter(e.target.value)
+                      setTextbookSubjectFilter('all')
+                    }}
                   >
                     <option value="all">All Groups</option>
                     <option value="group1">Group 1</option>
@@ -3385,19 +3428,38 @@ const Admin = () => {
                     <option value="group4">Group 4</option>
                   </select>
 
+                  {/* 3. All Standards */}
                   <select
                     className="filter-select"
                     value={textbookStandardFilter}
-                    onChange={(e) => setTextbookStandardFilter(e.target.value)}
+                    onChange={(e) => {
+                      setTextbookStandardFilter(e.target.value)
+                      setTextbookSubjectFilter('all')
+                    }}
                   >
                     <option value="all">All Standards (6th–12th)</option>
-                    {STANDARDS.map((s) => (
-                      <option key={s.id} value={`${s.id}th`}>
-                        {s.label}
+                    {STANDARDS_LIST.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.shortLabel} Standard
                       </option>
                     ))}
                   </select>
 
+                  {/* 4. All Subjects (NEW) */}
+                  <select
+                    className="filter-select"
+                    value={textbookSubjectFilter}
+                    onChange={(e) => setTextbookSubjectFilter(e.target.value)}
+                  >
+                    <option value="all">All Subjects</option>
+                    {textbookFilterSubjects.map((subj) => (
+                      <option key={subj} value={subj}>
+                        {subj}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* 5. All Mediums */}
                   <select
                     className="filter-select"
                     value={textbookMediumFilter}
@@ -3408,6 +3470,7 @@ const Admin = () => {
                     <option value="Tamil">Tamil</option>
                   </select>
 
+                  {/* 6. All Statuses */}
                   <select
                     className="filter-select"
                     value={textbookStatusFilter}
@@ -3459,6 +3522,12 @@ const Admin = () => {
                   ) : (
                     textbooksList
                       .filter((tb) => {
+                        if (
+                          textbookSubjectFilter !== 'all' &&
+                          tb.subject?.toLowerCase() !== textbookSubjectFilter.toLowerCase()
+                        ) {
+                          return false
+                        }
                         if (!textbookSearch.trim()) return true
                         const q = textbookSearch.toLowerCase()
                         return (
@@ -4799,12 +4868,9 @@ const Admin = () => {
                   )}
 
                   {/* 1. Group & 2. Standard */}
-                  <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                  <div className="form-grid-2" style={{ marginBottom: '0.85rem' }}>
                     <div className="form-field">
-                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>1. TNPSC Group *</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--gold-primary)' }}>Step 1 of 5</span>
-                      </label>
+                      <label>1. TNPSC Group *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -4812,21 +4878,14 @@ const Admin = () => {
                         onChange={(e) => handleTbGroupChange(e.target.value as any)}
                         required
                       >
-                        {TNPSC_GROUPS_LIST.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.badge} – {g.label}
-                          </option>
-                        ))}
+                        <option value="group1">TNPSC Group 1</option>
+                        <option value="group2">TNPSC Group 2/2A</option>
+                        <option value="group4">TNPSC Group 4</option>
                       </select>
                     </div>
 
                     <div className="form-field">
-                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>2. Standard / Class *</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {tbStandard === '11th' || tbStandard === '12th' ? 'Higher Secondary (+1/+2)' : 'High School (6th–10th)'}
-                        </span>
-                      </label>
+                      <label>2. Standard *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -4836,7 +4895,7 @@ const Admin = () => {
                       >
                         {STANDARDS_LIST.map((std) => (
                           <option key={std.id} value={std.id}>
-                            {std.label}
+                            {std.shortLabel} Standard
                           </option>
                         ))}
                       </select>
@@ -4844,14 +4903,9 @@ const Admin = () => {
                   </div>
 
                   {/* 3. Subject & 4. Medium */}
-                  <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                  <div className="form-grid-2" style={{ marginBottom: '0.85rem' }}>
                     <div className="form-field">
-                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>3. Subject Selection *</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--gold-primary)' }}>
-                          {tbAvailableSubjects.length} Available Subjects
-                        </span>
-                      </label>
+                      <label>3. Subject *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -4868,12 +4922,7 @@ const Admin = () => {
                     </div>
 
                     <div className="form-field">
-                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>4. Medium *</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {tbAvailableMediums.length > 1 ? 'Bilingual Available' : 'Single Medium'}
-                        </span>
-                      </label>
+                      <label>4. Medium *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -4883,7 +4932,7 @@ const Admin = () => {
                       >
                         {tbAvailableMediums.map((m) => (
                           <option key={m} value={m}>
-                            {m === 'Tamil' ? 'Tamil Medium (தமிழ் வழிக் கல்வி)' : 'English Medium'}
+                            {m === 'Tamil' ? 'Tamil Medium' : 'English Medium'}
                           </option>
                         ))}
                       </select>
@@ -4891,14 +4940,9 @@ const Admin = () => {
                   </div>
 
                   {/* 5. Term & 6. Book Name */}
-                  <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
+                  <div className="form-grid-2" style={{ marginBottom: '0.85rem' }}>
                     <div className="form-field">
-                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>5. Term / Volume Structure *</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {tbAvailableTerms.length === 1 ? 'Full Year Only' : `${tbAvailableTerms.length} Options`}
-                        </span>
-                      </label>
+                      <label>5. Term / Volume *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -4915,7 +4959,7 @@ const Admin = () => {
                     </div>
 
                     <div className="form-field">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <label style={{ margin: 0 }}>6. Book Name *</label>
                         {tbIsCustomBookName ? (
                           <button
@@ -4961,17 +5005,14 @@ const Admin = () => {
 
                   {/* 7. PDF Upload Dropzone */}
                   <div className="form-field" style={{ marginTop: '0.5rem' }}>
-                    <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>7. PDF Textbook File * (Max 100MB)</span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Classes 6–12 Official PDF</span>
-                    </label>
+                    <label>7. PDF Textbook File * (Max 100MB)</label>
                     <div
                       className="bulk-dropzone"
-                      style={{ padding: '1.5rem', textAlign: 'center', cursor: 'pointer' }}
+                      style={{ padding: '1.25rem', textAlign: 'center', cursor: 'pointer' }}
                       onClick={() => document.getElementById('tb-file-input')?.click()}
                     >
-                      <UploadCloud size={32} style={{ color: 'var(--gold-primary)', margin: '0 auto 0.5rem' }} />
-                      <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                      <UploadCloud size={28} style={{ color: 'var(--gold-primary)', margin: '0 auto 0.4rem' }} />
+                      <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.2rem', fontSize: '0.9rem' }}>
                         {tbFile ? tbFile.name : 'Click to select Samacheer Kalvi PDF'}
                       </p>
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 0 }}>
