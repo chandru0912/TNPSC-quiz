@@ -43,6 +43,7 @@ import {
   Target,
 } from 'lucide-react'
 import './Admin.css'
+import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import {
   SyllabusCascadeSelector,
   useSyllabusCascade,
@@ -5664,9 +5665,10 @@ const Admin = () => {
                               })
                               const data = await res.json()
                               if (res.ok && data.data) {
+                                const cleanedContent = cleanTamilUnicodeText(data.data.content)
                                 setNotesPreview({
-                                  content: data.data.content,
-                                  title: data.data.title || currentLessonTitle,
+                                  content: cleanedContent,
+                                  title: cleanTamilUnicodeText(data.data.title || currentLessonTitle),
                                   sourceReference: data.data.sourceReference || undefined,
                                 })
                                 setAiNotice(
@@ -5808,7 +5810,13 @@ const Admin = () => {
                     <div className="ai-preview-card" style={{ padding: '1rem' }}>
                       <textarea
                         className="ai-textarea"
-                        style={{ minHeight: '300px', fontFamily: 'monospace', fontSize: '0.85rem' }}
+                        style={{
+                          minHeight: '320px',
+                          fontFamily: "'Noto Sans Tamil', 'Inter', system-ui, -apple-system, sans-serif",
+                          fontSize: '0.92rem',
+                          lineHeight: 1.85,
+                          letterSpacing: 'normal',
+                        }}
                         value={notesPreview.content}
                         onChange={(e) => setNotesPreview({ ...notesPreview, content: e.target.value })}
                       />
@@ -6202,7 +6210,12 @@ const Admin = () => {
                     <textarea
                       className="ai-textarea"
                       rows={12}
-                      style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                      style={{
+                        fontFamily: "'Noto Sans Tamil', 'Inter', system-ui, -apple-system, sans-serif",
+                        fontSize: '0.92rem',
+                        lineHeight: 1.85,
+                        letterSpacing: 'normal',
+                      }}
                       value={editingNote.content || ''}
                       onChange={(e) => setEditingNote({ ...editingNote, content: e.target.value })}
                       placeholder="Write markdown note content (One-liners, tables, facts)..."
@@ -6215,12 +6228,13 @@ const Admin = () => {
                       border: '1px solid rgba(255,255,255,0.1)',
                       maxHeight: '350px',
                       overflowY: 'auto',
-                      fontSize: '0.88rem',
-                      lineHeight: 1.6,
+                      fontSize: '0.92rem',
+                      lineHeight: 1.85,
+                      letterSpacing: 'normal',
                       whiteSpace: 'pre-wrap',
-                      fontFamily: 'system-ui, sans-serif'
+                      fontFamily: "'Noto Sans Tamil', 'Inter', system-ui, sans-serif"
                     }}>
-                      {editingNote.content || 'No content written yet.'}
+                      {editingNote.content ? cleanTamilUnicodeText(editingNote.content) : 'No content written yet.'}
                     </div>
                   )}
                 </div>
@@ -6295,11 +6309,13 @@ const Admin = () => {
                   background: 'rgba(255,255,255,0.02)',
                   borderRadius: '8px',
                   border: '1px solid rgba(255,255,255,0.06)',
-                  lineHeight: 1.7,
-                  fontSize: '0.9rem',
+                  lineHeight: 1.85,
+                  fontSize: '0.95rem',
+                  letterSpacing: 'normal',
+                  fontFamily: "'Noto Sans Tamil', 'Inter', system-ui, sans-serif",
                   whiteSpace: 'pre-wrap',
                 }}>
-                  {previewingNote.content}
+                  {cleanTamilUnicodeText(previewingNote.content)}
                 </div>
               </div>
 

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useLanguage } from '../context/LanguageContext'
 import { apiFetch } from '../utils/api'
+import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import './StudyNotesPage.css'
 
 interface StudyNoteRecord {
@@ -395,7 +396,8 @@ const StudyNotesPage: React.FC = () => {
   const activeNote = notes[0]
   const parsedActiveContent = useMemo(() => {
     if (!activeNote || !activeNote.content) return null
-    return parseNoteSections(activeNote.content)
+    const cleaned = cleanTamilUnicodeText(activeNote.content)
+    return parseNoteSections(cleaned)
   }, [activeNote])
 
   return (
@@ -587,7 +589,8 @@ const StudyNotesPage: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', width: '100%' }}>
             {/* If multiple notes exist, show note tabs or stacked cards */}
             {notes.map((note, noteIdx) => {
-              const parsed = parseNoteSections(note.content)
+              const cleaned = cleanTamilUnicodeText(note.content)
+              const parsed = parseNoteSections(cleaned)
 
               return (
                 <div key={note.id || noteIdx} style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>

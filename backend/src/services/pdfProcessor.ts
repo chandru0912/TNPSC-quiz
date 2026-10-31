@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import pool from '../db';
 import { CLASS_6_TAMIL_TERM_1_PAGES } from './class6TamilTerm1Corpus';
+import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 
 function ensureServerlessPdfGlobals(): void {
   const g = globalThis as any;
@@ -116,36 +117,7 @@ export interface ExtractedPage {
 // including fixing broken InDesign Tamil font CMap encodings from tntextbooks.in PDFs
 export function normalizeTamilPdfText(raw: string): string {
   if (!raw) return '';
-  let text = raw
-    // In tntextbooks.in 2025 InDesign Tamil PDFs, U+FFFD is systematically the glyph for 'ப' (U+0BAA)
-    .replace(/\uFFFD/g, 'ப')
-    // Visual-order kombu 'पो' (ப + ோ) before a consonant represents 'ே' (U+0BC7) on that consonant
-    .replace(/போ\s*([க-ஹ])/g, '$1ே')
-    // Visual-order 'ழ' immediately followed by space and consonant + 'ா' in broken CMap represents 'ை' or 'ௌ'
-    // Fix common Tamil textbook headings and words corrupted by visual-order CMap
-    .replace(/இன்\s*பத்\s*தமிழ்/g, 'இன்பத்தமிழ்')
-    .replace(/தமிழ்க்\s*கும்\s*மி/g, 'தமிழ்க்கும்மி')
-    .replace(/வளர்\s*தமிழ்/g, 'வளர்தமிழ்')
-    .replace(/கனவு\s*பலித்\s*தது/g, 'கனவு பலித்தது')
-    .replace(/ஒளி\s*பிறந்\s*தது/g, 'ஒளி பிறந்தது')
-    .replace(/தமிழ்\s*எழுத்\s*துகளின்\s*வகை\s*தொகை/g, 'தமிழ் எழுத்துகளின் வகை தொகை')
-    .replace(/சிலப்\s*பதிகாரம்/g, 'சிலப்பதிகாரம்')
-    .replace(/காணி\s*நிலம்/g, 'காணி நிலம்')
-    .replace(/சிறகின்\s*ஓசை/g, 'சிறகின் ஓசை')
-    .replace(/கிழவனும்\s*கடலும்/g, 'கிழவனும் கடலும்')
-    .replace(/முதலெழுத்\s*தும்\s*சார்\s*பெழுத்\s*தும்/g, 'முதலெழுத்தும் சார்பெழுத்தும்')
-    .replace(/திருக்\s*குறள்/g, 'திருக்குறள்')
-    .replace(/அறிவியல்\s*ஆத்\s*திசூடி/g, 'அறிவியல் ஆத்திசூடி')
-    .replace(/அறிவியலால்\s*ஆள்\s*வோம்/g, 'அறிவியலால் ஆள்வோம்')
-    .replace(/கணியனின்\s*நண்\s*பன்/g, 'கணியனின் நண்பன்')
-    .replace(/துன்\s*பத்\s*தை\s*வெல்\s*லும்\s*கல்\s*வி/g, 'துன்பத்தை வெல்லும் கல்வி')
-    .replace(/கல்\s*விக்\s*கண்\s*திறந்\s*தவர்/g, 'கல்விக்கண் திறந்தவர்')
-    .replace(/நூலகம்\s*நோக்\s*கி/g, 'நூலகம் நோக்கி')
-    .replace(/இணைப்\s*புச்\s*சொற்\s*கள்/g, 'இணைப்புச்சொற்கள்')
-    // Remove spurious spaces immediately after Tamil pulli (்) when followed by another Tamil consonant within the same word
-    .replace(/([க-ஹ]்)\s+(?=[கசடதபறநஞணமனயரலவழள][ா-ௌ்]?)/g, '$1');
-
-  return text;
+  return cleanTamilUnicodeText(raw);
 }
 
 export function cleanText(raw: string): string {

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import pool from '../db';
 import { requireAdminAuth } from '../middleware/auth';
 import { generateStudyNotesWithRag } from '../services/studyNotesEngine';
+import { cleanTamilUnicodeText } from '../services/tamilUnicodeCleaner';
 
 const router = Router();
 
@@ -12,11 +13,11 @@ function mapRowToNote(row: any) {
     unitId: row.unit_id,
     classId: row.class_id,
     subject: row.subject,
-    lessonTitle: row.lesson_title,
+    lessonTitle: cleanTamilUnicodeText(row.lesson_title || ''),
     topic: row.topic,
     language: row.language,
-    title: row.title,
-    content: row.content,
+    title: cleanTamilUnicodeText(row.title || ''),
+    content: cleanTamilUnicodeText(row.content || ''),
     contentHtml: row.content_html,
     tags: typeof row.tags === 'string' ? JSON.parse(row.tags) : row.tags,
     status: row.status,
@@ -353,15 +354,15 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
     const insertedNotes = [];
 
     for (const n of notes) {
-      const content = n.content || n.contentText || '';
-      const lessonTitle = n.lessonTitle || n.lesson_title || 'General Lesson';
+      const content = cleanTamilUnicodeText(n.content || n.contentText || '');
+      const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title || 'General Lesson');
       const unitId = Number(n.unitId || n.unit_id) || 1;
       const category = (n.category || 'group1').trim().toLowerCase();
       const subject = n.subject || 'General Studies';
       const classId = n.classId ? Number(n.classId) : (n.class_id ? Number(n.class_id) : 6);
       const topic = n.topic || '';
       const language = (n.language || 'english').trim().toLowerCase();
-      const title = n.title || lessonTitle;
+      const title = cleanTamilUnicodeText(n.title || lessonTitle);
       const sourceReference = n.sourceReference || n.source_reference || null;
       // All uploaded notes initially enter staging
       const status = n.status === 'published' ? 'published' : 'staging';
@@ -475,15 +476,15 @@ router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response
 router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const n = req.body;
-    const content = n.content || n.contentText || '';
-    const lessonTitle = n.lessonTitle || n.lesson_title;
+    const content = cleanTamilUnicodeText(n.content || n.contentText || '');
+    const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title);
     const unitId = Number(n.unitId || n.unit_id);
     const category = (n.category || 'group1').trim().toLowerCase();
     const subject = n.subject || 'General Studies';
     const classId = n.classId || n.class_id || null;
     const topic = n.topic || '';
     const language = (n.language || 'english').trim().toLowerCase();
-    const title = n.title || lessonTitle || 'Study Notes';
+    const title = cleanTamilUnicodeText(n.title || lessonTitle || 'Study Notes');
     const contentHtml = n.contentHtml || n.content_html || null;
     const tags = Array.isArray(n.tags) ? JSON.stringify(n.tags) : JSON.stringify([]);
     const sourceReference = n.sourceReference || n.source_reference || null;
@@ -527,10 +528,10 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     const values: any[] = [];
     let pIdx = 1;
 
-    if (b.content !== undefined) { updateClauses.push(`content = $${pIdx++}`); values.push(b.content); }
+    if (b.content !== undefined) { updateClauses.push(`content = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.content)); }
     if (b.contentHtml !== undefined) { updateClauses.push(`content_html = $${pIdx++}`); values.push(b.contentHtml); }
-    if (b.title !== undefined) { updateClauses.push(`title = $${pIdx++}`); values.push(b.title); }
-    if (b.lessonTitle !== undefined || b.lesson_title !== undefined) { updateClauses.push(`lesson_title = $${pIdx++}`); values.push(b.lessonTitle || b.lesson_title); }
+    if (b.title !== undefined) { updateClauses.push(`title = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.title)); }
+    if (b.lessonTitle !== undefined || b.lesson_title !== undefined) { updateClauses.push(`lesson_title = $${pIdx++}`); values.push(cleanTamilUnicodeText(b.lessonTitle || b.lesson_title)); }
     if (b.subject !== undefined) { updateClauses.push(`subject = $${pIdx++}`); values.push(b.subject); }
     if (b.category !== undefined) { updateClauses.push(`category = $${pIdx++}`); values.push(b.category); }
     if (b.unitId !== undefined || b.unit_id !== undefined) { updateClauses.push(`unit_id = $${pIdx++}`); values.push(Number(b.unitId || b.unit_id)); }
