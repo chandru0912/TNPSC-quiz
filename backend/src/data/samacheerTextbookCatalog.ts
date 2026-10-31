@@ -411,3 +411,4 @@ export function generateSamacheerBookName(spec: {
 
   return `Samacheer Kalvi ${stdId} Standard - ${subj} - ${trm} - ${med}`;
 }
+
