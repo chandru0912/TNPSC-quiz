@@ -263,7 +263,7 @@ const Admin = () => {
   const [isAIGeneratorOpen, setIsAIGeneratorOpen] = useState(false)
   const [aiMode, setAiMode] = useState<'mcq' | 'notes'>('mcq')
   const [notesLanguage, setNotesLanguage] = useState<'english' | 'tamil'>('english')
-  const [notesInstructions, setNotesInstructions] = useState('')
+  const [notesScope, setNotesScope] = useState<'chapter' | 'full_book'>('chapter')
   const [isNotesGenerating, setIsNotesGenerating] = useState(false)
   const [notesPreview, setNotesPreview] = useState<{ content: string; title: string; sourceReference?: string } | null>(null)
   const [isNotesUploading, setIsNotesUploading] = useState(false)
@@ -373,8 +373,7 @@ const Admin = () => {
   const isNotesFormValid =
     isSubjectValid &&
     isStandardValid &&
-    isUnitValid &&
-    isLessonValid &&
+    (notesScope === 'full_book' || (isUnitValid && isLessonValid)) &&
     isNotesTextbookReady &&
     !isNotesGenerating
 
@@ -4543,7 +4542,7 @@ const Admin = () => {
                   <div className="ai-section-box">
                     <h3 className="ai-section-title">
                       <Sparkles size={16} style={{ color: '#c084fc' }} />
-                      <span>Syllabus MCQ Configuration (1 to 6)</span>
+                      <span>{aiMode === 'mcq' ? 'Syllabus MCQ Configuration (1 to 5)' : 'Syllabus Study Notes Configuration (1 to 5)'}</span>
                     </h3>
 
                     {/* Shared 5-Dropdown Syllabus Cascade Selector (1. Group -> 2. Subject -> 3. Standard -> 4. Unit -> 5. Lesson Title) */}
@@ -4755,7 +4754,7 @@ const Admin = () => {
                       <div className="ai-generation-options">
                         <div className="ai-options-inline">
                           <div className="ai-field ai-field-compact">
-                            <label>6. Language</label>
+                            <label>7. Language</label>
                             <select
                               className="ai-select"
                               value={aiLanguage}
@@ -4767,7 +4766,7 @@ const Admin = () => {
                           </div>
 
                           <div className="ai-field ai-field-compact">
-                            <label>7. Questions Count</label>
+                            <label>8. Questions Count</label>
                             <select
                               className="ai-select"
                               value={aiQuestionCount}
@@ -4780,7 +4779,7 @@ const Admin = () => {
                           </div>
 
                           <div className="ai-field ai-field-compact">
-                            <label>8. Difficulty</label>
+                            <label>9. Difficulty</label>
                             <select
                               className="ai-select"
                               value={aiDifficulty}
@@ -4972,6 +4971,45 @@ const Admin = () => {
                               )}
                             </div>
                           )}
+
+                          {/* Chapter Selection & Scope */}
+                          <div style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                            <label style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem' }}>
+                              <Layers size={14} style={{ color: 'var(--gold-primary)' }} />
+                              <span>Chapter Scope & Generation Mode</span>
+                            </label>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.5rem' }}>
+                              <label className={`ai-source-radio-card ${notesScope === 'chapter' ? 'active' : ''}`} style={{ padding: '0.55rem 0.75rem' }}>
+                                <input
+                                  type="radio"
+                                  name="notesScopeMode"
+                                  checked={notesScope === 'chapter'}
+                                  onChange={() => setNotesScope('chapter')}
+                                />
+                                <div>
+                                  <div style={{ fontWeight: 600, fontSize: '0.84rem' }}>Selected Chapter / Lesson</div>
+                                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                    Unit {currentUnitId}: {currentLessonTitle || 'Current Lesson'}
+                                  </div>
+                                </div>
+                              </label>
+
+                              <label className={`ai-source-radio-card ${notesScope === 'full_book' ? 'active' : ''}`} style={{ padding: '0.55rem 0.75rem' }}>
+                                <input
+                                  type="radio"
+                                  name="notesScopeMode"
+                                  checked={notesScope === 'full_book'}
+                                  onChange={() => setNotesScope('full_book')}
+                                />
+                                <div>
+                                  <div style={{ fontWeight: 600, fontSize: '0.84rem' }}>Entire Uploaded PDF</div>
+                                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                    All chapters sequentially in textbook order
+                                  </div>
+                                </div>
+                              </label>
+                            </div>
+                          </div>
                         </div>
 
                         <div className="ai-options-inline">
@@ -4982,21 +5020,12 @@ const Admin = () => {
                               value={notesLanguage}
                               onChange={(e) => setNotesLanguage(e.target.value as any)}
                             >
+                              <option value="tamil">Tamil (தமிழ்)</option>
                               <option value="english">English</option>
-                              <option value="tamil">Tamil</option>
                             </select>
                           </div>
                         </div>
-                        <div className="ai-field" style={{ marginTop: '0.75rem' }}>
-                          <label>8. Instructions (Optional)</label>
-                          <textarea
-                            className="ai-textarea"
-                            rows={2}
-                            value={notesInstructions}
-                            onChange={(e) => setNotesInstructions(e.target.value)}
-                            placeholder="e.g. Include key points, definitions, mnemonics and exam questions"
-                          />
-                        </div>
+
                         <button
                           className="ai-generate-action-btn"
                           onClick={async () => {
@@ -5016,7 +5045,6 @@ const Admin = () => {
                                   lessonTitle: currentLessonTitle,
                                   topic: currentTopicName || currentLessonTitle,
                                   language: notesLanguage,
-                                  instructions: notesInstructions,
                                   apiKey: geminiApiKey.trim() || undefined,
                                   textbookMode: notesTextbookMode,
                                   textbookId:
@@ -5024,6 +5052,7 @@ const Admin = () => {
                                       ? notesSelectedTextbookId
                                       : (notesInlineProcessingJob?.id || undefined),
                                   term: notesInlineTerm || 'Term 1',
+                                  scope: notesScope,
                                 }),
                               })
                               const data = await res.json()
@@ -5035,8 +5064,8 @@ const Admin = () => {
                                 })
                                 setAiNotice(
                                   data.source === 'gemini'
-                                    ? `Study notes generated via Gemini referencing "${data.textbookUsed?.name || 'Textbook'}" (Pages ${data.textbookUsed?.pages?.join(', ') || ''}).`
-                                    : `Study notes generated referencing "${data.textbookUsed?.name || 'Textbook'}"`
+                                    ? `One-Liner Notes generated via Gemini referencing "${data.textbookUsed?.name || 'Textbook'}" (Pages ${data.textbookUsed?.pages?.join(', ') || ''}).`
+                                    : `One-Liner Notes generated referencing "${data.textbookUsed?.name || 'Textbook'}"`
                                 )
                               } else {
                                 showToast('error', data.message || 'Failed to generate notes')
@@ -5051,7 +5080,9 @@ const Admin = () => {
                         >
                           <Sparkles size={18} className={isNotesGenerating ? 'spin-icon' : ''} />
                           <span>
-                            {isNotesGenerating ? 'Generating Notes...' : `Generate Study Notes (${notesLanguage === 'tamil' ? 'Tamil' : 'English'})`}
+                            {isNotesGenerating
+                              ? (notesScope === 'full_book' ? 'Generating All Chapters...' : 'Generating One-Liner Notes...')
+                              : `Generate One-Liner Notes (${notesLanguage === 'tamil' ? 'Tamil' : 'English'})`}
                           </span>
                         </button>
                       </div>
