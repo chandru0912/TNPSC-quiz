@@ -56,6 +56,18 @@ import {
   getLessonsForSelection,
   getTopicsForSelection,
 } from '../data/unifiedSyllabusRegistry'
+import {
+  TNPSC_GROUPS_LIST,
+  STANDARDS_LIST,
+  getSubjectsForStandard,
+  getAllowedMediums,
+  getAllowedTerms,
+  generateSamacheerBookName,
+  normalizeStandardId,
+  type TnpscGroupId,
+  type TextbookMedium,
+  type StandardId,
+} from '../data/samacheerTextbookCatalog'
 
 interface QuestionItem {
   id: number
@@ -202,17 +214,56 @@ const Admin = () => {
   const [isDeletingTextbook, setIsDeletingTextbook] = useState(false)
   const [replacingTextbookId, setReplacingTextbookId] = useState<number | null>(null)
 
-  // Upload Form Fields
-  const [tbGroup, setTbGroup] = useState<'group1' | 'group2' | 'group4'>('group1')
-  const [tbStandard, setTbStandard] = useState<string>('10th')
-  const [tbSubject, setTbSubject] = useState<string>('General Science')
-  const [tbMedium, setTbMedium] = useState<'Tamil' | 'English'>('English')
-  const [tbTerm, setTbTerm] = useState<string>('Full Year')
-  const [tbBookName, setTbBookName] = useState<string>('')
+  // Upload Form Fields (Samacheer Kalvi Dynamic Catalog)
+  const [tbGroup, setTbGroup] = useState<TnpscGroupId>('group1')
+  const [tbStandard, setTbStandard] = useState<StandardId>('6th')
+  const [tbSubject, setTbSubject] = useState<string>('Tamil')
+  const [tbMedium, setTbMedium] = useState<TextbookMedium>('Tamil')
+  const [tbTerm, setTbTerm] = useState<string>('Term 1')
+  const [tbBookName, setTbBookName] = useState<string>(
+    'Samacheer Kalvi 6th Standard - Tamil - Term 1 - Tamil Medium'
+  )
+  const [tbIsCustomBookName, setTbIsCustomBookName] = useState<boolean>(false)
   const [tbFile, setTbFile] = useState<File | null>(null)
   const [tbUploading, setTbUploading] = useState(false)
   const [tbUploadProgress, setTbUploadProgress] = useState(0)
   const [tbUploadError, setTbUploadError] = useState<string | null>(null)
+
+  // Dynamic cascading options for textbook upload modal
+  const tbAvailableSubjects = useMemo(() => {
+    return getSubjectsForStandard(tbStandard)
+  }, [tbStandard])
+
+  const tbSelectedSubjectObj = useMemo(() => {
+    return (
+      tbAvailableSubjects.find(
+        (s) => s.name.toLowerCase() === tbSubject.toLowerCase() || s.id.toLowerCase() === tbSubject.toLowerCase()
+      ) || tbAvailableSubjects[0]
+    )
+  }, [tbAvailableSubjects, tbSubject])
+
+  const tbAvailableMediums = useMemo(() => {
+    return getAllowedMediums(tbStandard, tbSelectedSubjectObj?.name || tbSubject)
+  }, [tbStandard, tbSelectedSubjectObj, tbSubject])
+
+  const tbAvailableTerms = useMemo(() => {
+    return getAllowedTerms(tbStandard, tbSelectedSubjectObj?.name || tbSubject)
+  }, [tbStandard, tbSelectedSubjectObj, tbSubject])
+
+  // Live duplicate detection in current database textbooks
+  const tbDuplicateInDb = useMemo(() => {
+    if (!textbooksList || textbooksList.length === 0) return null
+    const stdNum = parseInt(tbStandard, 10)
+    return textbooksList.find(
+      (t) =>
+        t.groupId.toLowerCase() === tbGroup.toLowerCase() &&
+        (t.standard === stdNum || String(t.standard) === tbStandard) &&
+        t.subject.toLowerCase() === tbSubject.toLowerCase() &&
+        t.medium.toLowerCase() === tbMedium.toLowerCase() &&
+        (t.term || 'Full Year').toLowerCase() === tbTerm.toLowerCase() &&
+        (!replacingTextbookId || t.id !== replacingTextbookId)
+    )
+  }, [textbooksList, tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, replacingTextbookId])
 
   // In-Generator Textbook Source states
   const [aiTextbookMode, setAiTextbookMode] = useState<'auto' | 'specific' | 'upload'>('auto')
@@ -1386,6 +1437,116 @@ const Admin = () => {
     return () => clearInterval(interval)
   }, [textbooksList, aiInlineProcessingJob, notesInlineProcessingJob, token, fetchTextbooks])
 
+  // Cascading Handlers for Textbook Upload Modal (Samacheer Kalvi Catalog)
+  const handleTbStandardChange = (newStd: StandardId) => {
+    setTbStandard(newStd)
+    const newSubjects = getSubjectsForStandard(newStd)
+    const subjectStillValid = newSubjects.some(
+      (s) => s.name.toLowerCase() === tbSubject.toLowerCase()
+    )
+    const effectiveSubject = subjectStillValid ? tbSubject : newSubjects[0].name
+    if (!subjectStillValid) {
+      setTbSubject(effectiveSubject)
+    }
+
+    const newMediums = getAllowedMediums(newStd, effectiveSubject)
+    const mediumStillValid = newMediums.includes(tbMedium)
+    const effectiveMedium = mediumStillValid ? tbMedium : newMediums[0]
+    if (!mediumStillValid) {
+      setTbMedium(effectiveMedium)
+    }
+
+    const newTerms = getAllowedTerms(newStd, effectiveSubject)
+    const termStillValid = newTerms.includes(tbTerm)
+    const effectiveTerm = termStillValid ? tbTerm : newTerms[0]
+    if (!termStillValid) {
+      setTbTerm(effectiveTerm)
+    }
+
+    if (!tbIsCustomBookName) {
+      setTbBookName(
+        generateSamacheerBookName({
+          standard: newStd,
+          subject: effectiveSubject,
+          medium: effectiveMedium,
+          term: effectiveTerm,
+        })
+      )
+    }
+  }
+
+  const handleTbSubjectChange = (newSubjectName: string) => {
+    setTbSubject(newSubjectName)
+
+    const newMediums = getAllowedMediums(tbStandard, newSubjectName)
+    const mediumStillValid = newMediums.includes(tbMedium)
+    const effectiveMedium = mediumStillValid ? tbMedium : newMediums[0]
+    if (!mediumStillValid) {
+      setTbMedium(effectiveMedium)
+    }
+
+    const newTerms = getAllowedTerms(tbStandard, newSubjectName)
+    const termStillValid = newTerms.includes(tbTerm)
+    const effectiveTerm = termStillValid ? tbTerm : newTerms[0]
+    if (!termStillValid) {
+      setTbTerm(effectiveTerm)
+    }
+
+    if (!tbIsCustomBookName) {
+      setTbBookName(
+        generateSamacheerBookName({
+          standard: tbStandard,
+          subject: newSubjectName,
+          medium: effectiveMedium,
+          term: effectiveTerm,
+        })
+      )
+    }
+  }
+
+  const handleTbMediumChange = (newMedium: TextbookMedium) => {
+    setTbMedium(newMedium)
+    if (!tbIsCustomBookName) {
+      setTbBookName(
+        generateSamacheerBookName({
+          standard: tbStandard,
+          subject: tbSubject,
+          medium: newMedium,
+          term: tbTerm,
+        })
+      )
+    }
+  }
+
+  const handleTbTermChange = (newTerm: string) => {
+    setTbTerm(newTerm)
+    if (!tbIsCustomBookName) {
+      setTbBookName(
+        generateSamacheerBookName({
+          standard: tbStandard,
+          subject: tbSubject,
+          medium: tbMedium,
+          term: newTerm,
+        })
+      )
+    }
+  }
+
+  const handleTbGroupChange = (newGroup: TnpscGroupId) => {
+    setTbGroup(newGroup)
+  }
+
+  const handleResetToAutoBookName = () => {
+    const auto = generateSamacheerBookName({
+      standard: tbStandard,
+      subject: tbSubject,
+      medium: tbMedium,
+      term: tbTerm,
+    })
+    setTbBookName(auto)
+    setTbIsCustomBookName(false)
+  }
+
   // Upload or Replace Textbook
   const handleUploadTextbook = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1402,7 +1563,7 @@ const Admin = () => {
       return
     }
     if (!tbSubject.trim()) {
-      setTbUploadError('Please enter the Subject.')
+      setTbUploadError('Please select a Subject.')
       return
     }
     if (!tbFile.name.toLowerCase().endsWith('.pdf') && tbFile.type !== 'application/pdf') {
@@ -1426,9 +1587,12 @@ const Admin = () => {
       formData.append('medium', tbMedium)
       formData.append('term', tbTerm)
       formData.append('bookName', tbBookName.trim())
-      formData.append('replace', replacingTextbookId ? 'true' : 'false')
-      if (replacingTextbookId) {
-        formData.append('replaceId', String(replacingTextbookId))
+
+      const effectiveReplaceId = replacingTextbookId || tbDuplicateInDb?.id || null
+      const shouldReplace = !!effectiveReplaceId
+      formData.append('replace', shouldReplace ? 'true' : 'false')
+      if (effectiveReplaceId) {
+        formData.append('replaceId', String(effectiveReplaceId))
       }
       formData.append('pdf', tbFile)
 
@@ -1468,7 +1632,7 @@ const Admin = () => {
       }
 
       const isAlreadyCompleted = data?.data?.status === 'completed'
-      const successMsg = replacingTextbookId
+      const successMsg = effectiveReplaceId
         ? isAlreadyCompleted
           ? `Textbook replaced and indexed (${data.data.pageCount || 0} pages).`
           : 'Textbook replaced successfully. Background indexing started.'
@@ -1479,9 +1643,9 @@ const Admin = () => {
       showToast('success', successMsg)
       setIsUploadTextbookModalOpen(false)
       setReplacingTextbookId(null)
-      setTbBookName('')
       setTbFile(null)
       setTbUploadProgress(0)
+      setTbIsCustomBookName(false)
       fetchTextbooks()
     } catch (err: any) {
       console.error('Textbook upload error:', err)
@@ -3168,7 +3332,20 @@ const Admin = () => {
                   className="admin-btn admin-btn-primary"
                   onClick={() => {
                     setReplacingTextbookId(null)
-                    setTbBookName('')
+                    setTbGroup('group1')
+                    setTbStandard('6th')
+                    setTbSubject('Tamil')
+                    setTbMedium('Tamil')
+                    setTbTerm('Term 1')
+                    setTbBookName(
+                      generateSamacheerBookName({
+                        standard: '6th',
+                        subject: 'Tamil',
+                        medium: 'Tamil',
+                        term: 'Term 1',
+                      })
+                    )
+                    setTbIsCustomBookName(false)
                     setTbFile(null)
                     setTbUploadError(null)
                     setIsUploadTextbookModalOpen(true)
@@ -3358,11 +3535,12 @@ const Admin = () => {
                                 onClick={() => {
                                   setReplacingTextbookId(tb.id)
                                   setTbGroup(tb.groupId as any)
-                                  setTbStandard(typeof tb.standard === 'number' ? `${tb.standard}th` : String(tb.standard))
+                                  setTbStandard(normalizeStandardId(tb.standard))
                                   setTbSubject(tb.subject)
                                   setTbMedium(tb.medium)
                                   setTbTerm(tb.term || 'Full Year')
                                   setTbBookName(tb.bookName)
+                                  setTbIsCustomBookName(true)
                                   setTbFile(null)
                                   setTbUploadError(null)
                                   setIsUploadTextbookModalOpen(true)
@@ -4556,10 +4734,14 @@ const Admin = () => {
               <div className="admin-modal-header">
                 <div>
                   <h2 className="admin-modal-title">
-                    {replacingTextbookId ? `Replace Textbook #${replacingTextbookId}` : 'Upload Samacheer Kalvi Textbook'}
+                    {replacingTextbookId
+                      ? `Replace Textbook #${replacingTextbookId}`
+                      : tbDuplicateInDb
+                        ? `Update & Re-Index Textbook (#${tbDuplicateInDb.id})`
+                        : 'Upload Samacheer Kalvi Textbook'}
                   </h2>
                   <p className="admin-modal-subtitle">
-                    Upload Classes 6–12 official textbooks in PDF format for RAG-based AI question generation.
+                    Classes 6–12 official syllabus textbooks with dynamic cascading selection and automatic book name generation.
                   </p>
                 </div>
                 <button
@@ -4593,35 +4775,68 @@ const Admin = () => {
                     </div>
                   )}
 
+                  {tbDuplicateInDb && (
+                    <div
+                      style={{
+                        padding: '0.75rem 1rem',
+                        background: 'rgba(234, 179, 8, 0.12)',
+                        border: '1px solid rgba(234, 179, 8, 0.35)',
+                        borderRadius: '8px',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.65rem',
+                        fontSize: '0.84rem',
+                        color: '#fef08a',
+                      }}
+                    >
+                      <AlertTriangle size={18} style={{ color: '#fbbf24', flexShrink: 0 }} />
+                      <div>
+                        <strong>Existing Textbook Match (# {tbDuplicateInDb.id}):</strong> "{tbDuplicateInDb.bookName}" is currently indexed.
+                        Uploading will overwrite and re-index this textbook.
+                      </div>
+                    </div>
+                  )}
+
                   {/* 1. Group & 2. Standard */}
                   <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
                     <div className="form-field">
-                      <label>1. TNPSC Group *</label>
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>1. TNPSC Group *</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--gold-primary)' }}>Step 1 of 5</span>
+                      </label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
                         value={tbGroup}
-                        onChange={(e) => setTbGroup(e.target.value as any)}
+                        onChange={(e) => handleTbGroupChange(e.target.value as any)}
                         required
                       >
-                        <option value="group1">Group 1</option>
-                        <option value="group2">Group 2 / 2A</option>
-                        <option value="group4">Group 4</option>
+                        {TNPSC_GROUPS_LIST.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.badge} – {g.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
 
                     <div className="form-field">
-                      <label>2. Standard / Class *</label>
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>2. Standard / Class *</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {tbStandard === '11th' || tbStandard === '12th' ? 'Higher Secondary (+1/+2)' : 'High School (6th–10th)'}
+                        </span>
+                      </label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
                         value={tbStandard}
-                        onChange={(e) => setTbStandard(e.target.value)}
+                        onChange={(e) => handleTbStandardChange(e.target.value as any)}
                         required
                       >
-                        {['6th', '7th', '8th', '9th', '10th', '11th', '12th'].map((std) => (
-                          <option key={std} value={std}>
-                            Class {std}
+                        {STANDARDS_LIST.map((std) => (
+                          <option key={std.id} value={std.id}>
+                            {std.label}
                           </option>
                         ))}
                       </select>
@@ -4631,28 +4846,46 @@ const Admin = () => {
                   {/* 3. Subject & 4. Medium */}
                   <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
                     <div className="form-field">
-                      <label>3. Subject *</label>
-                      <input
-                        type="text"
-                        className="admin-auth-input"
-                        placeholder="e.g. Science, Social Science, History..."
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>3. Subject Selection *</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--gold-primary)' }}>
+                          {tbAvailableSubjects.length} Available Subjects
+                        </span>
+                      </label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
                         value={tbSubject}
-                        onChange={(e) => setTbSubject(e.target.value)}
+                        onChange={(e) => handleTbSubjectChange(e.target.value)}
                         required
-                      />
+                      >
+                        {tbAvailableSubjects.map((s) => (
+                          <option key={s.id} value={s.name}>
+                            {s.name} ({s.tamilName})
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
                     <div className="form-field">
-                      <label>4. Medium *</label>
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>4. Medium *</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {tbAvailableMediums.length > 1 ? 'Bilingual Available' : 'Single Medium'}
+                        </span>
+                      </label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
                         value={tbMedium}
-                        onChange={(e) => setTbMedium(e.target.value as any)}
+                        onChange={(e) => handleTbMediumChange(e.target.value as any)}
                         required
                       >
-                        <option value="English">English Medium</option>
-                        <option value="Tamil">Tamil Medium (தமிழ்)</option>
+                        {tbAvailableMediums.map((m) => (
+                          <option key={m} value={m}>
+                            {m === 'Tamil' ? 'Tamil Medium (தமிழ் வழிக் கல்வி)' : 'English Medium'}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -4660,28 +4893,67 @@ const Admin = () => {
                   {/* 5. Term & 6. Book Name */}
                   <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
                     <div className="form-field">
-                      <label>5. Term (where applicable)</label>
+                      <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>5. Term / Volume Structure *</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {tbAvailableTerms.length === 1 ? 'Full Year Only' : `${tbAvailableTerms.length} Options`}
+                        </span>
+                      </label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
                         value={tbTerm}
-                        onChange={(e) => setTbTerm(e.target.value)}
+                        onChange={(e) => handleTbTermChange(e.target.value)}
+                        required
                       >
-                        <option value="Full Year">Full Year (Combined)</option>
-                        <option value="Term 1">Term 1</option>
-                        <option value="Term 2">Term 2</option>
-                        <option value="Term 3">Term 3</option>
+                        {tbAvailableTerms.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
                       </select>
                     </div>
 
                     <div className="form-field">
-                      <label>6. Book Name *</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                        <label style={{ margin: 0 }}>6. Book Name *</label>
+                        {tbIsCustomBookName ? (
+                          <button
+                            type="button"
+                            onClick={handleResetToAutoBookName}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--gold-primary)',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: 0,
+                            }}
+                            title="Reset to official Samacheer Kalvi naming format"
+                          >
+                            <RefreshCw size={11} />
+                            <span>Reset to Auto Name</span>
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '0.72rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <CheckCircle2 size={12} />
+                            <span>Auto-Generated</span>
+                          </span>
+                        )}
+                      </div>
                       <input
                         type="text"
                         className="admin-auth-input"
-                        placeholder="e.g. Samacheer Kalvi 10th Science"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        placeholder="e.g. Samacheer Kalvi 6th Standard - Tamil - Term 1 - Tamil Medium"
                         value={tbBookName}
-                        onChange={(e) => setTbBookName(e.target.value)}
+                        onChange={(e) => {
+                          setTbBookName(e.target.value)
+                          setTbIsCustomBookName(true)
+                        }}
                         required
                       />
                     </div>
@@ -4689,7 +4961,10 @@ const Admin = () => {
 
                   {/* 7. PDF Upload Dropzone */}
                   <div className="form-field" style={{ marginTop: '0.5rem' }}>
-                    <label>7. PDF Textbook File * (Max 100MB)</label>
+                    <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>7. PDF Textbook File * (Max 100MB)</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Classes 6–12 Official PDF</span>
+                    </label>
                     <div
                       className="bulk-dropzone"
                       style={{ padding: '1.5rem', textAlign: 'center', cursor: 'pointer' }}
@@ -4699,10 +4974,10 @@ const Admin = () => {
                       <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
                         {tbFile ? tbFile.name : 'Click to select Samacheer Kalvi PDF'}
                       </p>
-                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 0 }}>
                         {tbFile
                           ? `${(tbFile.size / (1024 * 1024)).toFixed(2)} MB • PDF file selected`
-                          : 'Supports searchable and scanned Tamil & English textbooks'}
+                          : 'Supports searchable and scanned Tamil & English textbooks (OCR & syllabus mapping)'}
                       </p>
                       <input
                         id="tb-file-input"
@@ -4713,9 +4988,6 @@ const Admin = () => {
                           const file = e.target.files?.[0]
                           if (file) {
                             setTbFile(file)
-                            if (!tbBookName.trim()) {
-                              setTbBookName(file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' '))
-                            }
                           }
                         }}
                       />
@@ -4772,8 +5044,21 @@ const Admin = () => {
                     Cancel
                   </button>
                   <button type="submit" className="admin-btn admin-btn-primary" disabled={tbUploading || !tbFile}>
-                    <UploadCloud size={16} />
-                    <span>{tbUploading ? 'Uploading...' : replacingTextbookId ? 'Replace & Reprocess' : 'Upload & Start Indexing'}</span>
+                    {tbUploading ? (
+                      <>
+                        <RefreshCw size={15} className="spin-icon" />
+                        <span>Uploading ({tbUploadProgress}%)...</span>
+                      </>
+                    ) : (
+                      <>
+                        {replacingTextbookId || tbDuplicateInDb ? <RefreshCw size={15} /> : <UploadCloud size={15} />}
+                        <span>
+                          {replacingTextbookId || tbDuplicateInDb
+                            ? 'Replace & Index Textbook'
+                            : 'Upload & Start Indexing'}
+                        </span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>

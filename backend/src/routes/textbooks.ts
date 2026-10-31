@@ -8,6 +8,12 @@ import { ensureDatabaseSchema } from '../migrate';
 import { requireAdminAuth } from '../middleware/auth';
 import { processTextbookPdf } from '../services/pdfProcessor';
 import { retrieveRelevantTextbookContent } from '../services/textbookRag';
+import {
+  TNPSC_GROUPS_LIST,
+  STANDARDS_LIST,
+  SAMACHEER_CATALOG,
+  generateSamacheerBookName,
+} from '../data/samacheerTextbookCatalog';
 
 const router = Router();
 
@@ -169,17 +175,24 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
       return res.status(400).json({ status: 'error', message: 'Subject is required.' });
     }
 
-    if (!bookName || !String(bookName).trim()) {
-      if (fs.existsSync(uploadedFilePath)) fs.unlinkSync(uploadedFilePath);
-      return res.status(400).json({ status: 'error', message: 'Book Name is required.' });
-    }
-
     const cleanGroupId = normalizeGroupId(group || groupId || 'group1');
     const parsedStandard = normalizeStandard(standard);
     const cleanSubject = String(subject).trim();
     const cleanMedium = String(medium).trim().toLowerCase() === 'tamil' ? 'Tamil' : 'English';
     const cleanTerm = term && String(term).trim() ? String(term).trim() : 'Full Year';
-    const cleanBookName = String(bookName).trim();
+    const cleanBookName = (bookName && String(bookName).trim())
+      ? String(bookName).trim()
+      : generateSamacheerBookName({
+          standard: parsedStandard,
+          subject: cleanSubject,
+          medium: cleanMedium,
+          term: cleanTerm,
+        });
+
+    if (!cleanBookName) {
+      if (fs.existsSync(uploadedFilePath)) fs.unlinkSync(uploadedFilePath);
+      return res.status(400).json({ status: 'error', message: 'Book Name could not be generated or validated.' });
+    }
     const fileSize = req.file.size;
 
     const targetReplaceId = req.params.id
@@ -390,6 +403,21 @@ router.post('/upload', requireAdminAuth, handlePdfUpload, handleUploadOrReplaceT
  * Replaces an existing textbook PDF by ID and re-indexes it.
  */
 router.put('/:id', requireAdminAuth, handlePdfUpload, handleUploadOrReplaceTextbook);
+
+/**
+ * GET /api/textbooks/catalog (Public / Admin)
+ * Returns the authoritative Samacheer Kalvi Classes 6–12 catalogue with groups, standards, subjects, mediums and terms.
+ */
+router.get('/catalog', (_req: Request, res: Response) => {
+  return res.status(200).json({
+    status: 'success',
+    data: {
+      groups: TNPSC_GROUPS_LIST,
+      standards: STANDARDS_LIST,
+      catalog: SAMACHEER_CATALOG,
+    },
+  });
+});
 
 /**
  * GET /api/textbooks (Public / Admin)
