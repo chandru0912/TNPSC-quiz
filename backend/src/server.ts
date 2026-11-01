@@ -96,6 +96,14 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 
+// Safeguard: Strip any accidental Vercel /dist/server.js prefix from incoming request URLs
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  if (req.url.startsWith('/dist/server.js')) {
+    req.url = req.url.replace('/dist/server.js', '') || '/';
+  }
+  next();
+});
+
 // Prevent HTTP 304 (Not Modified) and stale edge/browser caching on all API endpoints
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   delete req.headers['if-none-match'];
@@ -163,11 +171,29 @@ const requireSchemaMiddleware = async (_req: Request, _res: Response, next: Next
 };
 
 app.use('/api/admin', authRouter);
+app.use('/admin', authRouter);
+app.use('/api/api/admin', authRouter);
+
 app.use('/api/questions', requireSchemaMiddleware, questionsRouter);
+app.use('/questions', requireSchemaMiddleware, questionsRouter);
+app.use('/api/api/questions', requireSchemaMiddleware, questionsRouter);
+
 app.use('/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
+app.use('/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
+app.use('/api/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
+
 app.use('/api/notes', requireSchemaMiddleware, notesRouter);
+app.use('/notes', requireSchemaMiddleware, notesRouter);
+app.use('/api/api/notes', requireSchemaMiddleware, notesRouter);
+
 app.use('/api/textbooks', requireSchemaMiddleware, textbooksRouter);
+app.use('/textbooks', requireSchemaMiddleware, textbooksRouter);
+app.use('/api/api/textbooks', requireSchemaMiddleware, textbooksRouter);
+
 app.use('/api/ai', requireSchemaMiddleware, aiGenerationRouter);
+app.use('/ai', requireSchemaMiddleware, aiGenerationRouter);
+app.use('/api/api/ai', requireSchemaMiddleware, aiGenerationRouter);
+
 app.use('/api/drive', requireSchemaMiddleware, driveRouter);
 app.use('/drive', requireSchemaMiddleware, driveRouter);
 app.use('/api/api/drive', requireSchemaMiddleware, driveRouter);
