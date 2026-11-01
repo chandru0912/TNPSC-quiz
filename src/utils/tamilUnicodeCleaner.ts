@@ -3,79 +3,70 @@
  *
  * Authoritative Tamil Unicode Normalizer and Cleaner.
  * 
- * Fixes:
- * 1. Unicode NFC normalization.
- * 2. InDesign PDF / CMap glyph corruptions (e.g. U+FFFD -> ப, வபா -> போ, etc.).
- * 3. Removes spurious spaces between base consonants and dependent vowel signs (ா, ி, ீ, ு, ூ, ெ, ே, ை, ொ, ோ, ௌ) and pulli (்).
- * 4. Merges geminates and consonant conjuncts where spaces were inserted after pulli (e.g. க் க -> க்க, த் த -> த்த, ன் ப -> ன்ப).
- * 5. Re-stitches single/double Tamil syllables separated by artificial PDF glyph kerning spaces (e.g. 'ப ா ர தி தா சன்' -> 'பாரதிதாசன்').
- * 6. Fixes InDesign 8-bit Tamil font character remapping (e.g. Vanavil / Bamini CMap artifacts).
- * 7. Preserves legitimate word boundaries, punctuation, numbers, and Latin characters.
+ * Standards & Fixes:
+ * 1. Unicode NFC Normalization:
+ *    Ensures standard Unicode NFC representation for all Tamil and Latin characters.
+ * 2. Invisible / Corrupt Character Stripping:
+ *    Removes byte order marks (\uFEFF), replacement characters (\uFFFD),
+ *    and unneeded zero-width characters (\u200B).
+ * 3. Split Vowel Canonicalization:
+ *    Normalizes two-part dependent vowel signs to single Unicode points:
+ *    - ெ (U+0BC6) + ா (U+0BBE) -> ொ (U+0BCA)
+ *    - ே (U+0BC7) + ா (U+0BBE) -> ோ (U+0BCB)
+ *    - ெ (U+0BC6) + ௗ (U+0BD7) -> ௌ (U+0BCC)
+ * 4. Deduplicate multiple consecutive pullis:
+ *    - \u0BCD{2,} -> \u0BCD
+ * 5. Remove accidental pulli directly following a dependent vowel sign:
+ *    - e.g. ா + ் -> ா (dependent vowel signs cannot take pulli)
+ * 6. Remove spurious spaces between base consonants and dependent vowel signs or pulli:
+ *    - e.g. க + space + ா -> கா (dependent vowel signs can never start a word)
+ *    - e.g. க + space + ் -> க் (pulli can never start a word)
+ * 7. PRESERVES legitimate word boundaries:
+ *    - Strictly preserves spaces between distinct words (e.g. "சமச்சீர் கல்வி", "ஆகியோர் கலைகளை", "நானிலம் படைத்தவன்" are preserved intact!).
+ * 8. Preserves numbers, Latin terms, punctuation, and markdown formatting.
  */
 
 export function cleanTamilUnicodeText(raw: string): string {
   if (!raw) return '';
   let text = String(raw).normalize('NFC');
 
-  // 1. In tntextbooks.in InDesign Tamil PDFs, U+FFFD is systematically 'ப' (U+0BAA)
-  text = text.replace(/\uFFFD/g, 'ப');
+  // 1. Remove invisible junk characters (BOM, replacement characters, zero-width spaces)
+  text = text.replace(/[\uFEFF\uFFFD\u200B]/g, '');
 
-  // 2. Normalize split vowels (kombu + kal -> o, kombu + kal + pulli, etc.)
+  // 2. Canonicalize split vowels (kombu + kal -> o, kombu + kal + pulli, etc.)
   text = text.replace(/\u0BC6\s*\u0BBE/g, '\u0BCA'); // ெ + ா -> ொ
   text = text.replace(/\u0BC7\s*\u0BBE/g, '\u0BCB'); // ே + ா -> ோ
   text = text.replace(/\u0BC6\s*\u0BD7/g, '\u0BCC'); // ெ + ௗ -> ௌ
 
-  // 3. Normalize multiple consecutive pullis
+  // 3. Normalize multiple consecutive pullis to single pulli
   text = text.replace(/\u0BCD{2,}/g, '\u0BCD');
 
-  // 4. Remove pulli immediately following a vowel sign (e.g. ா் -> ா, ி் -> ி)
-  text = text.replace(/([\u0BBE-\u0BD7])\u0BCD+/g, '$1');
+  // 4. Remove pulli immediately following a dependent vowel sign (e.g. ா + ் -> ா)
+  // Dependent vowel signs: U+0BBE to U+0BCC, and U+0BD7 (excluding U+0BCD pulli)
+  text = text.replace(/([\u0BBE-\u0BCC\u0BD7])\u0BCD+/g, '$1');
 
-  // 5. Remove pulli before consonant if preceded by a vowel sign (e.g. போற்றுகி்றார் -> போற்றுகிறார்)
-  text = text.replace(/([\u0BBE-\u0BD7])\s*\u0BCD+\s*([க-ஹ])/g, '$1$2');
-
-  // 6. Remove stray pulli placed before consonants at word boundary
-  text = text.replace(/(?<=^|[\s,.:;!?"'(\[\]])\u0BCD+([க-ஹ])/g, '$1');
-
-  // 7. Remove spurious spaces immediately before dependent vowel signs and pulli
-  for (let i = 0; i < 4; i++) {
-    text = text.replace(/([\u0B80-\u0BFF])\s+([\u0BBE-\u0BCD\u0BD7])/g, '$1$2');
-    text = text.replace(/([க-ஹ])\s+்/g, '$1்');
+  // 5. Remove spurious spaces immediately before dependent vowel signs and pulli
+  // (A dependent vowel sign or pulli can never start a word, so space before it is always an artifact)
+  for (let i = 0; i < 2; i++) {
+    text = text.replace(/([க-ஹ])\s+([\u0BBE-\u0BCD\u0BD7])/g, '$1$2');
   }
 
-  // 8. Connect geminates where a pulli is followed by space and consonant
-  const geminateMap: [RegExp, string][] = [
-    [/க்\s+க/g, 'க்க'],
-    [/ச்\s+ச/g, 'ச்ச'],
-    [/ட்\s+ட/g, 'ட்ட'],
-    [/த்\s+த/g, 'த்த'],
-    [/ப்\s+ப/g, 'ப்ப'],
-    [/ற்\s+ற/g, 'ற்ற'],
-    [/ங்\s+க/g, 'ங்க'],
-    [/ஞ்\s+ச/g, 'ஞ்ச'],
-    [/ண்\s+ட/g, 'ண்ட'],
-    [/ந்\s+த/g, 'ந்த'],
-    [/ம்\s+ப/g, 'ம்ப'],
-    [/ன்\s+ற/g, 'ன்ற'],
-    [/ன்\s+ப/g, 'ன்ப'],
-    [/ல்\s+ல/g, 'ல்ல'],
-    [/ள்\s+ள/g, 'ள்ள'],
-    [/ண்\s+ண/g, 'ண்ண'],
-    [/ன்\s+ன/g, 'ன்ன'],
-    [/ய்\s+ய/g, 'ய்ய'],
-    [/ர்\s+க/g, 'ர்க'],
-    [/ழ்\s+க/g, 'ழ்க'],
-    [/ட்\s+ப/g, 'ட்ப'],
-    [/ற்\s+ப/g, 'ற்ப'],
-    [/ற்\s+க/g, 'ற்க'],
-    [/ட்\s+க/g, 'ட்க'],
-  ];
-  for (const [re, rep] of geminateMap) {
-    text = text.replace(re, rep);
-  }
+  // 6. Normalize multiple horizontal spaces while preserving line breaks
+  text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
-  // 9. InDesign 8-bit font CMap & syllable repairs for Tamil textbooks
-  text = text
+  return text;
+}
+
+/**
+ * Dedicated InDesign PDF CMap & Syllable repair for raw Tamil textbook extraction.
+ * Only applied during PDF parsing, never on generated notes or user input.
+ */
+export function repairInDesignPdfArtifacts(raw: string): string {
+  if (!raw) return '';
+  let text = cleanTamilUnicodeText(raw);
+
+  // tntextbooks.in InDesign 8-bit font glyph corruptions
+  return text
     .replace(/வபா/g, 'போ')
     .replace(/பொெ/g, 'செ')
     .replace(/சொ்ரேுள்/g, 'பொருள்')
@@ -93,24 +84,17 @@ export function cleanTamilUnicodeText(raw: string): string {
     .replace(/இன்ப\s+த\s+தமிழ்/g, 'இன்பத்தமிழ்')
     .replace(/இன்ப\s*த்தமிழ்/g, 'இன்பத்தமிழ்')
     .replace(/இன்பத்?\s*த?மிழ்/g, 'இன்பத்தமிழ்')
-    .replace(/இன்பத்தமிழ்\s+இன்பத்தமிழ்/g, 'இன்பத்தமிழ்')
     .replace(/இன்பத்தமிழ்நமது/g, 'இன்பத்தமிழ் நமது')
     .replace(/ப\s*ா\s*ர\s*தி\s*த\s*ா\s*ச\s*ன்/g, 'பாரதிதாசன்')
     .replace(/பார\s*திதா\s*சன்/g, 'பாரதிதாசன்')
-    .replace(/இ\s*லக்கி\s*ய\s*ம\s*ர\s*ப\s*ா?க/g, 'இலக்கிய மரபாக')
-    .replace(/ஆ\s*கி/g, 'ஆகி')
-    .replace(/விட்[்ட]\s*து/g, 'விட்டது')
-    .replace(/போற்றுகின்ற\s*ன/g, 'போற்றுகின்றன')
-    .replace(/பலவா[்றா]*க\s*ப்\s*போற்றுகி[்றா]*ர்/g, 'பலவாறாகப் போற்றுகிறார்')
-    .replace(/தமிழ்வணக்கம்தற்கால/g, 'தமிழ் வணக்கம் தற்கால')
-    .replace(/இயல்\s+இயல்/g, 'இயல்')
-    .replace(/ஒன்று\s+ஒன்று/g, 'ஒன்று')
-    .replace(/இன்பத்தமிழ்\s+இன்பத்தமிழ்/g, 'இன்பத்தமிழ்')
-    .replace(/குைந்ழதழயச்\s*்?\s*ச\s*ல்லமா்க/g, 'குழந்தையைச் செல்லமாக')
+    .replace(/பாரதிதாசன்தமிழைப்பலவாறா\s*்க\s*ப்?\s*போற்றுகி\s*்றார்/g, 'பாரதிதாசன் தமிழைப் பலவாறாகப் போற்றுகிறார்')
+    .replace(/பாரதிதாசன்தமிழைப்/g, 'பாரதிதாசன் தமிழைப் ')
+    .replace(/போற்றுகி\s*்றார்/g, 'போற்றுகிறார்')
+    .replace(/பலவாறா\s*்க\s*ப்/g, 'பலவாறாகப்')
+    .replace(/குைந்ழதழயச்\s*்?\s*ச\s*ல்லமா\s*்க\s*க்\s*்கா\s*ஞ்சுவதும்/g, 'குழந்தையைச் செல்லமாகக் கொஞ்சுவதும்')
     .replace(/குைந்ழதழய/g, 'குழந்தையை')
-    .replace(/ச\s+ல்லமா[்க]+/g, 'செல்லமாக')
-    .replace(/க்\s*்?்கா\s*ஞ்சுவதும்/g, 'கொஞ்சுவதும்')
-    .replace(/க்+கா\s+ஞ்சுவதும்/g, 'கொஞ்சுவதும்')
+    .replace(/ச\s*ல்லமா\s*்க/g, 'செல்லமாக')
+    .replace(/க்\s*்கா\s*ஞ்சுவதும்/g, 'கொஞ்சுவதும்')
     .replace(/அமுததன்று/g, 'அமுதென்று')
     .replace(/நிலதென்று/g, 'நிலவென்று')
     .replace(/மணதமன்று/g, 'மணமென்று')
@@ -122,72 +106,15 @@ export function cleanTamilUnicodeText(raw: string): string {
     .replace(/சந்தமிழுக்கு/g, 'செந்தமிழுக்கு')
     .replace(/பயர்்கள்பல/g, 'பெயர்கள் பல')
     .replace(/பயர்கள்பல/g, 'பெயர்கள் பல')
-    .replace(/(?:சூ)+ட்டி/g, 'சூட்டி')
-    .replace(/\bட்டி\s+மகிழ்வதைக்/g, 'சூட்டி மகிழ்வதைக்')
-    .replace(/மகிழ்வதைக்காண்போ\s*ம்/g, 'மகிழ்வதைக் காண்போம்')
-    .replace(/மகிழ்வழதக்\s*்காண்போ\s*ம்/g, 'மகிழ்வதைக் காண்போம்')
-    .replace(/மகிழ்வழதக்/g, 'மகிழ்வதைக்')
-    .replace(/இ[ைள]+மக்[குப்\s]*[்போா]+ல்/g, 'இளமைக்குப் பால்')
-    .replace(/[ேந]\s*ல்ல/g, 'நல்ல')
-    .replace(/இன்பத்தமிழ்நல்ல/g, 'இன்பத்தமிழ் நல்ல')
-    .replace(/பு[்க]+ழ்மிக்க/g, 'புகழ்மிக்க')
-    .replace(/புல[ெவ]ர்க்கு\s*[பெவ]+ல்/g, 'புலவர்க்கு வேல்')
-    .replace(/உயர்வுக்கு[ொவா]+ன்/g, 'உயர்வுக்கு வான்')
-    .replace(/அசதிக்குச்\s*சுடர்தந்த\s*[பத]+ன்/g, 'அசதிக்குச் சுடர்தந்த தேன்')
-    .replace(/அறிவுக்கு[த்\s]*[பத]+ோள்/g, 'அறிவுக்குத் தோள்')
-    .replace(/அறிவுக்குத்பதாள்/g, 'அறிவுக்குத் தோள்')
-    .replace(/எங்கள்கவிதைக்கு/g, 'எங்கள் கவிதைக்கு')
-    .replace(/எங்களகவிதைக்கு/g, 'எங்கள் கவிதைக்கு')
-    .replace(/[்க\s]*வி[ளத]+க்கு[ெவய]+ிரத்தின்[ொள்வா]+/g, 'கவிதைக்கு வைரத்தின் வாள்')
-    .replace(/நூல்சொ?ெளி/g, 'நூல் வெளி:')
-    .replace(/இயற்ப\s*பயர்/g, 'இயற்பெயர்')
-    .replace(/இயற்பெயர்சுப்புரத்தினம்/g, 'இயற்பெயர் சுப்புரத்தினம்')
-    .replace(/கவித[தை]+கள்/g, 'கவிதைகள்')
-    .replace(/பாரதியாரின்கவிதைகள்/g, 'பாரதியாரின் கவிதைகள்')
-    .replace(/கவிதைகள்மீது/g, 'கவிதைகள் மீது')
-    .replace(/மீ\s*து[்ப\s]*காண்ட/g, 'மீது கொண்ட')
-    .replace(/பற்றின்காரணமாகத்தம்/g, 'பற்றின் காரணமாகத் தம்')
-    .replace(/்ப\s*ப\s*ய[தர]*ப்\s*பாரதிதாசன்/g, 'பெயரைப் பாரதிதாசன்')
-    .replace(/ப\s+ப\s*ய[தர]*ப்?\s*பாரதிதாசன்/g, 'பெயரைப் பாரதிதாசன்')
-    .replace(/ப\s+ப\s*ய[தர]*/g, 'பெயரைப்')
-    .replace(/மாற்றி[கக்]*[்ப\s]*காண்டார்/g, 'மாற்றிக் கொண்டார்')
-    .replace(/தம்கவிதைகளில்/g, 'தம் கவிதைகளில்')
-    .replace(/கவிதைகளில்பெண்கல்வி/g, 'கவிதைகளில் பெண்கல்வி')
-    .replace(/தகம்ப\s*பண்/g, 'கைம்பெண்')
-    .replace(/கைம்பெண்மறுமணம்/g, 'கைம்பெண் மறுமணம்')
-    .replace(/கருத்துக\s*பொருளாகப்பாடியுள்[ைள]*ார்/g, 'கருத்துகளைப் பாடுபொருளாகப் பாடியுள்ளார்')
-    .replace(/இ[ேவ]ர்\s*புரட்சி[கக்\s]*வி/g, 'இவர் புரட்சிக்கவி')
-    .replace(/இவர்பாவேந்தர்/g, 'இவர் பாவேந்தர்')
-    .replace(/போற்றப்படுகி[்றா]*ர்/g, 'போற்றப்படுகிறார்')
-    .replace(/சிறப்பி[கக்\s]*[ப்\s]*படுகி[்றா]*ர்/g, 'சிறப்பிக்கப்படுகிறார்')
-    .replace(/என்றும்சிறப்பிக்கப்படுகிறார்/g, 'என்றும் சிறப்பிக்கப்படுகிறார்')
-    .replace(/என்றும்\s*சி்றப்பிகக\s*ப்படுகி்றார்/g, 'என்றும் சிறப்பிக்கப்படுகிறார்')
-    .replace(/பாரதிதாசன்தமிழைப்பலவாறாகப்/g, 'பாரதிதாசன் தமிழைப் பலவாறாகப்')
-    .replace(/இன்பத்தமிழ்எங்கள்/g, 'இன்பத்தமிழ் எங்கள்')
-    .replace(/உயிருக்கு பேர்/g, 'உயிருக்கு நேர்')
-    .replace(/அதுபோ ல/g, 'அதுபோல')
-    .replace(/அவர்நம்/g, 'அவர் நம் ')
-    .replace(/செந்தமிழுக்குப்பெயர்கள்/g, 'செந்தமிழுக்குப் பெயர்கள்')
-    .replace(/ெயிரத்தின்/g, 'வைரத்தின்')
-    .replace(/எங்களகவிதைக்கு/g, 'எங்கள் கவிதைக்கு')
-    .replace(/கவிதைகள்மீது/g, 'கவிதைகள் மீது')
-    .replace(/சார்பெ\s*ழுத்து/g, 'சார்பெழுத்து')
-    .replace(/முதலெ\s*ழுத்து/g, 'முதலெழுத்து')
-    .replace(/மாத்\s*திரை/g, 'மாத்திரை')
-    .replace(/அள\s*வுகள்/g, 'அளவுகள்')
-    // 6th Std Unit 1 Lesson 1.2: வளர்தமிழ் InDesign CMap glyph repairs
     .replace(/ெளர்த\s*மிழ்/g, 'வளர்தமிழ்')
     .replace(/வளர்த\s*மிழ்/g, 'வளர்தமிழ்')
     .replace(/உதைபதட\s*உலகம்/g, 'உரைநடை உலகம்')
     .replace(/உதைபதட/g, 'உரைநடை')
-    .replace(/தமிழ்\s*்\s*மா\s*ழி/g, 'தமிழ்மொழி')
-    .replace(/்\s*மா\s*ழி/g, 'மொழி')
     .replace(/தமாழி/g, 'மொழி')
     .replace(/இைழம/g, 'இளமை')
     .replace(/வைழம/g, 'வளமை')
     .replace(/சீர்ழம/g, 'சீர்மை')
     .replace(/சொதரிந்து\s*சொதளிநோெோம்/g, 'தெரிந்து தெளிவோம்')
-    .replace(/சொலே்\s*முதலில்\s*ஆளப்்படும்\s*இலக்கியம்/g, 'சொல் முதலில் ஆளப்படும் இலக்கியம்')
     .replace(/நோமற்நோகோள்/g, 'மேற்கோள்')
     .replace(/ெளர்சொ?மோழி/g, 'வளர்மொழி')
     .replace(/ெளதம\s*சொ?மோழி/g, 'வளமைமொழி')
@@ -195,40 +122,18 @@ export function cleanTamilUnicodeText(raw: string): string {
     .replace(/சீர்தம\s*சொ?மோழி/g, 'சீர்மைமொழி')
     .replace(/புதுதம\s*சொ?மோழி/g, 'புதுமைமொழி')
     .replace(/அறிவியல்சொ?தோழில்நுட்்ப\s*சொ?மோழி/g, 'அறிவியல் தொழில்நுட்ப மொழி')
-    .replace(/தோெை\s*இதலப்சொ்பயர்கள்/g, 'தாவர இலைப்பெயர்கள்')
+    .replace(/தோெை\s*இதலப்சொ?்பயர்கள்/g, 'தாவர இலைப்பெயர்கள்')
     .replace(/தமிழ்\s*எண்்கழை\s*அறிவோம்/g, 'தமிழ் எண்களை அறிவோம்')
-    // 6th Std Unit 1 Lesson 1.3: ஒளி பிறந்தது InDesign CMap glyph repairs
     .replace(/ஒளி\s*பி்றந்த\s*து/g, 'ஒளி பிறந்தது')
     .replace(/பி்றந்த\s*து/g, 'பிறந்தது')
-    .replace(/கு\s*ைந்ழ\s*த்க\s*ளி்ட\s*மும்/g, 'குழந்தைகளிடமும்')
-    .replace(/குைந்ழத்களி்டமும்/g, 'குழந்தைகளிடமும்')
-    .replace(/ம\s*ா\s*ண\s*வர்்க\s*ளி்ட\s*மும்/g, 'மாணவர்களிடமும்')
-    .replace(/மாணவர்களி்டமும்/g, 'மாணவர்களிடமும்')
     .replace(/அப்துல்\s*்கலாம்/g, 'அப்துல் கலாம்')
     .replace(/லிலியன்வாட்சன்/g, 'லிலியன் வாட்சன்')
-    .replace(/விைக்கு்கள்பல\s*தந்த\s*ஒளி/g, 'விளக்குகள் பல தந்த ஒளி')
     .replace(/கார்பன்\s*இழை/g, 'கார்பன் இழை')
     .replace(/செயற்கைக்\s*கால்கள்/g, 'செயற்கைக் கால்கள்');
-
-  // 10. Clean vowel signs and pulli again after word replacements
-  for (let i = 0; i < 3; i++) {
-    text = text.replace(/([\u0B80-\u0BFF])\s+([\u0BBE-\u0BCD\u0BD7])/g, '$1$2');
-    text = text.replace(/([க-ஹ])\s+்/g, '$1்');
-  }
-
-  // 11. Normalize multiple spaces and preserve line breaks
-  text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-
-  return text;
 }
-
 
 /**
  * Strips PDF page references, internal IDs, and technical audit tags from notes markdown.
- * Requirement:
- * - Do not display PDF page numbers in the final notes.
- * - Do not display internal extraction IDs.
- * - Do not display technical processing information.
  */
 export function stripPageNumbersAndInternalMetadata(raw: string): string {
   if (!raw) return '';

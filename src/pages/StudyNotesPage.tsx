@@ -8,7 +8,6 @@ import {
   Printer,
   FileText,
   Layers,
-  CheckCircle2,
   AlertCircle,
   RotateCcw,
   Search,
@@ -20,6 +19,7 @@ import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { getLessonsForSelection } from '../data/unifiedSyllabusRegistry'
 import { buildCanonicalLessonCode } from '../utils/lessonMapping'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
+import { TamilStudyNotesRenderer } from '../components/TamilStudyNotesRenderer'
 import './StudyNotesPage.css'
 
 interface StudyNoteRecord {
@@ -282,16 +282,6 @@ function parseNoteSections(content: string): {
   }
 
   return { preamble: cleanPreamble, blockquote, sections }
-}
-
-function renderFormattedText(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((part, idx) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={idx}>{part.slice(2, -2)}</strong>
-    }
-    return <span key={idx}>{part}</span>
-  })
 }
 
 const StudyNotesPage: React.FC = () => {
@@ -875,64 +865,7 @@ const StudyNotesPage: React.FC = () => {
 
                   {/* Topic Card Content */}
                   <div className="study-section-body">
-                    {topicItem.tableData ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        {(() => {
-                          const nonTableText = topicItem.content
-                            .split('\n')
-                            .filter((l) => !l.trim().startsWith('|'))
-                            .join('\n')
-                            .trim()
-                          if (!nonTableText) return null
-                          return (
-                            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.85, fontSize: '0.98rem', color: '#e2e8f0' }}>
-                              {renderFormattedText(nonTableText)}
-                            </div>
-                          )
-                        })()}
-                        <div className="table-responsive-wrapper">
-                          <table className="notes-markdown-table">
-                            <thead>
-                              <tr>
-                                {topicItem.tableData.headers.map((h, hIdx) => (
-                                  <th key={hIdx}>{renderFormattedText(h)}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {topicItem.tableData.rows.map((row, rIdx) => (
-                                <tr key={rIdx}>
-                                  {row.map((col, cIdx) => (
-                                    <td key={cIdx}>{renderFormattedText(col)}</td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ) : topicItem.bullets && topicItem.bullets.length > 0 && !topicItem.content.includes('\n\n') ? (
-                      <div className="bullet-facts-list">
-                        {topicItem.bullets.map((b, bIdx) => (
-                          <div key={bIdx} className="bullet-fact-item">
-                            <CheckCircle2 size={16} className="bullet-fact-icon" />
-                            <div className="bullet-fact-text">{renderFormattedText(b)}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div
-                        style={{
-                          whiteSpace: 'pre-wrap',
-                          lineHeight: 1.9,
-                          fontSize: '1rem',
-                          color: '#e2e8f0',
-                          letterSpacing: '0.01em',
-                        }}
-                      >
-                        {renderFormattedText(topicItem.content)}
-                      </div>
-                    )}
+                    <TamilStudyNotesRenderer content={topicItem.content} />
                   </div>
 
                   {/* Card Footer */}

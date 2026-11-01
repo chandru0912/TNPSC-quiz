@@ -21,6 +21,7 @@ import {
 import { apiFetch } from '../utils/api'
 import { SyllabusCascadeSelector, useSyllabusCascade } from './SyllabusCascadeSelector'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
+import { TamilStudyNotesRenderer } from './TamilStudyNotesRenderer'
 import { TNPSC_GROUPS } from '../data/unifiedSyllabusRegistry'
 
 export type CloudAiMode = 'mcq' | 'notes'
@@ -1560,8 +1561,8 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                           }}
                         />
                       ) : (
-                        <div style={{ background: '#131c2e', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '450px', overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '0.92rem' }}>
-                          {currentPreview.content}
+                        <div style={{ background: '#131c2e', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '480px', overflowY: 'auto' }}>
+                          <TamilStudyNotesRenderer content={currentPreview.content} showLessonHeader={true} />
                         </div>
                       )}
                     </div>

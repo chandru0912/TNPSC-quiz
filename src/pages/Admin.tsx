@@ -47,6 +47,7 @@ import './Admin.css'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import { CloudAiGeneratorModal, type CloudAiMode } from '../components/CloudAiGeneratorModal'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
+import { TamilStudyNotesRenderer } from '../components/TamilStudyNotesRenderer'
 import {
   SyllabusCascadeSelector,
   useSyllabusCascade,
@@ -6074,13 +6075,10 @@ const Admin = () => {
                   background: 'rgba(255,255,255,0.02)',
                   borderRadius: '8px',
                   border: '1px solid rgba(255,255,255,0.06)',
-                  lineHeight: 1.85,
-                  fontSize: '0.95rem',
-                  letterSpacing: 'normal',
-                  fontFamily: "'Noto Sans Tamil', 'Inter', system-ui, sans-serif",
-                  whiteSpace: 'pre-wrap',
+                  maxHeight: '520px',
+                  overflowY: 'auto',
                 }}>
-                  {cleanTamilUnicodeText(previewingNote.content)}
+                  <TamilStudyNotesRenderer content={previewingNote.content} showLessonHeader={true} />
                 </div>
               </div>
 

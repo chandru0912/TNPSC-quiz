@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import pool from '../db';
 import { CLASS_6_TAMIL_TERM_1_PAGES } from './class6TamilTerm1Corpus';
-import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
+import { cleanTamilUnicodeText, repairInDesignPdfArtifacts } from './tamilUnicodeCleaner';
 
 function ensureServerlessPdfGlobals(): void {
   const g = globalThis as any;
@@ -117,7 +117,7 @@ export interface ExtractedPage {
 // including fixing broken InDesign Tamil font CMap encodings from tntextbooks.in PDFs
 export function normalizeTamilPdfText(raw: string): string {
   if (!raw) return '';
-  return cleanTamilUnicodeText(raw);
+  return repairInDesignPdfArtifacts(raw);
 }
 
 export function cleanText(raw: string): string {
