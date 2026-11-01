@@ -46,8 +46,14 @@ export function getApiUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
-  const base = API_BASE_URL.replace(/\/+$/, '');
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  let base = API_BASE_URL.replace(/\/+$/, '');
+  let normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  // Prevent accidental /api/api duplication if base already ends with /api
+  if (base.endsWith('/api') && normalizedPath.startsWith('/api/')) {
+    normalizedPath = normalizedPath.substring(4);
+  }
+
   if (base) {
     return `${base}${normalizedPath}`;
   }

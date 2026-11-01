@@ -31,15 +31,25 @@ router.use(async (_req: Request, res: Response, next: NextFunction) => {
 });
 
 /**
- * GET /api/drive/status
- * Public status endpoint reporting Google Drive integration state.
+ * GET /api/drive and GET /api/drive/status
+ * Public status endpoint reporting Google Drive integration state and route map.
  */
-router.get('/status', async (_req: Request, res: Response) => {
+router.get(['/', '/status'], async (_req: Request, res: Response) => {
   try {
     const status = await getConnectionStatus();
     return res.status(200).json({
       status: 'success',
       data: status,
+      endpoints: {
+        status: 'GET /api/drive/status',
+        authUrl: 'GET /api/drive/auth/url',
+        callback: 'GET /api/drive/oauth/callback',
+        disconnect: 'POST /api/drive/disconnect',
+        uploadInitiate: 'POST /api/drive/upload/initiate',
+        uploadComplete: 'POST /api/drive/upload/complete',
+        materials: 'GET /api/drive/materials',
+        view: 'GET /api/drive/view/:id',
+      },
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -50,38 +60,42 @@ router.get('/status', async (_req: Request, res: Response) => {
 });
 
 /**
- * GET /api/drive/auth/url
+ * GET /api/drive/auth/url (and aliases /auth, /auth-url, /connect, /oauth/url)
  * Admin only: Generates a CSRF-protected Google OAuth 2.0 authorization URL.
  */
-router.get('/auth/url', requireAdminAuth, (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const adminUsername = req.adminUser?.username || 'admin';
-    const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
-    const redirectUri = resolveRedirectUri(req.query.redirectUri as string, reqHost);
-    const authUrl = getAuthorizationUrl(adminUsername, redirectUri);
+router.get(
+  ['/auth/url', '/auth', '/auth-url', '/connect', '/oauth/url'],
+  requireAdminAuth,
+  (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const adminUsername = req.adminUser?.username || 'admin';
+      const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
+      const redirectUri = resolveRedirectUri(req.query.redirectUri as string, reqHost);
+      const authUrl = getAuthorizationUrl(adminUsername, redirectUri);
 
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        authUrl,
-        redirectUri,
-        scope: 'https://www.googleapis.com/auth/drive.file',
-      },
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to generate Google authorization URL',
-    });
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          authUrl,
+          redirectUri,
+          scope: 'https://www.googleapis.com/auth/drive.file',
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        status: 'error',
+        message: err.message || 'Failed to generate Google authorization URL',
+      });
+    }
   }
-});
+);
 
 /**
- * GET /api/drive/oauth/callback
+ * GET /api/drive/oauth/callback (and alias /callback)
  * Google OAuth 2.0 redirect callback endpoint.
  * Validates CSRF state, exchanges code for tokens, and redirects back to Admin Panel.
  */
-router.get('/oauth/callback', async (req: Request, res: Response) => {
+router.get(['/oauth/callback', '/callback'], async (req: Request, res: Response) => {
   const { code, state, error: googleError } = req.query;
 
   const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;

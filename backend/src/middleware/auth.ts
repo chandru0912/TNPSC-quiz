@@ -55,14 +55,21 @@ export interface AuthenticatedRequest extends Request {
 
 export function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token: string | undefined;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (req.query.token && typeof req.query.token === 'string') {
+    token = req.query.token.trim();
+  }
+
+  if (!token) {
     return res.status(401).json({
       status: 'error',
-      message: 'Unauthorized: Missing or invalid Authorization header. Admin access required.',
+      message: 'Unauthorized: Missing or invalid Authorization header or token parameter. Admin access required.',
     });
   }
 
-  const token = authHeader.substring(7).trim();
   const verified = verifyAdminToken(token);
   if (!verified) {
     return res.status(403).json({

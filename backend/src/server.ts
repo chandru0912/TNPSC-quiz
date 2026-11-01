@@ -169,6 +169,8 @@ app.use('/api/notes', requireSchemaMiddleware, notesRouter);
 app.use('/api/textbooks', requireSchemaMiddleware, textbooksRouter);
 app.use('/api/ai', requireSchemaMiddleware, aiGenerationRouter);
 app.use('/api/drive', requireSchemaMiddleware, driveRouter);
+app.use('/drive', requireSchemaMiddleware, driveRouter);
+app.use('/api/api/drive', requireSchemaMiddleware, driveRouter);
 
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {

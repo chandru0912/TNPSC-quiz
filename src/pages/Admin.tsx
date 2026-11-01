@@ -1032,8 +1032,9 @@ const Admin = () => {
   // Connect Google Drive
   const handleConnectGoogleDrive = async () => {
     try {
+      const authHeader: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
       const res = await apiFetch('/api/drive/auth/url', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeader,
       })
       const data = await res.json()
       if (res.ok && data.data?.authUrl) {
