@@ -611,6 +611,7 @@ export async function initiateResumableUpload(params: {
   fileName: string;
   fileSize: number;
   mimeType?: string;
+  origin?: string;
 }): Promise<{ uploadUrl: string; folderId: string }> {
   const authClient = await getAuthenticatedClient();
   const folderId = await getOrCreateTargetFolder(authClient);
@@ -631,14 +632,24 @@ export async function initiateResumableUpload(params: {
 
   // Google Drive Resumable Upload initiation request
   const initUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable';
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json; charset=UTF-8',
+    'X-Upload-Content-Type': mimeType,
+    'X-Upload-Content-Length': String(params.fileSize),
+  };
+
+  // CRITICAL FOR CORS: When initiating a resumable upload for a web browser client,
+  // Google Drive API requires the Origin header. Google binds CORS permissions to the
+  // returned session URL based strictly on this Origin header.
+  if (params.origin) {
+    const cleanOrigin = params.origin.trim().replace(/\/+$/, '');
+    headers['Origin'] = cleanOrigin;
+  }
+
   const response = await fetch(initUrl, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json; charset=UTF-8',
-      'X-Upload-Content-Type': mimeType,
-      'X-Upload-Content-Length': String(params.fileSize),
-    },
+    headers,
     body: JSON.stringify(metadata),
   });
 

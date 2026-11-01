@@ -252,6 +252,7 @@ router.post('/upload/initiate', requireAdminAuth, async (req: AuthenticatedReque
       unit = 1,
       lesson,
       lessonId,
+      origin,
     } = req.body;
 
     if (!fileName || !fileSize) {
@@ -281,11 +282,28 @@ router.post('/upload/initiate', requireAdminAuth, async (req: AuthenticatedReque
     const parsedUnit = unit ? parseInt(String(unit), 10) : 1;
     const cleanFileName = fileName.replace(/[^a-zA-Z0-9.\-_ ()]/g, '_');
 
-    // 1. Initiate resumable upload with Google Drive API
+    // Resolve client origin for Google Drive CORS binding
+    let clientOrigin = typeof origin === 'string' ? origin.trim().replace(/\/+$/, '') : '';
+    if (!clientOrigin && typeof req.headers.origin === 'string') {
+      clientOrigin = req.headers.origin.trim().replace(/\/+$/, '');
+    }
+    if (!clientOrigin && typeof req.headers.referer === 'string') {
+      try {
+        clientOrigin = new URL(req.headers.referer).origin;
+      } catch {
+        // ignore invalid referer
+      }
+    }
+    if (!clientOrigin && process.env.FRONTEND_URL) {
+      clientOrigin = process.env.FRONTEND_URL.trim().replace(/\/+$/, '');
+    }
+
+    // 1. Initiate resumable upload with Google Drive API (passes origin for CORS)
     const { uploadUrl, folderId } = await initiateResumableUpload({
       fileName: cleanFileName,
       fileSize: parsedSize,
       mimeType: 'application/pdf',
+      origin: clientOrigin || undefined,
     });
 
     // 2. Pre-create pending record in PostgreSQL

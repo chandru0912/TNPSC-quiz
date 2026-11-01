@@ -1103,7 +1103,7 @@ const Admin = () => {
     }
   }
 
-  // Resumable Direct Upload to Google Drive
+  // Resumable Direct Upload to Google Drive (Chunked, CORS-bound, Zero Serverless Limits)
   const handleStartDriveUpload = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!driveFile) {
@@ -1133,6 +1133,7 @@ const Admin = () => {
           originalFileName: driveFile.name,
           fileSize: driveFile.size,
           mimeType: 'application/pdf',
+          origin: window.location.origin, // Explicitly pass current browser origin for Google Drive CORS binding
           group: driveSyllabusCascade.effectiveGroupId,
           subject: driveSyllabusCascade.selectedSubjectObj?.name || 'General Studies',
           standard: driveSyllabusCascade.currentClassId,
@@ -1150,77 +1151,179 @@ const Admin = () => {
 
       const { uploadUrl, trackingId } = initData.data
       setDriveUploadProgress(15)
-      setDriveUploadStep(`Streaming to Google Drive: 0 MB / ${(driveFile.size / (1024 * 1024)).toFixed(1)} MB...`)
+      setDriveUploadStep(`Preparing direct streaming for ${(driveFile.size / (1024 * 1024)).toFixed(1)} MB...`)
 
-      // Stream file directly to Google Drive via XMLHttpRequest
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        xhr.open('PUT', uploadUrl, true)
-        xhr.setRequestHeader('Content-Type', 'application/pdf')
+      // Stream file directly to Google Drive via 5 MB chunks with resume & retry
+      const CHUNK_SIZE = 5 * 1024 * 1024 // 5 MB chunks (aligned with 256 KiB Google requirement)
+      const totalSize = driveFile.size
+      const totalChunks = Math.ceil(totalSize / CHUNK_SIZE)
+      let currentOffset = 0
+      let googleDriveFileId = ''
 
-        xhr.upload.onprogress = (evt) => {
-          if (evt.lengthComputable) {
-            const percent = Math.min(95, Math.round(15 + (evt.loaded / evt.total) * 75))
-            setDriveUploadProgress(percent)
-            const loadedMb = (evt.loaded / (1024 * 1024)).toFixed(1)
-            const totalMb = (evt.total / (1024 * 1024)).toFixed(1)
-            setDriveUploadStep(`Uploading: ${loadedMb} MB of ${totalMb} MB (${percent}%)`)
-          }
-        }
+      while (currentOffset < totalSize) {
+        const chunkIndex = Math.floor(currentOffset / CHUNK_SIZE)
+        const chunkEnd = Math.min(currentOffset + CHUNK_SIZE - 1, totalSize - 1)
+        const chunkBlob = driveFile.slice(currentOffset, chunkEnd + 1)
+        const contentRange = `bytes ${currentOffset}-${chunkEnd}/${totalSize}`
 
-        xhr.onload = async () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const googleRes = JSON.parse(xhr.responseText || '{}')
-              const googleDriveFileId = googleRes.id
-              if (!googleDriveFileId) {
-                throw new Error('Google Drive upload succeeded but did not return file ID.')
+        let chunkAttempt = 0
+        const maxAttempts = 3
+        let chunkDone = false
+
+        while (chunkAttempt < maxAttempts && !chunkDone) {
+          chunkAttempt++
+          try {
+            const chunkResult = await new Promise<{ status: number; range?: string; fileId?: string }>(
+              (resolve, reject) => {
+                const xhr = new XMLHttpRequest()
+                xhr.open('PUT', uploadUrl, true)
+                // Set only Content-Range and Content-Type. Do not set Authorization to avoid CORS rejection.
+                xhr.setRequestHeader('Content-Range', contentRange)
+                xhr.setRequestHeader('Content-Type', 'application/pdf')
+
+                xhr.upload.onprogress = (evt) => {
+                  if (evt.lengthComputable) {
+                    const loadedBytes = currentOffset + evt.loaded
+                    const pct = Math.min(95, Math.round(15 + (loadedBytes / totalSize) * 80))
+                    setDriveUploadProgress(pct)
+                    const loadedMb = (loadedBytes / (1024 * 1024)).toFixed(1)
+                    const totalMb = (totalSize / (1024 * 1024)).toFixed(1)
+                    setDriveUploadStep(
+                      `Uploading: ${loadedMb} MB of ${totalMb} MB (${pct}%) [Chunk ${chunkIndex + 1}/${totalChunks}]`
+                    )
+                  }
+                }
+
+                xhr.onload = () => {
+                  if (xhr.status === 308) {
+                    // 308 Resume Incomplete = chunk received successfully
+                    const rangeHeader = xhr.getResponseHeader('Range')
+                    resolve({ status: 308, range: rangeHeader || undefined })
+                  } else if (xhr.status === 200 || xhr.status === 201) {
+                    // Upload completed!
+                    try {
+                      const data = JSON.parse(xhr.responseText || '{}')
+                      resolve({ status: xhr.status, fileId: data.id })
+                    } catch {
+                      resolve({ status: xhr.status })
+                    }
+                  } else {
+                    reject(
+                      new Error(
+                        `Google Drive returned HTTP ${xhr.status} (${xhr.statusText}): ${xhr.responseText || 'Upload rejected'}`
+                      )
+                    )
+                  }
+                }
+
+                xhr.onerror = () => {
+                  reject(
+                    new Error(
+                      `Network / CORS error during Google Drive upload (Chunk ${chunkIndex + 1}/${totalChunks}). ` +
+                      `Please check your internet connection, or verify in Google Cloud Console that "${window.location.origin}" is added to Authorized JavaScript origins for your OAuth 2.0 Client ID.`
+                    )
+                  )
+                }
+
+                xhr.ontimeout = () => {
+                  reject(new Error(`Upload chunk ${chunkIndex + 1} timed out. Retrying...`))
+                }
+
+                // 2 minute timeout per chunk
+                xhr.timeout = 120000
+                xhr.send(chunkBlob)
               }
+            )
 
-              setDriveUploadProgress(96)
-              setDriveUploadStep('Verifying file in Google Drive & registering in database...')
-
-              const completeRes = await apiFetch('/api/drive/upload/complete', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                  trackingId,
-                  googleDriveFileId,
-                }),
-              })
-              const completeData = await completeRes.json()
-              if (!completeRes.ok) {
-                throw new Error(completeData.message || 'Failed to register completed upload.')
+            if (chunkResult.status === 308) {
+              chunkDone = true
+              if (chunkResult.range) {
+                const match = chunkResult.range.match(/bytes=0-(\d+)/)
+                if (match && match[1]) {
+                  currentOffset = parseInt(match[1], 10) + 1
+                } else {
+                  currentOffset = chunkEnd + 1
+                }
+              } else {
+                currentOffset = chunkEnd + 1
               }
-
-              setDriveUploadProgress(100)
-              setDriveUploadStep('Upload and verification complete!')
-              setActionMessage({
-                type: 'success',
-                text: `PDF "${finalTitle}" successfully uploaded directly to Google Drive!`,
-              })
-              setIsDriveUploadModalOpen(false)
-              setDriveFile(null)
-              setDriveUploadTitle('')
-              fetchDriveMaterials()
-              resolve()
-            } catch (err: any) {
-              reject(err)
+            } else if (chunkResult.status === 200 || chunkResult.status === 201) {
+              chunkDone = true
+              googleDriveFileId = chunkResult.fileId || ''
+              currentOffset = totalSize
             }
-          } else {
-            reject(new Error(`Google Drive rejected upload (HTTP ${xhr.status}): ${xhr.statusText}`))
+          } catch (chunkErr: any) {
+            console.warn(`Chunk ${chunkIndex + 1} attempt ${chunkAttempt} failed:`, chunkErr.message)
+            if (chunkAttempt >= maxAttempts) {
+              throw chunkErr
+            }
+            // Exponential backoff wait
+            await new Promise((r) => setTimeout(r, 1000 * chunkAttempt))
+
+            // Query Google Drive for the current byte offset
+            try {
+              const checkRes = await fetch(uploadUrl, {
+                method: 'PUT',
+                headers: {
+                  'Content-Range': `bytes */${totalSize}`,
+                },
+              })
+              if (checkRes.status === 308) {
+                const range = checkRes.headers.get('Range')
+                if (range) {
+                  const match = range.match(/bytes=0-(\d+)/)
+                  if (match && match[1]) {
+                    currentOffset = parseInt(match[1], 10) + 1
+                    console.log(`Resuming upload from confirmed offset: ${currentOffset}`)
+                  }
+                }
+              } else if (checkRes.status === 200 || checkRes.status === 201) {
+                const checkData = await checkRes.json().catch(() => ({}))
+                googleDriveFileId = checkData.id || ''
+                currentOffset = totalSize
+                chunkDone = true
+              }
+            } catch {
+              // resume probe failed, will retry chunk directly
+            }
           }
         }
+      }
 
-        xhr.onerror = () => {
-          reject(new Error('Network error during Google Drive resumable upload.'))
-        }
+      if (!googleDriveFileId) {
+        throw new Error('Google Drive upload finished but did not return a valid file ID.')
+      }
 
-        xhr.send(driveFile)
+      setDriveUploadProgress(96)
+      setDriveUploadStep('Verifying file in Google Drive & registering in database...')
+
+      const completeRes = await apiFetch('/api/drive/upload/complete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          trackingId,
+          googleDriveFileId,
+        }),
       })
+
+      const completeData = await completeRes.json()
+      if (!completeRes.ok) {
+        throw new Error(completeData.message || 'Failed to register completed upload.')
+      }
+
+      setDriveUploadProgress(100)
+      setDriveUploadStep('Upload and verification complete!')
+      setActionMessage({
+        type: 'success',
+        text: `PDF "${finalTitle}" (${(driveFile.size / (1024 * 1024)).toFixed(1)} MB) successfully uploaded directly to Google Drive!`,
+      })
+      setIsDriveUploadModalOpen(false)
+      setDriveFile(null)
+      setDriveUploadTitle('')
+      fetchDriveMaterials()
     } catch (err: any) {
       console.error('Google Drive upload error:', err)
       setDriveUploadError(err.message || 'Failed to upload PDF')
@@ -3913,6 +4016,9 @@ const Admin = () => {
                 </div>
                 <div>
                   <strong style={{ color: '#ffd700' }}>Production Callback:</strong> <code style={{ color: '#cbd5e1' }}>https://tnpsc-quiz-lval.vercel.app/api/drive/oauth/callback</code>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <strong style={{ color: '#ffd700' }}>Authorized JavaScript Origin:</strong> <code style={{ color: '#10b981' }}>{typeof window !== 'undefined' ? window.location.origin : 'https://tnpsc-quiz-lval.vercel.app'}</code> <span style={{ color: 'rgba(255,255,255,0.45)', marginLeft: '0.5rem' }}>(Add to Google Cloud Console &rarr; OAuth 2.0 Client &rarr; Authorized JavaScript origins for direct browser streaming)</span>
                 </div>
               </div>
             </div>
