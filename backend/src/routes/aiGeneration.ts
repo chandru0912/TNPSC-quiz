@@ -12,6 +12,22 @@ import { CloudAIService } from '../services/cloudAi/cloudAiService';
 const router = Router();
 
 /**
+ * GET /api/ai
+ * Informational endpoint returning available AI Generation endpoints.
+ */
+router.get('/', (_req: Request, res: Response) => {
+  return res.status(200).json({
+    status: 'online',
+    service: 'Cloud AI Generation API',
+    endpoints: {
+      status: 'GET /api/ai/status',
+      testConnection: 'POST /api/ai/test-connection',
+      generate: 'POST /api/ai/generate',
+    },
+  });
+});
+
+/**
  * GET /api/ai/status (Protected)
  * Returns status of Cloud AI configuration.
  */

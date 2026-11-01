@@ -96,10 +96,28 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 
-// Safeguard: Strip any accidental Vercel /dist/server.js prefix from incoming request URLs
+// Safeguard: Normalize any accidental Vercel /dist/server.js prefix or edge rewrite routing
 app.use((req: Request, _res: Response, next: NextFunction) => {
   if (req.url.startsWith('/dist/server.js')) {
-    req.url = req.url.replace('/dist/server.js', '') || '/';
+    const subpath = req.url.slice('/dist/server.js'.length);
+    if (subpath && subpath.startsWith('/')) {
+      req.url = subpath;
+      req.originalUrl = subpath;
+    } else {
+      const forwardedPath =
+        (req.headers['x-matched-path'] as string) ||
+        (req.headers['x-forwarded-uri'] as string) ||
+        (req.headers['x-original-url'] as string) ||
+        (req.headers['x-rewrite-url'] as string) ||
+        '';
+      if (forwardedPath && !forwardedPath.startsWith('/dist/server.js')) {
+        req.url = forwardedPath;
+        req.originalUrl = forwardedPath;
+      } else {
+        req.url = '/';
+        req.originalUrl = '/';
+      }
+    }
   }
   next();
 });
@@ -157,6 +175,18 @@ app.get('/api/admin/login', (_req, res) => {
     service: 'Admin Auth API',
     message: 'Admin authentication endpoint is online. Submit admin credentials using POST /api/admin/login.',
     endpoint: 'POST /api/admin/login',
+  });
+});
+
+app.get('/api/ai', (_req, res) => {
+  res.status(200).json({
+    status: 'online',
+    service: 'Cloud AI Generation API',
+    endpoints: {
+      status: 'GET /api/ai/status',
+      testConnection: 'POST /api/ai/test-connection',
+      generate: 'POST /api/ai/generate',
+    },
   });
 });
 
