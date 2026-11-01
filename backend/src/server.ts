@@ -178,6 +178,17 @@ app.get('/api/admin/login', (_req, res) => {
   });
 });
 
+// Fallback: If a browser visits /admin on the backend API server (e.g. after OAuth),
+// seamlessly forward to the frontend Admin Dashboard preserving all query parameters.
+app.get('/admin', (req: Request, res: Response) => {
+  const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  const frontendUrl = (
+    process.env.FRONTEND_URL ||
+    'https://tnpsc-quiz-lrkivhxrn-moonzoro.vercel.app'
+  ).replace(/\/+$/, '');
+  return res.redirect(`${frontendUrl}/admin${queryStr}`);
+});
+
 app.get('/api/ai', (_req, res) => {
   res.status(200).json({
     status: 'online',

@@ -4,6 +4,7 @@ import { requireAdminAuth, AuthenticatedRequest } from '../middleware/auth';
 import {
   getAuthorizationUrl,
   handleOAuthCallback,
+  verifyOAuthState,
   getConnectionStatus,
   initiateResumableUpload,
   verifyUploadedFile,
@@ -71,13 +72,31 @@ router.get(
       const adminUsername = req.adminUser?.username || 'admin';
       const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
       const redirectUri = resolveRedirectUri(req.query.redirectUri as string, reqHost);
-      const authUrl = getAuthorizationUrl(adminUsername, redirectUri);
+
+      // Extract frontend origin hint from query, referer, or environment
+      let frontendOrigin: string | undefined;
+      const queryOrigin = typeof req.query.origin === 'string' ? req.query.origin.trim() : '';
+      if (queryOrigin && /^https?:\/\//i.test(queryOrigin)) {
+        frontendOrigin = queryOrigin.replace(/\/+$/, '');
+      } else if (req.headers.referer) {
+        try {
+          frontendOrigin = new URL(req.headers.referer).origin;
+        } catch {
+          // ignore referer parse failure
+        }
+      }
+      if (!frontendOrigin && process.env.FRONTEND_URL) {
+        frontendOrigin = process.env.FRONTEND_URL.trim().replace(/\/+$/, '');
+      }
+
+      const authUrl = getAuthorizationUrl(adminUsername, redirectUri, frontendOrigin);
 
       return res.status(200).json({
         status: 'success',
         data: {
           authUrl,
           redirectUri,
+          frontendOrigin: frontendOrigin || null,
           scope: 'https://www.googleapis.com/auth/drive.file',
         },
       });
@@ -102,24 +121,35 @@ router.get(['/oauth/callback', '/callback'], async (req: Request, res: Response)
   const isLocalHost = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
   const configuredFrontend = process.env.FRONTEND_URL?.trim().replace(/\/+$/, '');
 
-  let frontendOrigin = 'http://localhost:5173';
+  let defaultFrontend = 'http://localhost:5173';
   if (configuredFrontend) {
-    frontendOrigin = configuredFrontend;
+    defaultFrontend = configuredFrontend;
   } else if (!isLocalHost && reqHost) {
     const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-    frontendOrigin = `${proto}://${reqHost}`;
+    defaultFrontend = `${proto}://${reqHost}`;
   } else if (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) {
-    frontendOrigin = 'https://tnpsc-quiz-lval.vercel.app';
+    defaultFrontend = 'https://tnpsc-quiz-lval.vercel.app';
   }
+
+  // Attempt to decode state to retrieve the exact frontend origin that initiated OAuth
+  let originFromState: string | undefined;
+  if (typeof state === 'string' && state.trim()) {
+    const stateCheck = verifyOAuthState(state.trim());
+    if (stateCheck.isValid && stateCheck.frontendOrigin && /^https?:\/\//i.test(stateCheck.frontendOrigin)) {
+      originFromState = stateCheck.frontendOrigin;
+    }
+  }
+
+  const effectiveFrontend = (originFromState || defaultFrontend).replace(/\/+$/, '');
 
   if (googleError) {
     console.error('[GoogleDriveOAuth] Google returned error:', googleError);
-    return res.redirect(`${frontendOrigin}/admin?gdrive_error=${encodeURIComponent(String(googleError))}`);
+    return res.redirect(`${effectiveFrontend}/admin?gdrive_error=${encodeURIComponent(String(googleError))}`);
   }
 
   if (!code || !state) {
     return res.redirect(
-      `${frontendOrigin}/admin?gdrive_error=${encodeURIComponent('Missing authorization code or state parameter.')}`
+      `${effectiveFrontend}/admin?gdrive_error=${encodeURIComponent('Missing authorization code or state parameter.')}`
     );
   }
 
@@ -128,11 +158,11 @@ router.get(['/oauth/callback', '/callback'], async (req: Request, res: Response)
     const result = await handleOAuthCallback(String(code), String(state), redirectUri);
 
     return res.redirect(
-      `${frontendOrigin}/admin?gdrive=connected&email=${encodeURIComponent(result.email || '')}`
+      `${effectiveFrontend}/admin?gdrive=connected&email=${encodeURIComponent(result.email || '')}`
     );
   } catch (err: any) {
     console.error('[GoogleDriveOAuth] Callback processing failed:', err.message);
-    return res.redirect(`${frontendOrigin}/admin?gdrive_error=${encodeURIComponent(err.message || 'OAuth failed')}`);
+    return res.redirect(`${effectiveFrontend}/admin?gdrive_error=${encodeURIComponent(err.message || 'OAuth failed')}`);
   }
 });
 

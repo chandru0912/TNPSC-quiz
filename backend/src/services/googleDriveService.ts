@@ -58,20 +58,30 @@ export function createOAuth2Client(redirectUri?: string) {
 
 /**
  * Generates an HMAC-signed CSRF state token for the OAuth authorization flow.
+ * Securely encodes admin username and optional frontend origin for exact post-consent redirection.
  */
-export function generateOAuthState(adminUsername: string): string {
+export function generateOAuthState(adminUsername: string, frontendOrigin?: string): string {
   const secret = getJwtSecret();
   const timestamp = Date.now();
-  const rawPayload = JSON.stringify({ adminUsername, timestamp, nonce: crypto.randomBytes(16).toString('hex') });
+  const rawPayload = JSON.stringify({
+    adminUsername,
+    frontendOrigin: frontendOrigin ? frontendOrigin.trim() : undefined,
+    timestamp,
+    nonce: crypto.randomBytes(16).toString('hex'),
+  });
   const b64 = Buffer.from(rawPayload).toString('base64url');
   const signature = crypto.createHmac('sha256', secret).update(b64).digest('hex');
   return `${b64}.${signature}`;
 }
 
 /**
- * Validates the HMAC-signed OAuth state token.
+ * Validates the HMAC-signed OAuth state token and extracts admin username and frontend origin.
  */
-export function verifyOAuthState(state: string): { isValid: boolean; adminUsername?: string } {
+export function verifyOAuthState(state: string): {
+  isValid: boolean;
+  adminUsername?: string;
+  frontendOrigin?: string;
+} {
   try {
     const secret = getJwtSecret();
     const parts = state.split('.');
@@ -91,7 +101,13 @@ export function verifyOAuthState(state: string): { isValid: boolean; adminUserna
       return { isValid: false };
     }
 
-    return { isValid: true, adminUsername: payload.adminUsername };
+    return {
+      isValid: true,
+      adminUsername: payload.adminUsername,
+      frontendOrigin: typeof payload.frontendOrigin === 'string' && payload.frontendOrigin.trim()
+        ? payload.frontendOrigin.trim()
+        : undefined,
+    };
   } catch {
     return { isValid: false };
   }
@@ -100,9 +116,13 @@ export function verifyOAuthState(state: string): { isValid: boolean; adminUserna
 /**
  * Generates the Google OAuth 2.0 authorization URL.
  */
-export function getAuthorizationUrl(adminUsername: string, redirectUri?: string): string {
+export function getAuthorizationUrl(
+  adminUsername: string,
+  redirectUri?: string,
+  frontendOrigin?: string
+): string {
   const oauth2Client = createOAuth2Client(redirectUri);
-  const state = generateOAuthState(adminUsername);
+  const state = generateOAuthState(adminUsername, frontendOrigin);
 
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',

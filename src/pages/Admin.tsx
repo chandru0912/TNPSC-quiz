@@ -196,8 +196,27 @@ const Admin = () => {
     .filter((q) => selectedQuestionIds.has(q.id) && q.status === 'staging')
     .map((q) => q.id)
 
-  // Navigation Section
-  const [adminSection, setAdminSection] = useState<'questions' | 'textbooks' | 'notes' | 'gdrive'>('questions')
+  // Navigation Section (persists across page reloads and Google OAuth redirects)
+  const [adminSection, setAdminSectionState] = useState<'questions' | 'textbooks' | 'notes' | 'gdrive'>(() => {
+    if (typeof window !== 'undefined') {
+      const search = window.location.search || ''
+      if (search.includes('gdrive=') || search.includes('gdrive_error=')) {
+        return 'gdrive'
+      }
+      const saved = sessionStorage.getItem('admin_active_section')
+      if (saved === 'questions' || saved === 'textbooks' || saved === 'notes' || saved === 'gdrive') {
+        return saved
+      }
+    }
+    return 'questions'
+  })
+
+  const setAdminSection = useCallback((sec: 'questions' | 'textbooks' | 'notes' | 'gdrive') => {
+    setAdminSectionState(sec)
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('admin_active_section', sec)
+    }
+  }, [])
 
   // Google Drive state
   const [driveStatus, setDriveStatus] = useState<{
@@ -214,6 +233,8 @@ const Admin = () => {
     folderName: 'TNPSC Study Hub Materials',
   })
   const [isCheckingDrive, setIsCheckingDrive] = useState(false)
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false)
+  const [driveConnectionError, setDriveConnectionError] = useState<string | null>(null)
   const [driveMaterials, setDriveMaterials] = useState<GoogleDriveMaterialItem[]>([])
   const [driveLoading, setDriveLoading] = useState(false)
   const [driveSearch, setDriveSearch] = useState('')
@@ -995,6 +1016,10 @@ const Admin = () => {
       const json = await res.json()
       if (res.ok && json.status === 'success') {
         setDriveStatus(json.data)
+        if (json.data?.connected) {
+          setDriveConnectionError(null)
+          setIsConnectingDrive(false)
+        }
       }
     } catch (err: any) {
       console.warn('Could not check Google Drive status:', err.message)
@@ -1032,21 +1057,30 @@ const Admin = () => {
   // Connect Google Drive
   const handleConnectGoogleDrive = async () => {
     try {
+      setIsConnectingDrive(true)
+      setDriveConnectionError(null)
       const authHeader: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
-      const res = await apiFetch('/api/drive/auth/url', {
+      const originParam = encodeURIComponent(window.location.origin)
+      const res = await apiFetch(`/api/drive/auth/url?origin=${originParam}`, {
         headers: authHeader,
       })
       const data = await res.json()
       if (res.ok && data.data?.authUrl) {
         window.location.href = data.data.authUrl
       } else {
+        setIsConnectingDrive(false)
+        const errMsg = data.message || 'Could not initiate Google authorization. Please check server credentials.'
+        setDriveConnectionError(errMsg)
         setActionMessage({
           type: 'error',
-          text: data.message || 'Could not initiate Google authorization. Please check server credentials.',
+          text: errMsg,
         })
       }
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err.message || 'Connection failed' })
+      setIsConnectingDrive(false)
+      const errMsg = err.message || 'Connection failed'
+      setDriveConnectionError(errMsg)
+      setActionMessage({ type: 'error', text: errMsg })
     }
   }
 
@@ -1060,6 +1094,8 @@ const Admin = () => {
       })
       if (res.ok) {
         setActionMessage({ type: 'success', text: 'Google Drive disconnected successfully.' })
+        setDriveConnectionError(null)
+        setIsConnectingDrive(false)
         checkDriveStatus()
       }
     } catch (err: any) {
@@ -1221,14 +1257,21 @@ const Admin = () => {
     const urlParams = new URLSearchParams(window.location.search)
     if (urlParams.get('gdrive') === 'connected') {
       const email = urlParams.get('email')
+      setIsConnectingDrive(false)
+      setDriveConnectionError(null)
       setActionMessage({
         type: 'success',
         text: `Google Drive account successfully connected! ${email ? `(${email})` : ''}`,
       })
       setAdminSection('gdrive')
       window.history.replaceState({}, document.title, window.location.pathname)
+      // Immediately refresh status and materials list
+      checkDriveStatus()
+      fetchDriveMaterials()
     } else if (urlParams.get('gdrive_error')) {
-      const err = urlParams.get('gdrive_error')
+      const err = urlParams.get('gdrive_error') || 'Unknown OAuth error'
+      setIsConnectingDrive(false)
+      setDriveConnectionError(err)
       setActionMessage({
         type: 'error',
         text: `Google Drive connection failed: ${err}`,
@@ -1236,7 +1279,7 @@ const Admin = () => {
       setAdminSection('gdrive')
       window.history.replaceState({}, document.title, window.location.pathname)
     }
-  }, [checkDriveStatus, fetchDriveMaterials])
+  }, [checkDriveStatus, fetchDriveMaterials, setAdminSection])
 
   // Fetch All Global Metrics for Question Bank, Textbooks, and Study Notes
   const fetchAllMetrics = useCallback(async () => {
@@ -2403,6 +2446,59 @@ const Admin = () => {
                 <Database size={13} />
                 PostgreSQL Connected
               </span>
+              <button
+                type="button"
+                className={`admin-user-pill ${driveStatus.connected ? 'admin-gdrive-connected-pill' : 'admin-gdrive-disconnected-pill'}`}
+                onClick={() => {
+                  setAdminSection('gdrive')
+                  fetchDriveMaterials()
+                  checkDriveStatus()
+                }}
+                title="Google Drive Integration Status (click to manage)"
+                style={{
+                  cursor: 'pointer',
+                  border: driveStatus.connected
+                    ? '1px solid rgba(16, 185, 129, 0.4)'
+                    : isConnectingDrive
+                    ? '1px solid rgba(245, 158, 11, 0.4)'
+                    : driveConnectionError
+                    ? '1px solid rgba(239, 68, 68, 0.4)'
+                    : '1px solid rgba(255, 215, 0, 0.35)',
+                  background: driveStatus.connected
+                    ? 'rgba(16, 185, 129, 0.12)'
+                    : isConnectingDrive
+                    ? 'rgba(245, 158, 11, 0.12)'
+                    : driveConnectionError
+                    ? 'rgba(239, 68, 68, 0.12)'
+                    : 'rgba(255, 215, 0, 0.08)',
+                  color: driveStatus.connected
+                    ? '#34d399'
+                    : isConnectingDrive
+                    ? '#fbbf24'
+                    : driveConnectionError
+                    ? '#f87171'
+                    : '#ffd700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.3rem 0.75rem',
+                  borderRadius: '9999px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <Cloud size={13} className={isConnectingDrive ? 'spinning' : ''} />
+                {isConnectingDrive ? (
+                  <span>Google Drive: Connecting...</span>
+                ) : driveStatus.connected ? (
+                  <span>Google Drive: Connected ({driveStatus.email || 'Ready'})</span>
+                ) : driveConnectionError ? (
+                  <span>Google Drive: Error (Click to Retry)</span>
+                ) : (
+                  <span>Google Drive: Not Connected</span>
+                )}
+              </button>
             </div>
             <h1 className="admin-title">
               {adminSection === 'questions' && 'Question Bank Management'}
@@ -3671,7 +3767,7 @@ const Admin = () => {
           <div className="admin-gdrive-section">
             {/* Google Drive Status Banner Card */}
             <div className="gdrive-status-card" style={{ marginBottom: '1.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', width: '100%' }}>
                 <div className="gdrive-status-info">
                   <div className="gdrive-status-icon-box">
                     <Cloud size={28} />
@@ -3679,10 +3775,20 @@ const Admin = () => {
                   <div className="gdrive-status-details">
                     <div className="gdrive-status-title-row">
                       <h3 className="gdrive-status-title">Google Drive Cloud Storage</h3>
-                      {driveStatus.connected ? (
+                      {isConnectingDrive ? (
+                        <span className="gdrive-status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}>
+                          <RefreshCw size={13} className="spinning" />
+                          Connecting...
+                        </span>
+                      ) : driveStatus.connected ? (
                         <span className="gdrive-status-badge gdrive-status-badge-connected">
                           <CheckCircle2 size={13} />
                           Connected: {driveStatus.email || 'Authorized'}
+                        </span>
+                      ) : (driveConnectionError || driveStatus.error) ? (
+                        <span className="gdrive-status-badge gdrive-status-badge-disconnected">
+                          <AlertCircle size={13} />
+                          Connection Failed
                         </span>
                       ) : (
                         <span className="gdrive-status-badge gdrive-status-badge-disconnected">
@@ -3692,44 +3798,104 @@ const Admin = () => {
                       )}
                     </div>
                     <p className="gdrive-status-desc">
-                      {driveStatus.connected
-                        ? `Connected to personal Google Drive. Large PDF textbooks and study materials stream directly from your browser to Google Drive via authorized resumable sessions. Target Folder: "${driveStatus.folderName}".`
+                      {isConnectingDrive
+                        ? 'Opening Google OAuth authorization consent screen...'
+                        : driveStatus.connected
+                        ? `Connected to personal Google Drive (${driveStatus.email || 'Authorized'}). Large PDF textbooks stream directly to Google Drive via authorized resumable sessions. Target Folder: "${driveStatus.folderName}".`
+                        : driveConnectionError
+                        ? `Connection issue detected: ${driveConnectionError}`
                         : 'Connect your personal Google Drive account to store 3–4 GB of TNPSC PDF textbooks with zero Vercel serverless size restrictions.'}
                     </p>
+                    {(driveConnectionError || (!driveStatus.connected && driveStatus.error)) && (
+                      <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#fca5a5', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                        <span>{driveConnectionError || driveStatus.error}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="gdrive-status-actions">
-                  <button
-                    type="button"
-                    className="admin-btn admin-btn-secondary"
-                    onClick={() => checkDriveStatus()}
-                    title="Refresh connection status"
-                    disabled={isCheckingDrive}
-                  >
-                    <RefreshCw size={14} className={isCheckingDrive ? 'spinning' : ''} />
-                    <span>Check Status</span>
-                  </button>
-                  {driveStatus.connected ? (
-                    <button
-                      type="button"
-                      className="admin-btn"
-                      style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}
-                      onClick={handleDisconnectGoogleDrive}
-                    >
-                      <LogOut size={14} />
-                      <span>Disconnect Drive</span>
-                    </button>
-                  ) : (
+                  {/* Connection State 1: Connecting */}
+                  {isConnectingDrive ? (
                     <button
                       type="button"
                       className="admin-btn admin-btn-primary"
-                      onClick={handleConnectGoogleDrive}
-                      style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
+                      disabled
+                      style={{ opacity: 0.85, background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
                     >
-                      <Cloud size={16} />
-                      <span>Connect Google Drive</span>
+                      <RefreshCw size={14} className="spinning" />
+                      <span>Connecting to Google Drive...</span>
                     </button>
+                  ) : driveStatus.connected ? (
+                    /* Connection State 2: Connected */
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-secondary"
+                        onClick={() => checkDriveStatus()}
+                        title="Refresh connection status"
+                        disabled={isCheckingDrive}
+                      >
+                        <RefreshCw size={14} className={isCheckingDrive ? 'spinning' : ''} />
+                        <span>Check Status</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn"
+                        style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                        onClick={handleDisconnectGoogleDrive}
+                      >
+                        <LogOut size={14} />
+                        <span>Disconnect Drive</span>
+                      </button>
+                    </div>
+                  ) : (driveConnectionError || driveStatus.error) ? (
+                    /* Connection State 3: Connection Failed (Retry option) */
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-primary"
+                        onClick={handleConnectGoogleDrive}
+                        style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
+                      >
+                        <RefreshCw size={15} />
+                        <span>Retry Connection</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-secondary"
+                        onClick={() => checkDriveStatus()}
+                        title="Check connection status"
+                        disabled={isCheckingDrive}
+                      >
+                        <RefreshCw size={14} className={isCheckingDrive ? 'spinning' : ''} />
+                        <span>Check Status</span>
+                      </button>
+                    </div>
+                  ) : (
+                    /* Connection State 4: Not Connected */
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-primary"
+                        onClick={handleConnectGoogleDrive}
+                        style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
+                      >
+                        <Cloud size={16} />
+                        <span>Connect Google Drive</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-secondary"
+                        onClick={() => checkDriveStatus()}
+                        title="Check connection status"
+                        disabled={isCheckingDrive}
+                      >
+                        <RefreshCw size={14} className={isCheckingDrive ? 'spinning' : ''} />
+                        <span>Check Status</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

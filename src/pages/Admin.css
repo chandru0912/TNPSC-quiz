@@ -3918,5 +3918,28 @@
   justify-content: space-between;
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.admin-gdrive-connected-pill:hover {
+  background: rgba(16, 185, 129, 0.22) !important;
+  border-color: rgba(16, 185, 129, 0.6) !important;
+}
+
+.admin-gdrive-disconnected-pill:hover {
+  background: rgba(255, 215, 0, 0.16) !important;
+  border-color: rgba(255, 215, 0, 0.5) !important;
+}
+
 
 
