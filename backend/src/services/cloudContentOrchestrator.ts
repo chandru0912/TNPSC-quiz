@@ -11,6 +11,7 @@ import { generateMcqs, GeneratedMcqItem, McqGenerationResult } from './mcqGenera
 import { CloudAIService } from './cloudAi/cloudAiService';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { splitAndAlignNotesByTopic, persistTopicAlignedNotes, AlignedTopicItem, TopicSeparationResult } from './topicAlignmentService';
+import { extractTextFromGoogleDrivePdf } from './googleDriveService';
 
 export type GenerationMode = 'notes' | 'mcq' | 'both';
 export type NotesFormatOption = 'short' | 'full' | 'both';
@@ -31,8 +32,10 @@ export interface UnifiedGenerationRequest {
   notesFormat?: NotesFormatOption;
   questionCount?: number;
   difficulty?: 'Easy' | 'Medium' | 'Hard' | 'Mixed';
-  textbookMode?: 'auto' | 'specific' | 'custom_text';
+  textbookMode?: 'auto' | 'specific' | 'custom_text' | 'gdrive';
   textbookId?: number;
+  gdriveFileId?: string;
+  gdriveMaterialId?: number;
   customText?: string;
   apiKeyOverride?: string;
   autoSaveToStaging?: boolean;
@@ -110,16 +113,44 @@ export class CloudContentOrchestrator {
     const providerInfo = CloudAIService.getProviderStatus(req.apiKeyOverride);
 
     // Step 2: Textbook Content Extraction
-    report('Extracting Complete Lesson Textbook Content & Headings', 20);
     let textbookText = (req.customText || '').trim();
     let textbookDetails = {
-      id: req.textbookId || null,
+      id: req.textbookId || req.gdriveMaterialId || null,
       name: null as string | null,
       pageCount: 0,
       relevantPages: [] as number[],
     };
 
-    if (!textbookText) {
+    if (req.textbookMode === 'gdrive' && (req.gdriveFileId || req.gdriveMaterialId)) {
+      report('Retrieving & Extracting Textbook PDF from Google Drive', 20);
+      try {
+        const driveExtraction = await extractTextFromGoogleDrivePdf({
+          fileId: req.gdriveFileId || '',
+          materialId: req.gdriveMaterialId,
+          lessonTitle: req.lessonTitle,
+          unitId: req.unitId,
+          standard: req.standard,
+          subject: req.subject,
+        });
+
+        if (driveExtraction && driveExtraction.text && driveExtraction.text.length >= 50) {
+          textbookText = driveExtraction.text;
+          textbookDetails = {
+            id: req.gdriveMaterialId || null,
+            name: `[Google Drive] ${driveExtraction.fileName}`,
+            pageCount: driveExtraction.pageCount,
+            relevantPages: driveExtraction.relevantPages,
+          };
+          console.log(`[CloudOrchestrator] Using Google Drive textbook "${driveExtraction.fileName}" (${driveExtraction.text.length} chars, pages: ${driveExtraction.relevantPages.join(',') || 'full'}) for generation.`);
+        } else {
+          console.warn(`[CloudOrchestrator] Google Drive PDF extraction returned insufficient text. Falling back to syllabus matching.`);
+        }
+      } catch (gdriveErr: any) {
+        console.error(`[CloudOrchestrator] Google Drive PDF extraction error:`, gdriveErr.message);
+        throw new Error(`Google Drive PDF extraction failed: ${gdriveErr.message}`);
+      }
+    } else if (!textbookText) {
+      report('Extracting Complete Lesson Textbook Content & Headings', 20);
       const ragQuery: TextbookSearchQuery = {
         groupId: req.category,
         standard: req.standard,

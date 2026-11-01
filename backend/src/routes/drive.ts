@@ -15,6 +15,8 @@ import {
   resolveRedirectUri,
   cleanCredential,
   TARGET_FOLDER_NAME,
+  listGoogleDrivePdfs,
+  extractTextFromGoogleDrivePdf,
 } from '../services/googleDriveService';
 import { ensureDatabaseSchema } from '../migrate';
 
@@ -417,6 +419,81 @@ router.post('/upload/complete', requireAdminAuth, async (req: AuthenticatedReque
     return res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to verify uploaded file in Google Drive',
+    });
+  }
+});
+
+/**
+ * GET /api/drive/files (and aliases /library, /list)
+ * Admin & AI Generators: Lists all available Google Drive textbook PDFs.
+ * Supports query parameters: search, standard, subject, group, sync (syncs with Drive folder).
+ */
+router.get(['/files', '/library', '/list'], requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { search, standard, subject, group, sync } = req.query;
+    const syncFromDrive = String(sync).toLowerCase() === 'true' || sync === '1';
+    const parsedStandard = standard && !isNaN(Number(standard)) ? Number(standard) : undefined;
+
+    const files = await listGoogleDrivePdfs({
+      search: search ? String(search).trim() : undefined,
+      standard: parsedStandard,
+      subject: subject ? String(subject).trim() : undefined,
+      group: group ? String(group).trim() : undefined,
+      syncFromDrive,
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      total: files.length,
+      data: files,
+    });
+  } catch (err: any) {
+    console.error('[DriveListFiles] Error:', err.message);
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to list Google Drive PDF textbooks',
+    });
+  }
+});
+
+/**
+ * POST /api/drive/extract-text
+ * Admin & AI Generators: Diagnostic/Preview endpoint to extract text from a Google Drive PDF.
+ */
+router.post('/extract-text', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { fileId, materialId, lessonTitle, unitId, standard, subject } = req.body;
+    if (!fileId && !materialId) {
+      return res.status(400).json({ status: 'error', message: 'fileId or materialId is required.' });
+    }
+
+    const extraction = await extractTextFromGoogleDrivePdf({
+      fileId: fileId ? String(fileId).trim() : '',
+      materialId: materialId ? Number(materialId) : undefined,
+      lessonTitle: lessonTitle ? String(lessonTitle).trim() : undefined,
+      unitId: unitId ? Number(unitId) : undefined,
+      standard: standard ? Number(standard) : undefined,
+      subject: subject ? String(subject).trim() : undefined,
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        fileName: extraction.fileName,
+        fileId: extraction.fileId,
+        pageCount: extraction.pageCount,
+        relevantPages: extraction.relevantPages,
+        matchedLesson: extraction.matchedLesson,
+        fromCache: extraction.fromCache,
+        totalTextLength: extraction.text.length,
+        samplePreview: extraction.text.substring(0, 1000),
+      },
+    });
+  } catch (err: any) {
+    console.error('[DriveExtractText] Error:', err.message);
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to extract text from Google Drive PDF',
     });
   }
 });

@@ -416,6 +416,10 @@ export async function runMigration() {
 
       CREATE INDEX IF NOT EXISTS idx_gdrive_materials_status 
       ON google_drive_materials (upload_status);
+
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extracted_text TEXT;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extracted_pages JSONB;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS page_count INT;
     `);
 
     await client.query('COMMIT');

@@ -58,7 +58,7 @@ function ensureServerlessPdfGlobals(): void {
 
 let pdfWorkerConfigured = false;
 
-function getPdfParseClass(): any {
+export function getPdfParseClass(): any {
   ensureServerlessPdfGlobals();
   // Lazy-load pdf-parse only when processing a PDF so server startup and auth routes never load canvas/pdfjs
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -336,7 +336,7 @@ async function batchInsertTextbookPages(
   }
 }
 
-function isClass6TamilTextbook(standard: number, medium: string, subject: string, totalPages?: number): boolean {
+export function isClass6TamilTextbook(standard: number, medium: string, subject: string, totalPages?: number): boolean {
   if (totalPages === 72) return true;
   if (Number(standard) === 6 && (medium.toLowerCase() === 'tamil' || /tamil|தமிழ்|general studies/i.test(subject))) {
     return true;

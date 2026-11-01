@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Sparkles,
@@ -15,8 +15,10 @@ import {
   ArrowRight,
   Trash2,
   Cpu,
+  Cloud,
+  Search,
 } from 'lucide-react'
-import { apiFetch, classifyFetchFailure } from '../utils/api'
+import { apiFetch } from '../utils/api'
 import { SyllabusCascadeSelector, useSyllabusCascade } from './SyllabusCascadeSelector'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { TNPSC_GROUPS } from '../data/unifiedSyllabusRegistry'
@@ -40,7 +42,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   token,
   initialMode = 'notes',
   textbooksList = [],
-  fetchTextbooks,
+  fetchTextbooks: _fetchTextbooks,
   showToast,
   onRefreshData,
 }) => {
@@ -75,16 +77,32 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     handleUnitChange,
   } = aiSyllabusCascade
 
-  // Textbook Source Selection States (Unified across modes)
-  const [textbookMode, setTextbookMode] = useState<'auto' | 'specific' | 'upload'>('auto')
+  // Textbook Source Selection States (Unified across modes: 4 options)
+  const [textbookMode, setTextbookMode] = useState<'auto' | 'specific' | 'gdrive' | 'gdrive_upload'>('auto')
   const [selectedTextbookId, setSelectedTextbookId] = useState<number | null>(null)
-  const [inlineBookName, setInlineBookName] = useState<string>('')
-  const [inlineMedium, setInlineMedium] = useState<'Tamil' | 'English'>('English')
-  const [inlineTerm, setInlineTerm] = useState<string>('Full Year')
-  const [inlineFile, setInlineFile] = useState<File | null>(null)
-  const [isInlineUploading, setIsInlineUploading] = useState<boolean>(false)
-  const [inlineUploadProgress, setInlineUploadProgress] = useState<number>(0)
-  const [inlineProcessingJob, setInlineProcessingJob] = useState<{ id: number; status: string; progressPercent: number; stepDescription: string } | null>(null)
+
+  // Google Drive Source Selection States
+  const [drivePdfs, setDrivePdfs] = useState<any[]>([])
+  const [isDriveLoading, setIsDriveLoading] = useState<boolean>(false)
+  const [driveSearch, setDriveSearch] = useState<string>('')
+  const [selectedDriveFileId, setSelectedDriveFileId] = useState<string | null>(null)
+  const [selectedDriveMaterialId, setSelectedDriveMaterialId] = useState<number | null>(null)
+  const [driveConnectionStatus, setDriveConnectionStatus] = useState<{
+    connected: boolean
+    email?: string
+    folderName: string
+    configured: boolean
+  }>({ connected: false, folderName: 'TNPSC Study Hub Materials', configured: true })
+
+  // Inline Google Drive Resumable Upload States (Option 4)
+  const [driveUploadFile, setDriveUploadFile] = useState<File | null>(null)
+  const [driveUploadTitle, setDriveUploadTitle] = useState<string>('')
+  const [driveUploadMedium, setDriveUploadMedium] = useState<'Tamil' | 'English'>('English')
+  const [driveUploadTerm, setDriveUploadTerm] = useState<string>('Term 1')
+  const [isDriveUploading, setIsDriveUploading] = useState<boolean>(false)
+  const [driveUploadProgress, setDriveUploadProgress] = useState<number>(0)
+  const [driveUploadStep, setDriveUploadStep] = useState<string>('')
+  const [driveUploadError, setDriveUploadError] = useState<string | null>(null)
 
   // MCQ Options
   const [aiLanguage, setAiLanguage] = useState<'tamil' | 'english'>('tamil')
@@ -146,98 +164,263 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     localStorage.setItem('tnpsc_cloud_ai_key', key.trim())
   }
 
-  // Poll inline textbook upload progress
-  useEffect(() => {
-    if (!inlineProcessingJob || inlineProcessingJob.status !== 'processing' || !token) return
-    const interval = setInterval(async () => {
-      try {
-        const res = await apiFetch(`/api/textbooks/${inlineProcessingJob.id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        const data = await res.json()
-        if (res.ok && data.data) {
-          const tb = data.data
-          if (tb.status === 'completed' || tb.status === 'failed') {
-            setInlineProcessingJob(null)
-            if (tb.status === 'completed') {
-              setSelectedTextbookId(tb.id)
-              setTextbookMode('specific')
-              showToast?.('success', `Textbook "${tb.bookName}" processed and indexed successfully!`)
-              fetchTextbooks?.()
-            } else {
-              showToast?.('error', `Textbook processing failed: ${tb.errorMessage || 'Unknown error'}`)
-            }
-          } else if (tb.job) {
-            setInlineProcessingJob({
-              id: tb.id,
-              status: tb.status,
-              progressPercent: tb.job.progressPercent || 0,
-              stepDescription: tb.job.stepDescription || 'Processing PDF...',
-            })
-          }
-        }
-      } catch (e) {
-        console.warn('Inline job polling error:', e)
-      }
-    }, 2500)
-    return () => clearInterval(interval)
-  }, [inlineProcessingJob, token, fetchTextbooks, showToast])
-
-  if (!isOpen) return null
-
-  // Direct Inline PDF Upload handler
-  const handleInlineUploadTextbook = async () => {
-    if (!token) return
-    if (!inlineFile) {
-      showToast?.('error', 'Please choose a PDF file to upload.')
-      return
-    }
-    if (!inlineFile.name.toLowerCase().endsWith('.pdf') && inlineFile.type !== 'application/pdf') {
-      showToast?.('error', 'Bad Request (400): Only PDF files (.pdf) are supported.')
-      return
-    }
-
-    setIsInlineUploading(true)
-    setInlineUploadProgress(25)
-
+  // Fetch Google Drive PDFs
+  const fetchDrivePdfs = useCallback(async (sync = false) => {
+    setIsDriveLoading(true)
     try {
-      const autoBookName = inlineBookName.trim() || `Class ${currentClassId} ${selectedSubjectObj?.name || 'Subject'} (${inlineMedium})`
-      const formData = new FormData()
-      formData.append('group', aiGroupId)
-      formData.append('standard', `${currentClassId}th`)
-      formData.append('subject', selectedSubjectObj?.name || 'General Studies')
-      formData.append('medium', inlineMedium)
-      formData.append('term', inlineTerm)
-      formData.append('bookName', autoBookName)
-      formData.append('pdf', inlineFile)
-
-      const res = await apiFetch('/api/textbooks/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+      const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+      const res = await apiFetch(`/api/drive/files${sync ? '?sync=true' : ''}`, {
+        headers: { Authorization: `Bearer ${activeToken}` },
       })
-
       const data = await res.json()
-      if (!res.ok) throw new Error(data.message || 'Upload failed')
+      if (res.ok && data.status === 'success') {
+        setDrivePdfs(data.data || [])
+      } else {
+        const matRes = await apiFetch('/api/drive/materials')
+        const matData = await matRes.json()
+        if (matData.status === 'success') {
+          setDrivePdfs(matData.data || [])
+        }
+      }
+    } catch (err: any) {
+      console.warn('Could not fetch Google Drive files:', err.message)
+    } finally {
+      setIsDriveLoading(false)
+    }
+  }, [token])
 
-      showToast?.('success', `Textbook uploaded. Indexing started for "${autoBookName}"!`)
-      fetchTextbooks?.()
-
-      if (data.data?.id) {
-        setSelectedTextbookId(data.data.id)
-        setInlineProcessingJob({
-          id: data.data.id,
-          status: 'processing',
-          progressPercent: 20,
-          stepDescription: 'Extracting educational text from PDF...',
+  // Check Google Drive Connection Status
+  const checkDriveConnection = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/drive/status')
+      const data = await res.json()
+      if (res.ok && data.status === 'success') {
+        setDriveConnectionStatus({
+          connected: Boolean(data.data?.connected),
+          email: data.data?.email,
+          folderName: data.data?.folderName || 'TNPSC Study Hub Materials',
+          configured: Boolean(data.data?.configured),
         })
       }
     } catch (err: any) {
-      const friendly = await classifyFetchFailure(err, { endpointLabel: 'POST /api/textbooks/upload' })
-      showToast?.('error', friendly)
+      console.warn('Could not check Google Drive status:', err.message)
+    }
+  }, [])
+
+  // Auto-fetch Drive status and list when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      checkDriveConnection()
+      fetchDrivePdfs()
+    }
+  }, [isOpen, checkDriveConnection, fetchDrivePdfs])
+
+  // Search filtered Drive PDFs
+  const filteredDrivePdfs = useMemo(() => {
+    if (!driveSearch.trim()) return drivePdfs
+    const q = driveSearch.toLowerCase().trim()
+    return drivePdfs.filter(
+      (p) =>
+        (p.fileName && p.fileName.toLowerCase().includes(q)) ||
+        (p.subject && p.subject.toLowerCase().includes(q)) ||
+        (p.lesson && p.lesson.toLowerCase().includes(q)) ||
+        (p.standard && String(p.standard).includes(q))
+    )
+  }, [drivePdfs, driveSearch])
+
+  // Currently selected Drive PDF object
+  const selectedDrivePdf = useMemo(() => {
+    if (!selectedDriveFileId) return null
+    return drivePdfs.find((p) => p.googleDriveFileId === selectedDriveFileId) || null
+  }, [drivePdfs, selectedDriveFileId])
+
+  // Handle direct resumable upload to Google Drive inside generator modal (Option 4)
+  const handleStartDriveUploadModal = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!driveUploadFile) {
+      setDriveUploadError('Please choose a PDF textbook file first.')
+      return
+    }
+    if (driveUploadFile.type !== 'application/pdf' && !driveUploadFile.name.toLowerCase().endsWith('.pdf')) {
+      setDriveUploadError('Invalid file type: Only PDF documents (.pdf) are permitted.')
+      return
+    }
+
+    setIsDriveUploading(true)
+    setDriveUploadError(null)
+    setDriveUploadProgress(5)
+    setDriveUploadStep('Authorizing and creating Google Drive resumable session...')
+
+    try {
+      const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+      const finalTitle = driveUploadTitle.trim() || driveUploadFile.name.replace(/\.pdf$/i, '')
+      const initRes = await apiFetch('/api/drive/upload/initiate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${activeToken}`,
+        },
+        body: JSON.stringify({
+          fileName: `${finalTitle}.pdf`,
+          originalFileName: driveUploadFile.name,
+          fileSize: driveUploadFile.size,
+          mimeType: 'application/pdf',
+          origin: window.location.origin,
+          group: aiGroupId,
+          subject: selectedSubjectObj?.name || 'General Studies',
+          standard: currentClassId,
+          medium: driveUploadMedium,
+          term: driveUploadTerm || 'Term 1',
+          unit: currentUnitId,
+          lesson: currentLessonTitle,
+          lessonId: selectedLessonObj?.id,
+        }),
+      })
+
+      const initData = await initRes.json()
+      if (!initRes.ok || !initData.data?.uploadUrl) {
+        throw new Error(initData.message || 'Failed to initiate Google Drive upload session.')
+      }
+
+      const { uploadUrl, trackingId } = initData.data
+      setDriveUploadProgress(15)
+      setDriveUploadStep(`Streaming to Google Drive: 0 MB / ${(driveUploadFile.size / (1024 * 1024)).toFixed(1)} MB...`)
+
+      // Stream file directly to Google Drive via 5 MB chunks
+      const CHUNK_SIZE = 5 * 1024 * 1024
+      const totalSize = driveUploadFile.size
+      const totalChunks = Math.ceil(totalSize / CHUNK_SIZE)
+      let currentOffset = 0
+      let googleDriveFileId = ''
+
+      while (currentOffset < totalSize) {
+        const chunkIndex = Math.floor(currentOffset / CHUNK_SIZE)
+        const chunkEnd = Math.min(currentOffset + CHUNK_SIZE - 1, totalSize - 1)
+        const chunkBlob = driveUploadFile.slice(currentOffset, chunkEnd + 1)
+        const contentRange = `bytes ${currentOffset}-${chunkEnd}/${totalSize}`
+
+        let chunkAttempt = 0
+        const maxAttempts = 3
+        let chunkDone = false
+
+        while (chunkAttempt < maxAttempts && !chunkDone) {
+          chunkAttempt++
+          try {
+            const chunkResult = await new Promise<{ status: number; range?: string; fileId?: string }>(
+              (resolve, reject) => {
+                const xhr = new XMLHttpRequest()
+                xhr.open('PUT', uploadUrl, true)
+                xhr.setRequestHeader('Content-Range', contentRange)
+                xhr.setRequestHeader('Content-Type', 'application/pdf')
+
+                xhr.upload.onprogress = (evt) => {
+                  if (evt.lengthComputable) {
+                    const loadedBytes = currentOffset + evt.loaded
+                    const pct = Math.min(95, Math.round(15 + (loadedBytes / totalSize) * 80))
+                    setDriveUploadProgress(pct)
+                    const loadedMb = (loadedBytes / (1024 * 1024)).toFixed(1)
+                    const totalMb = (totalSize / (1024 * 1024)).toFixed(1)
+                    setDriveUploadStep(
+                      `Uploading: ${loadedMb} MB of ${totalMb} MB (${pct}%) [Chunk ${chunkIndex + 1}/${totalChunks}]`
+                    )
+                  }
+                }
+
+                xhr.onload = () => {
+                  if (xhr.status === 308) {
+                    const rangeHeader = xhr.getResponseHeader('Range')
+                    resolve({ status: 308, range: rangeHeader || undefined })
+                  } else if (xhr.status === 200 || xhr.status === 201) {
+                    try {
+                      const data = JSON.parse(xhr.responseText || '{}')
+                      resolve({ status: xhr.status, fileId: data.id })
+                    } catch {
+                      resolve({ status: xhr.status })
+                    }
+                  } else {
+                    reject(new Error(`Google Drive returned HTTP ${xhr.status}: ${xhr.responseText || xhr.statusText}`))
+                  }
+                }
+
+                xhr.onerror = () => {
+                  reject(
+                    new Error(
+                      `Network / CORS error during Google Drive upload (Chunk ${chunkIndex + 1}/${totalChunks}). ` +
+                      `Please check your connection or Google Cloud Console Authorized JavaScript origins.`
+                    )
+                  )
+                }
+
+                xhr.ontimeout = () => {
+                  reject(new Error(`Upload chunk ${chunkIndex + 1} timed out.`))
+                }
+
+                xhr.timeout = 120000
+                xhr.send(chunkBlob)
+              }
+            )
+
+            if (chunkResult.status === 308) {
+              chunkDone = true
+              if (chunkResult.range) {
+                const match = chunkResult.range.match(/bytes=0-(\d+)/)
+                currentOffset = match && match[1] ? parseInt(match[1], 10) + 1 : chunkEnd + 1
+              } else {
+                currentOffset = chunkEnd + 1
+              }
+            } else if (chunkResult.status === 200 || chunkResult.status === 201) {
+              chunkDone = true
+              googleDriveFileId = chunkResult.fileId || ''
+              currentOffset = totalSize
+            }
+          } catch (chunkErr: any) {
+            console.warn(`Upload chunk ${chunkIndex + 1} attempt ${chunkAttempt} error:`, chunkErr.message)
+            if (chunkAttempt >= maxAttempts) throw chunkErr
+            await new Promise((r) => setTimeout(r, 1000 * chunkAttempt))
+          }
+        }
+      }
+
+      if (!googleDriveFileId) {
+        throw new Error('Google Drive upload succeeded but did not return file ID.')
+      }
+
+      setDriveUploadProgress(96)
+      setDriveUploadStep('Verifying file in Google Drive & registering in database...')
+
+      const completeRes = await apiFetch('/api/drive/upload/complete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${activeToken}`,
+        },
+        body: JSON.stringify({
+          trackingId,
+          googleDriveFileId,
+        }),
+      })
+
+      const completeData = await completeRes.json()
+      if (!completeRes.ok) {
+        throw new Error(completeData.message || 'Failed to register completed upload.')
+      }
+
+      setDriveUploadProgress(100)
+      setDriveUploadStep('Upload and verification complete!')
+      showToast?.('success', `PDF "${finalTitle}" uploaded directly to Google Drive and selected as source!`)
+
+      // Auto-select this file and switch to gdrive mode
+      setSelectedDriveFileId(googleDriveFileId)
+      setSelectedDriveMaterialId(trackingId)
+      setTextbookMode('gdrive')
+      setDriveUploadFile(null)
+      setDriveUploadTitle('')
+      fetchDrivePdfs(true)
+    } catch (err: any) {
+      console.error('Google Drive inline upload error:', err)
+      setDriveUploadError(err.message || 'Failed to upload PDF to Google Drive.')
     } finally {
-      setIsInlineUploading(false)
-      setInlineFile(null)
+      setIsDriveUploading(false)
     }
   }
 
@@ -256,6 +439,11 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
 
     if (textbookMode === 'specific' && !selectedTextbookId) {
       showToast?.('error', 'Please select a specific textbook from the dropdown or switch to Automatic mode.')
+      return
+    }
+
+    if (textbookMode === 'gdrive' && !selectedDriveFileId) {
+      showToast?.('error', 'Please select a PDF textbook from your connected Google Drive library.')
       return
     }
 
@@ -281,7 +469,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           category: aiGroupId,
           standard: currentClassId,
           subject: selectedSubjectObj?.name || 'General Studies',
-          term: inlineTerm || 'Term 1',
+          term: driveUploadTerm || 'Term 1',
           unitId: currentUnitId,
           unitTitle: currentUnit?.title,
           lessonTitle: currentLessonTitle,
@@ -293,6 +481,8 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           notesFormat,
           textbookMode,
           textbookId: textbookMode === 'specific' ? selectedTextbookId : undefined,
+          gdriveFileId: textbookMode === 'gdrive' ? selectedDriveFileId : undefined,
+          gdriveMaterialId: textbookMode === 'gdrive' ? (selectedDriveMaterialId || undefined) : undefined,
           apiKey: cloudApiKey.trim() || undefined,
           autoSaveToStaging: true,
         }),
@@ -399,6 +589,11 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
       return
     }
 
+    if (textbookMode === 'gdrive' && !selectedDriveFileId) {
+      showToast?.('error', 'Please select a PDF textbook from your connected Google Drive library.')
+      return
+    }
+
     if (isAIGenerating) return
 
     setIsAIGenerating(true)
@@ -418,7 +613,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           category: aiGroupId,
           standard: currentClassId,
           subject: selectedSubjectObj?.name || 'General Studies',
-          term: inlineTerm || 'Term 1',
+          term: driveUploadTerm || 'Term 1',
           unitId: currentUnitId,
           unitTitle: currentUnit?.title,
           lessonTitle: currentLessonTitle,
@@ -431,6 +626,8 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           difficulty: aiDifficulty,
           textbookMode,
           textbookId: textbookMode === 'specific' ? selectedTextbookId : undefined,
+          gdriveFileId: textbookMode === 'gdrive' ? selectedDriveFileId : undefined,
+          gdriveMaterialId: textbookMode === 'gdrive' ? (selectedDriveMaterialId || undefined) : undefined,
           apiKey: cloudApiKey.trim() || undefined,
           autoSaveToStaging: true,
         }),
@@ -477,7 +674,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           category: aiGroupId,
           standard: currentClassId,
           subject: selectedSubjectObj?.name || 'General Studies',
-          term: inlineTerm || 'Term 1',
+          term: driveUploadTerm || 'Term 1',
           unitId: currentUnitId,
           lessonTitle: currentLessonTitle,
           lessonId: selectedLessonObj?.id,
@@ -560,6 +757,8 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     setAiUploadSuccess(null)
     setAiNotice(null)
   }
+
+  if (!isOpen) return null
 
   return (
     <AnimatePresence>
@@ -747,13 +946,25 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
 
                 {/* 4. Unified Textbook Source Selection Box */}
                 <div className="ai-textbook-source-box">
-                  <label style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.88rem' }}>
-                    <BookOpen size={15} style={{ color: 'var(--gold-primary)' }} />
-                    <span>6. Textbook Source Selection *</span>
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <label style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.88rem', margin: 0 }}>
+                      <BookOpen size={16} style={{ color: 'var(--gold-primary)' }} />
+                      <span>6. Textbook Source Selection *</span>
+                    </label>
+                    {driveConnectionStatus.connected ? (
+                      <span style={{ fontSize: '0.74rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(16, 185, 129, 0.1)', padding: '0.2rem 0.55rem', borderRadius: '9999px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                        <Cloud size={12} /> Google Drive: {driveConnectionStatus.email || 'Connected'}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.74rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(245, 158, 11, 0.1)', padding: '0.2rem 0.55rem', borderRadius: '9999px', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                        <AlertTriangle size={12} /> Google Drive Not Connected
+                      </span>
+                    )}
+                  </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                    {/* Radio 1: Auto */}
+                  {/* 4-Option Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                    {/* Option 1: Auto */}
                     <label className={`ai-source-radio-card ${textbookMode === 'auto' ? 'active' : ''}`}>
                       <input
                         type="radio"
@@ -762,14 +973,14 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                         onChange={() => setTextbookMode('auto')}
                       />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Use Uploaded Automatically</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.84rem' }}>1. Use Uploaded Automatically</div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                           Matches {currentClassId}th Standard {selectedSubjectObj?.name}
                         </div>
                       </div>
                     </label>
 
-                    {/* Radio 2: Specific */}
+                    {/* Option 2: Specific */}
                     <label className={`ai-source-radio-card ${textbookMode === 'specific' ? 'active' : ''}`}>
                       <input
                         type="radio"
@@ -778,27 +989,54 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                         onChange={() => setTextbookMode('specific')}
                       />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Select Specific Textbook</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Choose from existing uploaded books</div>
+                        <div style={{ fontWeight: 600, fontSize: '0.84rem' }}>2. Select Specific Textbook</div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Choose from indexed textbooks in DB</div>
                       </div>
                     </label>
 
-                    {/* Radio 3: Upload */}
-                    <label className={`ai-source-radio-card ${textbookMode === 'upload' ? 'active' : ''}`}>
+                    {/* Option 3: Select PDF from Google Drive */}
+                    <label className={`ai-source-radio-card ${textbookMode === 'gdrive' ? 'active' : ''}`}>
                       <input
                         type="radio"
                         name="unifiedTbSourceMode"
-                        checked={textbookMode === 'upload'}
-                        onChange={() => setTextbookMode('upload')}
+                        checked={textbookMode === 'gdrive'}
+                        onChange={() => {
+                          setTextbookMode('gdrive')
+                          fetchDrivePdfs()
+                          checkDriveConnection()
+                        }}
                       />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Upload New Textbook PDF</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Upload and index directly here</div>
+                        <div style={{ fontWeight: 600, fontSize: '0.84rem', color: '#ffd700', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <Cloud size={14} />
+                          <span>3. Select PDF from Google Drive</span>
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Use connected Drive textbooks directly</div>
+                      </div>
+                    </label>
+
+                    {/* Option 4: Upload New PDF to Google Drive */}
+                    <label className={`ai-source-radio-card ${textbookMode === 'gdrive_upload' ? 'active' : ''}`}>
+                      <input
+                        type="radio"
+                        name="unifiedTbSourceMode"
+                        checked={textbookMode === 'gdrive_upload'}
+                        onChange={() => {
+                          setTextbookMode('gdrive_upload')
+                          checkDriveConnection()
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.84rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <UploadCloud size={14} />
+                          <span>4. Upload New PDF to Google Drive</span>
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Direct resumable upload to Drive</div>
                       </div>
                     </label>
                   </div>
 
-                  {/* Mode: specific */}
+                  {/* Mode 2: specific */}
                   {textbookMode === 'specific' && (
                     <div className="ai-field" style={{ marginTop: '0.5rem' }}>
                       <label>Choose Uploaded Textbook ({textbooksList.filter((t) => t.status === 'completed').length} Available)</label>
@@ -817,90 +1055,256 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                     </div>
                   )}
 
-                  {/* Mode: upload */}
-                  {textbookMode === 'upload' && (
-                    <div
-                      style={{
-                        padding: '0.75rem',
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        borderRadius: '8px',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        marginTop: '0.5rem',
-                      }}
-                    >
-                      <div className="form-grid-2" style={{ marginBottom: '0.5rem' }}>
-                        <div className="ai-field">
-                          <label>Book Name / Title</label>
-                          <input
-                            type="text"
-                            className="admin-auth-input"
-                            placeholder={`Class ${currentClassId} ${selectedSubjectObj?.name || 'Subject'}`}
-                            value={inlineBookName}
-                            onChange={(e) => setInlineBookName(e.target.value)}
-                          />
-                        </div>
-                        <div className="ai-field">
-                          <label>Medium</label>
-                          <select
-                            className="ai-select"
-                            value={inlineMedium}
-                            onChange={(e) => setInlineMedium(e.target.value as any)}
+                  {/* Mode 3: Google Drive PDF Library */}
+                  {textbookMode === 'gdrive' && (
+                    <div className="ai-gdrive-library-container">
+                      {!driveConnectionStatus.connected ? (
+                        <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '8px', color: '#fca5a5', fontSize: '0.84rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <AlertTriangle size={18} />
+                            <span>Google Drive is not connected yet. Please connect your Google Drive account first.</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-secondary"
+                            onClick={() => checkDriveConnection()}
+                            style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem' }}
                           >
-                            <option value="English">English Medium</option>
-                            <option value="Tamil">Tamil Medium (தமிழ்)</option>
-                          </select>
+                            <RefreshCw size={12} />
+                            <span>Check Status</span>
+                          </button>
                         </div>
+                      ) : (
+                        <>
+                          <div className="ai-gdrive-library-header">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+                              <Search size={14} style={{ color: 'var(--text-muted)' }} />
+                              <input
+                                type="text"
+                                className="ai-gdrive-search-input"
+                                placeholder="Search textbook filename, subject, or lesson..."
+                                value={driveSearch}
+                                onChange={(e) => setDriveSearch(e.target.value)}
+                              />
+                              {driveSearch && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDriveSearch('')}
+                                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.2rem' }}
+                                >
+                                  <X size={14} />
+                                </button>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              className="ai-gdrive-refresh-btn"
+                              onClick={() => fetchDrivePdfs(true)}
+                              disabled={isDriveLoading}
+                              title="Sync and reload PDFs directly from Google Drive"
+                            >
+                              <RefreshCw size={13} className={isDriveLoading ? 'spinning' : ''} />
+                              <span>{isDriveLoading ? 'Syncing...' : 'Refresh Library'}</span>
+                            </button>
+                          </div>
+
+                          {/* List of Google Drive PDFs */}
+                          {filteredDrivePdfs.length === 0 ? (
+                            <div style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+                              {isDriveLoading ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                                  <RefreshCw size={14} className="spinning" />
+                                  <span>Loading Google Drive textbooks...</span>
+                                </div>
+                              ) : (
+                                <div>
+                                  <FileText size={24} style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
+                                  <div>No PDF textbooks found in Google Drive folder "{driveConnectionStatus.folderName}".</div>
+                                  <div style={{ marginTop: '0.4rem', fontSize: '0.78rem', color: '#ffd700' }}>
+                                    Select "4. Upload New PDF to Google Drive" above to upload your first textbook!
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="ai-gdrive-items-list">
+                              {filteredDrivePdfs.map((pdf) => {
+                                const isSelected = selectedDriveFileId === pdf.googleDriveFileId
+                                const isClassMatch = pdf.standard === currentClassId
+
+                                return (
+                                  <div
+                                    key={pdf.googleDriveFileId || pdf.id}
+                                    className={`ai-gdrive-item-card ${isSelected ? 'selected' : ''}`}
+                                    onClick={() => {
+                                      setSelectedDriveFileId(pdf.googleDriveFileId)
+                                      setSelectedDriveMaterialId(pdf.id)
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: isSelected ? '5px solid #ffd700' : '2px solid rgba(255,255,255,0.3)', flexShrink: 0, transition: 'all 0.15s ease' }} />
+                                      <FileText size={20} style={{ color: isSelected ? '#ffd700' : '#94a3b8', flexShrink: 0 }} />
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontWeight: 600, fontSize: '0.84rem', color: isSelected ? '#ffd700' : '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={pdf.fileName}>
+                                          {pdf.fileName}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+                                          <span className="ai-gdrive-badge-size">{pdf.fileSizeFormatted || `${(pdf.fileSize / 1048576).toFixed(1)} MB`}</span>
+                                          {pdf.standard && (
+                                            <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Class {pdf.standard}</span>
+                                          )}
+                                          {pdf.subject && (
+                                            <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>• {pdf.subject}</span>
+                                          )}
+                                          {isClassMatch && (
+                                            <span className="ai-gdrive-badge-match">Matches Class {currentClassId}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {isSelected && (
+                                      <div style={{ color: '#ffd700', display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', fontWeight: 700, flexShrink: 0 }}>
+                                        <CheckCircle size={15} />
+                                        <span>Selected</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          {/* Confirmed Selection Banner */}
+                          {selectedDrivePdf && (
+                            <div className="ai-gdrive-confirmed-banner">
+                              <CheckCircle size={18} style={{ color: '#10b981', flexShrink: 0 }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 700, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  Selected Google Drive Textbook: {selectedDrivePdf.fileName}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', marginTop: '0.1rem' }}>
+                                  Size: {selectedDrivePdf.fileSizeFormatted || `${((selectedDrivePdf.fileSize || 0) / 1048576).toFixed(1)} MB`} • Gemini AI will extract and generate content strictly from this textbook.
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Mode 4: Inline Google Drive Resumable Upload */}
+                  {textbookMode === 'gdrive_upload' && (
+                    <div className="ai-gdrive-library-container">
+                      <div style={{ padding: '0.65rem 0.85rem', background: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '0.8rem', color: '#a7f3d0', marginBottom: '0.85rem' }}>
+                        ⚡ <strong>Direct Resumable Stream:</strong> Large textbook PDFs stream directly from your browser to your Google Drive storage. After upload, it will be automatically selected as the AI generation source!
                       </div>
 
-                      <div className="form-grid-2" style={{ marginBottom: '0.5rem' }}>
-                        <div className="ai-field">
-                          <label>Term</label>
-                          <select
-                            className="ai-select"
-                            value={inlineTerm}
-                            onChange={(e) => setInlineTerm(e.target.value)}
-                          >
-                            <option value="Full Year">Full Year (Combined)</option>
-                            <option value="Term 1">Term 1</option>
-                            <option value="Term 2">Term 2</option>
-                            <option value="Term 3">Term 3</option>
-                          </select>
+                      <form onSubmit={handleStartDriveUploadModal}>
+                        <div className="form-grid-3" style={{ marginBottom: '0.65rem' }}>
+                          <div className="ai-field">
+                            <label>Material Title</label>
+                            <input
+                              type="text"
+                              className="admin-auth-input"
+                              placeholder={`Class ${currentClassId} ${selectedSubjectObj?.name || 'Subject'}`}
+                              value={driveUploadTitle}
+                              onChange={(e) => setDriveUploadTitle(e.target.value)}
+                              disabled={isDriveUploading}
+                            />
+                          </div>
+                          <div className="ai-field">
+                            <label>Medium</label>
+                            <select
+                              className="ai-select"
+                              value={driveUploadMedium}
+                              onChange={(e) => setDriveUploadMedium(e.target.value as 'Tamil' | 'English')}
+                              disabled={isDriveUploading}
+                            >
+                              <option value="English">English Medium</option>
+                              <option value="Tamil">Tamil Medium</option>
+                            </select>
+                          </div>
+                          <div className="ai-field">
+                            <label>Term / Volume</label>
+                            <select
+                              className="ai-select"
+                              value={driveUploadTerm}
+                              onChange={(e) => setDriveUploadTerm(e.target.value)}
+                              disabled={isDriveUploading}
+                            >
+                              <option value="Term 1">Term 1</option>
+                              <option value="Term 2">Term 2</option>
+                              <option value="Term 3">Term 3</option>
+                              <option value="Full Year">Full Year (Combined)</option>
+                            </select>
+                          </div>
                         </div>
-                        <div className="ai-field">
-                          <label>PDF File (Classes 6–12 Samacheer Kalvi)</label>
+
+                        <div className="ai-field" style={{ marginBottom: '0.75rem' }}>
+                          <label>Select PDF Textbook (.pdf only)</label>
                           <input
                             type="file"
-                            accept=".pdf,application/pdf"
-                            onChange={(e) => setInlineFile(e.target.files?.[0] || null)}
+                            accept="application/pdf,.pdf"
+                            disabled={isDriveUploading}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null
+                              setDriveUploadFile(file)
+                              if (file && !driveUploadTitle.trim()) {
+                                setDriveUploadTitle(file.name.replace(/\.pdf$/i, ''))
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '0.65rem',
+                              background: 'rgba(255,255,255,0.04)',
+                              border: '1px dashed rgba(255,255,255,0.2)',
+                              borderRadius: '8px',
+                              color: '#ffffff',
+                              cursor: 'pointer',
+                            }}
                           />
+                          {driveUploadFile && (
+                            <div style={{ marginTop: '0.35rem', fontSize: '0.78rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <CheckCircle size={13} /> Selected: {driveUploadFile.name} ({(driveUploadFile.size / (1024 * 1024)).toFixed(2)} MB)
+                            </div>
+                          )}
                         </div>
-                      </div>
 
-                      <button
-                        type="button"
-                        className="admin-btn admin-btn-primary"
-                        onClick={handleInlineUploadTextbook}
-                        disabled={isInlineUploading || !inlineFile}
-                        style={{ width: '100%', justifyContent: 'center' }}
-                      >
-                        <UploadCloud size={16} />
-                        <span>{isInlineUploading ? `Uploading PDF (${inlineUploadProgress}%)...` : 'Upload & Start Background Indexing'}</span>
-                      </button>
+                        {/* Progress Bar during resumable streaming */}
+                        {isDriveUploading && (
+                          <div className="gdrive-resumable-progress-box" style={{ margin: '0.75rem 0' }}>
+                            <div className="gdrive-progress-step-text">
+                              <span>{driveUploadStep}</span>
+                              <strong style={{ color: '#ffd700' }}>{driveUploadProgress}%</strong>
+                            </div>
+                            <div className="gdrive-progress-bar-track">
+                              <div
+                                className="gdrive-progress-bar-fill"
+                                style={{ width: `${driveUploadProgress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
 
-                      {inlineProcessingJob && (
-                        <div style={{ marginTop: '0.75rem', padding: '0.65rem', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '6px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#fbbf24', fontWeight: 600 }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                              <RefreshCw size={13} className="spin-icon" />
-                              <span>{inlineProcessingJob.stepDescription}</span>
-                            </span>
-                            <span>{inlineProcessingJob.progressPercent}%</span>
+                        {driveUploadError && (
+                          <div style={{ marginBottom: '0.75rem', padding: '0.6rem 0.85rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '6px', color: '#fca5a5', fontSize: '0.8rem' }}>
+                            ⚠️ {driveUploadError}
                           </div>
-                          <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden', marginTop: '0.35rem' }}>
-                            <div style={{ width: `${inlineProcessingJob.progressPercent}%`, height: '100%', background: '#fbbf24' }} />
-                          </div>
-                        </div>
-                      )}
+                        )}
+
+                        <button
+                          type="submit"
+                          className="admin-btn admin-btn-primary"
+                          disabled={isDriveUploading || !driveUploadFile}
+                          style={{ width: '100%', justifyContent: 'center', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: '#ffffff', fontWeight: 700 }}
+                        >
+                          <UploadCloud size={16} />
+                          <span>{isDriveUploading ? 'Streaming to Google Drive...' : 'Start Resumable Upload to Google Drive'}</span>
+                        </button>
+                      </form>
                     </div>
                   )}
                 </div>
