@@ -169,22 +169,23 @@ async function performOcrFallback(parser: any, pageNum: number, medium: string):
 const KNOWN_TAMIL_LESSONS: Array<{ pattern: RegExp; title: string; unitId: number }> = [
   { pattern: /இன்பத்தமிழ்|பாரதிதாசன்|தமிழுக்கும்\s*அமுதென்று/i, title: 'இன்பத்தமிழ்', unitId: 1 },
   { pattern: /தமிழ்க்கும்மி|பெருஞ்சித்திரனார்|கொட்டுங்கடி\s*கும்மி/i, title: 'தமிழ்க்கும்மி', unitId: 1 },
-  { pattern: /வளர்தமிழ்|மூத்தமொழி|யாமறிந்த\s*மொழிகளிலே/i, title: 'வளர்தமிழ்', unitId: 1 },
+  { pattern: /வளர்தமிழ்|ெளர்த\s*மிழ்|மூத்த\s*தமிழ்|யாமறிந்த|வளர்சொ?மோழி|உரைநடை\s*உலகம்|உதைபதட/i, title: 'வளர்தமிழ்', unitId: 1 },
   { pattern: /கனவு\s*பலித்தது|இன்சுவை/i, title: 'கனவு பலித்தது', unitId: 1 },
-  { pattern: /ஒளி\s*பிறந்தது|அப்துல்\s*கலாம்/i, title: 'ஒளி பிறந்தது', unitId: 1 },
-  { pattern: /தமிழ்\s*எழுத்துகளின்\s*வகை\s*தொகை|இலக்கணம்\s*ஐந்து\s*வகைப்படும்/i, title: 'தமிழ் எழுத்துகளின் வகை தொகை', unitId: 1 },
+  { pattern: /ஒளி\s*பிறந்தது|ஒளி\s*பி்றந்த\s*து|அப்துல்\s*கலாம்/i, title: 'ஒளி பிறந்தது', unitId: 1 },
+  { pattern: /தமிழ்\s*எழுத்துகளின்\s*வகை|கற்கண்டு|இலக்கண\s*வ[ழை]க்க[ள்ள]\s*ஐந்து|இலக்கணம்/i, title: 'தமிழ் எழுத்துகளின் வகை தொகை', unitId: 1 },
+  { pattern: /ஏதிலிக்குருவிகள்|அழகிய\s*பெரியவன்/i, title: 'ஏதிலிக்குருவிகள்', unitId: 2 },
   { pattern: /சிலப்பதிகாரம்|திங்களைப்\s*போற்றும்|இளங்கோவடிகள்/i, title: 'சிலப்பதிகாரம்', unitId: 2 },
   { pattern: /காணி\s*நிலம்|காணி\s*நிலம்\s*வேண்டும்/i, title: 'காணி நிலம்', unitId: 2 },
-  { pattern: /சிறகின்\s*ஓசை|வலசை\s*போதல்|சலீம்\s*அலி/i, title: 'சிறகின் ஓசை', unitId: 2 },
+  { pattern: /சிறகின்\s*ஓசை|சி்றகின்\s*ஓ[்கக]ப|வலசை\s*போதல்|சலீம்\s*அலி/i, title: 'சிறகின் ஓசை', unitId: 2 },
   { pattern: /கிழவனும்\s*கடலும்|சாண்டியாகோ|ஹெமிங்வே/i, title: 'கிழவனும் கடலும்', unitId: 2 },
-  { pattern: /முதலெழுத்தும்\s*சார்பெழுத்தும்|முதல்\s*எழுத்துகள்\s*முப்பது/i, title: 'முதலெழுத்தும் சார்பெழுத்தும்', unitId: 2 },
+  { pattern: /முதலெழுத்தும்\s*சார்பெழுத்தும்|முதலெ\s*ழுத்தும்|சார்பெ\s*ழுத்தும்|முதல்\s*எழுத்துகள்\s*முப்பது/i, title: 'முதலெழுத்தும் சார்பெழுத்தும்', unitId: 2 },
   { pattern: /அறிவியல்\s*ஆத்திசூடி|நெல்லை\s*சு\.\s*முத்து/i, title: 'அறிவியல் ஆத்திசூடி', unitId: 3 },
   { pattern: /அறிவியலால்\s*ஆள்வோம்/i, title: 'அறிவியலால் ஆள்வோம்', unitId: 3 },
   { pattern: /கணியனின்\s*நண்பன்|காரல்\s*கபெக்|சோபியா/i, title: 'கணியனின் நண்பன்', unitId: 3 },
-  { pattern: /துன்பத்தை\s*வெல்லும்\s*கல்வி|பட்டுக்கோட்டை/i, title: 'துன்பத்தை வெல்லும் கல்வி', unitId: 3 },
-  { pattern: /கல்விக்கண்\s*திறந்தவர்|காமராசர்/i, title: 'கல்விக்கண் திறந்தவர்', unitId: 3 },
-  { pattern: /நூலகம்\s*நோக்கி|இரா\.\s*அரங்கநாதன்/i, title: 'நூலகம் நோக்கி', unitId: 3 },
-  { pattern: /மொழிமுதல்,\s*இறுதி\s*எழுத்துகள்|மொழி\s*முதலில்\s*வரும்\s*எழுத்துகள்/i, title: 'மொழிமுதல், இறுதி எழுத்துகள்', unitId: 3 },
+  { pattern: /துன்பத்தை\s*வெல்லும்\s*கல்வி|துன்பத்ரே\s*தொவல்லும்|பட்டுக்கோட்டை/i, title: 'துன்பத்தை வெல்லும் கல்வி', unitId: 3 },
+  { pattern: /கல்விக்கண்\s*திறந்தவர்|கல்விக்கண்\s*திைந்ேவர்|காமராசர்/i, title: 'கல்விக்கண் திறந்தவர்', unitId: 3 },
+  { pattern: /நூலகம்\s*நோக்கி|நூ்லகம்\s*தபகாக்கி|இரா\.\s*அரங்கநாதன்/i, title: 'நூலகம் நோக்கி', unitId: 3 },
+  { pattern: /மொழிமுதல்,\s*இறுதி\s*எழுத்துகள்|தொமகாழிமுேல்|மொழி\s*முதலில்\s*வரும்\s*எழுத்துகள்/i, title: 'மொழிமுதல், இறுதி எழுத்துகள்', unitId: 3 },
   { pattern: /இணைப்புச்சொற்கள்/i, title: 'இணைப்புச்சொற்கள்', unitId: 3 },
 ];
 
@@ -511,16 +512,15 @@ export async function processTextbookPdf(options: ProcessPdfOptions): Promise<vo
       let activeUnitTitle: string | undefined;
       let activeLessonTitle: string | undefined;
 
-      // Only attempt slow Tesseract OCR if the document has virtually no embedded text (<500 chars)
-      // and we are not in a constrained serverless environment with >5 pages.
-      const allowOcrFallback = meaningfulTextChars < 500 && (!process.env.VERCEL || totalPages <= 5);
+      // Attempt OCR fallback if the document has low embedded text or individual pages are scanned
+      const allowOcrFallback = meaningfulTextChars < 500 || Boolean(process.env.ENABLE_PDF_OCR);
 
       for (let i = 0; i < totalPages; i++) {
         const pageNum = i + 1;
         let pageText = cleanedRawPages[i] || '';
         let isOcr = false;
 
-        if (allowOcrFallback && isScannedText(pageText) && scannedPagesCount < 5) {
+        if ((allowOcrFallback || isScannedText(pageText)) && isScannedText(pageText)) {
           scannedPagesCount++;
           const ocrText = await performOcrFallback(parser, pageNum, medium);
           if (ocrText && ocrText.length > pageText.length) {

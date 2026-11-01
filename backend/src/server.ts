@@ -11,6 +11,7 @@ import { generateAdminToken, verifyAdminToken } from './middleware/auth';
 import notesRouter from './routes/notes';
 import textbooksRouter from './routes/textbooks';
 import studyMaterialQuestionsRouter from './routes/studyMaterialQuestions';
+import aiGenerationRouter from './routes/aiGeneration';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -122,6 +123,7 @@ app.get('/', (_req, res) => {
       questions: '/api/questions',
       notes: '/api/notes',
       textbooks: '/api/textbooks',
+      ai: '/api/ai',
     },
   });
 });
@@ -163,6 +165,7 @@ app.use('/api/questions', requireSchemaMiddleware, questionsRouter);
 app.use('/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
 app.use('/api/notes', requireSchemaMiddleware, notesRouter);
 app.use('/api/textbooks', requireSchemaMiddleware, textbooksRouter);
+app.use('/api/ai', requireSchemaMiddleware, aiGenerationRouter);
 
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {

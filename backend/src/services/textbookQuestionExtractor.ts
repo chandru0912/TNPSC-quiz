@@ -1,4 +1,4 @@
-import { TextbookContext } from './aiMcqEngine';
+import { TextbookContext } from './questionValidator';
 
 export interface RawTextbookQuestion {
   question: string;

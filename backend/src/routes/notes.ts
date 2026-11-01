@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db';
 import { requireAdminAuth } from '../middleware/auth';
-import { generateStudyNotesWithRag } from '../services/studyNotesEngine';
 import { cleanTamilUnicodeText } from '../services/tamilUnicodeCleaner';
 import {
   computeContentHash,
@@ -9,6 +8,12 @@ import {
   deduplicateMarkdownContent,
   getEquivalentCategories,
 } from '../services/notesDeduplicator';
+import { buildCanonicalLessonCode, resolveSyllabusLessonId } from '../services/lessonMapping';
+import {
+  splitAndAlignNotesByTopic,
+  persistTopicAlignedNotes,
+  migrateAllExistingStudyMaterials,
+} from '../services/topicAlignmentService';
 
 const router = Router();
 
@@ -19,8 +24,10 @@ function mapRowToNote(row: any) {
     unitId: row.unit_id,
     classId: row.class_id,
     subject: row.subject,
+    term: row.term || 'Term 1',
     lessonId: row.lesson_id || null,
     lessonNumber: row.lesson_number || null,
+    lessonCode: row.lesson_code || null,
     lessonTitle: cleanTamilUnicodeText(row.lesson_title || ''),
     topic: row.topic,
     language: row.language,
@@ -34,6 +41,12 @@ function mapRowToNote(row: any) {
     topics: row.topics || null,
     contentHash: row.content_hash || null,
     deduplicationMeta: row.deduplication_meta || null,
+    topicOrder: row.topic_order ?? 0,
+    topicId: row.topic_id || null,
+    subtopics: typeof row.subtopics === 'string' ? JSON.parse(row.subtopics) : (row.subtopics || []),
+    generationStatus: row.generation_status || 'completed',
+    generationMeta: row.generation_meta || null,
+    noteFormat: row.note_format || 'short',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -42,7 +55,30 @@ function mapRowToNote(row: any) {
 // Public: Get notes
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { category, unitId, classId, lessonId, lesson_id, lesson, subject, language, status, limit = '100', offset = '0', strictLanguage } = req.query;
+    const {
+      category,
+      unitId,
+      classId,
+      lessonId,
+      lesson_id,
+      lessonNumber,
+      lesson_number,
+      lessonCode,
+      lesson_code,
+      term,
+      lesson,
+      subject,
+      language,
+      status,
+      format,
+      note_format,
+      topic,
+      topicId,
+      topic_id,
+      limit = '100',
+      offset = '0',
+      strictLanguage,
+    } = req.query;
 
     const queryConditions: string[] = [];
     const values: any[] = [];
@@ -83,36 +119,89 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex++;
     }
 
-    // Exact lessonId matching with backward-compatible fallback
+    if (term && typeof term === 'string' && term.trim() && term !== 'all') {
+      const cleanTerm = term.trim();
+      queryConditions.push(`(term IS NULL OR LOWER(term) = LOWER($${paramIndex++}) OR LOWER(term) = 'full year' OR LOWER($${paramIndex - 1}) = 'full year')`);
+      values.push(cleanTerm);
+    }
+
+    // Exact lessonCode / lessonId / lessonNumber / lessonTitle matching
+    const effectiveLessonCode = (typeof lessonCode === 'string' && lessonCode.trim() && lessonCode !== 'all')
+      ? lessonCode.trim()
+      : (typeof lesson_code === 'string' && lesson_code.trim() && lesson_code !== 'all')
+        ? lesson_code.trim()
+        : null;
+
     const effectiveLessonId = (typeof lessonId === 'string' && lessonId.trim() && lessonId !== 'all')
       ? lessonId.trim()
       : (typeof lesson_id === 'string' && lesson_id.trim() && lesson_id !== 'all')
         ? lesson_id.trim()
         : null;
 
-    if (effectiveLessonId) {
-      if (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all') {
-        queryConditions.push(`(lesson_id = $${paramIndex} OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($${paramIndex + 1})))`);
-        values.push(effectiveLessonId, lesson.trim());
-        paramIndex += 2;
-      } else {
-        queryConditions.push(`lesson_id = $${paramIndex++}`);
-        values.push(effectiveLessonId);
+    const effectiveLessonNumber = (typeof lessonNumber === 'string' && lessonNumber.trim() && lessonNumber !== 'all')
+      ? lessonNumber.trim()
+      : (typeof lesson_number === 'string' && lesson_number.trim() && lesson_number !== 'all')
+        ? lesson_number.trim()
+        : null;
+
+    const hasLessonFilter = effectiveLessonCode || effectiveLessonId || effectiveLessonNumber || (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all');
+
+    if (hasLessonFilter) {
+      const lessonConditions: string[] = [];
+
+      if (effectiveLessonCode) {
+        lessonConditions.push(`(lesson_code = $${paramIndex} OR lesson_id = $${paramIndex})`);
+        values.push(effectiveLessonCode);
+        paramIndex++;
       }
-    } else if (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all') {
-      const trimmedLesson = lesson.trim();
-      const stripped = trimmedLesson.replace(/^[0-9]+(\.[0-9]+)*[:\s-]*/, '').trim();
-      queryConditions.push(`(
-        LOWER(lesson_title) = LOWER($${paramIndex})
-        OR LOWER(title) = LOWER($${paramIndex})
-        OR LOWER(lesson_title) LIKE '%' || LOWER($${paramIndex + 1}) || '%'
-        OR LOWER($${paramIndex}) LIKE '%' || LOWER(lesson_title) || '%'
-      )`);
-      values.push(trimmedLesson, stripped || trimmedLesson);
-      paramIndex += 2;
+
+      if (effectiveLessonId) {
+        lessonConditions.push(`(lesson_id = $${paramIndex} OR lesson_code = $${paramIndex})`);
+        values.push(effectiveLessonId);
+        paramIndex++;
+      }
+
+      if (effectiveLessonNumber) {
+        const cleanNum = effectiveLessonNumber.replace(/[^0-9.]/g, '');
+        lessonConditions.push(`(
+          lesson_number = $${paramIndex}
+          OR lesson_number = $${paramIndex + 1}
+          OR lesson_id LIKE '%' || $${paramIndex + 2} || '%'
+          OR lesson_code LIKE '%' || $${paramIndex + 2} || '%'
+        )`);
+        values.push(effectiveLessonNumber, cleanNum, `l${cleanNum.replace('.', '_')}`);
+        paramIndex += 3;
+      }
+
+      if (lesson && typeof lesson === 'string' && lesson.trim() && lesson !== 'all') {
+        const trimmedLesson = lesson.trim();
+        const stripped = trimmedLesson.replace(/^[0-9]+(\.[0-9]+)*[:\s-]*/, '').trim();
+        lessonConditions.push(`(
+          LOWER(lesson_title) = LOWER($${paramIndex})
+          OR LOWER(title) = LOWER($${paramIndex})
+          OR LOWER(lesson_title) LIKE '%' || LOWER($${paramIndex + 1}) || '%'
+          OR LOWER($${paramIndex}) LIKE '%' || LOWER(lesson_title) || '%'
+        )`);
+        values.push(trimmedLesson, stripped || trimmedLesson);
+        paramIndex += 2;
+      }
+
+      queryConditions.push(`(${lessonConditions.join(' OR ')})`);
     }
 
     let orderBy = 'created_at DESC, id DESC';
+    if (effectiveLessonCode || effectiveLessonId || effectiveLessonNumber) {
+      const rankP1 = effectiveLessonCode || '__none__';
+      const rankP2 = effectiveLessonId || '__none__';
+      const rankP3 = effectiveLessonNumber || '__none__';
+      orderBy = `CASE 
+        WHEN lesson_code = '${rankP1.replace(/'/g, "''")}' THEN 0
+        WHEN lesson_id = '${rankP2.replace(/'/g, "''")}' THEN 1
+        WHEN lesson_number = '${rankP3.replace(/'/g, "''")}' THEN 2
+        ELSE 3
+      END ASC, ${orderBy}`;
+    }
+
     if (language && typeof language === 'string' && language !== 'all') {
       const lang = language.trim().toLowerCase();
       if (strictLanguage === 'true') {
@@ -120,15 +209,34 @@ router.get('/', async (req: Request, res: Response) => {
         values.push(lang);
       } else {
         const safeLang = lang.replace(/[^a-z0-9]/gi, '');
-        orderBy = `CASE WHEN LOWER(language) = '${safeLang}' THEN 0 ELSE 1 END, created_at DESC, id DESC`;
+        orderBy = `CASE WHEN LOWER(language) = '${safeLang}' THEN 0 ELSE 1 END, ${orderBy}`;
       }
     }
 
+    // Default status: published preferred, but allow staging if no published
     if (status && typeof status === 'string' && status !== 'all') {
       queryConditions.push(`status = $${paramIndex++}`);
       values.push(status);
     } else if (!status) {
-      queryConditions.push(`status = 'published'`);
+      queryConditions.push(`status IN ('published', 'staging')`);
+      orderBy = `CASE WHEN status = 'published' THEN 0 ELSE 1 END, ${orderBy}`;
+    }
+
+    const effectiveFormat = format || note_format;
+    if (effectiveFormat && typeof effectiveFormat === 'string' && (effectiveFormat === 'short' || effectiveFormat === 'full')) {
+      queryConditions.push(`COALESCE(note_format, 'short') = $${paramIndex++}`);
+      values.push(effectiveFormat.trim().toLowerCase());
+    }
+
+    const effectiveTopicId = (typeof topicId === 'string' && topicId) || (typeof topic_id === 'string' && topic_id);
+    if (effectiveTopicId && effectiveTopicId !== 'all') {
+      queryConditions.push(`(topic_id = $${paramIndex} OR topic = $${paramIndex})`);
+      values.push(effectiveTopicId);
+      paramIndex++;
+    } else if (topic && typeof topic === 'string' && topic !== 'all') {
+      queryConditions.push(`(topic = $${paramIndex} OR topic_id = $${paramIndex})`);
+      values.push(topic);
+      paramIndex++;
     }
 
     const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(' AND ')}` : '';
@@ -142,7 +250,7 @@ router.get('/', async (req: Request, res: Response) => {
     const dataQuery = `
       SELECT * FROM study_notes 
       ${whereClause} 
-      ORDER BY ${orderBy}
+      ORDER BY CASE WHEN topic_order > 0 THEN topic_order ELSE 99999 END ASC, ${orderBy}
       LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
     const dataValues = [...values, safeLimit, safeOffset];
@@ -180,6 +288,11 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       lesson,
       status,
       language,
+      format,
+      note_format,
+      topic,
+      topicId,
+      topic_id,
       limit = '50',
       offset = '0',
     } = req.query;
@@ -271,6 +384,23 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     if (language && typeof language === 'string' && language !== 'all') {
       queryConditions.push(`language = $${paramIndex++}`);
       values.push(language.toLowerCase());
+    }
+
+    const effectiveFormat = format || note_format;
+    if (effectiveFormat && typeof effectiveFormat === 'string' && (effectiveFormat === 'short' || effectiveFormat === 'full')) {
+      queryConditions.push(`COALESCE(note_format, 'short') = $${paramIndex++}`);
+      values.push(effectiveFormat.trim().toLowerCase());
+    }
+
+    const effectiveTopicId = (typeof topicId === 'string' && topicId) || (typeof topic_id === 'string' && topic_id);
+    if (effectiveTopicId && effectiveTopicId !== 'all') {
+      queryConditions.push(`(topic_id = $${paramIndex} OR topic = $${paramIndex})`);
+      values.push(effectiveTopicId);
+      paramIndex++;
+    } else if (topic && typeof topic === 'string' && topic !== 'all') {
+      queryConditions.push(`(topic = $${paramIndex} OR topic_id = $${paramIndex})`);
+      values.push(topic);
+      paramIndex++;
     }
 
     const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(' AND ')}` : '';
@@ -372,21 +502,22 @@ router.post('/bulk-publish', requireAdminAuth, async (req: Request, res: Respons
 
     // 1. Fetch details of all requested notes
     const notesQuery = await client.query(
-      `SELECT id, category, subject, unit_id, class_id, lesson_id, lesson_title, content_hash
+      `SELECT id, category, subject, unit_id, class_id, lesson_id, lesson_title, content_hash, note_format
        FROM study_notes
        WHERE id = ANY($1)
        ORDER BY id DESC`,
       [validIds]
     );
 
-    // 2. Deduplicate within the requested batch: keep at most 1 note per lesson
+    // 2. Deduplicate within the requested batch: keep at most 1 note per lesson and format
     const lessonSeen = new Set<string>();
     const noteIdsToPublish: number[] = [];
     let duplicatesSkipped = 0;
 
     for (const note of notesQuery.rows) {
       const normCat = getEquivalentCategories(note.category)[0];
-      const lessonKey = `${normCat}::${note.subject}::${note.unit_id}::${note.lesson_id || note.lesson_title.toLowerCase().trim()}`;
+      const noteFormat = note.note_format || 'short';
+      const lessonKey = `${normCat}::${note.subject}::${note.unit_id}::${note.lesson_id || note.lesson_title.toLowerCase().trim()}::${noteFormat}`;
       if (lessonSeen.has(lessonKey)) {
         duplicatesSkipped++;
         continue;
@@ -394,7 +525,7 @@ router.post('/bulk-publish', requireAdminAuth, async (req: Request, res: Respons
       lessonSeen.add(lessonKey);
       noteIdsToPublish.push(note.id);
 
-      // 3. Archive any existing published note for this lesson to prevent duplicate live notes
+      // 3. Archive any existing published note for this lesson and format to prevent duplicate live notes
       await client.query(
         `UPDATE study_notes
          SET status = 'archived', updated_at = CURRENT_TIMESTAMP
@@ -402,8 +533,9 @@ router.post('/bulk-publish', requireAdminAuth, async (req: Request, res: Respons
            AND id != $1
            AND category = ANY($2)
            AND unit_id = $3
-           AND (lesson_id = $4 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($5)))`,
-        [note.id, getEquivalentCategories(note.category), note.unit_id, note.lesson_id, note.lesson_title]
+           AND (lesson_id = $4 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($5)))
+           AND COALESCE(note_format, 'short') = $6`,
+        [note.id, getEquivalentCategories(note.category), note.unit_id, note.lesson_id, note.lesson_title, noteFormat]
       );
     }
 
@@ -533,114 +665,164 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
   }
 });
 
-// AI generate One-Liner Notes grounded in Samacheer Kalvi textbook content
-router.post('/ai-generate', requireAdminAuth, async (req: Request, res: Response) => {
+// Publish all notes belonging to a scope or array of IDs
+router.post('/publish-scope', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const {
-      category = 'group1',
-      unitId,
-      classId,
-      lessonId,
-      lessonNumber,
-      lessonTitle,
-      topic,
-      subject = 'General Studies',
-      language = 'english',
-      apiKey,
-      textbookMode = 'auto',
-      textbookId,
-      term = 'Term 1',
-      scope = 'chapter',
-    } = req.body;
+    const { noteIds, category, classId, subject, term, unitId } = req.body;
+    let updatedCount = 0;
 
-    const cleanCategory = String(category || '').trim().toLowerCase();
-    const parsedUnitId = Number(unitId) || 1;
-    const parsedClassId = classId ? Number(classId) : 6;
-    const trimmedLesson = String(lessonTitle || '').trim();
-    const trimmedTopic = String(topic || trimmedLesson).trim();
-    const lang = (String(language || 'english')).toLowerCase() === 'tamil' ? 'tamil' : 'english';
-    const effectiveApiKey = (apiKey && typeof apiKey === 'string' && apiKey.trim())
-      ? apiKey.trim()
-      : (process.env.GEMINI_API_KEY || '').trim();
+    if (Array.isArray(noteIds) && noteIds.length > 0) {
+      const result = await pool.query(
+        `UPDATE study_notes
+         SET status = 'published', updated_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[])
+         RETURNING id`,
+        [noteIds.map(Number)]
+      );
+      updatedCount = result.rows.length;
+    } else if (category && classId && subject) {
+      const conditions = [
+        `category = ANY($1)`,
+        `class_id = $2`,
+      ];
+      const values: any[] = [getEquivalentCategories(category), Number(classId)];
+      let pIdx = 3;
 
-    if (scope !== 'full_book' && !trimmedLesson) {
-      return res.status(400).json({ status: 'error', message: 'lessonTitle is required for chapter-wise notes.' });
+      if (unitId && !isNaN(Number(unitId))) {
+        conditions.push(`unit_id = $${pIdx++}`);
+        values.push(Number(unitId));
+      }
+      if (term && term !== 'all' && term !== 'Full Year') {
+        conditions.push(`(LOWER(term) = LOWER($${pIdx++}) OR term IS NULL)`);
+        values.push(term);
+      }
+
+      const result = await pool.query(
+        `UPDATE study_notes
+         SET status = 'published', updated_at = CURRENT_TIMESTAMP
+         WHERE ${conditions.join(' AND ')}
+         RETURNING id`,
+        values
+      );
+      updatedCount = result.rows.length;
     }
-
-    const result = await generateStudyNotesWithRag({
-      category: cleanCategory,
-      subject,
-      classId: parsedClassId,
-      unitId: parsedUnitId,
-      lessonId: lessonId ? String(lessonId).trim() : undefined,
-      lessonNumber: lessonNumber ? String(lessonNumber).trim() : undefined,
-      lessonTitle: trimmedLesson,
-      topic: trimmedTopic,
-      language: lang,
-      apiKey: effectiveApiKey,
-      textbookMode,
-      textbookId: textbookId ? Number(textbookId) : undefined,
-      term,
-      scope,
-    });
 
     return res.status(200).json({
       status: 'success',
-      source: result.source,
-      model: result.modelUsed,
-      textbookUsed: result.textbookUsed,
-      detectedChaptersCount: result.detectedChaptersCount,
-      data: {
-        category: cleanCategory,
-        unitId: parsedUnitId,
-        classId: parsedClassId,
-        subject,
-        lessonId: (lessonId ? String(lessonId).trim() : result.lessonId) || null,
-        lessonNumber: (lessonNumber ? String(lessonNumber).trim() : result.lessonNumber) || null,
-        lessonTitle: trimmedLesson || result.title,
-        topic: trimmedTopic,
-        language: lang,
-        title: result.title,
-        content: result.content,
-        contentHtml: null,
-        sourceReference: result.sourceReference,
-        coverageReport: result.coverageReport,
-        topics: result.topics,
-        deduplicationStats: result.deduplicationStats,
-        duplicateDetection: result.duplicateDetection,
-        contentHash: result.contentHash,
-      },
+      message: `Successfully published ${updatedCount} lesson study notes live to Study Materials!`,
+      publishedCount: updatedCount,
     });
-  } catch (error: any) {
-    console.error('Error generating study notes:', error);
-    return res.status(400).json({
-      status: 'error',
-      message: error.message || 'Failed to generate study notes',
-    });
+  } catch (err: any) {
+    console.error('Error publishing scope notes:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to publish scope notes' });
   }
 });
+
+// Admin: Migrate and organize ALL existing study materials into topic-wise notes
+router.post('/migrate-topics', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const stats = await migrateAllExistingStudyMaterials(pool);
+    return res.status(200).json({
+      status: 'success',
+      message: `Successfully migrated and organized ${stats.lessonsProcessed} lesson(s) into ${stats.topicsCreated} topic records across PostgreSQL.`,
+      stats,
+    });
+  } catch (error: any) {
+    console.error('Error in migrate-topics route:', error);
+    return res.status(500).json({ status: 'error', message: error.message || 'Failed to migrate topic notes' });
+  }
+});
+
+// Helper: Synchronize topic records across all note mutations
+async function alignAndPersistNoteTopics(params: {
+  content: string;
+  category: string;
+  subject: string;
+  classId?: number;
+  unitId: number;
+  term?: string;
+  lessonId?: string;
+  lessonNumber?: string;
+  lessonTitle: string;
+  language?: string;
+  noteFormat?: 'short' | 'full';
+  status?: string;
+  sourceReference?: string;
+}): Promise<number> {
+  try {
+    const separation = splitAndAlignNotesByTopic({
+      content: params.content,
+      category: params.category,
+      subject: params.subject,
+      classId: params.classId || 6,
+      unitId: params.unitId,
+      lessonTitle: params.lessonTitle.trim(),
+      lessonId: params.lessonId || undefined,
+      lessonNumber: params.lessonNumber || '1.1',
+      language: params.language,
+    });
+    if (separation.topics.length > 0) {
+      const res = await persistTopicAlignedNotes(pool, {
+        category: params.category,
+        subject: params.subject,
+        classId: params.classId || 6,
+        unitId: params.unitId,
+        term: params.term || 'Term 1',
+        lessonId: params.lessonId || undefined,
+        lessonNumber: params.lessonNumber || '1.1',
+        lessonTitle: params.lessonTitle.trim(),
+        language: params.language || 'tamil',
+        noteFormat: params.noteFormat || 'short',
+        sourceReference: params.sourceReference || 'Samacheer Kalvi Textbook',
+        status: params.status === 'staging' ? 'staging' : 'published',
+        separationResult: separation,
+      });
+      return res.savedTopicIds.length;
+    }
+  } catch (err) {
+    console.warn('[alignAndPersistNoteTopics] Non-fatal alignment warning:', err);
+  }
+  return 0;
+}
 
 // Create note
 router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const n = req.body;
     let rawContent = cleanTamilUnicodeText(n.content || n.contentText || '');
-    const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title);
+    const lessonTitle = cleanTamilUnicodeText(n.lessonTitle || n.lesson_title || n.title || 'Study Notes');
+    const title = cleanTamilUnicodeText(n.title || lessonTitle || 'Study Notes');
     const lessonId = (n.lessonId || n.lesson_id || null) ? String(n.lessonId || n.lesson_id).trim() : null;
     const lessonNumber = (n.lessonNumber || n.lesson_number || null) ? String(n.lessonNumber || n.lesson_number).trim() : null;
-    const unitId = Number(n.unitId || n.unit_id);
+    const unitId = typeof n.unitId === 'number'
+      ? n.unitId
+      : (parseInt(String(n.unitId || n.unit_id || '').replace(/\D/g, ''), 10) || 1);
     const category = (n.category || 'group1').trim().toLowerCase();
     const subject = n.subject || 'General Studies';
-    const classId = n.classId || n.class_id || null;
-    const topic = n.topic || '';
+    const rawClass = n.classId || n.class_id;
+    const classId = typeof rawClass === 'number' ? rawClass : (parseInt(String(rawClass || '').replace(/\D/g, ''), 10) || null);
+    const term = n.term || 'Term 1';
+    const lessonCode = n.lessonCode || n.lesson_code || buildCanonicalLessonCode({
+      category,
+      classId: classId || 6,
+      subject,
+      term,
+      unitId,
+      lessonNumber: lessonNumber || '1.1',
+      lessonId: lessonId || undefined,
+    });
+    const topic = n.topic || title;
     const language = (n.language || 'english').trim().toLowerCase();
-    const title = cleanTamilUnicodeText(n.title || lessonTitle || 'Study Notes');
     const contentHtml = n.contentHtml || n.content_html || null;
     const tags = Array.isArray(n.tags) ? JSON.stringify(n.tags) : JSON.stringify([]);
     const sourceReference = n.sourceReference || n.source_reference || null;
     const status = n.status === 'staging' ? 'staging' : n.status === 'archived' ? 'archived' : 'published';
     const coverageReport = n.coverageReport || n.coverage_report || null;
     const topics = Array.isArray(n.topics) ? JSON.stringify(n.topics) : (n.topics ? JSON.stringify(n.topics) : null);
+    const topicOrder = typeof n.topicOrder === 'number' ? n.topicOrder : (typeof n.topic_order === 'number' ? n.topic_order : 0);
+    const generationStatus = n.generationStatus || n.generation_status || 'completed';
+    const generationMeta = n.generationMeta || n.generation_meta ? JSON.stringify(n.generationMeta || n.generation_meta) : null;
+    const noteFormat = (n.noteFormat || n.note_format) === 'full' ? 'full' : 'short';
 
     if (!rawContent || rawContent.trim().length < 10) {
       return res.status(400).json({ status: 'error', message: 'Content is required (minimum 10 chars)' });
@@ -670,19 +852,35 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       lessonId,
       lessonTitle,
       language,
+      noteFormat,
       content,
     });
 
     if (dupCheck.isDuplicate && dupCheck.existingNote) {
-      // If client explicitly requests replacing/updating existing note
-      if (n.forceUpdate || n.replaceExisting) {
+      // Case 1: Publishing a note that is in staging, or client requested forceUpdate/replaceExisting
+      if ((status === 'published' && dupCheck.existingNote.status === 'staging') || n.forceUpdate || n.replaceExisting) {
+        if (status === 'published') {
+          // Archive any other published note for this lesson and format
+          await pool.query(
+            `UPDATE study_notes
+             SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+             WHERE status = 'published' AND id != $1
+               AND category = ANY($2)
+               AND unit_id = $3
+               AND (lesson_code = $4 OR lesson_id = $5 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($6)))
+               AND COALESCE(note_format, 'short') = $7`,
+            [dupCheck.existingNote.id, getEquivalentCategories(category), unitId, lessonCode, lessonId, lessonTitle.trim(), noteFormat]
+          );
+        }
+
         const updateRes = await pool.query(
           `UPDATE study_notes
            SET content = $1, title = $2, lesson_title = $3, lesson_number = $4,
                source_reference = $5, coverage_report = $6, topics = $7,
                content_hash = $8, deduplication_meta = $9, status = $10,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $11
+               term = $11, lesson_code = $12, topic_order = $13, generation_status = $14, generation_meta = $15,
+               note_format = $16, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $17
            RETURNING *;`,
           [
             content,
@@ -695,18 +893,99 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
             contentHash,
             deduplicationMeta,
             status,
+            term,
+            lessonCode,
+            topicOrder,
+            generationStatus,
+            generationMeta,
+            noteFormat,
             dupCheck.existingNote.id,
           ]
         );
+
+        // Keep topic records synchronized
+        await alignAndPersistNoteTopics({
+          content,
+          category,
+          subject,
+          classId: classId || 6,
+          unitId,
+          term,
+          lessonId: lessonId || undefined,
+          lessonNumber: lessonNumber || '1.1',
+          lessonTitle,
+          language,
+          noteFormat,
+          sourceReference: sourceReference || 'Samacheer Kalvi Textbook',
+          status: status === 'staging' ? 'staging' : 'published',
+        });
+
         return res.status(200).json({
           status: 'success',
-          message: `Existing study note (#${dupCheck.existingNote.id}) successfully updated with verified non-duplicate content.`,
+          message: status === 'published'
+            ? `Study note (#${dupCheck.existingNote.id}) successfully published live to Study Materials!`
+            : `Study note (#${dupCheck.existingNote.id}) successfully saved to Staging!`,
           data: mapRowToNote(updateRes.rows[0]),
           isUpdatedExisting: true,
         });
       }
 
-      // Reject duplicate insertion
+      // Case 2: Saving to staging when an identical note is already in staging
+      if (status === 'staging' && dupCheck.existingNote.status === 'staging') {
+        const updateRes = await pool.query(
+          `UPDATE study_notes
+           SET content = $1, title = $2, lesson_title = $3, lesson_number = $4,
+               source_reference = $5, coverage_report = $6, topics = $7,
+               content_hash = $8, deduplication_meta = $9,
+               term = $10, lesson_code = $11, topic_order = $12, generation_status = $13, generation_meta = $14,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $15
+           RETURNING *;`,
+          [
+            content,
+            title.trim(),
+            lessonTitle.trim(),
+            lessonNumber,
+            sourceReference,
+            coverageReport ? JSON.stringify(coverageReport) : null,
+            topics,
+            contentHash,
+            deduplicationMeta,
+            term,
+            lessonCode,
+            topicOrder,
+            generationStatus,
+            generationMeta,
+            dupCheck.existingNote.id,
+          ]
+        );
+
+        // Keep topic records synchronized
+        await alignAndPersistNoteTopics({
+          content,
+          category,
+          subject,
+          classId: classId || 6,
+          unitId,
+          term,
+          lessonId: lessonId || undefined,
+          lessonNumber: lessonNumber || '1.1',
+          lessonTitle,
+          language,
+          noteFormat,
+          sourceReference: sourceReference || 'Samacheer Kalvi Textbook',
+          status: 'staging',
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: `Study note (#${dupCheck.existingNote.id}) successfully updated and saved in Staging!`,
+          data: mapRowToNote(updateRes.rows[0]),
+          isUpdatedExisting: true,
+        });
+      }
+
+      // Case 3: Note is already published live and no forceUpdate requested
       return res.status(409).json({
         status: 'duplicate_prevented',
         message: `Duplicate Study Note Prevented: An identical study note (#${dupCheck.existingNote.id}) already exists in ${dupCheck.existingNote.status.toUpperCase()} (${Math.round((dupCheck.similarityScore || 1) * 100)}% match).`,
@@ -716,24 +995,116 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       });
     }
 
-    // 3. If publishing directly, archive any prior published note for this lesson
+    // 2.5 Check if there is an existing staging note for this exact lesson and format to promote or update
+    if (status === 'published' || (status === 'staging' && (n.replaceExisting || n.forceUpdate))) {
+      const existingStagedRes = await pool.query(
+        `SELECT id, status, lesson_title, lesson_id
+         FROM study_notes
+         WHERE status = 'staging'
+           AND category = ANY($1)
+           AND unit_id = $2
+           AND (lesson_code = $3 OR lesson_id = $4 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($5)))
+           AND COALESCE(note_format, 'short') = $6
+         ORDER BY id DESC
+         LIMIT 1;`,
+        [getEquivalentCategories(category), unitId, lessonCode, lessonId, lessonTitle.trim(), noteFormat]
+      );
+
+      if (existingStagedRes.rows.length > 0) {
+        const stagedToPromote = existingStagedRes.rows[0];
+        if (status === 'published') {
+          // Archive any other published notes for this lesson and format
+          await pool.query(
+            `UPDATE study_notes
+             SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+             WHERE status = 'published' AND id != $1
+               AND category = ANY($2)
+               AND unit_id = $3
+               AND (lesson_code = $4 OR lesson_id = $5 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($6)))
+               AND COALESCE(note_format, 'short') = $7`,
+            [stagedToPromote.id, getEquivalentCategories(category), unitId, lessonCode, lessonId, lessonTitle.trim(), noteFormat]
+          );
+        }
+
+        const updateRes = await pool.query(
+          `UPDATE study_notes
+           SET content = $1, title = $2, lesson_title = $3, lesson_number = $4,
+               source_reference = $5, coverage_report = $6, topics = $7,
+               content_hash = $8, deduplication_meta = $9, status = $10,
+               term = $11, lesson_code = $12, topic_order = $13, generation_status = $14, generation_meta = $15,
+               note_format = $16, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $17
+           RETURNING *;`,
+          [
+            content,
+            title.trim(),
+            lessonTitle.trim(),
+            lessonNumber,
+            sourceReference,
+            coverageReport ? JSON.stringify(coverageReport) : null,
+            topics,
+            contentHash,
+            deduplicationMeta,
+            status,
+            term,
+            lessonCode,
+            topicOrder,
+            generationStatus,
+            generationMeta,
+            noteFormat,
+            stagedToPromote.id,
+          ]
+        );
+
+        // Keep topic records synchronized
+        await alignAndPersistNoteTopics({
+          content,
+          category,
+          subject,
+          classId: classId || 6,
+          unitId,
+          term,
+          lessonId: lessonId || undefined,
+          lessonNumber: lessonNumber || '1.1',
+          lessonTitle,
+          language,
+          noteFormat,
+          sourceReference: sourceReference || 'Samacheer Kalvi Textbook',
+          status: status === 'staging' ? 'staging' : 'published',
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: status === 'published'
+            ? `Study note (#${stagedToPromote.id}) successfully published live to Study Materials!`
+            : `Study note (#${stagedToPromote.id}) successfully saved to Staging!`,
+          data: mapRowToNote(updateRes.rows[0]),
+          isUpdatedExisting: true,
+        });
+      }
+    }
+
+    // 3. If publishing directly, archive any prior published or staged notes for this lesson and format
     if (status === 'published') {
       await pool.query(
         `UPDATE study_notes
          SET status = 'archived', updated_at = CURRENT_TIMESTAMP
-         WHERE status = 'published'
+         WHERE (status = 'published' OR status = 'staging')
            AND category = ANY($1)
            AND unit_id = $2
-           AND (lesson_id = $3 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($4)))`,
-        [getEquivalentCategories(category), unitId, lessonId, lessonTitle.trim()]
+           AND (lesson_code = $3 OR lesson_id = $4 OR (lesson_id IS NULL AND LOWER(lesson_title) = LOWER($5)))
+           AND COALESCE(note_format, 'short') = $6`,
+        [getEquivalentCategories(category), unitId, lessonCode, lessonId, lessonTitle.trim(), noteFormat]
       );
     }
 
     const insertQuery = `
       INSERT INTO study_notes (
-        category, unit_id, class_id, subject, lesson_id, lesson_number, lesson_title, topic, language, title, content, content_html, tags, status, source_reference, coverage_report, topics, content_hash, deduplication_meta
+        category, unit_id, class_id, subject, term, lesson_id, lesson_number, lesson_code,
+        lesson_title, topic, language, title, content, content_html, tags, status, source_reference, coverage_report, topics, content_hash, deduplication_meta,
+        topic_order, generation_status, generation_meta, note_format
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
       RETURNING *;
     `;
     const values = [
@@ -741,10 +1112,12 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       unitId,
       classId,
       subject,
+      term,
       lessonId,
       lessonNumber,
+      lessonCode,
       lessonTitle.trim(),
-      topic,
+      topic.trim(),
       language,
       title.trim(),
       content,
@@ -756,10 +1129,60 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       topics,
       contentHash,
       deduplicationMeta,
+      topicOrder,
+      generationStatus,
+      generationMeta,
+      noteFormat,
     ];
 
     const result = await pool.query(insertQuery, values);
-    return res.status(201).json({ status: 'success', message: 'Study notes created successfully', data: mapRowToNote(result.rows[0]) });
+    const createdRow = result.rows[0];
+
+    // Automatically align and separate note content into individual topic records
+    let topicCount = 0;
+    try {
+      const separation = splitAndAlignNotesByTopic({
+        content,
+        category,
+        subject,
+        classId: classId || 6,
+        unitId,
+        lessonTitle: lessonTitle.trim(),
+        lessonId: lessonId || undefined,
+        lessonNumber: lessonNumber || '1.1',
+        language,
+      });
+
+      if (separation.topics.length > 0) {
+        const persistRes = await persistTopicAlignedNotes(pool, {
+          category,
+          subject,
+          classId: classId || 6,
+          unitId,
+          term,
+          lessonId: lessonId || undefined,
+          lessonNumber: lessonNumber || '1.1',
+          lessonTitle: lessonTitle.trim(),
+          language,
+          noteFormat,
+          sourceReference: sourceReference || 'Samacheer Kalvi Textbook',
+          status: status === 'staging' ? 'staging' : 'published',
+          separationResult: separation,
+        });
+        topicCount = persistRes.savedTopicIds.length;
+      }
+    } catch (sepErr) {
+      console.warn('[NotesRoute] Automatic topic separation non-fatal warning:', sepErr);
+    }
+
+    return res.status(201).json({
+      status: 'success',
+      message: status === 'published'
+        ? `Study notes published directly to Study Materials (${topicCount} topic(s) separated)!`
+        : `Study notes saved to Staging successfully (${topicCount} topic(s) separated)!`,
+      data: mapRowToNote(createdRow),
+      topicsSeparated: topicCount,
+    });
   } catch (error: any) {
     console.error('Error creating study note:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to create study notes', error: error.message });

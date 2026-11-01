@@ -1,4 +1,5 @@
 import pool from './db';
+import { migrateAllExistingStudyMaterials } from './services/topicAlignmentService';
 
 export async function runMigration() {
   const client = await pool.connect();
@@ -67,31 +68,89 @@ export async function runMigration() {
       );
     `);
 
-    // Ensure lesson_id, lesson_number, coverage_report, topics, and deduplication columns exist
+    // Ensure lesson_id, lesson_number, term, lesson_code, coverage_report, topics, deduplication, topic_order, and generation_meta columns exist
     await client.query(`
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_id VARCHAR(100);
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_number VARCHAR(50);
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS term VARCHAR(50) DEFAULT 'Term 1';
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_code VARCHAR(150);
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS coverage_report JSONB;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topics JSONB;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64);
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS deduplication_meta JSONB;
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topic_order INT DEFAULT 0;
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topic_id VARCHAR(150);
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS subtopics JSONB;
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS generation_status VARCHAR(50) DEFAULT 'completed';
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS generation_meta JSONB;
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS note_format VARCHAR(20) DEFAULT 'short' CHECK (note_format IN ('short', 'full'));
+      CREATE INDEX IF NOT EXISTS idx_study_notes_format ON study_notes (note_format);
       CREATE INDEX IF NOT EXISTS idx_study_notes_content_hash ON study_notes (content_hash);
       CREATE INDEX IF NOT EXISTS idx_study_notes_lesson_status ON study_notes (category, subject, unit_id, lesson_id, status);
+      CREATE INDEX IF NOT EXISTS idx_study_notes_term ON study_notes (term);
+      CREATE INDEX IF NOT EXISTS idx_study_notes_lesson_code ON study_notes (lesson_code);
+      CREATE INDEX IF NOT EXISTS idx_study_notes_composite_lesson ON study_notes (category, subject, class_id, unit_id, lesson_number, term);
+      CREATE INDEX IF NOT EXISTS idx_study_notes_topic_order ON study_notes (lesson_code, topic_order);
+      CREATE INDEX IF NOT EXISTS idx_study_notes_topic_id ON study_notes (topic_id);
+      CREATE INDEX IF NOT EXISTS idx_study_notes_lesson_topic ON study_notes (category, subject, class_id, unit_id, lesson_id, topic_id, note_format);
     `);
 
-    // Safe backfill for existing Study Notes missing lesson_id
+    // Backfill term for existing study notes
+    await client.query(`
+      UPDATE study_notes
+      SET term = CASE
+        WHEN source_reference ILIKE '%term 2%' THEN 'Term 2'
+        WHEN source_reference ILIKE '%term 3%' THEN 'Term 3'
+        WHEN source_reference ILIKE '%full year%' THEN 'Full Year'
+        ELSE COALESCE(term, 'Term 1')
+      END
+      WHERE term IS NULL OR term = '';
+    `);
+
+    // Backfill lesson_code for all study notes missing lesson_code
+    await client.query(`
+      UPDATE study_notes
+      SET lesson_code = LOWER(
+        CONCAT(
+          REGEXP_REPLACE(category, '[^a-zA-Z0-9]', '', 'g'),
+          '_std',
+          COALESCE(class_id, 6),
+          '_',
+          REGEXP_REPLACE(subject, '[^a-zA-Z0-9]', '', 'g'),
+          '_',
+          REGEXP_REPLACE(COALESCE(term, 'Term 1'), '[^a-zA-Z0-9]', '', 'g'),
+          '_u',
+          unit_id,
+          '_l',
+          COALESCE(lesson_number, '1.1')
+        )
+      )
+      WHERE lesson_code IS NULL OR lesson_code = '';
+    `);
+
+    // Safe backfill for existing Study Notes missing lesson_id or syllabus IDs
     await client.query(`
       UPDATE study_notes
       SET 
         lesson_id = 'gt-1-6-t1-l1',
         lesson_number = '1.1',
-        lesson_title = '6-ஆம் வகுப்பு (பருவம் 1): எழுத்து இலக்கணம், வகை, தொகை & மாத்திரை அளவுகள்'
+        lesson_title = '6-ஆம் வகுப்பு (பருவம் 1): எழுத்து இலக்கணம், வகை, தொகை & மாத்திரை அளவுகள்',
+        status = 'published'
       WHERE 
-        (lesson_id IS NULL OR lesson_id = '')
-        AND unit_id = 1 
+        unit_id = 1 
         AND (class_id = 6 OR class_id IS NULL)
         AND (LOWER(subject) LIKE '%tamil%' OR LOWER(category) LIKE '%group2%')
-        AND (lesson_title LIKE '%எழுத்து இலக்கணம்%' OR lesson_title LIKE '%1.1%');
+        AND (lesson_title LIKE '%எழுத்து இலக்கணம்%' OR lesson_title LIKE '%1.1%' OR lesson_id = 'gt-1-6-t1-l1' OR lesson_number = '1.1');
+    `);
+
+    // Ensure all completed textbook-generated study notes with sufficient content are published
+    await client.query(`
+      UPDATE study_notes
+      SET status = 'published'
+      WHERE status = 'staging'
+        AND LENGTH(content) > 100
+        AND class_id IS NOT NULL
+        AND unit_id IS NOT NULL;
     `);
 
     // 4. Create textbooks table
@@ -311,6 +370,13 @@ export async function runMigration() {
 
     await client.query('COMMIT');
     console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, and jobs verified.');
+
+    // Automatically align and separate all existing Study Materials topic-wise
+    try {
+      await migrateAllExistingStudyMaterials(pool);
+    } catch (migErr) {
+      console.warn('[Migration] Non-fatal warning during existing study notes topic alignment:', migErr);
+    }
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Migration failed:', error.message);

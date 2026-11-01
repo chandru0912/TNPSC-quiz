@@ -1,7 +1,7 @@
 /**
  * tamilUnicodeCleaner.ts
  *
- * Authoritative Tamil Unicode Normalizer and Cleaner (Frontend).
+ * Authoritative Tamil Unicode Normalizer and Cleaner.
  * 
  * Fixes:
  * 1. Unicode NFC normalization.
@@ -174,7 +174,41 @@ export function cleanTamilUnicodeText(raw: string): string {
     .replace(/சார்பெ\s*ழுத்து/g, 'சார்பெழுத்து')
     .replace(/முதலெ\s*ழுத்து/g, 'முதலெழுத்து')
     .replace(/மாத்\s*திரை/g, 'மாத்திரை')
-    .replace(/அள\s*வுகள்/g, 'அளவுகள்');
+    .replace(/அள\s*வுகள்/g, 'அளவுகள்')
+    // 6th Std Unit 1 Lesson 1.2: வளர்தமிழ் InDesign CMap glyph repairs
+    .replace(/ெளர்த\s*மிழ்/g, 'வளர்தமிழ்')
+    .replace(/வளர்த\s*மிழ்/g, 'வளர்தமிழ்')
+    .replace(/உதைபதட\s*உலகம்/g, 'உரைநடை உலகம்')
+    .replace(/உதைபதட/g, 'உரைநடை')
+    .replace(/தமிழ்\s*்\s*மா\s*ழி/g, 'தமிழ்மொழி')
+    .replace(/்\s*மா\s*ழி/g, 'மொழி')
+    .replace(/தமாழி/g, 'மொழி')
+    .replace(/இைழம/g, 'இளமை')
+    .replace(/வைழம/g, 'வளமை')
+    .replace(/சீர்ழம/g, 'சீர்மை')
+    .replace(/சொதரிந்து\s*சொதளிநோெோம்/g, 'தெரிந்து தெளிவோம்')
+    .replace(/சொலே்\s*முதலில்\s*ஆளப்்படும்\s*இலக்கியம்/g, 'சொல் முதலில் ஆளப்படும் இலக்கியம்')
+    .replace(/நோமற்நோகோள்/g, 'மேற்கோள்')
+    .replace(/ெளர்சொ?மோழி/g, 'வளர்மொழி')
+    .replace(/ெளதம\s*சொ?மோழி/g, 'வளமைமொழி')
+    .replace(/எளிய\s*சொ?மோழி/g, 'எளியமொழி')
+    .replace(/சீர்தம\s*சொ?மோழி/g, 'சீர்மைமொழி')
+    .replace(/புதுதம\s*சொ?மோழி/g, 'புதுமைமொழி')
+    .replace(/அறிவியல்சொ?தோழில்நுட்்ப\s*சொ?மோழி/g, 'அறிவியல் தொழில்நுட்ப மொழி')
+    .replace(/தோெை\s*இதலப்சொ்பயர்கள்/g, 'தாவர இலைப்பெயர்கள்')
+    .replace(/தமிழ்\s*எண்்கழை\s*அறிவோம்/g, 'தமிழ் எண்களை அறிவோம்')
+    // 6th Std Unit 1 Lesson 1.3: ஒளி பிறந்தது InDesign CMap glyph repairs
+    .replace(/ஒளி\s*பி்றந்த\s*து/g, 'ஒளி பிறந்தது')
+    .replace(/பி்றந்த\s*து/g, 'பிறந்தது')
+    .replace(/கு\s*ைந்ழ\s*த்க\s*ளி்ட\s*மும்/g, 'குழந்தைகளிடமும்')
+    .replace(/குைந்ழத்களி்டமும்/g, 'குழந்தைகளிடமும்')
+    .replace(/ம\s*ா\s*ண\s*வர்்க\s*ளி்ட\s*மும்/g, 'மாணவர்களிடமும்')
+    .replace(/மாணவர்களி்டமும்/g, 'மாணவர்களிடமும்')
+    .replace(/அப்துல்\s*்கலாம்/g, 'அப்துல் கலாம்')
+    .replace(/லிலியன்வாட்சன்/g, 'லிலியன் வாட்சன்')
+    .replace(/விைக்கு்கள்பல\s*தந்த\s*ஒளி/g, 'விளக்குகள் பல தந்த ஒளி')
+    .replace(/கார்பன்\s*இழை/g, 'கார்பன் இழை')
+    .replace(/செயற்கைக்\s*கால்கள்/g, 'செயற்கைக் கால்கள்');
 
   // 10. Clean vowel signs and pulli again after word replacements
   for (let i = 0; i < 3; i++) {
@@ -186,4 +220,25 @@ export function cleanTamilUnicodeText(raw: string): string {
   text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
   return text;
+}
+
+
+/**
+ * Strips PDF page references, internal IDs, and technical audit tags from notes markdown.
+ * Requirement:
+ * - Do not display PDF page numbers in the final notes.
+ * - Do not display internal extraction IDs.
+ * - Do not display technical processing information.
+ */
+export function stripPageNumbersAndInternalMetadata(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/\s*\[\s*(?:பக்கம்|பக்கங்கள்|பக்|Page|Pages)[\s:]*[\d\s,–-]+\]/gi, '')
+    .replace(/\s*\(\s*(?:பக்கம்|பக்கங்கள்|பக்|Page|Pages)[\s:]*[\d\s,–-]+\)/gi, '')
+    .replace(/\s*\[\s*(?:ID|CHUNK|EXTRACT|TOPIC_ID)[\s:]*[^\]]+\]/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\[\s*\]/g, '')
+    .replace(/\s+([.,;:])/g, '$1')
+    .trim();
 }

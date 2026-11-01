@@ -3,7 +3,7 @@ import path from 'path'
 import pool from './db'
 import { processTextbookPdf } from './services/pdfProcessor'
 import { retrieveRelevantTextbookContent } from './services/textbookRag'
-import { generateAiQuestions, verifyQuestionItem } from './services/aiMcqEngine'
+import { verifyQuestionItem } from './services/questionValidator'
 
 async function runTestSuite() {
   console.log('=====================================================')

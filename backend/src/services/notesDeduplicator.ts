@@ -35,6 +35,7 @@ export interface DuplicateCheckParams {
   lessonId?: string | null;
   lessonTitle: string;
   language?: string;
+  noteFormat?: 'short' | 'full';
   content: string;
   currentNoteId?: number;
 }
@@ -671,8 +672,13 @@ export async function checkDuplicateNoteInDb(
     values.push(Number(currentNoteId));
   }
 
+  if (params.noteFormat) {
+    syllabusQueryConditions.push(`COALESCE(note_format, 'short') = $${pIdx++}`);
+    values.push(params.noteFormat);
+  }
+
   const existingNotesQuery = `
-    SELECT id, title, lesson_title, lesson_id, status, content, content_hash
+    SELECT id, title, lesson_title, lesson_id, status, content, content_hash, note_format
     FROM study_notes
     WHERE ${syllabusQueryConditions.join(' AND ')}
     ORDER BY id DESC

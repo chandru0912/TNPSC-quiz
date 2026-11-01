@@ -57,9 +57,9 @@ export interface SyllabusCascadeState {
 }
 
 /**
- * Shared cascading syllabus state hook used by both:
- * 1. Gemini AI Generator (allowAll = false)
- * 2. Question Bank Management & Publishing section (allowAll = true)
+ * Shared cascading syllabus state hook used by:
+ * - Question Bank Management & Publishing section
+ * - Study Notes Management & Publishing section
  *
  * Powered by a single source of truth: src/data/unifiedSyllabusRegistry.ts
  */
@@ -377,7 +377,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
     onChange?.()
   }
 
-  // Sync selection programmatically (e.g., from Gemini AI Generator to Question Bank filter)
+  // Sync selection programmatically (e.g., to Question Bank filter)
   const syncSelection = (selection: {
     groupId: GroupFilterValue
     subjectId: string

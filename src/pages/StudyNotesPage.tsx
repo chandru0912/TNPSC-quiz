@@ -5,23 +5,20 @@ import {
   BookOpen,
   Loader2,
   HelpCircle,
-  Copy,
-  Check,
   Printer,
   FileText,
-  Sparkles,
   Layers,
-  GraduationCap,
   CheckCircle2,
   AlertCircle,
   RotateCcw,
-  Target,
-  Zap,
+  Search,
+  ChevronUp,
 } from 'lucide-react'
 import { useLanguage } from '../context/LanguageContext'
 import { apiFetch } from '../utils/api'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { getLessonsForSelection } from '../data/unifiedSyllabusRegistry'
+import { buildCanonicalLessonCode } from '../utils/lessonMapping'
 import './StudyNotesPage.css'
 
 interface StudyNoteRecord {
@@ -30,11 +27,18 @@ interface StudyNoteRecord {
   unitId: number
   classId: number | null
   subject: string
+  term?: string | null
   lessonId?: string | null
   lessonNumber?: string | null
+  lessonCode?: string | null
   lessonTitle: string
   topic?: string
+  topicOrder?: number
+  topicId?: string | null
+  subtopics?: string[] | string | null
+  generationStatus?: string
   language: string
+  noteFormat?: 'short' | 'full'
   title: string
   content: string
   contentHtml?: string | null
@@ -58,6 +62,18 @@ interface StudyNoteRecord {
   updatedAt?: string
 }
 
+interface TopicDisplayCard {
+  id: string | number
+  topicOrder: number
+  topicId?: string | null
+  topicTitle: string
+  subtopics: string[]
+  content: string
+  noteFormat?: 'short' | 'full'
+  tableData?: { headers: string[]; rows: string[][] } | null
+  bullets?: string[]
+}
+
 interface ParsedSection {
   number: number
   key: string
@@ -72,84 +88,30 @@ interface ParsedSection {
 
 const SECTION_CONFIGS: Record<number, { titleEn: string; titleTa: string }> = {
   1: {
-    titleEn: 'Lesson Title & Scope',
-    titleTa: 'பாடத் தலைப்பு & நோக்கம்',
+    titleEn: '1. Topic Notes',
+    titleTa: '1. முதன்மைப் பாடக் குறிப்புகள்',
   },
   2: {
-    titleEn: 'Complete Lesson Introduction',
-    titleTa: 'முழுமையான பாட அறிமுகம்',
+    titleEn: '2. Detailed Concepts',
+    titleTa: '2. விரிவான பாடக் கருத்துகள்',
   },
   3: {
-    titleEn: 'All Main Topics',
-    titleTa: 'அனைத்து முக்கிய தலைப்புகள்',
+    titleEn: '3. Educational Classifications',
+    titleTa: '3. கல்வி வகைப்பாடுகள் & அட்டவணைகள்',
   },
   4: {
-    titleEn: 'All Subtopics',
-    titleTa: 'அனைத்து துணைத் தலைப்புகள்',
-  },
-  5: {
-    titleEn: 'Detailed Explanations',
-    titleTa: 'விரிவான பாட விளக்கங்கள்',
-  },
-  6: {
-    titleEn: 'Definitions and Important Terms',
-    titleTa: 'வரையறைகள் மற்றும் கலைச்சொற்கள்',
-  },
-  7: {
-    titleEn: 'Examples from Textbook',
-    titleTa: 'பாடநூல் எடுத்துக்காட்டுகள் & சான்றுகள்',
-  },
-  8: {
-    titleEn: 'Important Facts and Information',
-    titleTa: 'முக்கிய உண்மைத் தகவல்கள்',
-  },
-  9: {
-    titleEn: 'Tables and Classifications',
-    titleTa: 'வகைப்பாடுகள் மற்றும் அட்டவணைகள்',
-  },
-  10: {
-    titleEn: 'Important Exam-Oriented Points',
-    titleTa: 'முக்கிய தேர்வு நோக்குக் குறிப்புகள்',
-  },
-  11: {
-    titleEn: 'Complete Lesson Revision Notes',
-    titleTa: 'முழுமையான பாட விரைவு மீள்பார்வை',
-  },
-  12: {
-    titleEn: 'Textbook Coverage & Quality Audit',
-    titleTa: 'பாடநூல் முழுமை ஆய்வு அறிக்கை',
+    titleEn: '4. Summary & Review',
+    titleTa: '4. முக்கியக் குறிப்புகள் & மீள்பார்வை',
   },
 }
 
-function getSectionIcon(secNum: number) {
-  switch (secNum) {
-    case 1:
-      return <BookOpen size={18} />
-    case 2:
-      return <FileText size={18} />
-    case 3:
-      return <Layers size={18} />
-    case 4:
-      return <Layers size={18} />
-    case 5:
-      return <Sparkles size={18} />
-    case 6:
-      return <Target size={18} />
-    case 7:
-      return <CheckCircle2 size={18} />
-    case 8:
-      return <GraduationCap size={18} />
-    case 9:
-      return <Layers size={18} />
-    case 10:
-      return <Zap size={18} />
-    case 11:
-      return <RotateCcw size={18} />
-    case 12:
-      return <CheckCircle2 size={18} />
-    default:
-      return <FileText size={18} />
-  }
+function getSectionIcon(_secNum: number, title?: string) {
+  const t = (title || '').toLowerCase()
+  if (t.includes('பாடத்திட்ட') || t.includes('syllabus')) return <Layers size={18} />
+  if (t.includes('அட்டவணை') || t.includes('table') || t.includes('ஒப்பீடு') || t.includes('வகைப்பாடு')) return <Layers size={18} />
+  if (t.includes('சொல்லும்') || t.includes('இலக்கணம்') || t.includes('விளக்கம்') || t.includes('கருத்து')) return <BookOpen size={18} />
+  if (t.includes('ஆசிரியர்') || t.includes('வரலாறு')) return <FileText size={18} />
+  return <BookOpen size={18} />
 }
 
 function parseMarkdownTable(text: string): { headers: string[]; rows: string[][] } | null {
@@ -238,7 +200,7 @@ function parseNoteSections(content: string): {
   // 1. "## 1. பாடத் தலைப்பு" / "## 1. LESSON TITLE"
   // 2. "SECTION 1: ..." / "பிரிவு 1: ..."
   // 3. "### 📋 பாடநூல் முழுமை ஆய்வு அறிக்கை" / "### 📋 Textbook Coverage & Quality Audit"
-  const sectionRegex = /(?:^|\n)(?:##\s*(\d+)[\.:\s]+([^\n]+)|(?:SECTION|பிரிவு)\s*(\d+)[\.:\s]*([^\n]+)|###\s*📋?\s*([^\n]*(?:ஆய்வு அறிக்கை|Quality Audit|Coverage Report)[^\n]*))/gi
+  const sectionRegex = /(?:^|\n)(?:##\s*(\d+(?:\.\d+)*)[\.:\s]+([^\n]+)|##\s+([^\n]+)|(?:SECTION|பிரிவு)\s*(\d+)[\.:\s]*([^\n]+)|###\s*📋?\s*([^\n]*(?:ஆய்வு அறிக்கை|Quality Audit|Coverage Report)[^\n]*))/gi;
   const matches = [...normalized.matchAll(sectionRegex)]
 
   if (matches.length === 0) {
@@ -275,31 +237,46 @@ function parseNoteSections(content: string): {
 
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i]
-    const secNum = parseInt(m[1] || m[3] || (m[5] ? '12' : `${i + 1}`), 10)
-    const rawTitle = (m[2] || m[4] || m[5] || '').trim()
+    let secNum = parseInt(m[1] || m[4] || `${i + 1}`, 10)
+    if (isNaN(secNum) || secNum === 0) {
+      secNum = i + 1
+    }
     const startIndex = (m.index || 0) + m[0].length
     const endIndex = i + 1 < matches.length ? matches[i + 1].index : normalized.length
     const body = normalized.substring(startIndex, endIndex).trim()
 
-    const cfg = SECTION_CONFIGS[secNum] || {
-      titleEn: rawTitle,
-      titleTa: rawTitle,
+    const isNumberedHeading = Boolean(m[1] && m[2]);
+    const headingText = isNumberedHeading ? `${m[1]}. ${m[2].trim()}` : (m[2] || m[3] || m[5] || m[6] || '').trim();
+
+    // STRICT STUDENT PORTAL RULES: Filter out any internal audit reports, MCQs, or unwanted metadata sections
+    if (/ஆய்வு\s*அறிக்கை|Quality\s*Audit|Coverage\s*Report|பாடநூல்\s*உறுதிமொழி|Textbook\s*Guarantee/i.test(headingText)) {
+      continue;
+    }
+    if (/MCQ|வினாக்கள்|மாதிரி\s*வினாக்கள்|Practice\s*Questions|Format\s*&?\s*Language|வடிவமைப்பு\s*&?\s*மொழி/i.test(headingText)) {
+      continue;
     }
 
+    const numMatch = headingText.match(/^(\d+)[\.:]/);
+    if (numMatch) {
+      secNum = parseInt(numMatch[1], 10);
+    }
+
+    const cfg = SECTION_CONFIGS[secNum];
+    const resolvedTitle = headingText || cfg?.titleEn || `Topic ${secNum}`;
+    const resolvedTitleTa = cfg?.titleTa || resolvedTitle;
+
     const tableData = parseMarkdownTable(body)
-    const parsedOnes = parseOneLiners(body)
     const parsedBul = parseBulletPoints(body)
 
     sections.push({
       number: secNum,
-      key: `section-${secNum}`,
-      titleEn: cfg.titleEn || rawTitle,
-      titleTa: cfg.titleTa || rawTitle,
-      icon: getSectionIcon(secNum),
+      key: `section-${secNum}-${i}`,
+      titleEn: resolvedTitle,
+      titleTa: resolvedTitleTa,
+      icon: getSectionIcon(secNum, resolvedTitle),
       rawText: body,
-      oneLiners: !tableData && parsedOnes.length > 0 ? parsedOnes : undefined,
       tableData,
-      bullets: !tableData && parsedOnes.length === 0 && parsedBul.length > 0 ? parsedBul : undefined,
+      bullets: !tableData && parsedBul.length > 0 && !body.includes('\n\n') ? parsedBul : undefined,
     })
   }
 
@@ -333,16 +310,20 @@ const StudyNotesPage: React.FC = () => {
 
   const queryLessonId = searchParams.get('lessonId') || ''
   const queryLessonNumber = searchParams.get('lessonNumber') || ''
+  const queryLessonCode = searchParams.get('lessonCode') || ''
+  const queryTerm = searchParams.get('term') || 'Term 1'
 
   const queryClassId = searchParams.get('classId')
   const effectiveClassId = paramClassId || (queryClassId && !isNaN(Number(queryClassId)) ? queryClassId : '')
 
   // Language filter: 'all' | 'tamil' | 'english'
   const [selectedLang, setSelectedLang] = useState<'all' | 'tamil' | 'english'>('all')
+  // Note Format filter: 'short' | 'full'
+  const [activeFormat, setActiveFormat] = useState<'short' | 'full'>('short')
+  const [topicSearch, setTopicSearch] = useState('')
   const [notes, setNotes] = useState<StudyNoteRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
 
   // Normalize category
   const normalizedCategory = useMemo(() => {
@@ -412,6 +393,19 @@ const StudyNotesPage: React.FC = () => {
     return ''
   }, [queryLessonNumber, canonicalLessonId, effectiveClassId, unitId, decodedLessonTitle, normalizedCategory, effectiveSubject])
 
+  const canonicalLessonCode = useMemo(() => {
+    if (queryLessonCode) return queryLessonCode
+    return buildCanonicalLessonCode({
+      category: normalizedCategory,
+      classId: effectiveClassId || 6,
+      subject: effectiveSubject,
+      term: queryTerm,
+      unitId: unitId || 1,
+      lessonNumber: canonicalLessonNumber || '1.1',
+      lessonId: canonicalLessonId || undefined,
+    })
+  }, [queryLessonCode, normalizedCategory, effectiveClassId, effectiveSubject, queryTerm, unitId, canonicalLessonNumber, canonicalLessonId])
+
   const fetchNotes = async () => {
     setLoading(true)
     setError(null)
@@ -421,8 +415,15 @@ const StudyNotesPage: React.FC = () => {
       if (unitId && !isNaN(Number(unitId))) params.set('unitId', unitId)
       if (effectiveClassId) params.set('classId', effectiveClassId)
       params.set('subject', effectiveSubject)
+      params.set('term', queryTerm)
+      if (canonicalLessonCode) {
+        params.set('lessonCode', canonicalLessonCode)
+      }
       if (canonicalLessonId) {
         params.set('lessonId', canonicalLessonId)
+      }
+      if (canonicalLessonNumber) {
+        params.set('lessonNumber', canonicalLessonNumber)
       }
       params.set('lesson', decodedLessonTitle)
       if (selectedLang !== 'all') {
@@ -449,7 +450,7 @@ const StudyNotesPage: React.FC = () => {
 
   useEffect(() => {
     fetchNotes()
-  }, [normalizedCategory, unitId, effectiveClassId, effectiveSubject, decodedLessonTitle, canonicalLessonId, selectedLang])
+  }, [normalizedCategory, unitId, effectiveClassId, effectiveSubject, decodedLessonTitle, canonicalLessonId, canonicalLessonNumber, canonicalLessonCode, queryTerm, selectedLang])
 
   const groupDisplayName = useMemo(() => {
     if (normalizedCategory === 'group1') return isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1'
@@ -495,22 +496,83 @@ const StudyNotesPage: React.FC = () => {
     )
   }
 
-  const handleCopyNotes = () => {
-    if (notes.length === 0) return
-    const textToCopy = notes.map((n) => `--- ${n.title} ---\n\n${n.content}`).join('\n\n')
-    navigator.clipboard.writeText(textToCopy).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2500)
-    })
-  }
+  const hasShortNotes = useMemo(() => notes.some((n) => (n.noteFormat || 'short') === 'short'), [notes])
+  const hasFullNotes = useMemo(() => notes.some((n) => n.noteFormat === 'full'), [notes])
 
-  // Active note (primary)
-  const activeNote = notes[0]
-  const parsedActiveContent = useMemo(() => {
-    if (!activeNote || !activeNote.content) return null
-    const cleaned = cleanTamilUnicodeText(activeNote.content)
-    return parseNoteSections(cleaned)
-  }, [activeNote])
+  useEffect(() => {
+    if (hasFullNotes && !hasShortNotes) {
+      setActiveFormat('full')
+    } else if (hasShortNotes && !hasFullNotes) {
+      setActiveFormat('short')
+    }
+  }, [hasShortNotes, hasFullNotes])
+
+  const filteredNotes = useMemo(() => {
+    const matching = notes.filter((n) => (n.noteFormat || 'short') === activeFormat)
+    return matching.length > 0 ? matching : notes
+  }, [notes, activeFormat])
+
+  // Automatic Topic-Wise Separation:
+  // Converts database topic records or segments content into individual topic cards
+  const displayTopics = useMemo<TopicDisplayCard[]>(() => {
+    if (filteredNotes.length === 0) return []
+
+    // 1. If individual topic records exist in filteredNotes (topicOrder >= 1)
+    const separatedRecords = filteredNotes.filter((n) => (n.topicOrder || 0) >= 1)
+    if (separatedRecords.length > 0) {
+      const sorted = [...separatedRecords].sort((a, b) => (a.topicOrder || 0) - (b.topicOrder || 0))
+      return sorted.map((n, idx) => {
+        const cleaned = cleanTamilUnicodeText(n.content || '')
+        const sub = Array.isArray(n.subtopics)
+          ? n.subtopics
+          : typeof n.subtopics === 'string'
+            ? JSON.parse(n.subtopics || '[]')
+            : []
+
+        return {
+          id: n.id,
+          topicOrder: n.topicOrder || idx + 1,
+          topicId: n.topicId || (canonicalLessonId ? `${canonicalLessonId}-t${n.topicOrder || idx + 1}` : undefined),
+          topicTitle: cleanTamilUnicodeText(n.topic || n.title || `Topic ${n.topicOrder || idx + 1}`),
+          subtopics: sub,
+          content: cleaned,
+          noteFormat: n.noteFormat || activeFormat,
+          tableData: parseMarkdownTable(cleaned),
+          bullets: parseBulletPoints(cleaned),
+        }
+      })
+    }
+
+    // 2. Fallback: If only a master note exists (topicOrder === 0 or null),
+    // automatically segment into separate topic cards so every topic gets its own card!
+    const masterNote = filteredNotes.find((n) => !n.topicOrder || n.topicOrder === 0) || filteredNotes[0]
+    if (!masterNote || !masterNote.content) return []
+
+    const cleaned = cleanTamilUnicodeText(masterNote.content)
+    const parsed = parseNoteSections(cleaned)
+    return parsed.sections.map((sec, idx) => ({
+      id: `sec-${sec.number}-${idx}`,
+      topicOrder: sec.number || idx + 1,
+      topicId: canonicalLessonId ? `${canonicalLessonId}-t${sec.number || idx + 1}` : undefined,
+      topicTitle: isTamil ? (sec.titleTa || sec.titleEn) : (sec.titleEn || sec.titleTa),
+      subtopics: sec.bullets || [],
+      content: sec.rawText,
+      noteFormat: masterNote.noteFormat || activeFormat,
+      tableData: sec.tableData,
+      bullets: sec.bullets,
+    }))
+  }, [filteredNotes, activeFormat, canonicalLessonId, isTamil])
+
+  const filteredTopics = useMemo(() => {
+    if (!topicSearch.trim()) return displayTopics
+    const q = topicSearch.trim().toLowerCase()
+    return displayTopics.filter(
+      (t) =>
+        t.topicTitle.toLowerCase().includes(q) ||
+        t.subtopics.some((st) => st.toLowerCase().includes(q)) ||
+        t.content.toLowerCase().includes(q)
+    )
+  }, [displayTopics, topicSearch])
 
   return (
     <div className="study-notes-page">
@@ -547,67 +609,10 @@ const StudyNotesPage: React.FC = () => {
             <span className="study-notes-breadcrumb-active">{decodedLessonTitle}</span>
           </nav>
 
-          {/* Badges / Meta */}
-          <div className="study-notes-meta-bar">
-            <span className="study-meta-pill study-meta-pill-gold">
-              <BookOpen size={13} />
-              <span>{isTamil ? 'பாடக் குறிப்புகள்' : 'Study Notes'}</span>
-            </span>
-            {(canonicalLessonNumber || activeNote?.lessonNumber) && (
-              <span className="study-meta-pill study-meta-pill-gold" style={{ fontWeight: 700 }}>
-                <span>{isTamil ? `பாடம் ${canonicalLessonNumber || activeNote?.lessonNumber}` : `Lesson ${canonicalLessonNumber || activeNote?.lessonNumber}`}</span>
-              </span>
-            )}
-            <span className="study-meta-pill study-meta-pill-blue">
-              <Layers size={13} />
-              <span>{groupDisplayName}</span>
-            </span>
-            <span className="study-meta-pill">
-              <span>{subjectDisplayName}</span>
-            </span>
-            {classDisplayName && (
-              <span className="study-meta-pill study-meta-pill-emerald">
-                <GraduationCap size={13} />
-                <span>{classDisplayName}</span>
-              </span>
-            )}
-            {unitId && (
-              <span className="study-meta-pill">
-                <span>{isTamil ? `அலகு ${unitId}` : `Unit ${unitId}`}</span>
-              </span>
-            )}
-            {activeNote?.coverageReport && (
-              <span
-                className="study-meta-pill study-meta-pill-emerald"
-                style={{
-                  background: 'rgba(16, 185, 129, 0.15)',
-                  color: '#34d399',
-                  borderColor: 'rgba(16, 185, 129, 0.4)',
-                  fontWeight: 700,
-                }}
-              >
-                <CheckCircle2 size={13} />
-                <span>
-                  {isTamil
-                    ? `பாடநூல் முழுமை: 100% (${activeNote.coverageReport.totalLessonPages} பக்கங்கள்)`
-                    : `Textbook 100% Covered (${activeNote.coverageReport.totalLessonPages} Pages)`}
-                </span>
-              </span>
-            )}
-          </div>
-
           {/* Lesson Title */}
-          <h1 className="study-notes-title">{decodedLessonTitle}</h1>
-
-          {/* Source Reference Callout */}
-          {activeNote?.sourceReference && (
-            <div className="study-notes-source-callout">
-              <BookOpen size={16} style={{ flexShrink: 0 }} />
-              <span>
-                <strong>{isTamil ? 'பாடநூல் ஆதாரம்:' : 'Textbook Reference:'}</strong> {activeNote.sourceReference}
-              </span>
-            </div>
-          )}
+          <h1 className="study-notes-title">
+            {canonicalLessonNumber ? `${canonicalLessonNumber} ${decodedLessonTitle}` : decodedLessonTitle}
+          </h1>
 
           {/* Action Bar */}
           <div className="study-notes-actions-bar">
@@ -624,6 +629,26 @@ const StudyNotesPage: React.FC = () => {
             </div>
 
             <div className="study-notes-actions-right">
+              {/* Note Format Switcher: Short Notes vs Full Notes */}
+              {(hasShortNotes || hasFullNotes || notes.length > 0) && (
+                <div className="study-lang-switch">
+                  <button
+                    className={`study-lang-pill ${activeFormat === 'short' ? 'active' : ''}`}
+                    onClick={() => setActiveFormat('short')}
+                    title="View concise exam-oriented revision notes"
+                  >
+                    <span>⚡ {isTamil ? 'சுருக்கக் குறிப்புகள்' : 'Short Notes'}</span>
+                  </button>
+                  <button
+                    className={`study-lang-pill ${activeFormat === 'full' ? 'active' : ''}`}
+                    onClick={() => setActiveFormat('full')}
+                    title="View comprehensive detailed textbook notes"
+                  >
+                    <span>📖 {isTamil ? 'முழுப் பாடம்' : 'Full Notes'}</span>
+                  </button>
+                </div>
+              )}
+
               {/* Language Switcher */}
               <div className="study-lang-switch">
                 <button
@@ -649,11 +674,6 @@ const StudyNotesPage: React.FC = () => {
                 </button>
               </div>
 
-              <button className="study-btn study-btn-gold-outline" onClick={handleCopyNotes} disabled={notes.length === 0}>
-                {copied ? <Check size={15} style={{ color: '#10b981' }} /> : <Copy size={15} />}
-                <span>{copied ? (isTamil ? 'நகலெடுக்கப்பட்டது!' : 'Copied!') : isTamil ? 'நகலெடு' : 'Copy'}</span>
-              </button>
-
               <button className="study-btn study-btn-secondary" onClick={() => window.print()} title="Print or Save PDF">
                 <Printer size={15} />
                 <span>{isTamil ? 'அச்சிடு' : 'Print'}</span>
@@ -663,13 +683,13 @@ const StudyNotesPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Quick Nav bar (Jump to Section) */}
-      {parsedActiveContent && parsedActiveContent.sections.length > 1 && (
+      {/* Quick Nav bar (Jump to Topic) */}
+      {displayTopics.length > 1 && (
         <div className="study-quick-nav-bar">
           <div className="study-quick-nav">
-            {parsedActiveContent.sections.map((sec) => (
-              <a key={sec.key} href={`#${sec.key}`} className="study-quick-pill">
-                <span>{isTamil ? `§ ${sec.number}. ${sec.titleTa}` : `§ ${sec.number}. ${sec.titleEn}`}</span>
+            {displayTopics.map((t) => (
+              <a key={t.id} href={`#topic-${t.topicOrder}`} className="study-quick-pill">
+                <span>{isTamil ? `§ தலைப்பு ${t.topicOrder}: ${t.topicTitle}` : `§ Topic ${t.topicOrder}: ${t.topicTitle}`}</span>
               </a>
             ))}
           </div>
@@ -684,8 +704,8 @@ const StudyNotesPage: React.FC = () => {
             <h2 className="study-state-title">{isTamil ? 'பாடக் குறிப்புகள் ஏற்றப்படுகிறது...' : 'Loading Study Notes...'}</h2>
             <p className="study-state-desc">
               {isTamil
-                ? 'அதிகாரப்பூர்வ சமச்சீர் கல்வி பாடநூல் அடிப்படையிலான தேர்வு ஒருவரி குறிப்புகள் மீட்டெடுக்கப்படுகின்றன.'
-                : 'Retrieving official Samacheer Kalvi examination one-liner notes.'}
+                ? 'அதிகாரப்பூர்வ சமச்சீர் கல்வி பாடநூல் அடிப்படையிலான முழுமையான பாடக் குறிப்புகள் மீட்டெடுக்கப்படுகின்றன.'
+                : 'Retrieving official Samacheer Kalvi complete syllabus study notes.'}
             </p>
           </div>
         ) : error ? (
@@ -700,7 +720,7 @@ const StudyNotesPage: React.FC = () => {
               <span>{isTamil ? 'மீண்டும் முயற்சிக்க' : 'Retry'}</span>
             </button>
           </div>
-        ) : notes.length === 0 ? (
+        ) : displayTopics.length === 0 ? (
           <div className="study-state-card glass">
             <BookOpen size={50} style={{ opacity: 0.45, margin: '0 auto 1.25rem', color: '#ffd700' }} />
             <h2 className="study-state-title">{isTamil ? 'பாடக் குறிப்புகள் இன்னும் சேர்க்கப்படவில்லை' : 'No Study Notes Available'}</h2>
@@ -721,133 +741,167 @@ const StudyNotesPage: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', width: '100%' }}>
-            {/* If multiple notes exist, show note tabs or stacked cards */}
-            {notes.map((note, noteIdx) => {
-              const cleaned = cleanTamilUnicodeText(note.content)
-              const parsed = parseNoteSections(cleaned)
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+            {/* Topic Filter & Summary Toolbar */}
+            <div className="study-topic-search-wrap">
+              <div className="study-topic-count-summary">
+                <span>
+                  {isTamil
+                    ? `அதிகாரப்பூர்வ பாடத்திட்டப் பிரிவுகள்: ${filteredTopics.length} / ${displayTopics.length} தலைப்புகள்`
+                    : `Syllabus Topic Alignment: ${filteredTopics.length} of ${displayTopics.length} Topics`}
+                </span>
+              </div>
+              <div className="study-topic-search-box">
+                <Search size={15} style={{ opacity: 0.6 }} />
+                <input
+                  type="text"
+                  className="study-topic-search-input"
+                  placeholder={isTamil ? 'தலைப்பைத் தேடுக...' : 'Search topics in lesson...'}
+                  value={topicSearch}
+                  onChange={(e) => setTopicSearch(e.target.value)}
+                />
+                {topicSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setTopicSearch('')}
+                    style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', padding: 0 }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
 
-              return (
-                <div key={note.id || noteIdx} style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
-                  {/* Note Preamble / Callout */}
-                  {parsed.blockquote && (
-                    <blockquote className="notes-blockquote">
-                      {renderFormattedText(parsed.blockquote)}
-                    </blockquote>
+            {/* Render Each Topic as its Own Separate Card */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+              {filteredTopics.map((topicItem) => (
+                <section
+                  key={topicItem.id}
+                  id={`topic-${topicItem.topicOrder}`}
+                  className="study-section-card"
+                >
+                  {/* Topic Card Header */}
+                  <header className="study-section-header">
+                    <div className="study-section-title-wrap">
+                      <span className="study-topic-order-badge">
+                        {isTamil ? `தலைப்பு ${topicItem.topicOrder}` : `Topic ${topicItem.topicOrder}`}
+                      </span>
+                      <h2 className="study-section-title">
+                        {topicItem.topicTitle}
+                      </h2>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="study-meta-pill study-meta-pill-gold">
+                        {topicItem.noteFormat === 'full'
+                          ? (isTamil ? '📖 முழுப் பாடம்' : '📖 Full Notes')
+                          : (isTamil ? '⚡ சுருக்கக் குறிப்பு' : '⚡ Short Notes')}
+                      </span>
+                      {topicItem.tableData && (
+                        <span className="study-section-count-badge">
+                          {topicItem.tableData.rows.length} {isTamil ? 'வரிசைகள்' : 'Rows'}
+                        </span>
+                      )}
+                    </div>
+                  </header>
+
+                  {/* Subtopics Bar (if subtopics exist) */}
+                  {topicItem.subtopics && topicItem.subtopics.length > 0 && (
+                    <div className="study-subtopics-list">
+                      <span className="study-subtopics-label">
+                        {isTamil ? 'துணைத் தலைப்புகள்:' : 'Subtopics:'}
+                      </span>
+                      {topicItem.subtopics.map((st, sIdx) => (
+                        <span key={sIdx} className="study-subtopic-tag">
+                          <span>🏷️</span>
+                          <span>{st}</span>
+                        </span>
+                      ))}
+                    </div>
                   )}
 
-                  {/* Render 6 Structured Sections */}
-                  {parsed.sections.map((sec) => (
-                    <section key={sec.key} id={sec.key} className="study-section-card">
-                      <header className="study-section-header">
-                        <div className="study-section-title-wrap">
-                          <div className="study-section-icon-box">{sec.icon}</div>
-                          <div>
-                            <h2 className="study-section-title">
-                              {isTamil ? `பகுதி ${sec.number}: ${sec.titleTa}` : `Section ${sec.number}: ${sec.titleEn}`}
-                            </h2>
-                          </div>
-                        </div>
-
-                        {sec.oneLiners && (
-                          <span className="study-section-count-badge">
-                            {sec.oneLiners.length} {isTamil ? 'ஒருவரி குறிப்புகள்' : 'One-Liners'}
-                          </span>
-                        )}
-                        {sec.tableData && (
-                          <span className="study-section-count-badge">
-                            {sec.tableData.rows.length} {isTamil ? 'வரிசைகள்' : 'Rows'}
-                          </span>
-                        )}
-                      </header>
-
-                      <div className="study-section-body">
-                        {/* 1. One-Liner Fact Cards (Section 1) */}
-                        {sec.oneLiners && sec.oneLiners.length > 0 ? (
-                          <div className="one-liners-grid">
-                            {sec.oneLiners.map((item) => (
-                              <div key={item.num} className="one-liner-fact-card">
-                                <span className="fact-num-circle">{item.num}</span>
-                                <div className="fact-text-content">
-                                  {renderFormattedText(item.text)}
-                                  {item.page && (
-                                    <span className="fact-page-badge">
-                                      <BookOpen size={11} />
-                                      <span>
-                                        {isTamil ? 'பக்கம்' : 'Page'} {item.page}
-                                      </span>
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : sec.tableData ? (
-                          /* 2. Structured Markdown Table (Sections 4, 9, 11, 12) */
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            {(() => {
-                              const nonTableText = sec.rawText
-                                .split('\n')
-                                .filter((l) => !l.trim().startsWith('|'))
-                                .join('\n')
-                                .trim()
-                              if (!nonTableText) return null
-                              return (
-                                <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75, fontSize: '0.95rem', color: '#cbd5e1' }}>
-                                  {renderFormattedText(nonTableText)}
-                                </div>
-                              )
-                            })()}
-                            <div className="table-responsive-wrapper">
-                              <table className="notes-markdown-table">
-                                <thead>
-                                  <tr>
-                                    {sec.tableData.headers.map((h, hIdx) => (
-                                      <th key={hIdx}>{renderFormattedText(h)}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {sec.tableData.rows.map((row, rIdx) => (
-                                    <tr key={rIdx}>
-                                      {row.map((col, cIdx) => (
-                                        <td key={cIdx}>{renderFormattedText(col)}</td>
-                                      ))}
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                  {/* Topic Card Content */}
+                  <div className="study-section-body">
+                    {topicItem.tableData ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {(() => {
+                          const nonTableText = topicItem.content
+                            .split('\n')
+                            .filter((l) => !l.trim().startsWith('|'))
+                            .join('\n')
+                            .trim()
+                          if (!nonTableText) return null
+                          return (
+                            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.85, fontSize: '0.98rem', color: '#e2e8f0' }}>
+                              {renderFormattedText(nonTableText)}
                             </div>
-                          </div>
-                        ) : sec.bullets && sec.bullets.length > 0 ? (
-                          /* 3. Bullet Facts List (Sections 3, 5) */
-                          <div className="bullet-facts-list">
-                            {sec.bullets.map((b, bIdx) => (
-                              <div key={bIdx} className="bullet-fact-item">
-                                <CheckCircle2 size={16} className="bullet-fact-icon" />
-                                <div className="bullet-fact-text">{renderFormattedText(b)}</div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          /* 4. Fallback text rendering with formatting */
-                          <div
-                            style={{
-                              whiteSpace: 'pre-wrap',
-                              lineHeight: 1.85,
-                              fontSize: '1rem',
-                              color: '#e2e8f0',
-                            }}
-                          >
-                            {renderFormattedText(sec.rawText)}
-                          </div>
-                        )}
+                          )
+                        })()}
+                        <div className="table-responsive-wrapper">
+                          <table className="notes-markdown-table">
+                            <thead>
+                              <tr>
+                                {topicItem.tableData.headers.map((h, hIdx) => (
+                                  <th key={hIdx}>{renderFormattedText(h)}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {topicItem.tableData.rows.map((row, rIdx) => (
+                                <tr key={rIdx}>
+                                  {row.map((col, cIdx) => (
+                                    <td key={cIdx}>{renderFormattedText(col)}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </section>
-                  ))}
-                </div>
-              )
-            })}
+                    ) : topicItem.bullets && topicItem.bullets.length > 0 && !topicItem.content.includes('\n\n') ? (
+                      <div className="bullet-facts-list">
+                        {topicItem.bullets.map((b, bIdx) => (
+                          <div key={bIdx} className="bullet-fact-item">
+                            <CheckCircle2 size={16} className="bullet-fact-icon" />
+                            <div className="bullet-fact-text">{renderFormattedText(b)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          whiteSpace: 'pre-wrap',
+                          lineHeight: 1.9,
+                          fontSize: '1rem',
+                          color: '#e2e8f0',
+                          letterSpacing: '0.01em',
+                        }}
+                      >
+                        {renderFormattedText(topicItem.content)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card Footer */}
+                  <footer className="study-topic-card-footer">
+                    <span className="study-topic-footer-id">
+                      {topicItem.topicId ? `ID: ${topicItem.topicId}` : ''}
+                    </span>
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        window.scrollTo({ top: 0, behavior: 'smooth' })
+                      }}
+                      style={{ color: '#ffd700', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                    >
+                      <ChevronUp size={14} />
+                      <span>{isTamil ? 'மேலே செல்க' : 'Top'}</span>
+                    </a>
+                  </footer>
+                </section>
+              ))}
+            </div>
           </div>
         )}
       </main>

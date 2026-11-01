@@ -7,7 +7,7 @@ import {
   isValidQuestionText,
   resolveCorrectAnswerIndex,
   ExistingDbQuestionRecord,
-} from '../services/aiMcqEngine';
+} from '../services/questionValidator';
 import { mapRowToQuestion, QuestionDTO } from './questions';
 
 const router = Router();
@@ -322,7 +322,7 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
 
 /**
  * POST /api/study-materials/questions/upload (Protected)
- * Uploads Gemini AI generated questions directly into Study Materials staging.
+ * Uploads questions directly into Study Materials staging.
  * Enforces target_system = 'study_materials'.
  */
 router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => {
