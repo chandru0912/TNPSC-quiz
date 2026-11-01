@@ -13,21 +13,35 @@ function getJwtSecret(): string {
 }
 
 /**
+ * Sanitizes credentials by trimming whitespace, stripping enclosing quotes,
+ * removing carriage returns (\r) and newlines, and stripping zero-width unicode characters.
+ */
+export function cleanCredential(val?: string | null): string {
+  if (!val || typeof val !== 'string') return '';
+  return val
+    .trim()
+    .replace(/^["']+|["']+$/g, '') // remove surrounding single or double quotes
+    .replace(/[\r\n\t]/g, '') // remove carriage returns, newlines, tabs
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // remove invisible zero-width spaces
+    .trim();
+}
+
+/**
  * Derives the exact Google OAuth redirect URI based on environment, request hint, and configuration.
  */
 export function resolveRedirectUri(customRedirectUri?: string, reqHostHint?: string): string {
   if (customRedirectUri && customRedirectUri.trim()) {
-    return customRedirectUri.trim();
+    return cleanCredential(customRedirectUri);
   }
   if (process.env.GOOGLE_REDIRECT_URI && process.env.GOOGLE_REDIRECT_URI.trim()) {
-    return process.env.GOOGLE_REDIRECT_URI.trim();
+    return cleanCredential(process.env.GOOGLE_REDIRECT_URI);
   }
   if (process.env.BACKEND_URL && process.env.BACKEND_URL.trim()) {
-    return `${process.env.BACKEND_URL.trim().replace(/\/+$/, '')}/api/drive/oauth/callback`;
+    return `${cleanCredential(process.env.BACKEND_URL).replace(/\/+$/, '')}/api/drive/oauth/callback`;
   }
 
   if (reqHostHint && reqHostHint.trim()) {
-    const cleanHost = reqHostHint.trim();
+    const cleanHost = cleanCredential(reqHostHint);
     const isLocal = cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1');
     if (isLocal) {
       return `http://${cleanHost}/api/drive/oauth/callback`;
@@ -46,11 +60,11 @@ export function resolveRedirectUri(customRedirectUri?: string, reqHostHint?: str
 }
 
 /**
- * Creates an OAuth2 client instance.
+ * Creates an OAuth2 client instance with sanitized credentials.
  */
 export function createOAuth2Client(redirectUri?: string) {
-  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
-  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  const clientId = cleanCredential(process.env.GOOGLE_CLIENT_ID);
+  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
   const effectiveRedirectUri = resolveRedirectUri(redirectUri);
 
   return new google.auth.OAuth2(clientId, clientSecret, effectiveRedirectUri);
@@ -58,14 +72,15 @@ export function createOAuth2Client(redirectUri?: string) {
 
 /**
  * Generates an HMAC-signed CSRF state token for the OAuth authorization flow.
- * Securely encodes admin username and optional frontend origin for exact post-consent redirection.
+ * Securely encodes admin username, frontend origin, and redirect URI for exact post-consent redirection.
  */
-export function generateOAuthState(adminUsername: string, frontendOrigin?: string): string {
+export function generateOAuthState(adminUsername: string, frontendOrigin?: string, redirectUri?: string): string {
   const secret = getJwtSecret();
   const timestamp = Date.now();
   const rawPayload = JSON.stringify({
     adminUsername,
-    frontendOrigin: frontendOrigin ? frontendOrigin.trim() : undefined,
+    frontendOrigin: frontendOrigin ? cleanCredential(frontendOrigin) : undefined,
+    redirectUri: redirectUri ? cleanCredential(redirectUri) : undefined,
     timestamp,
     nonce: crypto.randomBytes(16).toString('hex'),
   });
@@ -75,12 +90,13 @@ export function generateOAuthState(adminUsername: string, frontendOrigin?: strin
 }
 
 /**
- * Validates the HMAC-signed OAuth state token and extracts admin username and frontend origin.
+ * Validates the HMAC-signed OAuth state token and extracts admin username, frontend origin, and redirect URI.
  */
 export function verifyOAuthState(state: string): {
   isValid: boolean;
   adminUsername?: string;
   frontendOrigin?: string;
+  redirectUri?: string;
 } {
   try {
     const secret = getJwtSecret();
@@ -105,7 +121,10 @@ export function verifyOAuthState(state: string): {
       isValid: true,
       adminUsername: payload.adminUsername,
       frontendOrigin: typeof payload.frontendOrigin === 'string' && payload.frontendOrigin.trim()
-        ? payload.frontendOrigin.trim()
+        ? cleanCredential(payload.frontendOrigin)
+        : undefined,
+      redirectUri: typeof payload.redirectUri === 'string' && payload.redirectUri.trim()
+        ? cleanCredential(payload.redirectUri)
         : undefined,
     };
   } catch {
@@ -121,8 +140,9 @@ export function getAuthorizationUrl(
   redirectUri?: string,
   frontendOrigin?: string
 ): string {
-  const oauth2Client = createOAuth2Client(redirectUri);
-  const state = generateOAuthState(adminUsername, frontendOrigin);
+  const effectiveRedirect = resolveRedirectUri(redirectUri);
+  const oauth2Client = createOAuth2Client(effectiveRedirect);
+  const state = generateOAuthState(adminUsername, frontendOrigin, effectiveRedirect);
 
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -327,6 +347,84 @@ export async function getOrCreateTargetFolder(authClient: any): Promise<string> 
 }
 
 /**
+ * Probes Google OAuth token endpoint to verify client credentials validity
+ * without exposing secrets or completing a full login.
+ */
+export async function verifyGoogleClientCredentials(redirectUri?: string): Promise<{
+  status: 'valid_client_credentials' | 'invalid_client_secret' | 'invalid_client_id' | 'unconfigured' | 'error';
+  details: string;
+  isAuthentic: boolean;
+}> {
+  const clientId = cleanCredential(process.env.GOOGLE_CLIENT_ID);
+  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
+  const effectiveRedirectUri = resolveRedirectUri(redirectUri);
+
+  if (!clientId || !clientSecret) {
+    return {
+      status: 'unconfigured',
+      details: 'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing or empty in environment variables.',
+      isAuthentic: false,
+    };
+  }
+
+  try {
+    const probeParams = new URLSearchParams({
+      code: 'probe_test_verifier_code',
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: effectiveRedirectUri,
+      grant_type: 'authorization_code',
+    });
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: probeParams.toString(),
+    });
+
+    const data: any = await res.json().catch(() => ({}));
+
+    if (data.error === 'invalid_client') {
+      const desc = data.error_description || '';
+      if (/secret/i.test(desc)) {
+        return {
+          status: 'invalid_client_secret',
+          details: 'Google rejected the Client Secret: ' + desc,
+          isAuthentic: false,
+        };
+      }
+      return {
+        status: 'invalid_client_id',
+        details: 'Google rejected the Client ID: ' + desc,
+        isAuthentic: false,
+      };
+    }
+
+    // Google returns invalid_grant when the client credentials ARE valid,
+    // but the authorization code was a probe dummy!
+    if (data.error === 'invalid_grant' || data.error === 'bad_request') {
+      return {
+        status: 'valid_client_credentials',
+        details: 'Google Cloud successfully validated and accepted GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.',
+        isAuthentic: true,
+      };
+    }
+
+    return {
+      status: 'error',
+      details: `Google response: ${data.error || res.status} - ${data.error_description || ''}`,
+      isAuthentic: false,
+    };
+  } catch (err: any) {
+    return {
+      status: 'error',
+      details: `Failed to contact Google OAuth token endpoint: ${err.message}`,
+      isAuthentic: false,
+    };
+  }
+}
+
+/**
  * Exchanges the OAuth authorization code for tokens, extracts account email,
  * initializes the dedicated folder, and saves credentials to PostgreSQL.
  */
@@ -341,8 +439,32 @@ export async function handleOAuthCallback(code: string, state: string, redirectU
     throw new Error('OAuth Security Error: Invalid or expired state token (possible CSRF attack).');
   }
 
-  const oauth2Client = createOAuth2Client(redirectUri);
-  const { tokens } = await oauth2Client.getToken(code);
+  const clientId = cleanCredential(process.env.GOOGLE_CLIENT_ID);
+  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
+
+  if (!clientId || !clientSecret) {
+    throw new Error('Google Cloud OAuth configuration missing: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is empty.');
+  }
+
+  // Ensure redirect URI matches the exact URI recorded in state or fallback
+  const effectiveRedirectUri = resolveRedirectUri(stateCheck.redirectUri || redirectUri);
+  const oauth2Client = createOAuth2Client(effectiveRedirectUri);
+
+  const cleanCode = cleanCredential(code);
+  let tokens: any;
+  try {
+    const tokenRes = await oauth2Client.getToken(cleanCode);
+    tokens = tokenRes.tokens;
+  } catch (tokenErr: any) {
+    const errorData = tokenErr.response?.data;
+    const googleDesc = errorData?.error_description || errorData?.error || tokenErr.message;
+    console.error('[GoogleDriveService] Google OAuth token exchange failed:', {
+      error: errorData?.error,
+      errorDescription: googleDesc,
+      status: tokenErr.response?.status,
+    });
+    throw new Error(`Google OAuth error: ${googleDesc}`);
+  }
 
   if (!tokens.refresh_token) {
     // If no refresh token was returned (user was already consented), check if we already have one stored
@@ -398,11 +520,36 @@ export async function getConnectionStatus(): Promise<{
   folderId?: string;
   error?: string;
   redirectUri: string;
+  clientInfo?: {
+    clientIdLength: number;
+    clientIdConfigured: boolean;
+    clientSecretConfigured: boolean;
+    clientSecretLength: number;
+    clientSecretStartsWithGocspx: boolean;
+    hasFormattingIssue: boolean;
+  };
 }> {
-  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
-  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  const rawId = process.env.GOOGLE_CLIENT_ID || '';
+  const rawSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+  const clientId = cleanCredential(rawId);
+  const clientSecret = cleanCredential(rawSecret);
   const configured = Boolean(clientId && clientSecret);
   const redirectUri = resolveRedirectUri();
+
+  const hasFormattingIssue =
+    /^["']|["']$/.test(rawId) ||
+    /^["']|["']$/.test(rawSecret) ||
+    /\s/.test(rawId) ||
+    /\s/.test(rawSecret);
+
+  const clientInfo = {
+    clientIdLength: clientId.length,
+    clientIdConfigured: Boolean(clientId),
+    clientSecretConfigured: Boolean(clientSecret),
+    clientSecretLength: clientSecret.length,
+    clientSecretStartsWithGocspx: clientSecret.startsWith('GOCSPX-'),
+    hasFormattingIssue,
+  };
 
   if (!configured) {
     return {
@@ -410,6 +557,7 @@ export async function getConnectionStatus(): Promise<{
       configured: false,
       folderName: TARGET_FOLDER_NAME,
       redirectUri,
+      clientInfo,
       error: 'Google OAuth Client ID & Secret are not yet configured in server environment variables.',
     };
   }
@@ -421,6 +569,7 @@ export async function getConnectionStatus(): Promise<{
       configured: true,
       folderName: TARGET_FOLDER_NAME,
       redirectUri,
+      clientInfo,
       error: 'Google Drive is not connected yet. Click "Connect Google Drive" to authenticate.',
     };
   }
@@ -435,6 +584,7 @@ export async function getConnectionStatus(): Promise<{
       folderName: TARGET_FOLDER_NAME,
       folderId,
       redirectUri,
+      clientInfo,
     };
   } catch (err: any) {
     return {
@@ -444,6 +594,7 @@ export async function getConnectionStatus(): Promise<{
       folderName: TARGET_FOLDER_NAME,
       folderId: stored.folderId || undefined,
       redirectUri,
+      clientInfo,
       error: err.message || 'Failed to authenticate with Google Drive API',
     };
   }

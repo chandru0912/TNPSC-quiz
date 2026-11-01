@@ -5,6 +5,7 @@ import {
   getAuthorizationUrl,
   handleOAuthCallback,
   verifyOAuthState,
+  verifyGoogleClientCredentials,
   getConnectionStatus,
   initiateResumableUpload,
   verifyUploadedFile,
@@ -12,6 +13,7 @@ import {
   getFileStream,
   disconnectGoogleDrive,
   resolveRedirectUri,
+  cleanCredential,
   TARGET_FOLDER_NAME,
 } from '../services/googleDriveService';
 import { ensureDatabaseSchema } from '../migrate';
@@ -43,6 +45,7 @@ router.get(['/', '/status'], async (_req: Request, res: Response) => {
       data: status,
       endpoints: {
         status: 'GET /api/drive/status',
+        configCheck: 'GET /api/drive/config-check',
         authUrl: 'GET /api/drive/auth/url',
         callback: 'GET /api/drive/oauth/callback',
         disconnect: 'POST /api/drive/disconnect',
@@ -56,6 +59,52 @@ router.get(['/', '/status'], async (_req: Request, res: Response) => {
     return res.status(500).json({
       status: 'error',
       message: err.message || 'Failed to check Google Drive status',
+    });
+  }
+});
+
+/**
+ * GET /api/drive/config-check (Protected)
+ * Admin only: Performs an automated Google Cloud OAuth 2.0 configuration probe
+ * and reports whether GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are authentic and accepted by Google.
+ */
+router.get('/config-check', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
+    const redirectUri = resolveRedirectUri(req.query.redirectUri as string, reqHost);
+    const probe = await verifyGoogleClientCredentials(redirectUri);
+
+    const rawId = process.env.GOOGLE_CLIENT_ID || '';
+    const rawSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+    const cleanId = cleanCredential(rawId);
+    const cleanSecret = cleanCredential(rawSecret);
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        googleVerification: probe,
+        redirectUri,
+        clientId: {
+          configured: Boolean(cleanId),
+          length: cleanId.length,
+          previewPrefix: cleanId ? cleanId.slice(0, 16) + '...' : '',
+          previewSuffix: cleanId ? '...' + cleanId.slice(-24) : '',
+          hasQuotes: /^["']|["']$/.test(rawId),
+          hasWhitespace: /\s/.test(rawId),
+        },
+        clientSecret: {
+          configured: Boolean(cleanSecret),
+          length: cleanSecret.length,
+          startsWithGocspx: cleanSecret.startsWith('GOCSPX-'),
+          hasQuotes: /^["']|["']$/.test(rawSecret),
+          hasWhitespace: /\s/.test(rawSecret),
+        },
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Config check probe failed',
     });
   }
 });
