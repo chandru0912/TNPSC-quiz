@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   apiFetch,
+  getApiUrl,
   parseApiResponse,
   classifyApiError,
   classifyFetchFailure,
@@ -37,8 +38,13 @@ import {
   Eye,
   UploadCloud,
   Target,
+  Folder,
+  Cloud,
+  HardDrive,
+  ExternalLink,
 } from 'lucide-react'
 import './Admin.css'
+import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import { CloudAiGeneratorModal, type CloudAiMode } from '../components/CloudAiGeneratorModal'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import {
@@ -191,7 +197,54 @@ const Admin = () => {
     .map((q) => q.id)
 
   // Navigation Section
-  const [adminSection, setAdminSection] = useState<'questions' | 'textbooks' | 'notes'>('questions')
+  const [adminSection, setAdminSection] = useState<'questions' | 'textbooks' | 'notes' | 'gdrive'>('questions')
+
+  // Google Drive state
+  const [driveStatus, setDriveStatus] = useState<{
+    connected: boolean
+    configured: boolean
+    email?: string
+    folderName: string
+    folderId?: string
+    redirectUri?: string
+    error?: string
+  }>({
+    connected: false,
+    configured: false,
+    folderName: 'TNPSC Study Hub Materials',
+  })
+  const [isCheckingDrive, setIsCheckingDrive] = useState(false)
+  const [driveMaterials, setDriveMaterials] = useState<GoogleDriveMaterialItem[]>([])
+  const [driveLoading, setDriveLoading] = useState(false)
+  const [driveSearch, setDriveSearch] = useState('')
+  const [driveGroupFilter, setDriveGroupFilter] = useState('all')
+  const [driveStandardFilter, setDriveStandardFilter] = useState('all')
+  const [driveSubjectFilter, setDriveSubjectFilter] = useState('all')
+  const [driveTermFilter, setDriveTermFilter] = useState('all')
+
+  // Drive PDF Upload Modal state
+  const [isDriveUploadModalOpen, setIsDriveUploadModalOpen] = useState(false)
+  const [driveFile, setDriveFile] = useState<File | null>(null)
+  const [driveUploadTitle, setDriveUploadTitle] = useState('')
+  const [driveUploadTerm, setDriveUploadTerm] = useState('Term 1')
+  const [isDriveUploading, setIsDriveUploading] = useState(false)
+  const [driveUploadProgress, setDriveUploadProgress] = useState(0)
+  const [driveUploadStep, setDriveUploadStep] = useState('')
+  const [driveUploadError, setDriveUploadError] = useState<string | null>(null)
+
+  // Drive PDF Viewer & Delete states
+  const [viewingDriveMaterial, setViewingDriveMaterial] = useState<GoogleDriveMaterialItem | null>(null)
+  const [deletingDriveMaterial, setDeletingDriveMaterial] = useState<GoogleDriveMaterialItem | null>(null)
+  const [isDeletingDriveMaterial, setIsDeletingDriveMaterial] = useState(false)
+
+  // Shared 5-Dropdown Syllabus Cascade Selector for Google Drive upload
+  const driveSyllabusCascade = useSyllabusCascade({
+    allowAll: false,
+    initialGroupId: 'group1',
+    initialSubjectId: 'general-studies',
+    initialClassId: 6,
+    initialUnitId: 1,
+  })
 
   // Textbook management state
   const [textbooksList, setTextbooksList] = useState<TextbookItem[]>([])
@@ -397,7 +450,10 @@ const Admin = () => {
     Boolean(previewingNote) ||
     Boolean(isDeletingNote) ||
     isNotesBulkPublishModalOpen ||
-    isNotesBulkUploadModalOpen
+    isNotesBulkUploadModalOpen ||
+    isDriveUploadModalOpen ||
+    Boolean(viewingDriveMaterial) ||
+    Boolean(deletingDriveMaterial)
   useScrollLock(hasOpenAdminModal)
 
   // Login handler (single POST attempt with distinct error classification)
@@ -930,6 +986,256 @@ const Admin = () => {
       fetchTextbooks()
     }
   }, [fetchTextbooks, token])
+
+  // Check Google Drive Status
+  const checkDriveStatus = useCallback(async () => {
+    setIsCheckingDrive(true)
+    try {
+      const res = await apiFetch('/api/drive/status')
+      const json = await res.json()
+      if (res.ok && json.status === 'success') {
+        setDriveStatus(json.data)
+      }
+    } catch (err: any) {
+      console.warn('Could not check Google Drive status:', err.message)
+    } finally {
+      setIsCheckingDrive(false)
+    }
+  }, [])
+
+  // Fetch Google Drive Materials
+  const fetchDriveMaterials = useCallback(async () => {
+    setDriveLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (driveGroupFilter !== 'all') params.set('group', driveGroupFilter)
+      if (driveStandardFilter !== 'all') params.set('standard', driveStandardFilter)
+      if (driveSubjectFilter !== 'all') params.set('subject', driveSubjectFilter)
+      if (driveTermFilter !== 'all') params.set('term', driveTermFilter)
+      if (driveSearch.trim()) params.set('search', driveSearch.trim())
+
+      const res = await apiFetch(`/api/drive/materials?${params.toString()}`)
+      const json = await res.json()
+      if (res.ok && json.status === 'success' && Array.isArray(json.data)) {
+        setDriveMaterials(json.data)
+      } else {
+        setDriveMaterials([])
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch Google Drive materials:', err)
+      setDriveMaterials([])
+    } finally {
+      setDriveLoading(false)
+    }
+  }, [driveGroupFilter, driveStandardFilter, driveSubjectFilter, driveTermFilter, driveSearch])
+
+  // Connect Google Drive
+  const handleConnectGoogleDrive = async () => {
+    try {
+      const res = await apiFetch('/api/drive/auth/url', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok && data.data?.authUrl) {
+        window.location.href = data.data.authUrl
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: data.message || 'Could not initiate Google authorization. Please check server credentials.',
+        })
+      }
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Connection failed' })
+    }
+  }
+
+  // Disconnect Google Drive
+  const handleDisconnectGoogleDrive = async () => {
+    if (!window.confirm('Are you sure you want to disconnect your Google Drive account?')) return
+    try {
+      const res = await apiFetch('/api/drive/disconnect', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        setActionMessage({ type: 'success', text: 'Google Drive disconnected successfully.' })
+        checkDriveStatus()
+      }
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to disconnect.' })
+    }
+  }
+
+  // Resumable Direct Upload to Google Drive
+  const handleStartDriveUpload = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!driveFile) {
+      setDriveUploadError('Please select a PDF document to upload.')
+      return
+    }
+    if (driveFile.type !== 'application/pdf' && !driveFile.name.toLowerCase().endsWith('.pdf')) {
+      setDriveUploadError('Invalid file type: Only PDF documents (.pdf) are permitted.')
+      return
+    }
+
+    setIsDriveUploading(true)
+    setDriveUploadError(null)
+    setDriveUploadProgress(5)
+    setDriveUploadStep('Authorizing and creating Google Drive resumable session...')
+
+    try {
+      const finalTitle = driveUploadTitle.trim() || driveFile.name.replace(/\.pdf$/i, '')
+      const initRes = await apiFetch('/api/drive/upload/initiate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          fileName: `${finalTitle}.pdf`,
+          originalFileName: driveFile.name,
+          fileSize: driveFile.size,
+          mimeType: 'application/pdf',
+          group: driveSyllabusCascade.effectiveGroupId,
+          subject: driveSyllabusCascade.selectedSubjectObj?.name || 'General Studies',
+          standard: driveSyllabusCascade.currentClassId,
+          term: driveUploadTerm,
+          unit: driveSyllabusCascade.currentUnitId,
+          lesson: driveSyllabusCascade.currentLessonTitle,
+          lessonId: driveSyllabusCascade.selectedLessonObj?.id,
+        }),
+      })
+
+      const initData = await initRes.json()
+      if (!initRes.ok || !initData.data?.uploadUrl) {
+        throw new Error(initData.message || 'Failed to initiate Google Drive upload session.')
+      }
+
+      const { uploadUrl, trackingId } = initData.data
+      setDriveUploadProgress(15)
+      setDriveUploadStep(`Streaming to Google Drive: 0 MB / ${(driveFile.size / (1024 * 1024)).toFixed(1)} MB...`)
+
+      // Stream file directly to Google Drive via XMLHttpRequest
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', uploadUrl, true)
+        xhr.setRequestHeader('Content-Type', 'application/pdf')
+
+        xhr.upload.onprogress = (evt) => {
+          if (evt.lengthComputable) {
+            const percent = Math.min(95, Math.round(15 + (evt.loaded / evt.total) * 75))
+            setDriveUploadProgress(percent)
+            const loadedMb = (evt.loaded / (1024 * 1024)).toFixed(1)
+            const totalMb = (evt.total / (1024 * 1024)).toFixed(1)
+            setDriveUploadStep(`Uploading: ${loadedMb} MB of ${totalMb} MB (${percent}%)`)
+          }
+        }
+
+        xhr.onload = async () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const googleRes = JSON.parse(xhr.responseText || '{}')
+              const googleDriveFileId = googleRes.id
+              if (!googleDriveFileId) {
+                throw new Error('Google Drive upload succeeded but did not return file ID.')
+              }
+
+              setDriveUploadProgress(96)
+              setDriveUploadStep('Verifying file in Google Drive & registering in database...')
+
+              const completeRes = await apiFetch('/api/drive/upload/complete', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  trackingId,
+                  googleDriveFileId,
+                }),
+              })
+              const completeData = await completeRes.json()
+              if (!completeRes.ok) {
+                throw new Error(completeData.message || 'Failed to register completed upload.')
+              }
+
+              setDriveUploadProgress(100)
+              setDriveUploadStep('Upload and verification complete!')
+              setActionMessage({
+                type: 'success',
+                text: `PDF "${finalTitle}" successfully uploaded directly to Google Drive!`,
+              })
+              setIsDriveUploadModalOpen(false)
+              setDriveFile(null)
+              setDriveUploadTitle('')
+              fetchDriveMaterials()
+              resolve()
+            } catch (err: any) {
+              reject(err)
+            }
+          } else {
+            reject(new Error(`Google Drive rejected upload (HTTP ${xhr.status}): ${xhr.statusText}`))
+          }
+        }
+
+        xhr.onerror = () => {
+          reject(new Error('Network error during Google Drive resumable upload.'))
+        }
+
+        xhr.send(driveFile)
+      })
+    } catch (err: any) {
+      console.error('Google Drive upload error:', err)
+      setDriveUploadError(err.message || 'Failed to upload PDF')
+    } finally {
+      setIsDriveUploading(false)
+    }
+  }
+
+  // Delete Drive Material
+  const handleDeleteDriveMaterial = async (id: number) => {
+    setIsDeletingDriveMaterial(true)
+    try {
+      const res = await apiFetch(`/api/drive/materials/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Delete failed')
+      setActionMessage({ type: 'success', text: 'PDF material successfully deleted from Google Drive and database.' })
+      setDeletingDriveMaterial(null)
+      fetchDriveMaterials()
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Delete failed' })
+    } finally {
+      setIsDeletingDriveMaterial(false)
+    }
+  }
+
+  // Handle OAuth callback query parameters and initial Google Drive check
+  useEffect(() => {
+    checkDriveStatus()
+    fetchDriveMaterials()
+
+    const urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.get('gdrive') === 'connected') {
+      const email = urlParams.get('email')
+      setActionMessage({
+        type: 'success',
+        text: `Google Drive account successfully connected! ${email ? `(${email})` : ''}`,
+      })
+      setAdminSection('gdrive')
+      window.history.replaceState({}, document.title, window.location.pathname)
+    } else if (urlParams.get('gdrive_error')) {
+      const err = urlParams.get('gdrive_error')
+      setActionMessage({
+        type: 'error',
+        text: `Google Drive connection failed: ${err}`,
+      })
+      setAdminSection('gdrive')
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }, [checkDriveStatus, fetchDriveMaterials])
 
   // Fetch All Global Metrics for Question Bank, Textbooks, and Study Notes
   const fetchAllMetrics = useCallback(async () => {
@@ -2101,11 +2407,13 @@ const Admin = () => {
               {adminSection === 'questions' && 'Question Bank Management'}
               {adminSection === 'textbooks' && 'Textbook Management'}
               {adminSection === 'notes' && 'Study Notes Management'}
+              {adminSection === 'gdrive' && 'Google Drive PDF Materials'}
             </h1>
             <p className="admin-subtitle">
               {adminSection === 'questions' && 'Review, edit, stage, and publish verified Samacheer Kalvi topic-wise MCQs directly into the database.'}
               {adminSection === 'textbooks' && 'Upload, index, and organize Samacheer Kalvi PDF textbooks for AI study notes and MCQ generation.'}
               {adminSection === 'notes' && 'Review, edit, stage, and publish comprehensive TNPSC Complete Study Notes directly into the database.'}
+              {adminSection === 'gdrive' && 'Connect your personal Google Drive account to store and stream official PDF textbooks and study materials with zero serverless size limits.'}
             </p>
           </div>
 
@@ -2166,6 +2474,18 @@ const Admin = () => {
             <FileText size={16} />
             <span>Study Notes</span>
             <span className="admin-section-tab-count">{notesMetrics.totalNotes}</span>
+          </button>
+          <button
+            className={`admin-section-tab ${adminSection === 'gdrive' ? 'active' : ''}`}
+            onClick={() => {
+              setAdminSection('gdrive')
+              fetchDriveMaterials()
+              checkDriveStatus()
+            }}
+          >
+            <Cloud size={16} />
+            <span>Google Drive</span>
+            <span className="admin-section-tab-count">{driveMaterials.length}</span>
           </button>
         </div>
 
@@ -2305,6 +2625,64 @@ const Admin = () => {
                   {notesMetrics.classesCovered ? `${notesMetrics.classesCovered} Standards` : 'Classes 6–12'}
                 </span>
                 <span className="metric-label">Total Standards / Classes Covered</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {adminSection === 'gdrive' && (
+          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-gold">
+                <Cloud size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">{driveMaterials.length}</span>
+                <span className="metric-label">Google Drive Materials</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div
+                className="metric-icon-box"
+                style={{
+                  background: driveStatus.connected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                  color: driveStatus.connected ? '#10b981' : '#ef4444',
+                }}
+              >
+                {driveStatus.connected ? <CheckCircle size={24} /> : <AlertCircle size={24} />}
+              </div>
+              <div className="metric-info">
+                <span className="metric-value" style={{ fontSize: '1.1rem' }}>
+                  {driveStatus.connected ? 'Connected' : 'Not Connected'}
+                </span>
+                <span className="metric-label" style={{ wordBreak: 'break-all' }}>
+                  {driveStatus.email || 'OAuth Disconnected'}
+                </span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-cyan">
+                <Folder size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value" style={{ fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {driveStatus.folderName || 'TNPSC Study Hub Materials'}
+                </span>
+                <span className="metric-label">Target Drive Folder</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-amber">
+                <HardDrive size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value">
+                  {(driveMaterials.reduce((acc, m) => acc + (m.fileSize || 0), 0) / (1024 * 1024)).toFixed(1)} MB
+                </span>
+                <span className="metric-label">Total Cloud Materials Size</span>
               </div>
             </div>
           </div>
@@ -3285,6 +3663,357 @@ const Admin = () => {
               )}
             </div>
           </>
+        )}
+
+        {/* Section 4: Google Drive PDF Materials Management */}
+        {adminSection === 'gdrive' && (
+          <div className="admin-gdrive-section">
+            {/* Google Drive Status Banner Card */}
+            <div className="gdrive-status-card" style={{ marginBottom: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div className="gdrive-status-info">
+                  <div className="gdrive-status-icon-box">
+                    <Cloud size={28} />
+                  </div>
+                  <div className="gdrive-status-details">
+                    <div className="gdrive-status-title-row">
+                      <h3 className="gdrive-status-title">Google Drive Cloud Storage</h3>
+                      {driveStatus.connected ? (
+                        <span className="gdrive-status-badge gdrive-status-badge-connected">
+                          <CheckCircle2 size={13} />
+                          Connected: {driveStatus.email || 'Authorized'}
+                        </span>
+                      ) : (
+                        <span className="gdrive-status-badge gdrive-status-badge-disconnected">
+                          <AlertCircle size={13} />
+                          Not Connected
+                        </span>
+                      )}
+                    </div>
+                    <p className="gdrive-status-desc">
+                      {driveStatus.connected
+                        ? `Connected to personal Google Drive. Large PDF textbooks and study materials stream directly from your browser to Google Drive via authorized resumable sessions. Target Folder: "${driveStatus.folderName}".`
+                        : 'Connect your personal Google Drive account to store 3–4 GB of TNPSC PDF textbooks with zero Vercel serverless size restrictions.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="gdrive-status-actions">
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-secondary"
+                    onClick={() => checkDriveStatus()}
+                    title="Refresh connection status"
+                    disabled={isCheckingDrive}
+                  >
+                    <RefreshCw size={14} className={isCheckingDrive ? 'spinning' : ''} />
+                    <span>Check Status</span>
+                  </button>
+                  {driveStatus.connected ? (
+                    <button
+                      type="button"
+                      className="admin-btn"
+                      style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                      onClick={handleDisconnectGoogleDrive}
+                    >
+                      <LogOut size={14} />
+                      <span>Disconnect Drive</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="admin-btn admin-btn-primary"
+                      onClick={handleConnectGoogleDrive}
+                      style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
+                    >
+                      <Cloud size={16} />
+                      <span>Connect Google Drive</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Setup Information Grid */}
+              <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem', fontSize: '0.78rem', color: 'rgba(255,255,255,0.6)' }}>
+                <div>
+                  <strong style={{ color: '#ffd700' }}>OAuth Scope:</strong> <code style={{ color: '#cbd5e1' }}>https://www.googleapis.com/auth/drive.file</code> (App-isolated access)
+                </div>
+                <div>
+                  <strong style={{ color: '#ffd700' }}>Target Folder:</strong> <code style={{ color: '#cbd5e1' }}>TNPSC Study Hub Materials</code> (Auto-created on Drive)
+                </div>
+                <div>
+                  <strong style={{ color: '#ffd700' }}>Local Callback:</strong> <code style={{ color: '#cbd5e1' }}>http://localhost:5000/api/drive/oauth/callback</code>
+                </div>
+                <div>
+                  <strong style={{ color: '#ffd700' }}>Production Callback:</strong> <code style={{ color: '#cbd5e1' }}>https://tnpsc-quiz-lval.vercel.app/api/drive/oauth/callback</code>
+                </div>
+              </div>
+            </div>
+
+            {/* Toolbar & Filters */}
+            <div className="admin-toolbar glass" style={{ marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div className="search-bar" style={{ maxWidth: '360px', minWidth: '240px' }}>
+                    <Search size={16} />
+                    <input
+                      type="text"
+                      placeholder="Search PDF materials or lessons..."
+                      value={driveSearch}
+                      onChange={(e) => setDriveSearch(e.target.value)}
+                    />
+                    {driveSearch && (
+                      <button className="search-clear-btn" onClick={() => setDriveSearch('')}>
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    {driveMaterials.length} PDF file{driveMaterials.length === 1 ? '' : 's'} indexed
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-secondary"
+                    onClick={() => {
+                      setDriveGroupFilter('all')
+                      setDriveStandardFilter('all')
+                      setDriveSubjectFilter('all')
+                      setDriveTermFilter('all')
+                      setDriveSearch('')
+                    }}
+                    title="Reset all filters"
+                  >
+                    <RefreshCw size={14} />
+                    <span>Reset Filters</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-primary"
+                    disabled={!driveStatus.connected}
+                    onClick={() => {
+                      setDriveUploadError(null)
+                      setDriveFile(null)
+                      setDriveUploadTitle('')
+                      setDriveUploadProgress(0)
+                      setIsDriveUploadModalOpen(true)
+                    }}
+                    title={driveStatus.connected ? 'Upload PDF to Google Drive' : 'Please connect Google Drive first'}
+                    style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
+                  >
+                    <UploadCloud size={16} />
+                    <span>+ Upload PDF to Google Drive</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Dropdown Filters Row */}
+              <div className="filter-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
+                <div className="filter-group">
+                  <label className="filter-label">TNPSC Group</label>
+                  <select
+                    className="filter-select"
+                    value={driveGroupFilter}
+                    onChange={(e) => setDriveGroupFilter(e.target.value)}
+                  >
+                    <option value="all">All Groups</option>
+                    <option value="group1">Group 1</option>
+                    <option value="group2">Group 2 / 2A</option>
+                    <option value="group4">Group 4</option>
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label">Standard / Class</label>
+                  <select
+                    className="filter-select"
+                    value={driveStandardFilter}
+                    onChange={(e) => setDriveStandardFilter(e.target.value)}
+                  >
+                    <option value="all">All Classes</option>
+                    {[6, 7, 8, 9, 10, 11, 12].map((std) => (
+                      <option key={std} value={std}>
+                        Class {std}th
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label">Subject</label>
+                  <select
+                    className="filter-select"
+                    value={driveSubjectFilter}
+                    onChange={(e) => setDriveSubjectFilter(e.target.value)}
+                  >
+                    <option value="all">All Subjects</option>
+                    {Array.from(new Set(driveMaterials.map((m) => m.subject).filter(Boolean))).sort().map((sub) => (
+                      <option key={sub} value={sub}>
+                        {sub}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label">Term / Volume</label>
+                  <select
+                    className="filter-select"
+                    value={driveTermFilter}
+                    onChange={(e) => setDriveTermFilter(e.target.value)}
+                  >
+                    <option value="all">All Terms</option>
+                    <option value="Term 1">Term 1</option>
+                    <option value="Term 2">Term 2</option>
+                    <option value="Term 3">Term 3</option>
+                    <option value="Full Year">Full Year</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Materials Table Card */}
+            <div className="admin-table-card glass">
+              <div className="table-wrapper">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '40px' }}>#</th>
+                      <th style={{ minWidth: '220px' }}>Material / File Name</th>
+                      <th>Syllabus Alignment</th>
+                      <th>Class & Term</th>
+                      <th>File Size</th>
+                      <th>Uploaded Date</th>
+                      <th style={{ textAlign: 'center', width: '190px' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {driveLoading ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '3rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                            <RefreshCw size={24} className="spinning" style={{ color: 'var(--gold-primary)' }} />
+                            <span style={{ color: 'var(--text-secondary)' }}>Loading Google Drive materials...</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : driveMaterials.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                            <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                              <Folder size={24} />
+                            </div>
+                            <h4 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1rem' }}>
+                              No Google Drive PDF Materials Found
+                            </h4>
+                            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.82rem', maxWidth: '420px' }}>
+                              {!driveStatus.connected
+                                ? 'Connect your Google Drive account above to start uploading and organizing textbook PDFs.'
+                                : 'No PDF materials match your current filter selections. Click "+ Upload PDF to Google Drive" to add one.'}
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      driveMaterials.map((item, idx) => (
+                        <tr key={item.id}>
+                          <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{idx + 1}</td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                              <FileText size={20} style={{ color: '#ffd700', flexShrink: 0, marginTop: '2px' }} />
+                              <div>
+                                <div style={{ fontWeight: 600, color: '#ffffff', fontSize: '0.9rem', lineHeight: '1.3' }}>
+                                  {item.fileName}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
+                                  Original: {item.originalFileName || item.fileName}
+                                </div>
+                                {item.lesson && (
+                                  <div style={{ fontSize: '0.76rem', color: '#c084fc', marginTop: '2px' }}>
+                                    📖 {item.lesson}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <span className="badge badge-group" style={{ width: 'fit-content', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                                {item.group}
+                              </span>
+                              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                                {item.subject}
+                              </span>
+                              {item.unit && (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  {item.unit}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                                Class {item.standard}th
+                              </span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {item.term || 'Full Year'}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: '0.82rem', color: '#cbd5e1' }}>
+                              {item.fileSize ? `${(item.fileSize / (1024 * 1024)).toFixed(2)} MB` : '—'}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                              {item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
+                              <button
+                                type="button"
+                                className="table-action-btn"
+                                title="View PDF inside Reader Modal"
+                                onClick={() => setViewingDriveMaterial(item)}
+                                style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}
+                              >
+                                <Eye size={14} />
+                              </button>
+                              <a
+                                href={getApiUrl(`/api/drive/view/${item.id}`)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="table-action-btn"
+                                title="Open PDF Stream in New Tab"
+                                style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                              >
+                                <ExternalLink size={14} />
+                              </a>
+                              <button
+                                type="button"
+                                className="table-action-btn table-action-btn-danger"
+                                title="Delete PDF Material"
+                                onClick={() => setDeletingDriveMaterial(item)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -5336,6 +6065,232 @@ const Admin = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* 6. Google Drive Resumable PDF Upload Modal */}
+      <AnimatePresence>
+        {isDriveUploadModalOpen && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '640px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <UploadCloud size={20} style={{ color: '#ffd700' }} />
+                  <h3 className="admin-modal-title">Upload PDF to Google Drive</h3>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (!isDriveUploading) setIsDriveUploadModalOpen(false)
+                  }}
+                  disabled={isDriveUploading}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleStartDriveUpload}>
+                <div className="admin-modal-body">
+                  <div style={{ padding: '0.75rem 1rem', background: 'rgba(255, 215, 0, 0.08)', borderRadius: '8px', border: '1px solid rgba(255, 215, 0, 0.25)', fontSize: '0.8rem', color: '#fef08a', marginBottom: '1.25rem' }}>
+                    ⚡ <strong>Zero Vercel Limits:</strong> Large textbook PDFs stream directly from your browser to Google Drive via authorized resumable sessions. No serverless payload limits apply.
+                  </div>
+
+                  {/* Syllabus Cascade Selector */}
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                      1. Syllabus Mapping (Group &rarr; Subject &rarr; Class &rarr; Unit &rarr; Lesson) *
+                    </label>
+                    <SyllabusCascadeSelector cascade={driveSyllabusCascade} />
+                  </div>
+
+                  {/* Material Title & Term */}
+                  <div className="form-grid-2" style={{ marginBottom: '1rem' }}>
+                    <div className="form-field">
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                        2. Material Title
+                      </label>
+                      <input
+                        type="text"
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        placeholder="e.g. Standard 10 Science Unit 1 Full Textbook"
+                        value={driveUploadTitle}
+                        onChange={(e) => setDriveUploadTitle(e.target.value)}
+                        disabled={isDriveUploading}
+                      />
+                    </div>
+
+                    <div className="form-field">
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                        3. Term / Volume
+                      </label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        value={driveUploadTerm}
+                        onChange={(e) => setDriveUploadTerm(e.target.value)}
+                        disabled={isDriveUploading}
+                      >
+                        <option value="Term 1">Term 1</option>
+                        <option value="Term 2">Term 2</option>
+                        <option value="Term 3">Term 3</option>
+                        <option value="Full Year">Full Year</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* File Selector */}
+                  <div className="form-field" style={{ marginBottom: '1rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                      4. Select PDF Textbook / Study Material (.pdf only) *
+                    </label>
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      disabled={isDriveUploading}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null
+                        setDriveFile(file)
+                        if (file && !driveUploadTitle.trim()) {
+                          setDriveUploadTitle(file.name.replace(/\.pdf$/i, ''))
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px dashed rgba(255,255,255,0.2)',
+                        borderRadius: '8px',
+                        color: '#ffffff',
+                        cursor: 'pointer',
+                      }}
+                    />
+                    {driveFile && (
+                      <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <CheckCircle size={14} /> Selected: {driveFile.name} ({(driveFile.size / (1024 * 1024)).toFixed(2)} MB)
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Progress Box during direct resumable streaming */}
+                  {isDriveUploading && (
+                    <div className="gdrive-resumable-progress-box">
+                      <div className="gdrive-progress-step-text">
+                        <span>{driveUploadStep}</span>
+                        <strong style={{ color: '#ffd700' }}>{driveUploadProgress}%</strong>
+                      </div>
+                      <div className="gdrive-progress-bar-track" style={{ marginTop: '0.6rem' }}>
+                        <div
+                          className="gdrive-progress-bar-fill"
+                          style={{ width: `${driveUploadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {driveUploadError && (
+                    <div style={{ marginTop: '0.85rem', padding: '0.65rem 0.85rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '6px', color: '#fca5a5', fontSize: '0.82rem' }}>
+                      ⚠️ {driveUploadError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="admin-modal-footer">
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-secondary"
+                    onClick={() => setIsDriveUploadModalOpen(false)}
+                    disabled={isDriveUploading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="admin-btn admin-btn-primary"
+                    disabled={!driveFile || isDriveUploading}
+                    style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
+                  >
+                    <UploadCloud size={16} />
+                    <span>{isDriveUploading ? 'Streaming to Drive...' : 'Start Resumable Upload'}</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 7. Delete Google Drive Material Confirmation Modal */}
+      <AnimatePresence>
+        {deletingDriveMaterial && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '500px' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertTriangle size={20} style={{ color: '#ef4444' }} />
+                  <h3 className="admin-modal-title">Delete Google Drive Material</h3>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (!isDeletingDriveMaterial) setDeletingDriveMaterial(null)
+                  }}
+                  disabled={isDeletingDriveMaterial}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  Are you sure you want to permanently delete <strong>"{deletingDriveMaterial.fileName}"</strong>?
+                </p>
+                <div style={{ padding: '0.65rem 0.85rem', background: 'rgba(239, 68, 68, 0.08)', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.25)', fontSize: '0.8rem', color: '#fca5a5' }}>
+                  ⚠️ This action will permanently remove the file from your Google Drive ("TNPSC Study Hub Materials") and remove its metadata record from PostgreSQL.
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setDeletingDriveMaterial(null)}
+                  disabled={isDeletingDriveMaterial}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn"
+                  style={{ background: '#ef4444', color: '#fff' }}
+                  disabled={isDeletingDriveMaterial}
+                  onClick={() => handleDeleteDriveMaterial(deletingDriveMaterial.id)}
+                >
+                  <Trash2 size={16} />
+                  <span>{isDeletingDriveMaterial ? 'Deleting...' : 'Delete Permanently'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 8. Google Drive PDF Reader Modal */}
+      <GoogleDrivePdfViewer
+        isOpen={Boolean(viewingDriveMaterial)}
+        material={viewingDriveMaterial}
+        onClose={() => setViewingDriveMaterial(null)}
+      />
 
     </div>
   )

@@ -19,6 +19,7 @@ import { apiFetch } from '../utils/api'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { getLessonsForSelection } from '../data/unifiedSyllabusRegistry'
 import { buildCanonicalLessonCode } from '../utils/lessonMapping'
+import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import './StudyNotesPage.css'
 
 interface StudyNoteRecord {
@@ -324,6 +325,8 @@ const StudyNotesPage: React.FC = () => {
   const [notes, setNotes] = useState<StudyNoteRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [driveMaterial, setDriveMaterial] = useState<GoogleDriveMaterialItem | null>(null)
+  const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false)
 
   // Normalize category
   const normalizedCategory = useMemo(() => {
@@ -451,6 +454,39 @@ const StudyNotesPage: React.FC = () => {
   useEffect(() => {
     fetchNotes()
   }, [normalizedCategory, unitId, effectiveClassId, effectiveSubject, decodedLessonTitle, canonicalLessonId, canonicalLessonNumber, canonicalLessonCode, queryTerm, selectedLang])
+
+  // Fetch associated Google Drive PDF material for this lesson
+  useEffect(() => {
+    let isCancelled = false
+    const fetchDrivePdf = async () => {
+      try {
+        const params = new URLSearchParams()
+        if (canonicalLessonId) {
+          params.set('lessonId', canonicalLessonId)
+        } else if (effectiveClassId && decodedLessonTitle) {
+          params.set('standard', effectiveClassId)
+          params.set('search', decodedLessonTitle)
+        } else {
+          return
+        }
+
+        const res = await apiFetch(`/api/drive/materials?${params.toString()}`)
+        const json = await res.json()
+        if (!isCancelled && res.ok && json.status === 'success' && Array.isArray(json.data) && json.data.length > 0) {
+          setDriveMaterial(json.data[0])
+        } else if (!isCancelled) {
+          setDriveMaterial(null)
+        }
+      } catch (err) {
+        console.warn('Could not fetch Google Drive PDF material for lesson:', err)
+      }
+    }
+
+    fetchDrivePdf()
+    return () => {
+      isCancelled = true
+    }
+  }, [canonicalLessonId, effectiveClassId, decodedLessonTitle])
 
   const groupDisplayName = useMemo(() => {
     if (normalizedCategory === 'group1') return isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1'
@@ -673,6 +709,23 @@ const StudyNotesPage: React.FC = () => {
                   English
                 </button>
               </div>
+
+              {driveMaterial && (
+                <button
+                  className="study-btn"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(255, 215, 0, 0.25) 100%)',
+                    border: '1px solid rgba(255, 215, 0, 0.45)',
+                    color: '#ffd700',
+                    fontWeight: 600,
+                  }}
+                  onClick={() => setIsPdfViewerOpen(true)}
+                  title="View Official Textbook PDF from Google Drive"
+                >
+                  <BookOpen size={15} />
+                  <span>{isTamil ? 'பாடநூல் PDF' : 'Official PDF'}</span>
+                </button>
+              )}
 
               <button className="study-btn study-btn-secondary" onClick={() => window.print()} title="Print or Save PDF">
                 <Printer size={15} />
@@ -905,6 +958,15 @@ const StudyNotesPage: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Google Drive PDF Reader Modal for Students */}
+      {driveMaterial && (
+        <GoogleDrivePdfViewer
+          isOpen={isPdfViewerOpen}
+          material={driveMaterial}
+          onClose={() => setIsPdfViewerOpen(false)}
+        />
+      )}
     </div>
   )
 }

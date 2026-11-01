@@ -12,6 +12,7 @@ import notesRouter from './routes/notes';
 import textbooksRouter from './routes/textbooks';
 import studyMaterialQuestionsRouter from './routes/studyMaterialQuestions';
 import aiGenerationRouter from './routes/aiGeneration';
+import driveRouter from './routes/drive';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -124,6 +125,7 @@ app.get('/', (_req, res) => {
       notes: '/api/notes',
       textbooks: '/api/textbooks',
       ai: '/api/ai',
+      drive: '/api/drive',
     },
   });
 });
@@ -166,6 +168,7 @@ app.use('/api/study-materials/questions', requireSchemaMiddleware, studyMaterial
 app.use('/api/notes', requireSchemaMiddleware, notesRouter);
 app.use('/api/textbooks', requireSchemaMiddleware, textbooksRouter);
 app.use('/api/ai', requireSchemaMiddleware, aiGenerationRouter);
+app.use('/api/drive', requireSchemaMiddleware, driveRouter);
 
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {

@@ -368,8 +368,58 @@ export async function runMigration() {
       ON textbook_content (unit_id, lesson_title);
     `);
 
+    // 8. Create google_drive_tokens table for persistent Google OAuth token management
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS google_drive_tokens (
+        id SERIAL PRIMARY KEY,
+        account_email VARCHAR(255),
+        refresh_token TEXT NOT NULL,
+        access_token TEXT,
+        expiry_date BIGINT,
+        folder_id VARCHAR(150),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 9. Create google_drive_materials table for PDF metadata storage
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS google_drive_materials (
+        id SERIAL PRIMARY KEY,
+        file_name VARCHAR(255) NOT NULL,
+        original_file_name VARCHAR(255) NOT NULL,
+        mime_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+        file_size BIGINT NOT NULL,
+        google_drive_file_id VARCHAR(150) NOT NULL UNIQUE,
+        google_drive_folder_id VARCHAR(150),
+        tnpsc_group VARCHAR(50) NOT NULL,
+        subject VARCHAR(150) NOT NULL,
+        standard INT,
+        term VARCHAR(50) DEFAULT 'Term 1',
+        unit INT,
+        lesson VARCHAR(255),
+        lesson_id VARCHAR(100),
+        upload_status VARCHAR(30) NOT NULL DEFAULT 'completed' CHECK (upload_status IN ('initiating', 'uploading', 'completed', 'failed')),
+        uploaded_by VARCHAR(150),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_group_subject 
+      ON google_drive_materials (tnpsc_group, subject, standard, unit);
+
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_file_id 
+      ON google_drive_materials (google_drive_file_id);
+
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_lesson 
+      ON google_drive_materials (lesson_id);
+
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_status 
+      ON google_drive_materials (upload_status);
+    `);
+
     await client.query('COMMIT');
-    console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, and jobs verified.');
+    console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, jobs, and google_drive_materials verified.');
 
     // Automatically align and separate all existing Study Materials topic-wise
     try {
