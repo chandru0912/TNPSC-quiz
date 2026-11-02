@@ -140,7 +140,8 @@ router.get(
         frontendOrigin = process.env.FRONTEND_URL.trim().replace(/\/+$/, '');
       }
 
-      const authUrl = getAuthorizationUrl(adminUsername, redirectUri, frontendOrigin);
+      const clientIdHint = typeof req.query.clientId === 'string' ? req.query.clientId.trim() : undefined;
+      const authUrl = getAuthorizationUrl(adminUsername, redirectUri, frontendOrigin, clientIdHint);
 
       return res.status(200).json({
         status: 'success',

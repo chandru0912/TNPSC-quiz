@@ -1,5 +1,12 @@
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+
+// Reliably load environment variables from root and backend/.env
+dotenv.config(); // Root .env
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') }); // Root .env.local
+dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') }); // backend/.env from root
+dotenv.config({ path: path.resolve(__dirname, '../.env') }); // backend/.env when running from dist/
+dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') }); // fallback
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { CorsOptions } from 'cors';

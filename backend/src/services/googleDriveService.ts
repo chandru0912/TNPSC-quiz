@@ -35,38 +35,47 @@ export function resolveRedirectUri(customRedirectUri?: string, reqHostHint?: str
   if (customRedirectUri && customRedirectUri.trim()) {
     return cleanCredential(customRedirectUri);
   }
+
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    Boolean(process.env.VERCEL);
+
+  const cleanHost = reqHostHint ? cleanCredential(reqHostHint) : '';
+  const isLocalHostHint = Boolean(
+    cleanHost && (cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1'))
+  );
+
+  // Local development: strictly guarantee the backend callback uses port 5000
+  if (!isProduction || isLocalHostHint) {
+    if (process.env.GOOGLE_REDIRECT_URI && process.env.GOOGLE_REDIRECT_URI.includes('localhost')) {
+      return cleanCredential(process.env.GOOGLE_REDIRECT_URI);
+    }
+    return `${LOCAL_BACKEND_URL}/api/drive/oauth/callback`; // http://localhost:5000/api/drive/oauth/callback
+  }
+
+  // Production: use configured production redirect URI
   if (process.env.GOOGLE_REDIRECT_URI && process.env.GOOGLE_REDIRECT_URI.trim()) {
     return cleanCredential(process.env.GOOGLE_REDIRECT_URI);
   }
   if (process.env.BACKEND_URL && process.env.BACKEND_URL.trim()) {
     return `${cleanCredential(process.env.BACKEND_URL).replace(/\/+$/, '')}/api/drive/oauth/callback`;
   }
-
-  if (reqHostHint && reqHostHint.trim()) {
-    const cleanHost = cleanCredential(reqHostHint);
-    const isLocal = cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1');
-    if (isLocal) {
-      return `http://${cleanHost}/api/drive/oauth/callback`;
-    }
+  if (cleanHost && !isLocalHostHint) {
     return `https://${cleanHost}/api/drive/oauth/callback`;
   }
-
-  const isProduction =
-    process.env.NODE_ENV === 'production' ||
-    Boolean(process.env.VERCEL);
-
-  if (isProduction) {
-    return `${PRODUCTION_BACKEND_URL}/api/drive/oauth/callback`;
-  }
-  return `${LOCAL_BACKEND_URL}/api/drive/oauth/callback`;
+  return `${PRODUCTION_BACKEND_URL}/api/drive/oauth/callback`;
 }
 
 /**
  * Creates an OAuth2 client instance with sanitized credentials.
  */
-export function createOAuth2Client(redirectUri?: string) {
-  const clientId = cleanCredential(process.env.GOOGLE_CLIENT_ID);
-  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
+export function createOAuth2Client(
+  redirectUri?: string,
+  clientIdOverride?: string,
+  clientSecretOverride?: string
+) {
+  const clientId = cleanCredential(clientIdOverride || process.env.GOOGLE_CLIENT_ID);
+  const clientSecret = cleanCredential(clientSecretOverride || process.env.GOOGLE_CLIENT_SECRET);
   const effectiveRedirectUri = resolveRedirectUri(redirectUri);
 
   return new google.auth.OAuth2(clientId, clientSecret, effectiveRedirectUri);
@@ -140,13 +149,22 @@ export function verifyOAuthState(state: string): {
 export function getAuthorizationUrl(
   adminUsername: string,
   redirectUri?: string,
-  frontendOrigin?: string
+  frontendOrigin?: string,
+  clientIdOverride?: string
 ): string {
+  const clientId = cleanCredential(clientIdOverride || process.env.GOOGLE_CLIENT_ID);
+  if (!clientId) {
+    throw new Error(
+      'Google Cloud OAuth configuration missing: GOOGLE_CLIENT_ID is not configured. ' +
+      'Please ensure GOOGLE_CLIENT_ID is set in backend/.env (local) or Vercel Environment Variables (production).'
+    );
+  }
+
   const effectiveRedirect = resolveRedirectUri(redirectUri);
-  const oauth2Client = createOAuth2Client(effectiveRedirect);
+  const oauth2Client = createOAuth2Client(effectiveRedirect, clientId);
   const state = generateOAuthState(adminUsername, frontendOrigin, effectiveRedirect);
 
-  return oauth2Client.generateAuthUrl({
+  const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
     scope: [
@@ -157,6 +175,12 @@ export function getAuthorizationUrl(
     state,
     include_granted_scopes: true,
   });
+
+  if (!authUrl.includes('client_id=')) {
+    throw new Error('Failed to generate valid Google OAuth URL: client_id parameter is missing.');
+  }
+
+  return authUrl;
 }
 
 /**

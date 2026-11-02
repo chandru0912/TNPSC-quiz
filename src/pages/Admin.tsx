@@ -1063,7 +1063,10 @@ const Admin = () => {
       setDriveConnectionError(null)
       const authHeader: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
       const originParam = encodeURIComponent(window.location.origin)
-      const res = await apiFetch(`/api/drive/auth/url?origin=${originParam}`, {
+      const clientIdParam = import.meta.env.VITE_GOOGLE_CLIENT_ID
+        ? `&clientId=${encodeURIComponent(import.meta.env.VITE_GOOGLE_CLIENT_ID)}`
+        : ''
+      const res = await apiFetch(`/api/drive/auth/url?origin=${originParam}${clientIdParam}`, {
         headers: authHeader,
       })
       const data = await res.json()
