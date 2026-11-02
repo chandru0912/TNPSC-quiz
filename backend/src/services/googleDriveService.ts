@@ -1,3 +1,13 @@
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Guarantee environment variables from backend/.env and .env.local are loaded
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') });
+
 import { google } from 'googleapis';
 import crypto from 'crypto';
 import pool from '../db';
@@ -157,6 +167,21 @@ export function getAuthorizationUrl(
     throw new Error(
       'Google Cloud OAuth configuration missing: GOOGLE_CLIENT_ID is not configured. ' +
       'Please ensure GOOGLE_CLIENT_ID is set in backend/.env (local) or Vercel Environment Variables (production).'
+    );
+  }
+
+  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
+  const isPlaceholderSecret =
+    !clientSecret ||
+    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
+    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
+    clientSecret.includes('YOUR_') ||
+    clientSecret.includes('your_');
+
+  if (isPlaceholderSecret) {
+    throw new Error(
+      'Google Cloud OAuth configuration missing: GOOGLE_CLIENT_SECRET is not configured in backend/.env. ' +
+      'Please open backend/.env and paste your newly rotated Google Client Secret (starting with GOCSPX-) before connecting.'
     );
   }
 
@@ -385,10 +410,17 @@ export async function verifyGoogleClientCredentials(redirectUri?: string): Promi
   const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
   const effectiveRedirectUri = resolveRedirectUri(redirectUri);
 
-  if (!clientId || !clientSecret) {
+  const isPlaceholderSecret =
+    !clientSecret ||
+    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
+    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
+    clientSecret.includes('YOUR_') ||
+    clientSecret.includes('your_');
+
+  if (!clientId || isPlaceholderSecret) {
     return {
       status: 'unconfigured',
-      details: 'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing or empty in environment variables.',
+      details: 'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing, empty, or set to placeholder in backend/.env.',
       isAuthentic: false,
     };
   }
@@ -468,8 +500,18 @@ export async function handleOAuthCallback(code: string, state: string, redirectU
   const clientId = cleanCredential(process.env.GOOGLE_CLIENT_ID);
   const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
 
-  if (!clientId || !clientSecret) {
-    throw new Error('Google Cloud OAuth configuration missing: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is empty.');
+  const isPlaceholderSecret =
+    !clientSecret ||
+    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
+    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
+    clientSecret.includes('YOUR_') ||
+    clientSecret.includes('your_');
+
+  if (!clientId || isPlaceholderSecret) {
+    throw new Error(
+      'Google Cloud OAuth configuration missing: Valid GOOGLE_CLIENT_SECRET must be configured in backend/.env. ' +
+      'Please open backend/.env and paste your newly rotated Google Client Secret (starting with GOCSPX-).'
+    );
   }
 
   // Ensure redirect URI matches the exact URI recorded in state or fallback
@@ -489,6 +531,13 @@ export async function handleOAuthCallback(code: string, state: string, redirectU
       errorDescription: googleDesc,
       status: tokenErr.response?.status,
     });
+    if (googleDesc && /client secret is invalid/i.test(googleDesc)) {
+      throw new Error(
+        'Google OAuth error: The provided client secret in backend/.env is invalid. ' +
+        'Please verify that GOOGLE_CLIENT_SECRET matches the exact Client Secret generated for Client ID ' +
+        clientId + ' in Google Cloud Console (project: tnpsc-study-hub).'
+      );
+    }
     throw new Error(`Google OAuth error: ${googleDesc}`);
   }
 
@@ -559,7 +608,15 @@ export async function getConnectionStatus(): Promise<{
   const rawSecret = process.env.GOOGLE_CLIENT_SECRET || '';
   const clientId = cleanCredential(rawId);
   const clientSecret = cleanCredential(rawSecret);
-  const configured = Boolean(clientId && clientSecret);
+
+  const isPlaceholderSecret =
+    !clientSecret ||
+    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
+    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
+    clientSecret.includes('YOUR_') ||
+    clientSecret.includes('your_');
+
+  const configured = Boolean(clientId && !isPlaceholderSecret);
   const redirectUri = resolveRedirectUri();
 
   const hasFormattingIssue =
@@ -571,20 +628,25 @@ export async function getConnectionStatus(): Promise<{
   const clientInfo = {
     clientIdLength: clientId.length,
     clientIdConfigured: Boolean(clientId),
-    clientSecretConfigured: Boolean(clientSecret),
+    clientSecretConfigured: Boolean(clientSecret && !isPlaceholderSecret),
     clientSecretLength: clientSecret.length,
     clientSecretStartsWithGocspx: clientSecret.startsWith('GOCSPX-'),
     hasFormattingIssue,
   };
 
   if (!configured) {
+    const errorMsg = !clientId
+      ? 'Google Client ID is missing. Please configure GOOGLE_CLIENT_ID in backend/.env.'
+      : isPlaceholderSecret
+      ? 'Google Client Secret is not set in backend/.env. Please paste your newly rotated Google Client Secret into backend/.env.'
+      : 'Google OAuth Client ID & Secret are not yet configured in server environment variables.';
     return {
       connected: false,
       configured: false,
       folderName: TARGET_FOLDER_NAME,
       redirectUri,
       clientInfo,
-      error: 'Google OAuth Client ID & Secret are not yet configured in server environment variables.',
+      error: errorMsg,
     };
   }
 

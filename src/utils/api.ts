@@ -11,8 +11,8 @@ function isFrontendDevPortUrl(url: string): boolean {
 
 function resolveApiBaseUrl(): string {
   const rawEnvUrl = (
-    (import.meta.env.VITE_API_BASE_URL as string) ||
     (import.meta.env.VITE_API_URL as string) ||
+    (import.meta.env.VITE_API_BASE_URL as string) ||
     (import.meta.env.VITE_BACKEND_URL as string) ||
     ''
   ).trim();
