@@ -12,19 +12,19 @@ export async function runMigration() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS questions (
         id SERIAL PRIMARY KEY,
-        category VARCHAR(50) NOT NULL DEFAULT 'group1',
+        category TEXT NOT NULL DEFAULT 'group1',
         unit_id INT NOT NULL,
         class_id INT,
-        subject VARCHAR(100) NOT NULL,
-        lesson_title VARCHAR(255) NOT NULL,
-        topic VARCHAR(255),
+        subject TEXT NOT NULL,
+        lesson_title TEXT NOT NULL,
+        topic TEXT,
         difficulty VARCHAR(20) NOT NULL DEFAULT 'Medium' CHECK (difficulty IN ('Easy', 'Medium', 'Hard')),
-        tag VARCHAR(255),
+        tag TEXT,
         question_text TEXT NOT NULL,
         options JSONB NOT NULL,
         correct_answer INT NOT NULL CHECK (correct_answer >= 0 AND correct_answer <= 3),
         explanation TEXT NOT NULL,
-        source_reference VARCHAR(255),
+        source_reference TEXT,
         status VARCHAR(20) NOT NULL DEFAULT 'published' CHECK (status IN ('staging', 'published', 'archived')),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -48,21 +48,21 @@ export async function runMigration() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS study_notes (
         id SERIAL PRIMARY KEY,
-        category VARCHAR(50) NOT NULL DEFAULT 'group1',
+        category TEXT NOT NULL DEFAULT 'group1',
         unit_id INT NOT NULL,
         class_id INT,
-        subject VARCHAR(100) NOT NULL,
-        lesson_id VARCHAR(100),
-        lesson_number VARCHAR(50),
-        lesson_title VARCHAR(255) NOT NULL,
-        topic VARCHAR(255),
+        subject TEXT NOT NULL,
+        lesson_id TEXT,
+        lesson_number TEXT,
+        lesson_title TEXT NOT NULL,
+        topic TEXT,
         language VARCHAR(10) NOT NULL DEFAULT 'english' CHECK (language IN ('tamil', 'english')),
-        title VARCHAR(255),
+        title TEXT,
         content TEXT NOT NULL,
         content_html TEXT,
         tags JSONB,
         status VARCHAR(20) NOT NULL DEFAULT 'published' CHECK (status IN ('staging', 'published', 'archived')),
-        source_reference VARCHAR(255),
+        source_reference TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
@@ -70,18 +70,18 @@ export async function runMigration() {
 
     // Ensure lesson_id, lesson_number, term, lesson_code, coverage_report, topics, deduplication, topic_order, and generation_meta columns exist
     await client.query(`
-      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_id VARCHAR(100);
-      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_number VARCHAR(50);
-      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS term VARCHAR(50) DEFAULT 'Term 1';
-      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_code VARCHAR(150);
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_id TEXT;
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_number TEXT;
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS term TEXT DEFAULT 'Term 1';
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS lesson_code TEXT;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS coverage_report JSONB;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topics JSONB;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64);
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS deduplication_meta JSONB;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topic_order INT DEFAULT 0;
-      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topic_id VARCHAR(150);
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS topic_id TEXT;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS subtopics JSONB;
-      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS generation_status VARCHAR(50) DEFAULT 'completed';
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS generation_status TEXT DEFAULT 'completed';
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS generation_meta JSONB;
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS note_format VARCHAR(20) DEFAULT 'short' CHECK (note_format IN ('short', 'full'));
       CREATE INDEX IF NOT EXISTS idx_study_notes_format ON study_notes (note_format);
@@ -157,13 +157,13 @@ export async function runMigration() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS textbooks (
         id SERIAL PRIMARY KEY,
-        group_id VARCHAR(50) NOT NULL,
+        group_id TEXT NOT NULL,
         standard INT NOT NULL,
-        subject VARCHAR(150) NOT NULL,
+        subject TEXT NOT NULL,
         medium VARCHAR(20) NOT NULL DEFAULT 'English' CHECK (medium IN ('Tamil', 'English')),
-        term VARCHAR(50) DEFAULT 'Full Year',
-        book_name VARCHAR(255) NOT NULL,
-        file_path VARCHAR(500) NOT NULL,
+        term TEXT DEFAULT 'Full Year',
+        book_name TEXT NOT NULL,
+        file_path TEXT NOT NULL,
         file_size BIGINT NOT NULL,
         page_count INT DEFAULT 0,
         status VARCHAR(30) NOT NULL DEFAULT 'uploaded' CHECK (status IN ('uploaded', 'processing', 'completed', 'failed')),
@@ -181,9 +181,9 @@ export async function runMigration() {
         textbook_id INT NOT NULL REFERENCES textbooks(id) ON DELETE CASCADE,
         page_number INT NOT NULL,
         unit_id INT,
-        unit_title VARCHAR(255),
-        lesson_title VARCHAR(255),
-        topic VARCHAR(255),
+        unit_title TEXT,
+        lesson_title TEXT,
+        topic TEXT,
         content TEXT NOT NULL,
         text_length INT NOT NULL,
         is_ocr BOOLEAN DEFAULT FALSE,
@@ -198,7 +198,7 @@ export async function runMigration() {
         textbook_id INT NOT NULL REFERENCES textbooks(id) ON DELETE CASCADE,
         status VARCHAR(30) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'extracting', 'indexing', 'completed', 'failed')),
         progress_percent INT DEFAULT 0,
-        step_description VARCHAR(255),
+        step_description TEXT,
         error_message TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -390,21 +390,21 @@ export async function runMigration() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS google_drive_materials (
         id SERIAL PRIMARY KEY,
-        file_name VARCHAR(255) NOT NULL,
-        original_file_name VARCHAR(255) NOT NULL,
+        file_name TEXT NOT NULL,
+        original_file_name TEXT NOT NULL,
         mime_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
         file_size BIGINT NOT NULL,
         google_drive_file_id VARCHAR(150) NOT NULL UNIQUE,
-        google_drive_folder_id VARCHAR(150),
-        tnpsc_group VARCHAR(50) NOT NULL,
-        subject VARCHAR(150) NOT NULL,
+        google_drive_folder_id TEXT,
+        tnpsc_group TEXT NOT NULL,
+        subject TEXT NOT NULL,
         standard INT,
-        term VARCHAR(50) DEFAULT 'Term 1',
+        term TEXT DEFAULT 'Term 1',
         unit INT,
-        lesson VARCHAR(255),
-        lesson_id VARCHAR(100),
+        lesson TEXT,
+        lesson_id TEXT,
         upload_status VARCHAR(30) NOT NULL DEFAULT 'completed' CHECK (upload_status IN ('initiating', 'uploading', 'completed', 'failed')),
-        uploaded_by VARCHAR(150),
+        uploaded_by TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
@@ -452,6 +452,64 @@ export async function runMigration() {
       );
 
       CREATE INDEX IF NOT EXISTS idx_bulk_batches_batch_id ON bulk_upload_batches (batch_id);
+
+      -- 11. Safe Schema Widening Migration: Widen VARCHAR columns to TEXT
+      -- Eliminates PostgreSQL error 22001 (value too long for type character varying(255))
+      -- across long filenames, lesson titles, Tamil topics, and detailed source references.
+      DO $$
+      BEGIN
+        -- study_notes
+        ALTER TABLE study_notes ALTER COLUMN source_reference TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN title TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN topic TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN lesson_title TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN lesson_id TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN lesson_number TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN lesson_code TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN topic_id TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN subject TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN category TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN term TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN generation_status TYPE TEXT;
+        ALTER TABLE study_notes ALTER COLUMN note_format TYPE TEXT;
+
+        -- google_drive_materials
+        ALTER TABLE google_drive_materials ALTER COLUMN file_name TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN original_file_name TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN lesson TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN lesson_id TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN subject TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN tnpsc_group TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN term TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN uploaded_by TYPE TEXT;
+        ALTER TABLE google_drive_materials ALTER COLUMN google_drive_folder_id TYPE TEXT;
+
+        -- textbooks
+        ALTER TABLE textbooks ALTER COLUMN book_name TYPE TEXT;
+        ALTER TABLE textbooks ALTER COLUMN file_path TYPE TEXT;
+        ALTER TABLE textbooks ALTER COLUMN subject TYPE TEXT;
+        ALTER TABLE textbooks ALTER COLUMN group_id TYPE TEXT;
+        ALTER TABLE textbooks ALTER COLUMN term TYPE TEXT;
+
+        -- textbook_content
+        ALTER TABLE textbook_content ALTER COLUMN unit_title TYPE TEXT;
+        ALTER TABLE textbook_content ALTER COLUMN lesson_title TYPE TEXT;
+        ALTER TABLE textbook_content ALTER COLUMN topic TYPE TEXT;
+
+        -- questions
+        ALTER TABLE questions ALTER COLUMN source_reference TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN lesson_title TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN topic TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN tag TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN subject TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN category TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN lesson_id TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN exam_group_id TYPE TEXT;
+        ALTER TABLE questions ALTER COLUMN subject_id TYPE TEXT;
+
+        -- textbook_processing_jobs
+        ALTER TABLE textbook_processing_jobs ALTER COLUMN step_description TYPE TEXT;
+      END $$;
     `);
 
     await client.query('COMMIT');

@@ -1577,35 +1577,38 @@
 }
 
 /* AI Modal Backdrop - Keep website navbar visible & position modal cleanly below */
+/* AI Modal Backdrop - Full viewport height studio (100dvh) with high z-index above all navigation */
 .admin-modal-backdrop.ai-modal-backdrop {
   position: fixed !important;
-  top: var(--navbar-height, 80px) !important;
+  inset: 0 !important;
+  top: 0 !important;
   left: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
-  width: 100% !important;
-  height: calc(100dvh - var(--navbar-height, 80px)) !important;
-  max-height: calc(100dvh - var(--navbar-height, 80px)) !important;
-  z-index: 999 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  z-index: 10050 !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
-  justify-content: flex-start !important;
-  padding: 0.75rem clamp(0.75rem, 2vw, 1.5rem) !important;
-  overflow-y: auto !important;
+  justify-content: center !important;
+  padding: 1rem clamp(1rem, 2vw, 2rem) !important;
+  overflow: hidden !important;
   overscroll-behavior: contain !important;
   -webkit-overflow-scrolling: touch !important;
   box-sizing: border-box !important;
-  background: rgba(6, 9, 19, 0.85) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
+  background: rgba(4, 7, 18, 0.94) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
 }
 
 .ai-modal-container {
-  max-width: 1160px !important;
+  max-width: 1200px !important;
   width: 100% !important;
-  height: calc(100dvh - var(--navbar-height, 80px) - 1.5rem) !important;
-  max-height: calc(100dvh - var(--navbar-height, 80px) - 1.5rem) !important;
+  height: calc(100dvh - 2rem) !important;
+  max-height: calc(100dvh - 2rem) !important;
   min-height: 0 !important;
   display: flex !important;
   flex-direction: column !important;
@@ -1613,12 +1616,12 @@
   overscroll-behavior: contain !important;
   box-sizing: border-box !important;
   margin: 0 auto !important;
-  border-radius: 16px !important;
-  border: 1px solid rgba(168, 85, 247, 0.35) !important;
+  border-radius: 20px !important;
+  border: 1px solid rgba(168, 85, 247, 0.45) !important;
   background: linear-gradient(180deg, rgba(13, 21, 39, 0.98) 0%, rgba(10, 16, 32, 0.98) 100%) !important;
-  backdrop-filter: blur(24px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
-  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 50px rgba(147, 51, 234, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(28px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.9), 0 0 50px rgba(147, 51, 234, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
 }
 
 /* AI Modal Header */
@@ -2937,39 +2940,43 @@
   }
 }
 
-/* Up to 768px: Mobile viewport modal bounding, scroll container, and backdrop lock */
+/* Up to 768px: Mobile viewport full screen studio (100dvh) without bottom navigation overlap */
 @media (max-width: 768px) {
-  /* Parent backdrop: start below tablet/mobile navbar and eliminate outer scroll trap */
+  /* Parent backdrop: full viewport height studio (100dvh) covering entire screen */
   .admin-modal-backdrop:has(.ai-modal-container),
   .admin-modal-backdrop.ai-modal-backdrop {
-    top: var(--navbar-height, 70px) !important;
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
-    width: 100% !important;
-    height: calc(100dvh - var(--navbar-height, 70px)) !important;
-    max-height: calc(100dvh - var(--navbar-height, 70px)) !important;
-    padding: 0.5rem !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    padding: 0 !important;
     align-items: stretch !important;
     justify-content: flex-start !important;
     overflow: hidden !important;
-    z-index: 999 !important;
+    z-index: 10050 !important;
   }
 
-  /* Modal container: fill mobile viewport below navbar with strict flex column and bounded max-height */
+  /* Modal container: fill 100% of mobile viewport with full height flex column */
   .ai-modal-container {
     width: 100% !important;
     max-width: 100% !important;
-    height: 100% !important;
-    max-height: 100% !important;
-    min-height: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    min-height: 100dvh !important;
     margin: 0 !important;
-    border-radius: 14px !important;
-    border: 1px solid rgba(168, 85, 247, 0.35) !important;
+    border-radius: 0 !important;
+    border: none !important;
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8) !important;
+    box-shadow: none !important;
   }
 
   /* Compact sticky header so body has maximum vertical space on small screens */
@@ -3138,14 +3145,19 @@
 @media (max-width: 540px) {
   .admin-modal-backdrop:has(.ai-modal-container),
   .admin-modal-backdrop.ai-modal-backdrop {
-    top: var(--navbar-height, 64px) !important;
-    height: calc(100dvh - var(--navbar-height, 64px)) !important;
-    max-height: calc(100dvh - var(--navbar-height, 64px)) !important;
-    padding: 0.35rem !important;
+    top: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    padding: 0 !important;
+    z-index: 10050 !important;
   }
 
   .ai-modal-container {
-    border-radius: 12px !important;
+    border-radius: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
   }
 
   .ai-report-grid {

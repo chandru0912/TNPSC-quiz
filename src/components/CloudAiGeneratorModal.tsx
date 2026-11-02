@@ -23,6 +23,7 @@ import { SyllabusCascadeSelector, useSyllabusCascade } from './SyllabusCascadeSe
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { TamilStudyNotesRenderer } from './TamilStudyNotesRenderer'
 import { TNPSC_GROUPS } from '../data/unifiedSyllabusRegistry'
+import { useScrollLock } from '../hooks/useScrollLock'
 
 export type CloudAiMode = 'mcq' | 'notes'
 
@@ -136,6 +137,41 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   const [activePreviewFormat, setActivePreviewFormat] = useState<'short' | 'full'>('short')
   const [isNotesSaving, setIsNotesSaving] = useState<boolean>(false)
   const [notesEditMode, setNotesEditMode] = useState<boolean>(false)
+
+  // Lock background scroll when Cloud AI Generator is active
+  useScrollLock(isOpen)
+
+  // Dynamically manage document attribute & notify BottomNav to hide/restore cleanly
+  useEffect(() => {
+    if (isOpen) {
+      document.documentElement.setAttribute('data-ai-modal-open', 'true')
+      document.body.classList.add('ai-generator-active')
+      window.dispatchEvent(new CustomEvent('tnpsc:ai-modal-state', { detail: { isOpen: true } }))
+    } else {
+      document.documentElement.removeAttribute('data-ai-modal-open')
+      document.body.classList.remove('ai-generator-active')
+      window.dispatchEvent(new CustomEvent('tnpsc:ai-modal-state', { detail: { isOpen: false } }))
+    }
+
+    return () => {
+      document.documentElement.removeAttribute('data-ai-modal-open')
+      document.body.classList.remove('ai-generator-active')
+      window.dispatchEvent(new CustomEvent('tnpsc:ai-modal-state', { detail: { isOpen: false } }))
+    }
+  }, [isOpen])
+
+  // Keyboard shortcut: Escape to close modal cleanly
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isAIGenerating && !isNotesGenerating) {
+        onClose()
+        setAiUploadSuccess(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isAIGenerating, isNotesGenerating, onClose])
 
   useEffect(() => {
     if (initialMode) {

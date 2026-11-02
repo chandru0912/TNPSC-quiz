@@ -154,18 +154,34 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
 
     return res.status(200).json(result);
   } catch (error: any) {
-    console.error('[AI Generation Route] Error:', error);
+    console.error('[AI Generation Route] Database / Execution Error:', {
+      message: error?.message,
+      code: error?.code,
+      table: error?.table,
+      column: error?.column,
+      detail: error?.detail,
+    });
+
+    let clientMessage = error.message || 'Generation failed';
+    if (error?.code === '22001') {
+      clientMessage = 'A database field limit was exceeded while saving notes. The database schema has been updated to support extensive content.';
+    } else if (error?.code && String(error.code).startsWith('23')) {
+      clientMessage = 'A database constraint error occurred while saving notes. Please try again.';
+    } else if (error?.code && String(error.code).startsWith('08')) {
+      clientMessage = 'Database connection error. Please verify the PostgreSQL server connection.';
+    }
+
     if (isStream) {
       sendStreamEvent({
         type: 'error',
         status: 'error',
-        error: error.message || 'Generation failed',
+        error: clientMessage,
       });
       return res.end();
     }
     return res.status(400).json({
       status: 'error',
-      message: error.message || 'Generation failed',
+      message: clientMessage,
     });
   }
 });

@@ -459,6 +459,21 @@ const Admin = () => {
     setIsCloudAiModalOpen(true)
   }
 
+  // Handle URL deep link query param ?openCloudAi=mcq | notes | true
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const openCloudAi = params.get('openCloudAi')
+    if (openCloudAi) {
+      if (openCloudAi === 'mcq') {
+        setCloudAiModalMode('mcq')
+      } else {
+        setCloudAiModalMode('notes')
+      }
+      setIsCloudAiModalOpen(true)
+    }
+  }, [])
+
   // Lock background page scrolling strictly when any admin modal is open
   const hasOpenAdminModal =
     isUsersModalOpen ||

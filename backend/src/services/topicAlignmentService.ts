@@ -376,6 +376,39 @@ export function splitAndAlignNotesByTopic(params: {
 }
 
 /**
+ * Safe database error logger that captures table, operation, error code,
+ * failing column and record ID without exposing any credentials or secrets.
+ */
+function logDatabaseError(meta: {
+  table: string;
+  operation: 'INSERT' | 'UPDATE' | 'DELETE' | 'SELECT';
+  recordId?: any;
+  error: any;
+  context?: Record<string, any>;
+}) {
+  const sanitizedContext = { ...meta.context };
+  delete sanitizedContext.apiKey;
+  delete sanitizedContext.token;
+  delete sanitizedContext.secret;
+  delete sanitizedContext.password;
+  delete sanitizedContext.accessToken;
+  delete sanitizedContext.refreshToken;
+
+  console.error(
+    `[DB ERROR] Table: ${meta.table} | Operation: ${meta.operation} | Code: ${meta.error?.code || 'UNKNOWN'} | Column: ${meta.error?.column || 'N/A'} | Message: ${meta.error?.message}`
+  );
+  if (meta.recordId) {
+    console.error(`[DB ERROR] Record ID: ${meta.recordId}`);
+  }
+  if (meta.error?.detail) {
+    console.error(`[DB ERROR] Detail: ${meta.error.detail}`);
+  }
+  if (Object.keys(sanitizedContext).length > 0) {
+    console.error(`[DB ERROR] Context:`, JSON.stringify(sanitizedContext));
+  }
+}
+
+/**
  * Persists all separated topic notes safely into PostgreSQL.
  * Deduplicates by lesson and topic_order / topic_id.
  * Maintains both individual topic records (topic_order >= 1) and master note (topic_order = 0).
@@ -403,76 +436,21 @@ export async function persistTopicAlignedNotes(
   const lessonId = params.lessonId || separationResult.lessonId;
   const lessonNumber = params.lessonNumber || separationResult.lessonNumber;
 
+  const debugContext = {
+    category,
+    subject,
+    classId,
+    unitId,
+    lessonId,
+    lessonTitle: lessonTitle.slice(0, 80),
+    language,
+    noteFormat,
+  };
+
   // 1. Save or Update Master Assembled Note (topic_order = 0)
-  const masterExisting = await clientOrPool.query(
-    `SELECT id FROM study_notes
-     WHERE category = $1
-       AND subject = $2
-       AND class_id = $3
-       AND unit_id = $4
-       AND (lesson_id = $5 OR LOWER(lesson_title) = LOWER($6))
-       AND language = $7
-       AND COALESCE(note_format, 'short') = $8
-       AND (topic_order = 0 OR topic_order IS NULL)
-     LIMIT 1`,
-    [category, subject, classId, unitId, lessonId, lessonTitle.trim(), language, noteFormat]
-  );
-
-  let masterNoteId: number | undefined;
-
-  if (masterExisting.rows.length > 0) {
-    masterNoteId = masterExisting.rows[0].id;
-    await clientOrPool.query(
-      `UPDATE study_notes
-       SET title = $1, content = $2, source_reference = $3, note_format = $4, status = $5,
-           topics = $6, updated_at = NOW()
-       WHERE id = $7`,
-      [
-        lessonTitle,
-        separationResult.masterContent,
-        sourceReference,
-        noteFormat,
-        status,
-        JSON.stringify(separationResult.topics.map((t) => t.topicTitle)),
-        masterNoteId,
-      ]
-    );
-  } else {
-    const masterInsert = await clientOrPool.query(
-      `INSERT INTO study_notes (
-        category, unit_id, class_id, subject, term,
-        lesson_id, lesson_number, lesson_title, topic,
-        language, title, content, status, source_reference, note_format,
-        topic_order, topic_id, topics, subtopics
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 0, $16, $17, $18)
-      RETURNING id`,
-      [
-        category,
-        unitId,
-        classId,
-        subject,
-        term,
-        lessonId,
-        lessonNumber,
-        lessonTitle,
-        lessonTitle,
-        language,
-        lessonTitle,
-        separationResult.masterContent,
-        status,
-        sourceReference,
-        noteFormat,
-        `${lessonId}-master`,
-        JSON.stringify(separationResult.topics.map((t) => t.topicTitle)),
-        JSON.stringify([]),
-      ]
-    );
-    masterNoteId = masterInsert.rows[0]?.id;
-  }
-
-  // 2. Save or Update Each Individual Topic Note (topic_order >= 1)
-  for (const topicItem of separationResult.topics) {
-    const existingTopic = await clientOrPool.query(
+  let masterExisting;
+  try {
+    masterExisting = await clientOrPool.query(
       `SELECT id FROM study_notes
        WHERE category = $1
          AND subject = $2
@@ -481,53 +459,59 @@ export async function persistTopicAlignedNotes(
          AND (lesson_id = $5 OR LOWER(lesson_title) = LOWER($6))
          AND language = $7
          AND COALESCE(note_format, 'short') = $8
-         AND (topic_order = $9 OR topic_id = $10 OR LOWER(topic) = LOWER($11))
+         AND (topic_order = 0 OR topic_order IS NULL)
        LIMIT 1`,
-      [
-        category,
-        subject,
-        classId,
-        unitId,
-        lessonId,
-        lessonTitle.trim(),
-        language,
-        noteFormat,
-        topicItem.topicOrder,
-        topicItem.topicId,
-        topicItem.topicTitle.trim(),
-      ]
+      [category, subject, classId, unitId, lessonId, lessonTitle.trim(), language, noteFormat]
     );
+  } catch (err: any) {
+    logDatabaseError({
+      table: 'study_notes',
+      operation: 'SELECT',
+      error: err,
+      context: debugContext,
+    });
+    throw err;
+  }
 
-    if (existingTopic.rows.length > 0) {
-      const topicDbId = existingTopic.rows[0].id;
+  let masterNoteId: number | undefined;
+
+  if (masterExisting.rows.length > 0) {
+    masterNoteId = masterExisting.rows[0].id;
+    try {
       await clientOrPool.query(
         `UPDATE study_notes
-         SET title = $1, topic = $2, content = $3, source_reference = $4,
-             note_format = $5, status = $6, topic_order = $7, topic_id = $8,
-             subtopics = $9, updated_at = NOW()
-         WHERE id = $10`,
+         SET title = $1, content = $2, source_reference = $3, note_format = $4, status = $5,
+             topics = $6, updated_at = NOW()
+         WHERE id = $7`,
         [
-          topicItem.topicTitle,
-          topicItem.topicTitle,
-          topicItem.content,
+          lessonTitle,
+          separationResult.masterContent,
           sourceReference,
           noteFormat,
           status,
-          topicItem.topicOrder,
-          topicItem.topicId,
-          JSON.stringify(topicItem.subtopics),
-          topicDbId,
+          JSON.stringify(separationResult.topics.map((t) => t.topicTitle)),
+          masterNoteId,
         ]
       );
-      savedTopicIds.push(topicDbId);
-    } else {
-      const insertRes = await clientOrPool.query(
+    } catch (err: any) {
+      logDatabaseError({
+        table: 'study_notes',
+        operation: 'UPDATE',
+        recordId: masterNoteId,
+        error: err,
+        context: debugContext,
+      });
+      throw err;
+    }
+  } else {
+    try {
+      const masterInsert = await clientOrPool.query(
         `INSERT INTO study_notes (
           category, unit_id, class_id, subject, term,
           lesson_id, lesson_number, lesson_title, topic,
           language, title, content, status, source_reference, note_format,
-          topic_order, topic_id, subtopics
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          topic_order, topic_id, topics, subtopics
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 0, $16, $17, $18)
         RETURNING id`,
         [
           category,
@@ -538,20 +522,144 @@ export async function persistTopicAlignedNotes(
           lessonId,
           lessonNumber,
           lessonTitle,
-          topicItem.topicTitle,
+          lessonTitle,
           language,
-          topicItem.topicTitle,
-          topicItem.content,
+          lessonTitle,
+          separationResult.masterContent,
           status,
           sourceReference,
           noteFormat,
-          topicItem.topicOrder,
-          topicItem.topicId,
-          JSON.stringify(topicItem.subtopics),
+          `${lessonId}-master`,
+          JSON.stringify(separationResult.topics.map((t) => t.topicTitle)),
+          JSON.stringify([]),
         ]
       );
-      if (insertRes.rows[0]?.id) {
-        savedTopicIds.push(insertRes.rows[0].id);
+      masterNoteId = masterInsert.rows[0]?.id;
+    } catch (err: any) {
+      logDatabaseError({
+        table: 'study_notes',
+        operation: 'INSERT',
+        error: err,
+        context: debugContext,
+      });
+      throw err;
+    }
+  }
+
+  // 2. Save or Update Each Individual Topic Note (topic_order >= 1)
+  for (const topicItem of separationResult.topics) {
+    let existingTopic;
+    try {
+      existingTopic = await clientOrPool.query(
+        `SELECT id FROM study_notes
+         WHERE category = $1
+           AND subject = $2
+           AND class_id = $3
+           AND unit_id = $4
+           AND (lesson_id = $5 OR LOWER(lesson_title) = LOWER($6))
+           AND language = $7
+           AND COALESCE(note_format, 'short') = $8
+           AND (topic_order = $9 OR topic_id = $10 OR LOWER(topic) = LOWER($11))
+         LIMIT 1`,
+        [
+          category,
+          subject,
+          classId,
+          unitId,
+          lessonId,
+          lessonTitle.trim(),
+          language,
+          noteFormat,
+          topicItem.topicOrder,
+          topicItem.topicId,
+          topicItem.topicTitle.trim(),
+        ]
+      );
+    } catch (err: any) {
+      logDatabaseError({
+        table: 'study_notes',
+        operation: 'SELECT',
+        error: err,
+        context: { ...debugContext, topicId: topicItem.topicId },
+      });
+      throw err;
+    }
+
+    if (existingTopic.rows.length > 0) {
+      const topicDbId = existingTopic.rows[0].id;
+      try {
+        await clientOrPool.query(
+          `UPDATE study_notes
+           SET title = $1, topic = $2, content = $3, source_reference = $4,
+               note_format = $5, status = $6, topic_order = $7, topic_id = $8,
+               subtopics = $9, updated_at = NOW()
+           WHERE id = $10`,
+          [
+            topicItem.topicTitle,
+            topicItem.topicTitle,
+            topicItem.content,
+            sourceReference,
+            noteFormat,
+            status,
+            topicItem.topicOrder,
+            topicItem.topicId,
+            JSON.stringify(topicItem.subtopics),
+            topicDbId,
+          ]
+        );
+        savedTopicIds.push(topicDbId);
+      } catch (err: any) {
+        logDatabaseError({
+          table: 'study_notes',
+          operation: 'UPDATE',
+          recordId: topicDbId,
+          error: err,
+          context: { ...debugContext, topicId: topicItem.topicId },
+        });
+        throw err;
+      }
+    } else {
+      try {
+        const insertRes = await clientOrPool.query(
+          `INSERT INTO study_notes (
+            category, unit_id, class_id, subject, term,
+            lesson_id, lesson_number, lesson_title, topic,
+            language, title, content, status, source_reference, note_format,
+            topic_order, topic_id, subtopics
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          RETURNING id`,
+          [
+            category,
+            unitId,
+            classId,
+            subject,
+            term,
+            lessonId,
+            lessonNumber,
+            lessonTitle,
+            topicItem.topicTitle,
+            language,
+            topicItem.topicTitle,
+            topicItem.content,
+            status,
+            sourceReference,
+            noteFormat,
+            topicItem.topicOrder,
+            topicItem.topicId,
+            JSON.stringify(topicItem.subtopics),
+          ]
+        );
+        if (insertRes.rows[0]?.id) {
+          savedTopicIds.push(insertRes.rows[0].id);
+        }
+      } catch (err: any) {
+        logDatabaseError({
+          table: 'study_notes',
+          operation: 'INSERT',
+          error: err,
+          context: { ...debugContext, topicId: topicItem.topicId },
+        });
+        throw err;
       }
     }
   }

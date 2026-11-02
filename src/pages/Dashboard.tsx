@@ -29,10 +29,18 @@ import {
 } from 'lucide-react'
 import './Dashboard.css'
 import { useScrollLock } from '../hooks/useScrollLock'
+import { CloudAiGeneratorModal } from '../components/CloudAiGeneratorModal'
 
 
 const Dashboard = () => {
   const [userName] = useState('Student')
+  const [isCloudAiOpen, setIsCloudAiOpen] = useState(false)
+  const [token] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('tnpsc_admin_token')
+    }
+    return null
+  })
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Lock background scroll when mobile sidebar drawer is open
@@ -48,6 +56,13 @@ const Dashboard = () => {
   ]
 
   const featureCards = [
+    {
+      title: 'Cloud AI Generation',
+      description: 'Generate authentic syllabus MCQs and comprehensive study notes with Google Gemini AI.',
+      icon: Sparkles,
+      meta: 'Gemini 1.5 Flash',
+      onClick: () => setIsCloudAiOpen(true),
+    },
     {
       title: 'Study Materials',
       description: 'Standard-wise notes and syllabus coverage.',
@@ -262,6 +277,15 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="dash-header-meta">
+            <button
+              type="button"
+              className="dash-cloud-ai-btn"
+              onClick={() => setIsCloudAiOpen(true)}
+              title="Open Cloud AI Generator for MCQs & Study Notes"
+            >
+              <Sparkles size={16} />
+              <span>Cloud AI Generation</span>
+            </button>
             <DateCalendarPopover />
             <div className="dash-chip dash-chip-gold">
               <Flame size={16} />
@@ -430,17 +454,39 @@ const Dashboard = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, delay: 0.1 + index * 0.05 }}
                 >
-                  <Link to={card.to} className="feature-tile glass">
-                    <span className="feature-tile-icon">
-                      <Icon size={22} />
-                    </span>
-                    <div className="feature-tile-body">
-                      <h3 className="feature-tile-title">{card.title}</h3>
-                      <p className="feature-tile-text">{card.description}</p>
-                      <span className="feature-tile-meta">{card.meta}</span>
-                    </div>
-                    <ChevronRight size={18} className="feature-tile-arrow" />
-                  </Link>
+                  {card.to ? (
+                    <Link to={card.to} className="feature-tile glass">
+                      <span className="feature-tile-icon">
+                        <Icon size={22} />
+                      </span>
+                      <div className="feature-tile-body">
+                        <h3 className="feature-tile-title">{card.title}</h3>
+                        <p className="feature-tile-text">{card.description}</p>
+                        <span className="feature-tile-meta">{card.meta}</span>
+                      </div>
+                      <ChevronRight size={18} className="feature-tile-arrow" />
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={card.onClick}
+                      className="feature-tile glass"
+                      style={{ width: '100%', textAlign: 'left', cursor: 'pointer', background: 'none', border: 'none' }}
+                    >
+                      <span className="feature-tile-icon" style={{ background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.35), rgba(217, 119, 6, 0.35))', color: '#ffd700' }}>
+                        <Icon size={22} />
+                      </span>
+                      <div className="feature-tile-body">
+                        <h3 className="feature-tile-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {card.title}
+                          <span style={{ fontSize: '0.65rem', padding: '0.15rem 0.45rem', borderRadius: '9999px', background: 'rgba(168, 85, 247, 0.25)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.4)' }}>AI</span>
+                        </h3>
+                        <p className="feature-tile-text">{card.description}</p>
+                        <span className="feature-tile-meta">{card.meta}</span>
+                      </div>
+                      <ChevronRight size={18} className="feature-tile-arrow" />
+                    </button>
+                  )}
                 </motion.div>
               )
             })}
@@ -542,6 +588,14 @@ const Dashboard = () => {
           </motion.section>
         </div>
       </div>
+
+      {/* Cloud AI Study Notes & MCQ Generator Modal */}
+      <CloudAiGeneratorModal
+        isOpen={isCloudAiOpen}
+        onClose={() => setIsCloudAiOpen(false)}
+        token={token}
+        initialMode="notes"
+      />
     </div>
   )
 }
