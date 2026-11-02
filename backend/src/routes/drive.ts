@@ -19,6 +19,12 @@ import {
   extractTextFromGoogleDrivePdf,
 } from '../services/googleDriveService';
 import { ensureDatabaseSchema } from '../migrate';
+import {
+  classifyPdf,
+  ClassifyPdfInput,
+  ClassifiedPdfMetadata,
+} from '../services/bulkClassificationService';
+import { extractAndIndexFullTextbook } from '../services/fullTextbookExtractor';
 
 const router = Router();
 
@@ -500,6 +506,281 @@ router.post('/extract-text', requireAdminAuth, async (req: Request, res: Respons
 });
 
 /**
+ * POST /api/drive/bulk/classify
+ * Admin only: Classifies a batch of PDF files using filename heuristics,
+ * cover page metadata, and Table of Contents matching against TNPSC syllabus.
+ */
+router.post('/bulk/classify', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { files } = req.body;
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'Array of files is required for classification.' });
+    }
+
+    const results: ClassifiedPdfMetadata[] = files.map((f: ClassifyPdfInput) => classifyPdf(f));
+
+    return res.status(200).json({
+      status: 'success',
+      total: results.length,
+      data: results,
+    });
+  } catch (err: any) {
+    console.error('[BulkClassify] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Bulk classification failed.' });
+  }
+});
+
+/**
+ * POST /api/drive/bulk/check-duplicates
+ * Admin only: Verifies whether any files in the batch have already been uploaded based on checksum.
+ */
+router.post('/bulk/check-duplicates', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { checksums = [] } = req.body;
+    if (!Array.isArray(checksums) || checksums.length === 0) {
+      return res.status(200).json({ status: 'success', existing: {} });
+    }
+
+    const cleanChecksums = checksums.map((c: any) => String(c).trim()).filter(Boolean);
+    if (cleanChecksums.length === 0) {
+      return res.status(200).json({ status: 'success', existing: {} });
+    }
+
+    const query = `
+      SELECT id, file_name, file_size, google_drive_file_id, file_checksum, upload_status, tnpsc_group, subject, standard
+      FROM google_drive_materials
+      WHERE file_checksum = ANY($1) AND upload_status = 'completed'
+    `;
+    const resDb = await pool.query(query, [cleanChecksums]);
+
+    const existingMap: Record<string, any> = {};
+    resDb.rows.forEach((row) => {
+      if (row.file_checksum && !existingMap[row.file_checksum]) {
+        existingMap[row.file_checksum] = {
+          id: row.id,
+          fileName: row.file_name,
+          fileSize: row.file_size,
+          googleDriveFileId: row.google_drive_file_id,
+          group: row.tnpsc_group,
+          subject: row.subject,
+          standard: row.standard,
+        };
+      }
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      existing: existingMap,
+    });
+  } catch (err: any) {
+    console.error('[BulkCheckDuplicates] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Duplicate check failed.' });
+  }
+});
+
+/**
+ * POST /api/drive/bulk/register
+ * Admin only: Atomically registers an uploaded PDF across all applicable TNPSC groups,
+ * saves syllabus mappings, and synchronizes with textbooks table.
+ */
+router.post('/bulk/register', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const {
+      trackingId,
+      googleDriveFileId,
+      metadata,
+      batchId,
+    }: {
+      trackingId: number;
+      googleDriveFileId: string;
+      metadata: ClassifiedPdfMetadata;
+      batchId?: string;
+    } = req.body;
+
+    if (!trackingId || !googleDriveFileId || !metadata) {
+      return res.status(400).json({ status: 'error', message: 'trackingId, googleDriveFileId, and metadata are required.' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Verify existence in Google Drive
+    const verified = await verifyUploadedFile(googleDriveFileId);
+
+    // 2. Update primary google_drive_materials record
+    const applicableGroupsJson = JSON.stringify(metadata.applicableGroups || [metadata.primaryGroup || 'group1']);
+    const unitsJson = JSON.stringify(metadata.units || []);
+    const metaJson = JSON.stringify(metadata);
+
+    const primaryUpdate = await client.query(
+      `UPDATE google_drive_materials
+       SET google_drive_file_id = $1,
+           file_size = $2,
+           upload_status = 'completed',
+           tnpsc_group = $3,
+           subject = $4,
+           standard = $5,
+           term = $6,
+           medium = $7,
+           file_checksum = $8,
+           applicable_groups = $9::jsonb,
+           extracted_toc = $10::jsonb,
+           classification_meta = $11::jsonb,
+           confidence_score = $12,
+           batch_id = $13,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $14
+       RETURNING *`,
+      [
+        verified.id,
+        verified.size,
+        metadata.primaryGroup || 'group1',
+        metadata.subject,
+        metadata.standardNumber,
+        metadata.term,
+        metadata.medium,
+        metadata.checksum || null,
+        applicableGroupsJson,
+        unitsJson,
+        metaJson,
+        metadata.confidenceScore || 100,
+        batchId || null,
+        trackingId,
+      ]
+    );
+
+    if (primaryUpdate.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ status: 'error', message: `Tracking record #${trackingId} not found.` });
+    }
+
+    const mainRow = primaryUpdate.rows[0];
+
+    // 3. Register cross-group associations if the textbook applies to multiple groups
+    const additionalGroups = (metadata.applicableGroups || []).filter((g) => g !== metadata.primaryGroup);
+    for (const group of additionalGroups) {
+      await client.query(
+        `INSERT INTO google_drive_materials (
+          file_name, original_file_name, mime_type, file_size,
+          google_drive_file_id, google_drive_folder_id,
+          tnpsc_group, subject, standard, term, unit, lesson, lesson_id,
+          upload_status, uploaded_by, medium, file_checksum, applicable_groups,
+          extracted_toc, classification_meta, confidence_score, batch_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'completed', $14, $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, $20, $21)
+        ON CONFLICT (google_drive_file_id) DO NOTHING`,
+        [
+          mainRow.file_name,
+          mainRow.original_file_name,
+          mainRow.mime_type,
+          verified.size,
+          verified.id,
+          mainRow.google_drive_folder_id,
+          group,
+          metadata.subject,
+          metadata.standardNumber,
+          metadata.term,
+          1,
+          metadata.units[0]?.lessons[0]?.title || null,
+          metadata.units[0]?.lessons[0]?.lessonId || null,
+          req.adminUser?.username || 'admin',
+          metadata.medium,
+          metadata.checksum || null,
+          applicableGroupsJson,
+          unitsJson,
+          metaJson,
+          metadata.confidenceScore || 100,
+          batchId || null,
+        ]
+      );
+    }
+
+    // 4. Ensure textbook record in textbooks table
+    await client.query(
+      `INSERT INTO textbooks (
+        group_id, standard, subject, medium, term, book_name, file_path, file_size, page_count, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'completed')
+      ON CONFLICT (group_id, standard, subject, medium, term, book_name)
+      DO UPDATE SET
+        file_path = EXCLUDED.file_path,
+        file_size = EXCLUDED.file_size,
+        status = 'completed',
+        updated_at = CURRENT_TIMESTAMP`,
+      [
+        metadata.primaryGroup || 'group1',
+        metadata.standardNumber,
+        metadata.subject,
+        metadata.medium,
+        metadata.term,
+        metadata.bookName,
+        `gdrive://${verified.id}`,
+        verified.size,
+        metadata.pageCount || 0,
+      ]
+    );
+
+    // 5. Update batch tracking if provided
+    if (batchId) {
+      await client.query(
+        `INSERT INTO bulk_upload_batches (batch_id, total_files, completed_files, status, created_by)
+         VALUES ($1, 1, 1, 'processing', $2)
+         ON CONFLICT (batch_id)
+         DO UPDATE SET
+           completed_files = bulk_upload_batches.completed_files + 1,
+           updated_at = CURRENT_TIMESTAMP`,
+        [batchId, req.adminUser?.username || 'admin']
+      );
+    }
+
+    await client.query('COMMIT');
+
+    // 6. Asynchronously trigger full text indexing in background
+    extractAndIndexFullTextbook({
+      materialId: mainRow.id,
+      googleDriveFileId: verified.id,
+      metadata,
+    }).catch((bgErr) => {
+      console.warn(`[BackgroundIndex] Non-fatal extraction notice for #${mainRow.id}:`, bgErr.message);
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      message: `Successfully registered "${metadata.bookName}" across ${metadata.applicableGroups?.length || 1} TNPSC group(s).`,
+      data: {
+        id: mainRow.id,
+        googleDriveFileId: verified.id,
+        bookName: metadata.bookName,
+        applicableGroups: metadata.applicableGroups,
+        totalUnits: metadata.totalUnits,
+        totalLessons: metadata.totalLessons,
+      },
+    });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('[BulkRegister] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to register bulk PDF upload.' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/drive/bulk/batches/:batchId
+ * Admin only: Retrieves batch progress summary.
+ */
+router.get('/bulk/batches/:batchId', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { batchId } = req.params;
+    const resDb = await pool.query(`SELECT * FROM bulk_upload_batches WHERE batch_id = $1 LIMIT 1`, [batchId]);
+    if (resDb.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: `Batch ${batchId} not found.` });
+    }
+    return res.status(200).json({ status: 'success', data: resDb.rows[0] });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to fetch batch status.' });
+  }
+});
+
+/**
  * GET /api/drive/materials
  * Public & Admin: Lists Google Drive PDF study materials with flexible syllabus filters.
  */
@@ -531,11 +812,11 @@ router.get('/materials', async (req: Request, res: Response) => {
     if (group && group !== 'all') {
       const cleanGroup = String(group).toLowerCase().trim();
       if (cleanGroup.includes('group1')) {
-        conditions.push(`LOWER(tnpsc_group) LIKE '%group1%'`);
+        conditions.push(`(LOWER(tnpsc_group) LIKE '%group1%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group1"]'::jsonb))`);
       } else if (cleanGroup.includes('group4')) {
-        conditions.push(`(LOWER(tnpsc_group) LIKE '%group4%' OR LOWER(tnpsc_group) LIKE '%vao%')`);
+        conditions.push(`(LOWER(tnpsc_group) LIKE '%group4%' OR LOWER(tnpsc_group) LIKE '%vao%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group4"]'::jsonb))`);
       } else {
-        conditions.push(`(LOWER(tnpsc_group) LIKE '%group2%' OR LOWER(tnpsc_group) LIKE '%2a%')`);
+        conditions.push(`(LOWER(tnpsc_group) LIKE '%group2%' OR LOWER(tnpsc_group) LIKE '%2a%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group2"]'::jsonb))`);
       }
     }
 
@@ -589,7 +870,8 @@ router.get('/materials', async (req: Request, res: Response) => {
       SELECT id, file_name, original_file_name, mime_type, file_size,
              google_drive_file_id, google_drive_folder_id,
              tnpsc_group, subject, standard, term, unit, lesson, lesson_id,
-             upload_status, uploaded_by, created_at, updated_at
+             upload_status, uploaded_by, created_at, updated_at,
+             applicable_groups, extracted_toc, confidence_score, medium
       FROM google_drive_materials
       ${whereClause}
       ORDER BY id DESC
@@ -606,6 +888,10 @@ router.get('/materials', async (req: Request, res: Response) => {
       fileSize: parseInt(row.file_size, 10),
       googleDriveFileId: row.google_drive_file_id,
       group: row.tnpsc_group,
+      applicableGroups: row.applicable_groups || [row.tnpsc_group],
+      extractedToc: row.extracted_toc || [],
+      confidenceScore: row.confidence_score || 100,
+      medium: row.medium || 'Tamil',
       subject: row.subject,
       standard: row.standard,
       term: row.term,

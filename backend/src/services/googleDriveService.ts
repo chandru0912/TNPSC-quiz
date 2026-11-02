@@ -908,8 +908,11 @@ export async function listGoogleDrivePdfs(options: {
   }
 
   if (options.group && options.group !== 'all') {
-    conditions.push(`LOWER(tnpsc_group) LIKE $${pIdx++}`);
-    vals.push(`%${options.group.toLowerCase()}%`);
+    const cleanGrp = options.group.toLowerCase().trim();
+    conditions.push(`(LOWER(tnpsc_group) LIKE $${pIdx} OR (applicable_groups IS NOT NULL AND applicable_groups @> $${pIdx + 1}::jsonb))`);
+    vals.push(`%${cleanGrp}%`);
+    vals.push(JSON.stringify([cleanGrp]));
+    pIdx += 2;
   }
 
   if (options.subject && options.subject !== 'all') {

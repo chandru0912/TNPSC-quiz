@@ -45,6 +45,7 @@ import {
 } from 'lucide-react'
 import './Admin.css'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
+import { BulkPdfUploadModal } from '../components/BulkPdfUploadModal'
 import { CloudAiGeneratorModal, type CloudAiMode } from '../components/CloudAiGeneratorModal'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { TamilStudyNotesRenderer } from '../components/TamilStudyNotesRenderer'
@@ -6369,163 +6370,37 @@ const Admin = () => {
         )}
       </AnimatePresence>
 
-      {/* 6. Google Drive Resumable PDF Upload Modal */}
-      <AnimatePresence>
-        {isDriveUploadModalOpen && (
-          <div className="admin-modal-backdrop">
-            <motion.div
-              className="admin-modal"
-              style={{ maxWidth: '640px' }}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-            >
-              <div className="admin-modal-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <UploadCloud size={20} style={{ color: '#ffd700' }} />
-                  <h3 className="admin-modal-title">Upload PDF to Google Drive</h3>
-                </div>
-                <button
-                  className="admin-modal-close"
-                  onClick={() => {
-                    if (!isDriveUploading) setIsDriveUploadModalOpen(false)
-                  }}
-                  disabled={isDriveUploading}
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <form onSubmit={handleStartDriveUpload}>
-                <div className="admin-modal-body">
-                  <div style={{ padding: '0.75rem 1rem', background: 'rgba(255, 215, 0, 0.08)', borderRadius: '8px', border: '1px solid rgba(255, 215, 0, 0.25)', fontSize: '0.8rem', color: '#fef08a', marginBottom: '1.25rem' }}>
-                    ⚡ <strong>Zero Vercel Limits:</strong> Large textbook PDFs stream directly from your browser to Google Drive via authorized resumable sessions. No serverless payload limits apply.
-                  </div>
-
-                  {/* Syllabus Cascade Selector */}
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                      1. Syllabus Mapping (Group &rarr; Subject &rarr; Class &rarr; Unit &rarr; Lesson) *
-                    </label>
-                    <SyllabusCascadeSelector cascade={driveSyllabusCascade} />
-                  </div>
-
-                  {/* Material Title & Term */}
-                  <div className="form-grid-2" style={{ marginBottom: '1rem' }}>
-                    <div className="form-field">
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                        2. Material Title
-                      </label>
-                      <input
-                        type="text"
-                        className="filter-select"
-                        style={{ width: '100%', padding: '0.65rem' }}
-                        placeholder="e.g. Standard 10 Science Unit 1 Full Textbook"
-                        value={driveUploadTitle}
-                        onChange={(e) => setDriveUploadTitle(e.target.value)}
-                        disabled={isDriveUploading}
-                      />
-                    </div>
-
-                    <div className="form-field">
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                        3. Term / Volume
-                      </label>
-                      <select
-                        className="filter-select"
-                        style={{ width: '100%', padding: '0.65rem' }}
-                        value={driveUploadTerm}
-                        onChange={(e) => setDriveUploadTerm(e.target.value)}
-                        disabled={isDriveUploading}
-                      >
-                        <option value="Term 1">Term 1</option>
-                        <option value="Term 2">Term 2</option>
-                        <option value="Term 3">Term 3</option>
-                        <option value="Full Year">Full Year</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* File Selector */}
-                  <div className="form-field" style={{ marginBottom: '1rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                      4. Select PDF Textbook / Study Material (.pdf only) *
-                    </label>
-                    <input
-                      type="file"
-                      accept="application/pdf,.pdf"
-                      disabled={isDriveUploading}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0] || null
-                        setDriveFile(file)
-                        if (file && !driveUploadTitle.trim()) {
-                          setDriveUploadTitle(file.name.replace(/\.pdf$/i, ''))
-                        }
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '0.75rem',
-                        background: 'rgba(255,255,255,0.04)',
-                        border: '1px dashed rgba(255,255,255,0.2)',
-                        borderRadius: '8px',
-                        color: '#ffffff',
-                        cursor: 'pointer',
-                      }}
-                    />
-                    {driveFile && (
-                      <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <CheckCircle size={14} /> Selected: {driveFile.name} ({(driveFile.size / (1024 * 1024)).toFixed(2)} MB)
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Progress Box during direct resumable streaming */}
-                  {isDriveUploading && (
-                    <div className="gdrive-resumable-progress-box">
-                      <div className="gdrive-progress-step-text">
-                        <span>{driveUploadStep}</span>
-                        <strong style={{ color: '#ffd700' }}>{driveUploadProgress}%</strong>
-                      </div>
-                      <div className="gdrive-progress-bar-track" style={{ marginTop: '0.6rem' }}>
-                        <div
-                          className="gdrive-progress-bar-fill"
-                          style={{ width: `${driveUploadProgress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {driveUploadError && (
-                    <div style={{ marginTop: '0.85rem', padding: '0.65rem 0.85rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '6px', color: '#fca5a5', fontSize: '0.82rem' }}>
-                      ⚠️ {driveUploadError}
-                    </div>
-                  )}
-                </div>
-
-                <div className="admin-modal-footer">
-                  <button
-                    type="button"
-                    className="admin-btn admin-btn-secondary"
-                    onClick={() => setIsDriveUploadModalOpen(false)}
-                    disabled={isDriveUploading}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="admin-btn admin-btn-primary"
-                    disabled={!driveFile || isDriveUploading}
-                    style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)', color: '#000', fontWeight: 700 }}
-                  >
-                    <UploadCloud size={16} />
-                    <span>{isDriveUploading ? 'Streaming to Drive...' : 'Start Resumable Upload'}</span>
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* 6. Google Drive Bulk & Single PDF Upload Modal */}
+      <BulkPdfUploadModal
+        isOpen={isDriveUploadModalOpen}
+        onClose={() => {
+          if (!isDriveUploading) setIsDriveUploadModalOpen(false)
+        }}
+        onUploadSuccess={(summary) => {
+          setActionMessage({
+            type: 'success',
+            text: `Batch completed! ${summary.totalUploaded} textbook(s) uploaded, mapping ${summary.totalUnits} unit(s) and ${summary.totalLessons} lesson(s) to TNPSC syllabus.`,
+          })
+          fetchDriveMaterials()
+          fetchTextbooks()
+        }}
+        singleUploadProps={{
+          driveFile,
+          setDriveFile,
+          driveUploadTitle,
+          setDriveUploadTitle,
+          driveUploadTerm,
+          setDriveUploadTerm,
+          isDriveUploading,
+          driveUploadProgress,
+          driveUploadStep,
+          driveUploadError,
+          driveSyllabusCascade,
+          handleSingleDriveUpload: () => {
+            handleStartDriveUpload({ preventDefault: () => {} } as any)
+          },
+        }}
+      />
 
       {/* 7. Delete Google Drive Material Confirmation Modal */}
       <AnimatePresence>

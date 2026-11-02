@@ -424,6 +424,34 @@ export async function runMigration() {
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extracted_text TEXT;
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extracted_pages JSONB;
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS page_count INT;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS file_checksum VARCHAR(64);
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS applicable_groups JSONB DEFAULT '["group1", "group2", "group4"]'::jsonb;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS medium VARCHAR(20) DEFAULT 'Tamil';
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extracted_toc JSONB;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS classification_meta JSONB;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS confidence_score INT DEFAULT 100;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS batch_id VARCHAR(100);
+
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_checksum ON google_drive_materials (file_checksum);
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_batch_id ON google_drive_materials (batch_id);
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_medium ON google_drive_materials (medium);
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_applicable_groups ON google_drive_materials USING GIN (applicable_groups);
+
+      -- 10. Create bulk_upload_batches table for tracking bulk upload processing batches
+      CREATE TABLE IF NOT EXISTS bulk_upload_batches (
+        id SERIAL PRIMARY KEY,
+        batch_id VARCHAR(100) UNIQUE NOT NULL,
+        total_files INT NOT NULL DEFAULT 0,
+        completed_files INT DEFAULT 0,
+        failed_files INT DEFAULT 0,
+        status VARCHAR(30) NOT NULL DEFAULT 'processing' CHECK (status IN ('processing', 'completed', 'partial_failure', 'failed')),
+        created_by VARCHAR(150),
+        summary JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bulk_batches_batch_id ON bulk_upload_batches (batch_id);
     `);
 
     await client.query('COMMIT');

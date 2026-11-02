@@ -29,6 +29,10 @@ export interface GoogleDriveMaterialItem {
   viewUrl?: string;
   uploadStatus?: string;
   createdAt?: string;
+  applicableGroups?: string[];
+  extractedToc?: any[];
+  confidenceScore?: number;
+  medium?: string;
 }
 
 interface GoogleDrivePdfViewerProps {
