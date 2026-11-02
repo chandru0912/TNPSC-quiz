@@ -3924,6 +3924,20 @@ const Admin = () => {
                         <span>{driveConnectionError || driveStatus.error}</span>
                       </div>
                     )}
+                    {!driveStatus.connected && !driveStatus.configured && (
+                      <div style={{ marginTop: '0.65rem', padding: '0.65rem 0.85rem', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fde68a', fontSize: '0.82rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: '#f59e0b', marginBottom: '0.25rem' }}>
+                          <AlertTriangle size={15} />
+                          <span>Action Required: Configure GOOGLE_CLIENT_SECRET</span>
+                        </div>
+                        <div>
+                          Open <code>backend/.env</code> and paste your newly rotated Google Client Secret into:
+                          <div style={{ marginTop: '0.35rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.35)', padding: '0.35rem 0.6rem', borderRadius: '4px', color: '#6ee7b7' }}>
+                            GOOGLE_CLIENT_SECRET=GOCSPX-your_actual_rotated_secret
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -4027,7 +4041,17 @@ const Admin = () => {
                   <strong style={{ color: '#ffd700' }}>Production Callback:</strong> <code style={{ color: '#cbd5e1' }}>https://tnpsc-quiz-lval.vercel.app/api/drive/oauth/callback</code>
                 </div>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <strong style={{ color: '#ffd700' }}>Authorized JavaScript Origin:</strong> <code style={{ color: '#10b981' }}>{typeof window !== 'undefined' ? window.location.origin : 'https://tnpsc-quiz-lval.vercel.app'}</code> <span style={{ color: 'rgba(255,255,255,0.45)', marginLeft: '0.5rem' }}>(Add to Google Cloud Console &rarr; OAuth 2.0 Client &rarr; Authorized JavaScript origins for direct browser streaming)</span>
+                  <strong style={{ color: '#ffd700' }}>Authorized JavaScript Origins:</strong>{' '}
+                  <code style={{ color: '#10b981' }}>http://localhost:5173</code>,{' '}
+                  <code style={{ color: '#10b981' }}>https://tnpsc-quiz-lval.vercel.app</code>
+                  {typeof window !== 'undefined' && window.location.origin && window.location.origin !== 'http://localhost:5173' && !window.location.origin.includes('vercel.app') && (
+                    <span style={{ color: '#f59e0b', marginLeft: '0.5rem' }}>
+                      (Current active origin: <code>{window.location.origin}</code>)
+                    </span>
+                  )}
+                  <span style={{ color: 'rgba(255,255,255,0.45)', marginLeft: '0.5rem' }}>
+                    (Add to Google Cloud Console &rarr; OAuth 2.0 Client &rarr; Authorized JavaScript origins for direct browser streaming)
+                  </span>
                 </div>
               </div>
             </div>
