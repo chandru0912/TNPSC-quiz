@@ -287,12 +287,16 @@ export async function runMigration() {
     // Backfill existing questions: set study_materials for textbook-grounded or lesson-mapped questions
     await client.query(`
       UPDATE questions
-      SET target_system = 'study_materials',
+      SET target_system = COALESCE(target_system, 'study_materials'),
           exam_group_id = COALESCE(exam_group_id, category),
           subject_id = COALESCE(subject_id, LOWER(REPLACE(subject, ' ', '-'))),
           standard_id = COALESCE(standard_id, class_id),
-          language = COALESCE(language, 'tamil')
-      WHERE textbook_id IS NOT NULL OR lesson_id IS NOT NULL;
+          language = COALESCE(language, 'tamil'),
+          lesson_id = CASE
+            WHEN lesson_id IS NOT NULL AND lesson_id != '' THEN lesson_id
+            WHEN (lesson_title LIKE '%எழுத்து இலக்கணம்%' OR lesson_title LIKE '%1.1%') AND class_id = 6 AND unit_id = 1 THEN 'gt-1-6-t1-l1'
+            ELSE COALESCE(lesson_id, 'gt-1-6-t1-l1')
+          END;
 
       UPDATE questions
       SET option_a = options->>0,

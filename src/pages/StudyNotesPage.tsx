@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Search,
   ChevronUp,
+  ChevronDown,
 } from 'lucide-react'
 import { useLanguage } from '../context/LanguageContext'
 import { apiFetch } from '../utils/api'
@@ -478,6 +479,44 @@ const StudyNotesPage: React.FC = () => {
     }
   }, [canonicalLessonId, effectiveClassId, decodedLessonTitle])
 
+  // Published MCQs for this specific lesson
+  const [lessonQuestions, setLessonQuestions] = useState<any[]>([])
+  const [loadingQuestions, setLoadingQuestions] = useState(false)
+  const [expandedQuestionId, setExpandedQuestionId] = useState<number | null>(null)
+
+  const fetchLessonQuestions = useCallback(async () => {
+    setLoadingQuestions(true)
+    try {
+      const g = normalizedCategory.includes('group1') ? 'group1' : normalizedCategory.includes('group4') ? 'group4' : 'group2'
+      const params = new URLSearchParams()
+      params.set('group', g)
+      params.set('subjectId', effectiveSubject)
+      if (effectiveClassId) params.set('standard', effectiveClassId.toString())
+      if (unitId) params.set('unitId', unitId.toString())
+      if (canonicalLessonId) params.set('lessonId', canonicalLessonId)
+      if (decodedLessonTitle) params.set('lessonTitle', decodedLessonTitle)
+      if (selectedLang !== 'all') params.set('language', selectedLang)
+      params.set('limit', '50')
+
+      const res = await apiFetch(`/api/study-materials/questions?${params.toString()}`)
+      const data = await res.json().catch(() => null)
+      if (res.ok && data?.status === 'success' && Array.isArray(data?.data)) {
+        setLessonQuestions(data.data)
+      } else {
+        setLessonQuestions([])
+      }
+    } catch (err) {
+      console.warn('Could not fetch practice questions for study notes:', err)
+      setLessonQuestions([])
+    } finally {
+      setLoadingQuestions(false)
+    }
+  }, [normalizedCategory, effectiveSubject, effectiveClassId, unitId, canonicalLessonId, decodedLessonTitle, selectedLang])
+
+  useEffect(() => {
+    fetchLessonQuestions()
+  }, [fetchLessonQuestions])
+
   const groupDisplayName = useMemo(() => {
     if (normalizedCategory === 'group1') return isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1'
     if (normalizedCategory === 'group4_vao') return isTamil ? 'TNPSC குரூப் 4 & VAO' : 'TNPSC Group 4 & VAO'
@@ -515,10 +554,11 @@ const StudyNotesPage: React.FC = () => {
     const g = normalizedCategory.includes('group1') ? 'group1' : normalizedCategory.includes('group4') ? 'group4' : 'group2'
     const c = effectiveClassId || 'all'
     const u = unitId || '1'
+    const lessonIdParam = canonicalLessonId ? `&lessonId=${encodeURIComponent(canonicalLessonId)}` : ''
     navigate(
       `/study-materials/practice?group=${g}&subjectId=${effectiveSubject}&classId=${c}&unitId=${u}&lessonTitle=${encodeURIComponent(
         decodedLessonTitle
-      )}`
+      )}${lessonIdParam}`
     )
   }
 
@@ -889,6 +929,175 @@ const StudyNotesPage: React.FC = () => {
               ))}
             </div>
           </div>
+        )}
+
+        {/* Dedicated Lesson Practice Questions Section */}
+        {lessonQuestions.length > 0 && (
+          <section className="study-section-card" style={{ marginTop: '2rem', border: '1px solid rgba(255, 215, 0, 0.25)' }}>
+            <header className="study-section-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <div className="study-section-title-wrap">
+                <span className="study-topic-order-badge" style={{ background: 'linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,165,0,0.2))', color: '#ffd700', borderColor: 'rgba(255,215,0,0.4)' }}>
+                  {isTamil ? 'வினா வங்கி' : 'Question Bank'}
+                </span>
+                <h2 className="study-section-title" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <span>{isTamil ? 'பாட மாதிரி வினாக்கள்' : 'Lesson Practice Questions'}</span>
+                  <span className="study-meta-pill study-meta-pill-gold" style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}>
+                    {loadingQuestions ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <Loader2 size={12} className="animate-spin" />
+                        {isTamil ? 'ஏற்றுகிறது...' : 'Loading...'}
+                      </span>
+                    ) : (
+                      `${lessonQuestions.length} ${isTamil ? 'வினாக்கள் உள்ளன' : 'Available Questions'}`
+                    )}
+                  </span>
+                </h2>
+              </div>
+              <button
+                className="study-btn study-btn-primary"
+                onClick={handlePracticeClick}
+                style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+              >
+                <HelpCircle size={15} />
+                <span>{isTamil ? 'ஊடாடும் பயிற்சி தேர்வு' : 'Take Interactive Quiz'}</span>
+              </button>
+            </header>
+
+            <div className="study-section-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.25rem' }}>
+              {lessonQuestions.slice(0, 10).map((q: any, qIdx: number) => (
+                <div
+                  key={q.id || qIdx}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '10px',
+                    padding: '1.25rem',
+                    transition: 'border-color 0.2s',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ background: 'rgba(255, 215, 0, 0.15)', color: '#ffd700', borderRadius: '6px', padding: '0.15rem 0.5rem', fontSize: '0.8rem', fontWeight: 600 }}>
+                        Q{qIdx + 1}
+                      </span>
+                      {q.difficulty && (
+                        <span style={{
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '4px',
+                          background: q.difficulty === 'Hard' ? 'rgba(239, 68, 68, 0.15)' : q.difficulty === 'Medium' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                          color: q.difficulty === 'Hard' ? '#ef4444' : q.difficulty === 'Medium' ? '#f59e0b' : '#10b981',
+                        }}>
+                          {q.difficulty}
+                        </span>
+                      )}
+                    </div>
+                    {q.tag && (
+                      <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)' }}>
+                        {q.tag}
+                      </span>
+                    )}
+                  </div>
+
+                  <p style={{ color: '#f3f4f6', fontSize: '0.95rem', lineHeight: '1.6', marginBottom: '1rem', fontWeight: 500 }}>
+                    {cleanTamilUnicodeText(q.question)}
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    {q.options && q.options.map((opt: string, optIdx: number) => {
+                      const optLabel = String.fromCharCode(65 + optIdx)
+                      const isCorrect = q.correctAnswer === optIdx
+                      const isExpanded = expandedQuestionId === q.id
+                      return (
+                        <div
+                          key={optIdx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.6rem',
+                            padding: '0.5rem 0.75rem',
+                            borderRadius: '6px',
+                            background: isExpanded && isCorrect ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                            border: `1px solid ${isExpanded && isCorrect ? 'rgba(16, 185, 129, 0.4)' : 'rgba(255, 255, 255, 0.05)'}`,
+                            fontSize: '0.875rem',
+                            color: isExpanded && isCorrect ? '#10b981' : 'rgba(255, 255, 255, 0.85)',
+                          }}
+                        >
+                          <span style={{
+                            width: '22px',
+                            height: '22px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '50%',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            background: isExpanded && isCorrect ? '#10b981' : 'rgba(255, 255, 255, 0.1)',
+                            color: isExpanded && isCorrect ? '#000' : '#fff',
+                          }}>
+                            {optLabel}
+                          </span>
+                          <span>{cleanTamilUnicodeText(opt)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedQuestionId(expandedQuestionId === q.id ? null : q.id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#ffd700',
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        padding: '0.25rem 0',
+                      }}
+                    >
+                      {expandedQuestionId === q.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      <span>{expandedQuestionId === q.id ? (isTamil ? 'விளக்கத்தை மறை' : 'Hide Explanation') : (isTamil ? 'விடை & விளக்கம் காண்க' : 'Show Answer & Explanation')}</span>
+                    </button>
+                    {q.sourceReference && (
+                      <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)' }}>
+                        {q.sourceReference}
+                      </span>
+                    )}
+                  </div>
+
+                  {expandedQuestionId === q.id && (
+                    <div style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', background: 'rgba(16, 185, 129, 0.08)', borderLeft: '3px solid #10b981', borderRadius: '4px' }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#10b981', marginBottom: '0.25rem' }}>
+                        {isTamil ? 'சரியான விடை:' : 'Correct Answer:'} {String.fromCharCode(65 + (q.correctAnswer ?? 0))}
+                      </div>
+                      {q.explanation && (
+                        <p style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.85)', lineHeight: '1.5', margin: 0 }}>
+                          {cleanTamilUnicodeText(q.explanation)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {lessonQuestions.length > 10 && (
+                <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+                  <button
+                    className="study-btn study-btn-primary"
+                    onClick={handlePracticeClick}
+                    style={{ margin: '0 auto' }}
+                  >
+                    <HelpCircle size={15} />
+                    <span>{isTamil ? `அனைத்து ${lessonQuestions.length} வினாக்களையும் பயிற்சி செய்ய` : `Practice All ${lessonQuestions.length} Questions`}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
         )}
       </main>
 

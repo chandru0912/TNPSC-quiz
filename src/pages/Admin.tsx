@@ -125,6 +125,7 @@ interface AdminMetrics {
   totalQuestions: number
   stagingCount: number
   publishedCount: number
+  pendingReviewCount?: number
   unitsCount?: number
   classesCount?: number
 }
@@ -181,7 +182,7 @@ const Admin = () => {
 
   // Data & Filters
   const [questions, setQuestions] = useState<QuestionItem[]>([])
-  const [metrics, setMetrics] = useState<AdminMetrics>({ totalQuestions: 0, stagingCount: 0, publishedCount: 0, unitsCount: 0, classesCount: 0 })
+  const [metrics, setMetrics] = useState<AdminMetrics>({ totalQuestions: 0, stagingCount: 0, publishedCount: 0, pendingReviewCount: 0, unitsCount: 0, classesCount: 0 })
   const [textbookMetrics, setTextbookMetrics] = useState<TextbookMetrics>({ totalTextbooks: 0, stagingCount: 0, publishedCount: 0, classesCovered: 0 })
   const [notesMetrics, setNotesMetrics] = useState<StudyNotesMetrics>({ totalNotes: 0, stagingCount: 0, publishedCount: 0, classesCovered: 0 })
   const [filteredTotal, setFilteredTotal] = useState(0)
@@ -1882,15 +1883,20 @@ const Admin = () => {
 
       const publishedCount = data.publishedCount ?? ids.length
       setQuestions((prev) => prev.map((q) => (ids.includes(q.id) ? { ...q, status: 'published' } : q)))
-      setMetrics((prev) => ({
-        ...prev,
-        stagingCount: Math.max(0, prev.stagingCount - publishedCount),
-        publishedCount: prev.publishedCount + publishedCount,
-      }))
+      if (data.metrics) {
+        setMetrics(data.metrics)
+      } else {
+        setMetrics((prev) => ({
+          ...prev,
+          stagingCount: Math.max(0, prev.stagingCount - publishedCount),
+          publishedCount: prev.publishedCount + publishedCount,
+        }))
+      }
       setSelectedQuestionIds(new Set())
       setIsBulkPublishModalOpen(false)
       showToast('success', data.message || `Successfully published ${publishedCount} questions.`)
       fetchQuestions()
+      fetchAllMetrics()
     } catch {
       showToast('error', 'Network error during bulk publishing')
     } finally {
@@ -2338,6 +2344,7 @@ const Admin = () => {
       if (res.ok) {
         showToast('success', `Question #${q.id} status changed to ${newStatus}`)
         fetchQuestions()
+        fetchAllMetrics()
       } else {
         showToast('error', 'Failed to update publication status')
       }
@@ -2419,10 +2426,11 @@ const Admin = () => {
       return
     }
 
-    // Ensure every question has mandatory TNPSC Group and Topic
+    // Ensure every question has mandatory TNPSC Group, target system, and Topic
     const mappedQuestions = parsed.map((item: any) => ({
       ...item,
-      category: bulkGroupId,
+      category: item.category || bulkGroupId,
+      targetSystem: item.targetSystem || targetSystemFilter,
       lessonId: item.lessonId || (qbSelectedLessonObj && qbSelectedLessonObj.title === item.lessonTitle ? qbSelectedLessonObj.id : null),
       topic: item.topic || (item.lessonTitle ? `${item.lessonTitle}: General Practice` : 'General Practice'),
       status: 'staging',
@@ -2445,6 +2453,7 @@ const Admin = () => {
         setBulkRawText('')
         setBulkParsedCount(null)
         fetchQuestions()
+        fetchAllMetrics()
       } else {
         showToast('error', data.message || 'Upload failed')
       }
@@ -2725,15 +2734,11 @@ const Admin = () => {
 
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-cyan">
-                <Layers size={24} />
+                <AlertCircle size={24} />
               </div>
               <div className="metric-info">
-                <span className="metric-value">
-                  {metrics.unitsCount ? `${metrics.unitsCount} Units` : '6 Units'}
-                </span>
-                <span className="metric-label">
-                  {metrics.classesCount ? `${metrics.classesCount} Classes (6–12)` : 'Total Units / Classes'}
-                </span>
+                <span className="metric-value">{metrics.pendingReviewCount ?? 0}</span>
+                <span className="metric-label">Pending Review</span>
               </div>
             </div>
           </div>

@@ -107,14 +107,16 @@ export const StudyMaterialsPractice: React.FC = () => {
     availableUnits.find((u) => u.id === unitId) || availableUnits[0] || { id: unitId, title: `Unit ${unitId}`, unitNumber: `Unit ${unitId}` }
 
   const availableLessons = getLessonsForSelection(normalizedGroup, resolvedSubject.id, classId, unitId)
-  const resolvedLesson: LessonItem | undefined =
+  const matchedLesson: LessonItem | undefined =
     availableLessons.find(
-      (l) => l.id === lessonIdParam || (lessonTitleParam && l.title.trim().toLowerCase() === lessonTitleParam.trim().toLowerCase())
-    ) || availableLessons[0]
+      (l) => (lessonIdParam && l.id === lessonIdParam) ||
+             (lessonTitleParam && l.title.trim().toLowerCase() === lessonTitleParam.trim().toLowerCase())
+    )
+  const resolvedLesson: LessonItem | undefined = matchedLesson || (lessonTitleParam || lessonIdParam ? undefined : availableLessons[0])
 
-  const displayLessonTitle = resolvedLesson?.title || lessonTitleParam || 'Lesson Practice'
-  const displayLessonId = resolvedLesson?.id || lessonIdParam
-  const displayLessonNumber = resolvedLesson?.lessonNumber || '1.1'
+  const displayLessonTitle = lessonTitleParam || resolvedLesson?.title || availableLessons[0]?.title || 'Lesson Practice'
+  const displayLessonId = lessonIdParam || resolvedLesson?.id || availableLessons[0]?.id
+  const displayLessonNumber = resolvedLesson?.lessonNumber || availableLessons[0]?.lessonNumber || '1.1'
 
   // Exam Group Display Title
   const groupDisplayTitle = useMemo(() => {
