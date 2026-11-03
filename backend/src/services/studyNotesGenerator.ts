@@ -24,7 +24,6 @@ export interface StudyNotesRequest {
   textbookContent: string;
   extractedPages?: number[];
   textbookName?: string;
-  apiKeyOverride?: string;
 }
 
 export interface TopicCoverageValidation {
@@ -131,7 +130,7 @@ export function extractTextbookKeyTopics(textbookContent: string, language: 'tam
 
 /**
  * High-yield concise Short Notes synthesis directly from textbook content
- * when offline or when Cloud AI API key is unconfigured.
+ * when offline or when Claude AI API key is unconfigured.
  */
 export function synthesizeShortNotesFromTextbook(params: {
   lessonTitle: string;
@@ -353,6 +352,7 @@ export async function generateStudyNotes(
 ): Promise<GeneratedStudyNotesResult> {
   const isTamil = req.language === 'tamil';
   const isFullFormat = req.noteFormat === 'full';
+  const hasSourceText = (req.textbookContent || '').trim().length >= 50;
 
   let systemPrompt = '';
   if (isFullFormat) {
@@ -500,7 +500,7 @@ Format: ${isFullFormat ? 'FULL COMPREHENSIVE NOTES (DETAILED)' : 'SHORT REVISION
 
 SOURCE SAMACHEER KALVI TEXTBOOK CONTENT:
 """
-${req.textbookContent.slice(0, 16000)}
+${hasSourceText ? req.textbookContent.slice(0, 16000) : 'No textbook PDF or source text was provided. Generate from standard Samacheer Kalvi syllabus knowledge only and do not claim PDF verification.'}
 """
 
 ${isFullFormat
@@ -516,12 +516,14 @@ ${isFullFormat
         systemPrompt,
         temperature: 0.15,
         maxTokens: isFullFormat ? 6000 : 4000,
-      },
-      req.apiKeyOverride
+      }
     );
   } catch (aiErr: any) {
+    if (!hasSourceText) {
+      throw new Error(`Claude notes generation failed: ${aiErr.message}`);
+    }
     console.warn(
-      `[StudyNotesGenerator] Cloud AI call failed (${aiErr.message}), falling back to direct textbook synthesis.`
+      `[StudyNotesGenerator] Claude call failed (${aiErr.message}), falling back to direct textbook synthesis.`
     );
     rawResponse = isFullFormat
       ? synthesizeFullNotesFromTextbook({
@@ -585,8 +587,7 @@ Do not include page numbers, intros or conclusions.`;
             systemPrompt,
             temperature: 0.15,
             maxTokens: 1000,
-          },
-          req.apiKeyOverride
+          }
         );
 
         const cleanHeal = sanitizeStudyNotesMarkdown(healResponse);

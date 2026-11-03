@@ -36,6 +36,10 @@ import {
   CheckCircle2,
   AlertCircle,
   Eye,
+  EyeOff,
+  Key,
+  Cpu,
+  Copy,
   UploadCloud,
   Target,
   Folder,
@@ -200,26 +204,51 @@ const Admin = () => {
     .map((q) => q.id)
 
   // Navigation Section (persists across page reloads and Google OAuth redirects)
-  const [adminSection, setAdminSectionState] = useState<'questions' | 'textbooks' | 'notes' | 'gdrive'>(() => {
+  const [adminSection, setAdminSectionState] = useState<'questions' | 'textbooks' | 'notes' | 'gdrive' | 'claude'>(() => {
     if (typeof window !== 'undefined') {
       const search = window.location.search || ''
       if (search.includes('gdrive=') || search.includes('gdrive_error=')) {
         return 'gdrive'
       }
       const saved = sessionStorage.getItem('admin_active_section')
-      if (saved === 'questions' || saved === 'textbooks' || saved === 'notes' || saved === 'gdrive') {
+      if (saved === 'questions' || saved === 'textbooks' || saved === 'notes' || saved === 'gdrive' || saved === 'claude') {
         return saved
       }
     }
     return 'questions'
   })
 
-  const setAdminSection = useCallback((sec: 'questions' | 'textbooks' | 'notes' | 'gdrive') => {
+  const setAdminSection = useCallback((sec: 'questions' | 'textbooks' | 'notes' | 'gdrive' | 'claude') => {
     setAdminSectionState(sec)
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('admin_active_section', sec)
     }
   }, [])
+
+  // Claude AI Configuration state
+  const [claudeStatus, setClaudeStatus] = useState<{
+    configured: boolean
+    model: string
+    name: string
+    maskedKey?: string
+    connected?: boolean
+    error?: string
+  }>({
+    configured: false,
+    model: 'claude-3-5-sonnet-20241022',
+    name: 'Anthropic Claude API',
+  })
+  const [claudeInputKey, setClaudeInputKey] = useState('')
+  const [claudeInputModel, setClaudeInputModel] = useState('claude-3-5-sonnet-20241022')
+  const [showClaudeKey, setShowClaudeKey] = useState(false)
+  const [isTestingClaude, setIsTestingClaude] = useState(false)
+  const [isSavingClaudeKey, setIsSavingClaudeKey] = useState(false)
+  const [claudeTestResult, setClaudeTestResult] = useState<{
+    tested: boolean
+    success: boolean
+    message: string
+  } | null>(null)
+  const [copiedInstructions, setCopiedInstructions] = useState(false)
 
   // Google Drive state
   const [driveStatus, setDriveStatus] = useState<{
@@ -450,7 +479,7 @@ const Admin = () => {
   const [bulkParseError, setBulkParseError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
 
-  // Cloud AI Generator Modal state
+  // Claude AI Generator Modal state
   const [isCloudAiModalOpen, setIsCloudAiModalOpen] = useState(false)
   const [cloudAiModalMode, setCloudAiModalMode] = useState<CloudAiMode>('notes')
 
@@ -459,11 +488,11 @@ const Admin = () => {
     setIsCloudAiModalOpen(true)
   }
 
-  // Handle URL deep link query param ?openCloudAi=mcq | notes | true
+  // Handle URL deep link query param ?openClaudeAi or ?openCloudAi=mcq | notes | true
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
-    const openCloudAi = params.get('openCloudAi')
+    const openCloudAi = params.get('openClaudeAi') || params.get('openCloudAi')
     if (openCloudAi) {
       if (openCloudAi === 'mcq') {
         setCloudAiModalMode('mcq')
@@ -1124,6 +1153,121 @@ const Admin = () => {
     }
   }
 
+  // Fetch Claude AI Status from backend
+  const fetchClaudeStatus = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/ai/status', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setClaudeStatus({
+          configured: Boolean(data.configured),
+          model: data.model || 'claude-3-5-sonnet-20241022',
+          name: data.name || 'Anthropic Claude API',
+          maskedKey: data.maskedKey,
+        })
+        if (data.model) {
+          setClaudeInputModel(data.model)
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch Claude status:', e)
+    }
+  }, [token])
+
+  // Save Claude AI API Key and Model securely to backend
+  const saveClaudeConfig = async () => {
+    if (!token) return
+    setIsSavingClaudeKey(true)
+    setClaudeTestResult(null)
+    try {
+      const res = await apiFetch('/api/ai/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          apiKey: claudeInputKey.trim() || undefined,
+          model: claudeInputModel.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Failed to save configuration')
+      setClaudeStatus({
+        configured: Boolean(data.configured),
+        model: data.model || claudeInputModel,
+        name: data.name || 'Anthropic Claude API',
+        maskedKey: data.maskedKey,
+      })
+      setClaudeInputKey('')
+      setActionMessage({ type: 'success', text: 'Claude AI API configuration saved securely on backend.' })
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to save Claude configuration' })
+    } finally {
+      setIsSavingClaudeKey(false)
+    }
+  }
+
+  // Test Claude AI authenticated connectivity
+  const testClaudeConnection = async () => {
+    if (!token) return
+    setIsTestingClaude(true)
+    setClaudeTestResult(null)
+    try {
+      const res = await apiFetch('/api/ai/test-connection', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      const data = await res.json()
+      if (data.success) {
+        setClaudeTestResult({
+          tested: true,
+          success: true,
+          message: 'CLAUDE AI CONNECTED',
+        })
+        setClaudeStatus((prev) => ({ ...prev, connected: true }))
+        setActionMessage({ type: 'success', text: 'CLAUDE AI CONNECTED: Authentication verified with Anthropic Messages API.' })
+      } else {
+        setClaudeTestResult({
+          tested: true,
+          success: false,
+          message: data.message || 'Claude connection test failed',
+        })
+        setClaudeStatus((prev) => ({ ...prev, connected: false }))
+        setActionMessage({ type: 'error', text: `Claude test failed: ${data.message}` })
+      }
+    } catch (err: any) {
+      setClaudeTestResult({
+        tested: true,
+        success: false,
+        message: err.message || 'Network error during Claude test',
+      })
+      setClaudeStatus((prev) => ({ ...prev, connected: false }))
+      setActionMessage({ type: 'error', text: err.message || 'Connection test error' })
+    } finally {
+      setIsTestingClaude(false)
+    }
+  }
+
+  // Copy Claude API setup instructions
+  const copySetupInstructions = () => {
+    const text = `Anthropic Claude API Setup Instructions for TNPSC Study Hub:
+1. Open https://platform.claude.com/settings/keys
+2. Sign in or create an account at Anthropic Console.
+3. Click "+ Create Key" and give it a name (e.g. "TNPSC Study Hub").
+4. Copy the secret key (starts with sk-ant-).
+5. Paste it into TNPSC Study Hub Admin Panel -> Claude AI Configuration.
+6. Click "Save API Key", then click "Test API Connection" until "CLAUDE AI CONNECTED" appears.`
+    navigator.clipboard.writeText(text)
+    setCopiedInstructions(true)
+    setTimeout(() => setCopiedInstructions(false), 2500)
+    setActionMessage({ type: 'success', text: 'API setup instructions copied to clipboard!' })
+  }
+
   // Resumable Direct Upload to Google Drive (Chunked, CORS-bound, Zero Serverless Limits)
   const handleStartDriveUpload = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1377,6 +1521,7 @@ const Admin = () => {
   useEffect(() => {
     checkDriveStatus()
     fetchDriveMaterials()
+    fetchClaudeStatus()
 
     const urlParams = new URLSearchParams(window.location.search)
     if (urlParams.get('gdrive') === 'connected') {
@@ -1435,8 +1580,11 @@ const Admin = () => {
   useEffect(() => {
     if (token) {
       fetchAllMetrics()
+      if (adminSection === 'claude') {
+        fetchClaudeStatus()
+      }
     }
-  }, [fetchAllMetrics, token, adminSection])
+  }, [fetchAllMetrics, token, adminSection, fetchClaudeStatus])
 
   // Poll active processing jobs
   useEffect(() => {
@@ -2631,18 +2779,65 @@ const Admin = () => {
                   <span>Google Drive: Not Connected</span>
                 )}
               </button>
+
+              {/* Claude AI Status Pill */}
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminSection('claude')
+                  fetchClaudeStatus()
+                }}
+                title={claudeStatus.connected ? 'Claude AI Connected (Click to configure)' : 'Claude AI (Click to configure)'}
+                style={{
+                  cursor: 'pointer',
+                  border: claudeStatus.connected
+                    ? '1px solid rgba(16, 185, 129, 0.45)'
+                    : claudeStatus.configured
+                    ? '1px solid rgba(192, 132, 252, 0.4)'
+                    : '1px solid rgba(239, 68, 68, 0.35)',
+                  background: claudeStatus.connected
+                    ? 'rgba(16, 185, 129, 0.12)'
+                    : claudeStatus.configured
+                    ? 'rgba(192, 132, 252, 0.12)'
+                    : 'rgba(239, 68, 68, 0.1)',
+                  color: claudeStatus.connected
+                    ? '#34d399'
+                    : claudeStatus.configured
+                    ? '#c084fc'
+                    : '#f87171',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.3rem 0.75rem',
+                  borderRadius: '9999px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <Cpu size={13} />
+                <span>
+                  {claudeStatus.connected
+                    ? 'Claude AI: Connected'
+                    : claudeStatus.configured
+                    ? 'Claude AI: Configured'
+                    : 'Claude AI: Offline'}
+                </span>
+              </button>
             </div>
             <h1 className="admin-title">
               {adminSection === 'questions' && 'Question Bank Management'}
               {adminSection === 'textbooks' && 'Textbook Management'}
               {adminSection === 'notes' && 'Study Notes Management'}
               {adminSection === 'gdrive' && 'Google Drive PDF Materials'}
+              {adminSection === 'claude' && 'Claude AI Configuration'}
             </h1>
             <p className="admin-subtitle">
               {adminSection === 'questions' && 'Review, edit, stage, and publish verified Samacheer Kalvi topic-wise MCQs directly into the database.'}
               {adminSection === 'textbooks' && 'Upload, index, and organize Samacheer Kalvi PDF textbooks for AI study notes and MCQ generation.'}
               {adminSection === 'notes' && 'Review, edit, stage, and publish comprehensive TNPSC Complete Study Notes directly into the database.'}
               {adminSection === 'gdrive' && 'Connect your personal Google Drive account to store and stream official PDF textbooks and study materials with zero serverless size limits.'}
+              {adminSection === 'claude' && 'Configure Anthropic Claude API credentials, manage models, and verify secure server-side connection for AI generation.'}
             </p>
           </div>
 
@@ -2715,6 +2910,25 @@ const Admin = () => {
             <Cloud size={16} />
             <span>Google Drive</span>
             <span className="admin-section-tab-count">{driveMaterials.length}</span>
+          </button>
+          <button
+            className={`admin-section-tab ${adminSection === 'claude' ? 'active' : ''}`}
+            onClick={() => {
+              setAdminSection('claude')
+              fetchClaudeStatus()
+            }}
+          >
+            <Cpu size={16} />
+            <span>Claude AI Configuration</span>
+            <span
+              className="admin-section-tab-count"
+              style={{
+                background: claudeStatus.connected ? 'rgba(16, 185, 129, 0.25)' : (claudeStatus.configured ? 'rgba(192, 132, 252, 0.25)' : 'rgba(239, 68, 68, 0.25)'),
+                color: claudeStatus.connected ? '#34d399' : (claudeStatus.configured ? '#c084fc' : '#f87171'),
+              }}
+            >
+              {claudeStatus.connected ? 'CONNECTED' : (claudeStatus.configured ? 'READY' : 'OFFLINE')}
+            </span>
           </button>
         </div>
 
@@ -2913,6 +3127,85 @@ const Admin = () => {
           </div>
         )}
 
+        {adminSection === 'claude' && (
+          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box" style={{ background: 'rgba(192, 132, 252, 0.15)', color: '#c084fc' }}>
+                <Cpu size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value" style={{ fontSize: '1.1rem' }}>Anthropic Claude</span>
+                <span className="metric-label">AI Generation Provider</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div
+                className="metric-icon-box"
+                style={{
+                  background: claudeStatus.connected
+                    ? 'rgba(16, 185, 129, 0.15)'
+                    : claudeStatus.configured
+                    ? 'rgba(255, 215, 0, 0.15)'
+                    : 'rgba(239, 68, 68, 0.15)',
+                  color: claudeStatus.connected ? '#10b981' : claudeStatus.configured ? '#ffd700' : '#ef4444',
+                }}
+              >
+                {claudeStatus.connected ? (
+                  <CheckCircle size={24} />
+                ) : claudeStatus.configured ? (
+                  <Clock size={24} />
+                ) : (
+                  <AlertCircle size={24} />
+                )}
+              </div>
+              <div className="metric-info">
+                <span
+                  className="metric-value"
+                  style={{
+                    fontSize: '1.02rem',
+                    color: claudeStatus.connected ? '#34d399' : claudeStatus.configured ? '#ffd700' : '#f87171',
+                  }}
+                >
+                  {claudeStatus.connected
+                    ? 'CLAUDE AI CONNECTED'
+                    : claudeStatus.configured
+                    ? 'Configured (Untested)'
+                    : 'Not Connected'}
+                </span>
+                <span className="metric-label">Connection Health</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-gold">
+                <Sparkles size={24} />
+              </div>
+              <div className="metric-info">
+                <span
+                  className="metric-value"
+                  style={{ fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {claudeStatus.model}
+                </span>
+                <span className="metric-label">Configured Foundation Model</span>
+              </div>
+            </div>
+
+            <div className="admin-metric-card glass">
+              <div className="metric-icon-box metric-icon-cyan">
+                <Key size={24} />
+              </div>
+              <div className="metric-info">
+                <span className="metric-value" style={{ fontSize: '0.92rem' }}>
+                  {claudeStatus.maskedKey ? claudeStatus.maskedKey : 'No Key Configured'}
+                </span>
+                <span className="metric-label">Backend Secrets Storage</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Section 1: Question Bank Management */}
         {adminSection === 'questions' && (
           <>
@@ -2999,10 +3292,10 @@ const Admin = () => {
               <button
                 className="admin-btn admin-btn-cloud-ai"
                 onClick={() => handleOpenCloudAiGenerator('mcq')}
-                title="Generate syllabus-based questions from Samacheer Kalvi textbooks"
+                title="Generate syllabus-based questions from Samacheer Kalvi textbooks with Claude AI"
               >
                 <Sparkles size={16} />
-                <span>Cloud AI Generator</span>
+                <span>Claude AI Generator</span>
               </button>
               <button className="admin-btn admin-btn-primary" onClick={handleOpenAddModal}>
                 <Plus size={16} />
@@ -3585,10 +3878,10 @@ const Admin = () => {
                   <button
                     className="admin-btn admin-btn-cloud-ai"
                     onClick={() => handleOpenCloudAiGenerator('notes')}
-                    title="Generate syllabus-based study notes from Samacheer Kalvi textbooks"
+                    title="Generate syllabus-based study notes from Samacheer Kalvi textbooks with Claude AI"
                   >
                     <Sparkles size={16} />
-                    <span>Cloud AI Generator</span>
+                    <span>Claude AI Generator</span>
                   </button>
                   <button className="admin-btn admin-btn-primary" onClick={handleOpenAddNoteModal}>
                     <Plus size={16} />
@@ -4333,6 +4626,424 @@ const Admin = () => {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Section 5: Claude AI Configuration */}
+        {adminSection === 'claude' && (
+          <div className="admin-claude-section" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* 1. Header & Live Status Card */}
+            <div className="claude-config-card glass" style={{ padding: '1.75rem', borderRadius: '16px', background: 'linear-gradient(135deg, rgba(22, 32, 60, 0.75) 0%, rgba(15, 23, 42, 0.95) 100%)', border: '1px solid rgba(192, 132, 252, 0.25)', boxShadow: '0 10px 30px rgba(0, 0, 0, 0.4)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.25rem' }}>
+                <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      width: '56px',
+                      height: '56px',
+                      borderRadius: '16px',
+                      background: claudeStatus.connected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(192, 132, 252, 0.15)',
+                      border: `1px solid ${claudeStatus.connected ? 'rgba(16, 185, 129, 0.4)' : 'rgba(192, 132, 252, 0.35)'}`,
+                      color: claudeStatus.connected ? '#10b981' : '#c084fc',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Cpu size={30} />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <h2 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 700, color: '#ffffff' }}>
+                        Claude AI Configuration
+                      </h2>
+                      {claudeStatus.connected ? (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '9999px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            background: 'rgba(16, 185, 129, 0.2)',
+                            border: '1px solid rgba(16, 185, 129, 0.5)',
+                            color: '#34d399',
+                          }}
+                        >
+                          <CheckCircle2 size={13} />
+                          CLAUDE AI CONNECTED
+                        </span>
+                      ) : claudeStatus.configured ? (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '9999px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            background: 'rgba(255, 215, 0, 0.18)',
+                            border: '1px solid rgba(255, 215, 0, 0.45)',
+                            color: '#facc15',
+                          }}
+                        >
+                          <Clock size={13} />
+                          READY FOR VERIFICATION
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '9999px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            background: 'rgba(239, 68, 68, 0.18)',
+                            border: '1px solid rgba(239, 68, 68, 0.45)',
+                            color: '#f87171',
+                          }}
+                        >
+                          <AlertCircle size={13} />
+                          NOT CONNECTED
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                      Anthropic Messages API is the exclusive provider for TNPSC MCQ generation and Study Notes.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Top Action Buttons */}
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <a
+                    href="https://platform.claude.com/settings/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="admin-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(192, 132, 252, 0.2) 0%, rgba(217, 70, 239, 0.2) 100%)',
+                      border: '1px solid rgba(192, 132, 252, 0.4)',
+                      color: '#e9d5ff',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      textDecoration: 'none',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <ExternalLink size={15} />
+                    <span>Get Claude API Key</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={copySetupInstructions}
+                    className="admin-btn admin-btn-secondary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                  >
+                    {copiedInstructions ? <Check size={15} style={{ color: '#10b981' }} /> : <Copy size={15} />}
+                    <span>{copiedInstructions ? 'Instructions Copied!' : 'Copy Instructions'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={testClaudeConnection}
+                    disabled={isTestingClaude}
+                    className="admin-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <RefreshCw size={15} className={isTestingClaude ? 'spinning' : ''} />
+                    <span>{isTestingClaude ? 'Testing Connection...' : 'Test API Connection'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Official Help Text Banner */}
+              <div
+                style={{
+                  marginTop: '1.25rem',
+                  padding: '0.85rem 1.15rem',
+                  borderRadius: '10px',
+                  background: 'rgba(192, 132, 252, 0.08)',
+                  border: '1px solid rgba(192, 132, 252, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '0.75rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', fontSize: '0.87rem', color: '#e2e8f0' }}>
+                  <Sparkles size={16} style={{ color: '#c084fc', flexShrink: 0 }} />
+                  <span>
+                    Don't have a Claude API Key? Create one from the official Anthropic Console.
+                  </span>
+                </div>
+                <a
+                  href="https://platform.claude.com/settings/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: '0.82rem',
+                    color: '#c084fc',
+                    fontWeight: 600,
+                    textDecoration: 'underline',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                  }}
+                >
+                  platform.claude.com/settings/keys <ExternalLink size={12} />
+                </a>
+              </div>
+
+              {/* Live Connection Test Feedback */}
+              {claudeTestResult && (
+                <div
+                  style={{
+                    marginTop: '1rem',
+                    padding: '0.9rem 1.25rem',
+                    borderRadius: '10px',
+                    background: claudeTestResult.success ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                    border: `1px solid ${claudeTestResult.success ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                  }}
+                >
+                  {claudeTestResult.success ? (
+                    <CheckCircle size={20} style={{ color: '#10b981', flexShrink: 0 }} />
+                  ) : (
+                    <AlertTriangle size={20} style={{ color: '#ef4444', flexShrink: 0 }} />
+                  )}
+                  <div style={{ fontSize: '0.86rem' }}>
+                    <div style={{ fontWeight: 700, color: claudeTestResult.success ? '#34d399' : '#f87171' }}>
+                      {claudeTestResult.success ? 'CLAUDE AI CONNECTED' : 'Connection Authentication Failed'}
+                    </div>
+                    <div style={{ color: '#cbd5e1', marginTop: '0.15rem' }}>
+                      {claudeTestResult.message}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 2. Secure Configuration Form */}
+            <div className="admin-table-card glass" style={{ padding: '1.75rem' }}>
+              <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Key size={18} style={{ color: '#ffd700' }} />
+                  API Credentials & Model Setup
+                </h3>
+                <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Credentials are encrypted and saved solely on the backend environment (never stored in browser or localStorage).
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
+                {/* Field 1: Model Selection */}
+                <div className="form-field">
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.45rem', display: 'block' }}>
+                    Configured Model *
+                  </label>
+                  <select
+                    className="filter-select"
+                    style={{ width: '100%', padding: '0.75rem' }}
+                    value={claudeInputModel}
+                    onChange={(e) => setClaudeInputModel(e.target.value)}
+                  >
+                    <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022 (Recommended - High Accuracy)</option>
+                    <option value="claude-sonnet-5-5">claude-sonnet-5-5 (Sonnet 3.5 Alias)</option>
+                    <option value="claude-3-7-sonnet-20250219">claude-3-7-sonnet-20250219 (Claude 3.7 Sonnet)</option>
+                    <option value="claude-3-5-haiku-20241022">claude-3-5-haiku-20241022 (High Speed, Low Latency)</option>
+                    <option value="claude-3-haiku-20240307">claude-3-haiku-20240307 (Claude 3 Haiku)</option>
+                  </select>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                    Active model for MCQ question generation and comprehensive TNPSC study notes.
+                  </span>
+                </div>
+
+                {/* Field 2: API Key Input with Toggle and Masked Display */}
+                <div className="form-field">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                    <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', margin: 0 }}>
+                      Claude API Key *
+                    </label>
+                    {claudeStatus.maskedKey && (
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '6px',
+                          background: 'rgba(255, 215, 0, 0.1)',
+                          border: '1px solid rgba(255, 215, 0, 0.3)',
+                          color: '#ffd700',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        Configured: {claudeStatus.maskedKey}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type={showClaudeKey ? 'text' : 'password'}
+                      className="admin-input"
+                      style={{ width: '100%', padding: '0.75rem 2.75rem 0.75rem 0.85rem', fontFamily: 'monospace', fontSize: '0.88rem' }}
+                      value={claudeInputKey}
+                      onChange={(e) => setClaudeInputKey(e.target.value)}
+                      placeholder={claudeStatus.maskedKey ? `Configured: ${claudeStatus.maskedKey} (enter new key to update)` : 'sk-ant-api03-...'}
+                      autoComplete="off"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowClaudeKey(!showClaudeKey)}
+                      title={showClaudeKey ? 'Hide Secret Key' : 'Show Secret Key'}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        padding: '4px',
+                      }}
+                    >
+                      {showClaudeKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                    Must start with <code>sk-ant-</code>. Leave blank to retain current key if only changing model.
+                  </span>
+                </div>
+              </div>
+
+              {/* Form Buttons */}
+              <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={fetchClaudeStatus}
+                  className="admin-btn admin-btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                >
+                  <RefreshCw size={15} />
+                  <span>Refresh Status</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={testClaudeConnection}
+                  disabled={isTestingClaude}
+                  className="admin-btn"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    color: '#e2e8f0',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  <RefreshCw size={15} className={isTestingClaude ? 'spinning' : ''} />
+                  <span>{isTestingClaude ? 'Testing...' : 'Test Connection'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={saveClaudeConfig}
+                  disabled={isSavingClaudeKey || (!claudeInputKey.trim() && claudeInputModel === claudeStatus.model)}
+                  className="admin-btn admin-btn-primary"
+                  style={{
+                    background: 'linear-gradient(135deg, #ffd700 0%, #f59e0b 100%)',
+                    color: '#000000',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  {isSavingClaudeKey ? <RefreshCw size={15} className="spinning" /> : <Check size={15} />}
+                  <span>{isSavingClaudeKey ? 'Saving Key...' : 'Save API Key'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Integration & Security Architecture Reference */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+              {/* Setup Workflow */}
+              <div className="admin-table-card glass" style={{ padding: '1.5rem' }}>
+                <h4 style={{ margin: '0 0 1rem', fontSize: '1rem', color: '#ffd700', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Sparkles size={16} />
+                  Claude API Key Setup Workflow
+                </h4>
+                <ol style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.84rem', color: '#cbd5e1', lineHeight: '1.65' }}>
+                  <li style={{ marginBottom: '0.5rem' }}>
+                    Click <strong>Get Claude API Key</strong> or visit{' '}
+                    <a
+                      href="https://platform.claude.com/settings/keys"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#c084fc', textDecoration: 'underline' }}
+                    >
+                      Anthropic Console
+                    </a>.
+                  </li>
+                  <li style={{ marginBottom: '0.5rem' }}>
+                    Sign in and create a new API Key with Messages API access.
+                  </li>
+                  <li style={{ marginBottom: '0.5rem' }}>
+                    Copy your secret key (starts with <code>sk-ant-</code>).
+                  </li>
+                  <li style={{ marginBottom: '0.5rem' }}>
+                    Paste the key into the input field above and click <strong>Save API Key</strong>.
+                  </li>
+                  <li>
+                    Click <strong>Test API Connection</strong>. The system performs an authenticated ping and displays{' '}
+                    <strong style={{ color: '#34d399' }}>CLAUDE AI CONNECTED</strong> upon verification.
+                  </li>
+                </ol>
+              </div>
+
+              {/* Security & Strict Removal Guarantees */}
+              <div className="admin-table-card glass" style={{ padding: '1.5rem' }}>
+                <h4 style={{ margin: '0 0 1rem', fontSize: '1rem', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Shield size={16} />
+                  Security & Architecture Standards
+                </h4>
+                <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.84rem', color: '#cbd5e1', lineHeight: '1.65' }}>
+                  <li style={{ marginBottom: '0.45rem' }}>
+                    <strong>Backend-Only Execution:</strong> All Claude API calls happen on the Node.js backend. Keys are never exposed in frontend bundles or network requests.
+                  </li>
+                  <li style={{ marginBottom: '0.45rem' }}>
+                    <strong>Complete Gemini Removal:</strong> Zero legacy Gemini endpoints or fallback logic. Claude AI is the sole provider.
+                  </li>
+                  <li style={{ marginBottom: '0.45rem' }}>
+                    <strong>Zero Mock Generation:</strong> Only authentic, verified Samacheer Kalvi textbook facts are generated.
+                  </li>
+                  <li>
+                    <strong>Staging Question Workflow:</strong> Claude-generated questions always enter Staging for admin review, editing, deduplication, and bulk publishing.
+                  </li>
+                </ul>
               </div>
             </div>
           </div>
@@ -5704,7 +6415,7 @@ const Admin = () => {
         )}
       </AnimatePresence>
 
-      {/* Cloud AI Study Notes & MCQ Generator Modal */}
+      {/* Claude AI Study Notes & MCQ Generator Modal */}
       <CloudAiGeneratorModal
         isOpen={isCloudAiModalOpen}
         onClose={() => setIsCloudAiModalOpen(false)}

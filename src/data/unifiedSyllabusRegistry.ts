@@ -614,8 +614,9 @@ export const GROUP_SUBJECTS: Record<'group1' | 'group2' | 'group4', SyllabusSubj
 /**
  * Returns available subjects strictly configured for the chosen examination group.
  */
-export function getSubjectsForGroup(groupId: 'group1' | 'group2' | 'group4'): SyllabusSubjectConfig[] {
-  return GROUP_SUBJECTS[groupId] || GROUP_SUBJECTS.group1
+export function getSubjectsForGroup(groupId: 'group1' | 'group2' | 'group2a' | 'group4'): SyllabusSubjectConfig[] {
+  const effective = groupId === 'group2a' ? 'group2' : groupId
+  return GROUP_SUBJECTS[effective] || GROUP_SUBJECTS.group1
 }
 
 /**
@@ -625,7 +626,7 @@ export function getSubjectsForGroup(groupId: 'group1' | 'group2' | 'group4'): Sy
  * - General Studies, English, and Tamil for Group 1/2 cover 6th to 12th standard.
  */
 export function getStandardsForSubject(
-  groupId: 'group1' | 'group2' | 'group4',
+  groupId: 'group1' | 'group2' | 'group2a' | 'group4',
   subjectId: string
 ): { id: number; label: string; shortLabel: string }[] {
   if (groupId === 'group4' || subjectId === 'aptitude') {
@@ -645,7 +646,7 @@ export interface SyllabusUnitOption {
  * Returns the exact units mapped to the selected group, subject, and standard.
  */
 export function getUnitsForSubjectStandard(
-  _groupId: 'group1' | 'group2' | 'group4',
+  _groupId: 'group1' | 'group2' | 'group2a' | 'group4',
   subjectId: string,
   classId: number
 ): SyllabusUnitOption[] {

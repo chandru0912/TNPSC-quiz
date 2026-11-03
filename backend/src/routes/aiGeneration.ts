@@ -1,5 +1,5 @@
 /**
- * Cloud AI Generation Routes
+ * Claude AI Generation Routes
  * Handles unified Study Notes, MCQ, and Both generation requests
  * Supports Server-Sent Events (SSE) streaming for real-time progress feedback.
  */
@@ -18,9 +18,10 @@ const router = Router();
 router.get('/', (_req: Request, res: Response) => {
   return res.status(200).json({
     status: 'online',
-    service: 'Cloud AI Generation API',
+    service: 'Claude AI Generation API',
     endpoints: {
       status: 'GET /api/ai/status',
+      config: 'POST /api/ai/config',
       testConnection: 'POST /api/ai/test-connection',
       generate: 'POST /api/ai/generate',
     },
@@ -29,11 +30,10 @@ router.get('/', (_req: Request, res: Response) => {
 
 /**
  * GET /api/ai/status (Protected)
- * Returns status of Cloud AI configuration.
+ * Returns status of Claude AI configuration.
  */
-router.get('/status', requireAdminAuth, (req: Request, res: Response) => {
-  const customKey = typeof req.query.apiKey === 'string' ? req.query.apiKey.trim() : undefined;
-  const status = CloudAIService.getProviderStatus(customKey);
+router.get('/status', requireAdminAuth, (_req: Request, res: Response) => {
+  const status = CloudAIService.getProviderStatus();
   return res.status(200).json({
     status: 'ok',
     ...status,
@@ -41,13 +41,49 @@ router.get('/status', requireAdminAuth, (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/ai/test-connection (Protected)
- * Tests connection to active Cloud AI API.
+ * POST /api/ai/config (Protected)
+ * Saves or updates Claude AI API Key and model.
+ * Enforces secure storage on backend only.
  */
-router.post('/test-connection', requireAdminAuth, async (req: Request, res: Response) => {
+router.post('/config', requireAdminAuth, (req: Request, res: Response) => {
   try {
-    const { apiKey } = req.body || {};
-    const result = await CloudAIService.testConnection(apiKey);
+    const { apiKey, model } = req.body || {};
+
+    if (apiKey !== undefined) {
+      if (typeof apiKey !== 'string') {
+        return res.status(400).json({ success: false, message: 'Invalid API key format.' });
+      }
+      const trimmedKey = apiKey.trim();
+      if (trimmedKey.length > 0 && trimmedKey.length < 15) {
+        return res.status(400).json({ success: false, message: 'API key appears too short. Valid Anthropic keys start with sk-ant-.' });
+      }
+    }
+
+    if (model !== undefined && typeof model !== 'string') {
+      return res.status(400).json({ success: false, message: 'Invalid model format.' });
+    }
+
+    const updated = CloudAIService.updateConfiguration(apiKey, model);
+    return res.status(200).json({
+      success: true,
+      message: 'Claude AI configuration saved securely.',
+      ...updated,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update Claude configuration',
+    });
+  }
+});
+
+/**
+ * POST /api/ai/test-connection (Protected)
+ * Tests connection to active Claude AI API.
+ */
+router.post('/test-connection', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const result = await CloudAIService.testConnection();
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error: any) {
     return res.status(500).json({
@@ -59,7 +95,7 @@ router.post('/test-connection', requireAdminAuth, async (req: Request, res: Resp
 
 /**
  * POST /api/ai/generate (Protected)
- * Unified Cloud AI Generator for Study Notes, MCQs, or Both.
+ * Unified Claude AI Generator for Study Notes, MCQs, or Both.
  * Supports streaming Server-Sent Events when ?stream=true.
  */
 router.post('/generate', requireAdminAuth, async (req: Request, res: Response) => {
@@ -83,7 +119,8 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
       category = 'group4',
       standard = 6,
       subject = 'General Studies',
-      term = 'Term 1',
+      term,
+      volume,
       unitId = 1,
       unitTitle,
       lessonTitle,
@@ -100,7 +137,6 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
       gdriveFileId,
       gdriveMaterialId,
       customText,
-      apiKey,
       autoSaveToStaging = true,
     } = req.body || {};
 
@@ -112,11 +148,32 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
       return res.status(400).json({ status: 'error', message: 'lessonTitle is required for generation.' });
     }
 
+    if (mode === 'mcq') {
+      const allowedCounts = [25, 50, 100, 200];
+      if (!allowedCounts.includes(Number(questionCount))) {
+        const message = `questionCount must be one of ${allowedCounts.join(', ')} for MCQ generation.`;
+        if (isStream) {
+          sendStreamEvent({ status: 'error', error: message });
+          return res.end();
+        }
+        return res.status(400).json({ status: 'error', message });
+      }
+      if (!textbookId && !gdriveMaterialId && !gdriveFileId) {
+        const message = 'Select a processed textbook or Google Drive PDF before generating MCQs.';
+        if (isStream) {
+          sendStreamEvent({ status: 'error', error: message });
+          return res.end();
+        }
+        return res.status(400).json({ status: 'error', message });
+      }
+    }
+
     const payload: UnifiedGenerationRequest = {
       category: String(category).toLowerCase(),
       standard: Number(standard) || 6,
       subject: String(subject),
-      term: String(term || 'Term 1'),
+      term: term ? String(term) : undefined,
+      volume: volume ? String(volume) : undefined,
       unitId: Number(unitId) || 1,
       unitTitle: unitTitle ? String(unitTitle) : undefined,
       lessonTitle: String(lessonTitle).trim(),
@@ -133,7 +190,6 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
       gdriveFileId: gdriveFileId ? String(gdriveFileId).trim() : undefined,
       gdriveMaterialId: gdriveMaterialId ? Number(gdriveMaterialId) : undefined,
       customText: customText ? String(customText) : undefined,
-      apiKeyOverride: apiKey && typeof apiKey === 'string' && apiKey.trim().length > 5 ? apiKey.trim() : undefined,
       autoSaveToStaging: Boolean(autoSaveToStaging),
     };
 

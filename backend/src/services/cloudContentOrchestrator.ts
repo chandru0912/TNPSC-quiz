@@ -12,6 +12,7 @@ import { CloudAIService } from './cloudAi/cloudAiService';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { splitAndAlignNotesByTopic, persistTopicAlignedNotes, AlignedTopicItem, TopicSeparationResult } from './topicAlignmentService';
 import { extractTextFromGoogleDrivePdf } from './googleDriveService';
+import { resolveMcqSelection, ResolvedMcqSelection } from './mcqCascadeService';
 
 export type GenerationMode = 'notes' | 'mcq' | 'both';
 export type NotesFormatOption = 'short' | 'full' | 'both';
@@ -21,6 +22,7 @@ export interface UnifiedGenerationRequest {
   standard: number;
   subject: string;
   term?: string;
+  volume?: string;
   unitId: number;
   unitTitle?: string;
   lessonTitle: string;
@@ -37,7 +39,6 @@ export interface UnifiedGenerationRequest {
   gdriveFileId?: string;
   gdriveMaterialId?: number;
   customText?: string;
-  apiKeyOverride?: string;
   autoSaveToStaging?: boolean;
 }
 
@@ -109,8 +110,13 @@ export class CloudContentOrchestrator {
     };
 
     // Step 1: Provider Status Check & Verification
-    report('Connecting to Cloud AI & Checking Provider Readiness', 10);
-    const providerInfo = CloudAIService.getProviderStatus(req.apiKeyOverride);
+    report('Connecting to Claude AI & Checking Provider Readiness', 10);
+    const providerInfo = CloudAIService.getProviderStatus();
+    if (!providerInfo.configured) {
+      throw new Error(
+        'Claude AI is not configured. Set ANTHROPIC_API_KEY in the backend environment variables.'
+      );
+    }
 
     // Step 2: Textbook Content Extraction
     let textbookText = (req.customText || '').trim();
@@ -121,7 +127,32 @@ export class CloudContentOrchestrator {
       relevantPages: [] as number[],
     };
 
-    if (req.textbookMode === 'gdrive' && (req.gdriveFileId || req.gdriveMaterialId)) {
+    let mcqSelection: ResolvedMcqSelection | undefined;
+    if (req.mode === 'mcq') {
+      report('Re-validating selections against the processed lesson PDF', 15);
+      mcqSelection = await resolveMcqSelection({
+        groupId: req.category,
+        subject: req.subject,
+        standard: req.standard,
+        unitId: req.unitId,
+        textbookId: req.textbookId,
+        materialId: req.gdriveMaterialId,
+        gdriveFileId: req.gdriveFileId,
+        term: req.term,
+        volume: req.volume,
+        lessonTitle: req.lessonTitle,
+        lessonNumber: req.lessonNumber,
+      });
+      textbookText = mcqSelection.content;
+      textbookDetails = {
+        id: mcqSelection.candidate.textbookId || mcqSelection.candidate.materialId,
+        name: mcqSelection.candidate.bookName,
+        pageCount: mcqSelection.pages.length,
+        relevantPages: mcqSelection.pages,
+      };
+    }
+
+    if (!mcqSelection && req.textbookMode === 'gdrive' && (req.gdriveFileId || req.gdriveMaterialId)) {
       report('Retrieving & Extracting Textbook PDF from Google Drive', 20);
       try {
         const driveExtraction = await extractTextFromGoogleDrivePdf({
@@ -149,7 +180,7 @@ export class CloudContentOrchestrator {
         console.error(`[CloudOrchestrator] Google Drive PDF extraction error:`, gdriveErr.message);
         throw new Error(`Google Drive PDF extraction failed: ${gdriveErr.message}`);
       }
-    } else if (!textbookText) {
+    } else if (!mcqSelection && !textbookText) {
       report('Extracting Complete Lesson Textbook Content & Headings', 20);
       const ragQuery: TextbookSearchQuery = {
         groupId: req.category,
@@ -176,9 +207,14 @@ export class CloudContentOrchestrator {
       }
     }
 
-    // Fallback if textbook content was not uploaded yet
+    // No textbook was provided; Claude will generate from the selected syllabus only.
     if (!textbookText || textbookText.length < 50) {
-      textbookText = `Standard: ${req.standard}th Standard Samacheer Kalvi\nSubject: ${req.subject}\nUnit: ${req.unitId} (${req.unitTitle || 'General'})\nLesson: ${req.lessonTitle}\n\nCore Educational Syllabus: Complete exam concepts for ${req.category.toUpperCase()} including definitions, key dates, historical figures, scientific principles, and standard curriculum details.`;
+      if (req.mode === 'mcq') {
+        throw new Error(
+          'No verified lesson PDF content is available. Select a processed textbook lesson before generating MCQs.'
+        );
+      }
+      textbookText = '';
     }
 
     let shortNotesResult: GeneratedStudyNotesResult | undefined;
@@ -188,9 +224,11 @@ export class CloudContentOrchestrator {
     let savedShortNoteId: number | undefined;
     let savedFullNoteId: number | undefined;
 
-    const sourceRef = textbookDetails.name
+    const sourceRef = mcqSelection
+      ? `${mcqSelection.sourcePdf}${mcqSelection.term ? `, ${mcqSelection.term}` : ''}${mcqSelection.volume ? `, ${mcqSelection.volume}` : ''} (Pages: ${mcqSelection.pages.join(',')})`
+      : textbookDetails.name
       ? `${textbookDetails.name} (Pages: ${textbookDetails.relevantPages.join(',')})`
-      : `Samacheer Kalvi Standard ${req.standard}`;
+      : 'Claude AI generation (no textbook PDF provided)';
 
     // Study Notes Generation
     if (isNotesMode) {
@@ -219,7 +257,6 @@ export class CloudContentOrchestrator {
           textbookContent: textbookText,
           extractedPages: textbookDetails.relevantPages,
           textbookName: textbookDetails.name || undefined,
-          apiKeyOverride: req.apiKeyOverride,
         });
 
         // Automatically separate into distinct topic notes
@@ -277,7 +314,6 @@ export class CloudContentOrchestrator {
           textbookContent: textbookText,
           extractedPages: textbookDetails.relevantPages,
           textbookName: textbookDetails.name || undefined,
-          apiKeyOverride: req.apiKeyOverride,
         });
 
         // Automatically separate into distinct topic notes
@@ -330,18 +366,23 @@ export class CloudContentOrchestrator {
           category: req.category,
           standard: req.standard,
           subject: req.subject,
-          term: req.term,
+          term: mcqSelection?.term || req.term,
+          volume: mcqSelection?.volume || req.volume,
           unitId: req.unitId,
           unitTitle: req.unitTitle,
           lessonTitle: req.lessonTitle,
           lessonId: req.lessonId,
+          lessonNumber: req.lessonNumber,
           topic: req.topic,
           language: req.language,
           count: req.questionCount || 20,
           difficulty: req.difficulty || 'Medium',
           textbookContent: textbookText,
-          textbookId: textbookDetails.id || undefined,
-          apiKeyOverride: req.apiKeyOverride,
+          textbookId: mcqSelection?.candidate.textbookId || undefined,
+          textbookName: mcqSelection?.textbookName,
+          textbookSubject: mcqSelection?.textbookSubject,
+          sourcePdf: mcqSelection?.sourcePdf,
+          sourcePages: mcqSelection?.pages,
         },
         (progressPct, msg) => {
           onProgress?.({
@@ -366,11 +407,12 @@ export class CloudContentOrchestrator {
           for (const q of mcqsResult.questions) {
             await client.query(
               `INSERT INTO questions (
-                category, unit_id, class_id, subject, lesson_title,
+                category, unit_id, class_id, subject, lesson_title, lesson_number,
                 topic, difficulty, question_text, options, correct_answer,
                 explanation, status, source_reference, target_system,
-                language, option_a, option_b, option_c, option_d
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'staging', $12, 'study_materials', $13, $14, $15, $16, $17)
+                language, option_a, option_b, option_c, option_d,
+                term, volume, source_pdf, source_page, textbook_id
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'staging', $13, 'study_materials', $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
               ON CONFLICT (lesson_title, question_text) DO NOTHING`,
               [
                 q.category,
@@ -378,18 +420,24 @@ export class CloudContentOrchestrator {
                 q.standard,
                 q.subject,
                 q.lessonTitle,
+                req.lessonNumber || null,
                 q.topic || q.lessonTitle,
                 q.difficulty,
                 q.question,
                 JSON.stringify(q.options),
                 q.correctAnswer,
                 q.explanation,
-                textbookDetails.name || `Samacheer Kalvi Std ${q.standard}`,
+                mcqSelection ? sourceRef : (textbookDetails.name || 'Claude AI generation (no textbook PDF provided)'),
                 q.language || 'tamil',
                 q.optionA || q.options[0] || '',
                 q.optionB || q.options[1] || '',
                 q.optionC || q.options[2] || '',
                 q.optionD || q.options[3] || '',
+                mcqSelection?.term || req.term || null,
+                mcqSelection?.volume || req.volume || null,
+                mcqSelection?.sourcePdf || textbookDetails.name || null,
+                mcqSelection?.pages[0] ?? null,
+                mcqSelection?.candidate.textbookId || null,
               ]
             );
           }

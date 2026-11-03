@@ -9,6 +9,10 @@ import { requireAdminAuth } from '../middleware/auth';
 import { processTextbookPdf } from '../services/pdfProcessor';
 import { retrieveRelevantTextbookContent } from '../services/textbookRag';
 import {
+  getMcqTextbookCandidates,
+  getMcqLessons,
+} from '../services/mcqCascadeService';
+import {
   TNPSC_GROUPS_LIST,
   STANDARDS_LIST,
   SAMACHEER_CATALOG,
@@ -576,6 +580,86 @@ router.get('/metrics', async (_req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Textbooks Route] Metrics error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to retrieve textbook metrics.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/mcq-candidates (Public / Admin)
+ * Maps a syllabus unit to real textbooks / Google Drive materials and returns
+ * separate term and volume levels derived from stored metadata.
+ */
+router.get('/mcq-candidates', async (req: Request, res: Response) => {
+  try {
+    const groupId = normalizeGroupId(String(req.query.group || req.query.groupId || 'group4'));
+    const subject = String(req.query.subject || '').trim();
+    const standard = normalizeStandard(req.query.standard);
+    const unitId = parseInt(String(req.query.unitId || req.query.unit || ''), 10);
+
+    if (!subject) {
+      return res.status(400).json({ status: 'error', message: 'subject is required.' });
+    }
+    if (!Number.isFinite(unitId) || unitId < 1) {
+      return res.status(400).json({ status: 'error', message: 'unitId is required.' });
+    }
+
+    const data = await getMcqTextbookCandidates({ groupId, subject, standard, unitId });
+    return res.status(200).json({
+      status: 'success',
+      data: { groupId, subject, standard, unitId, ...data },
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Route] MCQ candidates error:', error);
+    return res.status(400).json({ status: 'error', message: error.message || 'Failed to map textbooks.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/mcq-lessons (Public / Admin)
+ * Returns processed lesson metadata for one selected textbook/term/volume.
+ */
+router.get('/mcq-lessons', async (req: Request, res: Response) => {
+  try {
+    const groupId = normalizeGroupId(String(req.query.group || req.query.groupId || 'group4'));
+    const subject = String(req.query.subject || '').trim();
+    const standard = normalizeStandard(req.query.standard);
+    const unitId = parseInt(String(req.query.unitId || req.query.unit || ''), 10);
+    const textbookId = req.query.textbookId ? parseInt(String(req.query.textbookId), 10) : undefined;
+    const materialId = req.query.materialId ? parseInt(String(req.query.materialId), 10) : undefined;
+    const gdriveFileId = req.query.gdriveFileId ? String(req.query.gdriveFileId).trim() : undefined;
+    const term = req.query.term ? String(req.query.term).trim() : undefined;
+    const volume = req.query.volume ? String(req.query.volume).trim() : undefined;
+
+    if (!subject || !Number.isFinite(unitId) || unitId < 1) {
+      return res.status(400).json({ status: 'error', message: 'subject and unitId are required.' });
+    }
+    if (!textbookId && !materialId && !gdriveFileId) {
+      return res.status(400).json({ status: 'error', message: 'A textbook or Drive material must be selected.' });
+    }
+
+    const data = await getMcqLessons({
+      groupId,
+      subject,
+      standard,
+      unitId,
+      textbookId,
+      materialId,
+      gdriveFileId,
+      term,
+      volume,
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        ...data,
+        message: data.lessons.length === 0
+          ? 'No processed lessons were found for this textbook. Upload/process the PDF and try again.'
+          : null,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Route] MCQ lessons error:', error);
+    return res.status(400).json({ status: 'error', message: error.message || 'Failed to load lessons.' });
   }
 });
 

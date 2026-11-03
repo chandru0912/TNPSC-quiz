@@ -57,10 +57,10 @@ const Dashboard = () => {
 
   const featureCards = [
     {
-      title: 'Cloud AI Generation',
-      description: 'Generate authentic syllabus MCQs and comprehensive study notes with Google Gemini AI.',
+      title: 'Claude AI Generation',
+      description: 'Generate authentic syllabus MCQs and comprehensive study notes with Anthropic Claude AI.',
       icon: Sparkles,
-      meta: 'Gemini 1.5 Flash',
+      meta: 'Claude Sonnet',
       onClick: () => setIsCloudAiOpen(true),
     },
     {
@@ -281,10 +281,10 @@ const Dashboard = () => {
               type="button"
               className="dash-cloud-ai-btn"
               onClick={() => setIsCloudAiOpen(true)}
-              title="Open Cloud AI Generator for MCQs & Study Notes"
+              title="Open Claude AI Generator for MCQs & Study Notes"
             >
               <Sparkles size={16} />
-              <span>Cloud AI Generation</span>
+              <span>Claude AI Generation</span>
             </button>
             <DateCalendarPopover />
             <div className="dash-chip dash-chip-gold">
@@ -589,7 +589,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Cloud AI Study Notes & MCQ Generator Modal */}
+      {/* Claude AI Study Notes & MCQ Generator Modal */}
       <CloudAiGeneratorModal
         isOpen={isCloudAiOpen}
         onClose={() => setIsCloudAiOpen(false)}

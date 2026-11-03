@@ -1,91 +1,42 @@
 /**
- * Cloud AI Service Manager & Central Dispatcher
- * Provides unified, provider-agnostic completion, JSON parsing, and health verification.
+ * Claude AI Service Manager
+ * Central dispatcher for Anthropic Claude completion, JSON parsing and health checks.
  */
 
 import {
-  CloudAIProvider,
   CloudAICompletionOptions,
   CloudAIProviderInfo,
 } from './cloudAiTypes';
-import { OpenAICloudProvider } from './openAiProvider';
-import { GeminiCloudProvider } from './geminiProvider';
+import { ClaudeCloudProvider } from './claudeProvider';
 
 export class CloudAIServiceManager {
-  private openaiProvider = new OpenAICloudProvider();
-  private geminiProvider = new GeminiCloudProvider();
+  private claudeProvider = new ClaudeCloudProvider();
 
-  /**
-   * Resolves the active provider according to AI_PROVIDER env setting or configured keys.
-   */
-  resolveProvider(apiKeyOverride?: string): CloudAIProvider {
-    const configuredProvider = (process.env.AI_PROVIDER || 'auto').trim().toLowerCase();
-
-    if (configuredProvider === 'openai') {
-      return this.openaiProvider;
-    }
-    if (configuredProvider === 'gemini') {
-      return this.geminiProvider;
-    }
-
-    // Auto-detect based on API key presence
-    if (apiKeyOverride) {
-      if (apiKeyOverride.startsWith('sk-') || apiKeyOverride.startsWith('proj-')) {
-        return this.openaiProvider;
-      }
-      if (apiKeyOverride.startsWith('AIza')) {
-        return this.geminiProvider;
-      }
-    }
-
-    if (this.openaiProvider.isConfigured()) {
-      return this.openaiProvider;
-    }
-
-    if (this.geminiProvider.isConfigured()) {
-      return this.geminiProvider;
-    }
-
-    // Default to OpenAI provider (will cleanly inform user if key is unconfigured)
-    return this.openaiProvider;
+  getProviderStatus(): CloudAIProviderInfo {
+    return this.claudeProvider.getProviderInfo();
   }
 
   /**
-   * Returns current provider info and readiness.
-   */
-  getProviderStatus(apiKeyOverride?: string): CloudAIProviderInfo {
-    const provider = this.resolveProvider(apiKeyOverride);
-    return provider.getProviderInfo(apiKeyOverride);
-  }
-
-  /**
-   * Executes completion request with active provider.
+   * Executes a Claude completion request.
    */
   async generateText(
     prompt: string,
-    options?: CloudAICompletionOptions,
-    apiKeyOverride?: string
+    options?: CloudAICompletionOptions
   ): Promise<string> {
-    const provider = this.resolveProvider(apiKeyOverride);
-    return provider.generateCompletion(prompt, options, apiKeyOverride);
+    return this.claudeProvider.generateCompletion(prompt, options);
   }
 
   /**
-   * Generates and parses structured JSON response with sanitization.
+   * Generates and parses a structured JSON response with sanitization.
    */
   async generateJson<T>(
     prompt: string,
-    options?: CloudAICompletionOptions,
-    apiKeyOverride?: string
+    options?: CloudAICompletionOptions
   ): Promise<T> {
-    const raw = await this.generateText(
-      prompt,
-      {
-        ...options,
-        responseFormat: 'json',
-      },
-      apiKeyOverride
-    );
+    const raw = await this.generateText(prompt, {
+      ...options,
+      responseFormat: 'json',
+    });
 
     return this.parseJsonResponse<T>(raw);
   }
@@ -125,37 +76,48 @@ export class CloudAIServiceManager {
         const withoutTrailingCommas = cleaned.replace(/,\s*([}\]])/g, '$1');
         return JSON.parse(withoutTrailingCommas) as T;
       } catch {
-        throw new Error(`Failed to parse AI JSON response: ${parseError.message}. Content was: ${cleaned.slice(0, 300)}...`);
+        throw new Error(
+          `Claude returned invalid JSON: ${parseError.message}. Content was: ${cleaned.slice(0, 300)}...`
+        );
       }
     }
   }
 
+  updateConfiguration(apiKey?: string, model?: string): CloudAIProviderInfo {
+    this.claudeProvider.setCredentials(apiKey, model, true);
+    return this.getProviderStatus();
+  }
+
   /**
-   * Tests connection to the active Cloud AI service.
+   * Tests connectivity to the Claude API.
    */
-  async testConnection(apiKeyOverride?: string): Promise<{ success: boolean; message: string; provider: string; model: string }> {
-    const provider = this.resolveProvider(apiKeyOverride);
-    const info = provider.getProviderInfo(apiKeyOverride);
+  async testConnection(): Promise<{
+    success: boolean;
+    message: string;
+    provider: string;
+    model: string;
+  }> {
+    const info = this.getProviderStatus();
 
     if (!info.configured) {
       return {
         success: false,
-        message: `${info.name} is not configured. Please supply an API key in server environment variables or generator settings.`,
+        message:
+          'Claude API is not configured. Set ANTHROPIC_API_KEY in the backend environment variables or save your API key in Admin Settings.',
         provider: info.provider,
         model: info.model,
       };
     }
 
     try {
-      const result = await provider.generateCompletion(
-        'Respond with "OK" if connection is operational.',
-        { maxTokens: 10, timeoutMs: 15000 },
-        apiKeyOverride
+      await this.claudeProvider.generateCompletion(
+        'Respond with "OK" if the connection is operational.',
+        { maxTokens: 10, timeoutMs: 15000 }
       );
 
       return {
         success: true,
-        message: `Successfully connected to ${info.name} (${info.model}). Response: ${result.trim()}`,
+        message: 'CLAUDE AI CONNECTED',
         provider: info.provider,
         model: info.model,
       };
@@ -171,4 +133,3 @@ export class CloudAIServiceManager {
 }
 
 export const CloudAIService = new CloudAIServiceManager();
-

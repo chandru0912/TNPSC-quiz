@@ -18,6 +18,8 @@ import { generateAdminToken, verifyAdminToken } from './middleware/auth';
 import notesRouter from './routes/notes';
 import textbooksRouter from './routes/textbooks';
 import studyMaterialQuestionsRouter from './routes/studyMaterialQuestions';
+import syllabusRouter from './routes/syllabusRoutes';
+import studyMaterialRouter from './routes/studyMaterialRoutes';
 import aiGenerationRouter from './routes/aiGeneration';
 import driveRouter from './routes/drive';
 
@@ -199,7 +201,7 @@ app.get('/admin', (req: Request, res: Response) => {
 app.get('/api/ai', (_req, res) => {
   res.status(200).json({
     status: 'online',
-    service: 'Cloud AI Generation API',
+    service: 'Claude AI Generation API',
     endpoints: {
       status: 'GET /api/ai/status',
       testConnection: 'POST /api/ai/test-connection',
@@ -229,6 +231,14 @@ app.use('/api/api/questions', requireSchemaMiddleware, questionsRouter);
 app.use('/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
 app.use('/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
 app.use('/api/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
+
+app.use('/api/study-materials', requireSchemaMiddleware, studyMaterialRouter);
+app.use('/study-materials', requireSchemaMiddleware, studyMaterialRouter);
+app.use('/api/api/study-materials', requireSchemaMiddleware, studyMaterialRouter);
+
+app.use('/api/syllabus', requireSchemaMiddleware, syllabusRouter);
+app.use('/syllabus', requireSchemaMiddleware, syllabusRouter);
+app.use('/api/api/syllabus', requireSchemaMiddleware, syllabusRouter);
 
 app.use('/api/notes', requireSchemaMiddleware, notesRouter);
 app.use('/notes', requireSchemaMiddleware, notesRouter);

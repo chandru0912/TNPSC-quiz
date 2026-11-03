@@ -1421,9 +1421,10 @@
 }
 
 /* =========================================================
-   Cloud AI Generator Trigger Button in Dashboard
+   Claude AI Generator Trigger Button in Dashboard
    ========================================================= */
-.dash-cloud-ai-btn {
+.dash-cloud-ai-btn,
+.dash-claude-ai-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -1442,7 +1443,8 @@
   -webkit-backdrop-filter: blur(12px);
 }
 
-.dash-cloud-ai-btn:hover {
+.dash-cloud-ai-btn:hover,
+.dash-claude-ai-btn:hover {
   transform: translateY(-2px);
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.5) 0%, rgba(217, 119, 6, 0.5) 100%),
               rgba(20, 30, 55, 0.9);
@@ -1451,6 +1453,7 @@
   box-shadow: 0 8px 25px rgba(255, 215, 0, 0.3), 0 0 15px rgba(168, 85, 247, 0.4);
 }
 
-.dash-cloud-ai-btn:active {
+.dash-cloud-ai-btn:active,
+.dash-claude-ai-btn:active {
   transform: translateY(0) scale(0.97);
 }

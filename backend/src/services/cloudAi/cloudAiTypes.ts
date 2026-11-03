@@ -1,9 +1,9 @@
 /**
- * Cloud AI Architecture Types & Provider Interfaces
- * TNPSC Study Hub - Flexible Multi-Provider Cloud AI
+ * Claude AI Architecture Types & Provider Interfaces
+ * TNPSC Study Hub - Anthropic Claude
  */
 
-export type CloudAIProviderName = 'openai' | 'gemini' | 'auto';
+export type CloudAIProviderName = 'claude';
 
 export interface CloudAICompletionOptions {
   systemPrompt?: string;
@@ -15,21 +15,20 @@ export interface CloudAICompletionOptions {
 }
 
 export interface CloudAIProviderInfo {
-  provider: 'openai' | 'gemini' | 'custom' | 'none';
+  provider: 'claude' | 'none';
   name: string;
   configured: boolean;
   model: string;
-  configuredVia: 'env' | 'custom' | 'none';
+  configuredVia: 'env' | 'none';
+  maskedKey?: string;
 }
 
 export interface CloudAIProvider {
   readonly name: string;
-  isConfigured(apiKeyOverride?: string): boolean;
-  getProviderInfo(apiKeyOverride?: string): CloudAIProviderInfo;
+  isConfigured(): boolean;
+  getProviderInfo(): CloudAIProviderInfo;
   generateCompletion(
     prompt: string,
-    options?: CloudAICompletionOptions,
-    apiKeyOverride?: string
+    options?: CloudAICompletionOptions
   ): Promise<string>;
 }
-

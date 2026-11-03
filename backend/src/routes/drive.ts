@@ -1041,6 +1041,115 @@ router.get('/view/:id', async (req: Request, res: Response) => {
 });
 
 /**
+ * DELETE /api/drive/materials
+ * Admin only: Bulk deletes PDF materials from Google Drive and PostgreSQL database.
+ * Supports:
+ * 1. { ids: number[] } -> Delete selected materials
+ * 2. { deleteAll: true, group?, standard?, subject?, term?, search? } -> Delete all (optionally filtered) materials
+ */
+router.delete('/materials', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { ids, deleteAll, group, standard, subject, term, search } = req.body || {};
+
+    let targetRows: { id: number; file_name: string; google_drive_file_id: string }[] = [];
+
+    if (Array.isArray(ids) && ids.length > 0) {
+      const validIds = ids.map((id: any) => Number(id)).filter((id: number) => !isNaN(id) && id > 0);
+      if (validIds.length === 0) {
+        return res.status(400).json({ status: 'error', message: 'No valid material IDs provided.' });
+      }
+      const dbRes = await pool.query(
+        `SELECT id, file_name, google_drive_file_id FROM google_drive_materials WHERE id = ANY($1)`,
+        [validIds]
+      );
+      targetRows = dbRes.rows;
+    } else if (deleteAll) {
+      const conditions: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      if (group && group !== 'all') {
+        conditions.push(`(tnpsc_group = $${idx} OR applicable_groups @> $${idx + 1}::jsonb)`);
+        values.push(String(group));
+        values.push(JSON.stringify([String(group)]));
+        idx += 2;
+      }
+      if (subject && subject !== 'all') {
+        conditions.push(`LOWER(subject) = LOWER($${idx++})`);
+        values.push(String(subject));
+      }
+      if (standard && standard !== 'all' && !isNaN(Number(standard))) {
+        conditions.push(`standard = $${idx++}`);
+        values.push(Number(standard));
+      }
+      if (term && term !== 'all') {
+        conditions.push(`(term ILIKE $${idx} OR term = 'Full Year' OR term IS NULL)`);
+        values.push(`%${term}%`);
+        idx++;
+      }
+      if (search && String(search).trim()) {
+        conditions.push(
+          `(LOWER(file_name) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(lesson) LIKE '%' || LOWER($${idx}) || '%')`
+        );
+        values.push(String(search).trim());
+        idx++;
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      const dbRes = await pool.query(
+        `SELECT id, file_name, google_drive_file_id FROM google_drive_materials ${whereClause}`,
+        values
+      );
+      targetRows = dbRes.rows;
+    } else {
+      return res.status(400).json({ status: 'error', message: 'Provide either "ids" array or "deleteAll: true".' });
+    }
+
+    if (targetRows.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        message: 'No PDF materials found to delete.',
+        deletedCount: 0,
+      });
+    }
+
+    const targetIds = targetRows.map((r) => r.id);
+
+    // Delete associated files from Google Drive in parallel (graceful error handling)
+    await Promise.allSettled(
+      targetRows.map(async (row) => {
+        if (row.google_drive_file_id && !row.google_drive_file_id.startsWith('pending_')) {
+          try {
+            await deleteDriveFile(row.google_drive_file_id);
+          } catch (driveErr: any) {
+            console.warn(`[BulkDeleteDrive] Drive deletion warning for file ID ${row.google_drive_file_id}:`, driveErr.message);
+          }
+        }
+      })
+    );
+
+    // Delete records from PostgreSQL database
+    const deleteRes = await pool.query(
+      `DELETE FROM google_drive_materials WHERE id = ANY($1) RETURNING id`,
+      [targetIds]
+    );
+
+    return res.status(200).json({
+      status: 'success',
+      message: `Successfully deleted ${deleteRes.rowCount} PDF material(s) from Google Drive and database.`,
+      deletedCount: deleteRes.rowCount,
+      deletedIds: targetIds,
+    });
+  } catch (err: any) {
+    console.error('[BulkDriveDelete] Error:', err.message);
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to delete PDF materials',
+    });
+  }
+});
+
+/**
  * DELETE /api/drive/materials/:id
  * Admin only: Deletes the PDF from Google Drive and removes its record from PostgreSQL.
  */

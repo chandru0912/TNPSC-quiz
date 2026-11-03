@@ -1234,7 +1234,7 @@ export async function extractTextFromGoogleDrivePdf(params: {
     }
   }
 
-  // If no specific page window matched, use full text up to ~120,000 chars (safe for Gemini prompt)
+  // If no specific page window matched, use full text up to ~120,000 chars (safe for Claude prompt)
   if (!matchedText || matchedText.length < 200) {
     matchedText = fullConcatenatedText.slice(0, 120000);
     matchedPages = extractedPages.slice(0, 30).map((p) => p.pageNumber);

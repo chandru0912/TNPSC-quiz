@@ -12,14 +12,12 @@ import {
   RefreshCw,
   FileText,
   Upload,
-  ArrowRight,
-  Trash2,
-  Cpu,
   Cloud,
   Search,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { SyllabusCascadeSelector, useSyllabusCascade } from './SyllabusCascadeSelector'
+import { McqCascadeGenerator } from './McqCascadeGenerator'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { TamilStudyNotesRenderer } from './TamilStudyNotesRenderer'
 import { TNPSC_GROUPS } from '../data/unifiedSyllabusRegistry'
@@ -51,9 +49,8 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   const [aiMode, setAiMode] = useState<CloudAiMode>(initialMode)
 
   // API Key Configuration
-  const [cloudApiKey, setCloudApiKey] = useState<string>(() => localStorage.getItem('tnpsc_cloud_ai_key') || '')
   const [isKeyConfiguredOnServer, setIsKeyConfiguredOnServer] = useState<boolean>(false)
-  const [serverModel, setServerModel] = useState<string>('gpt-4o-mini')
+  const [serverModel, setServerModel] = useState<string>('claude-sonnet-5-5')
 
   // Shared 5-Dropdown Syllabus Cascade Selector
   const aiSyllabusCascade = useSyllabusCascade({
@@ -69,14 +66,10 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     currentClassId,
     currentUnitId,
     currentLessonTitle,
-    availableUnits,
-    availableLessons,
     selectedSubjectObj,
     selectedStandardObj,
     currentUnit,
     selectedLessonObj,
-    handleLessonChange,
-    handleUnitChange,
   } = aiSyllabusCascade
 
   // Textbook Source Selection States (Unified across modes: 4 options)
@@ -106,15 +99,8 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   const [driveUploadStep, setDriveUploadStep] = useState<string>('')
   const [driveUploadError, setDriveUploadError] = useState<string | null>(null)
 
-  // MCQ Options
-  const [aiLanguage, setAiLanguage] = useState<'tamil' | 'english'>('tamil')
-  const [aiQuestionCount, setAiQuestionCount] = useState<number>(50)
-  const [aiDifficulty, setAiDifficulty] = useState<'Medium' | 'Easy' | 'Hard' | 'Mixed'>('Medium')
-  const [isAIGenerating, setIsAIGenerating] = useState<boolean>(false)
+  // Shared AI notice for notes errors
   const [aiNotice, setAiNotice] = useState<string | null>(null)
-  const [aiGeneratedQuestions, setAiGeneratedQuestions] = useState<any[]>([])
-  const [aiUploadSuccess, setAiUploadSuccess] = useState<{ count: number; lessonTitle: string } | null>(null)
-  const [isAIUploading, setIsAIUploading] = useState<boolean>(false)
 
   // Study Notes Options
   const [notesLanguage, setNotesLanguage] = useState<'tamil' | 'english'>('tamil')
@@ -138,8 +124,14 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   const [isNotesSaving, setIsNotesSaving] = useState<boolean>(false)
   const [notesEditMode, setNotesEditMode] = useState<boolean>(false)
 
-  // Lock background scroll when Cloud AI Generator is active
+  // Lock background scroll when Claude AI Generator is active
   useScrollLock(isOpen)
+
+  // Remove any obsolete browser-stored AI key from the previous provider setup.
+  useEffect(() => {
+    localStorage.removeItem('tnpsc_cloud_ai_key')
+    localStorage.removeItem('tnpsc_claude_ai_key')
+  }, [])
 
   // Dynamically manage document attribute & notify BottomNav to hide/restore cleanly
   useEffect(() => {
@@ -164,14 +156,13 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   useEffect(() => {
     if (!isOpen) return
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isAIGenerating && !isNotesGenerating) {
+      if (e.key === 'Escape' && !isNotesGenerating) {
         onClose()
-        setAiUploadSuccess(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, isAIGenerating, isNotesGenerating, onClose])
+  }, [isOpen, isNotesGenerating, onClose])
 
   useEffect(() => {
     if (initialMode) {
@@ -194,12 +185,6 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
       })
       .catch((e) => console.warn('Could not fetch AI status:', e))
   }, [token, isOpen])
-
-  // Save API key to localStorage when updated
-  const handleApiKeyChange = (key: string) => {
-    setCloudApiKey(key)
-    localStorage.setItem('tnpsc_cloud_ai_key', key.trim())
-  }
 
   // Fetch Google Drive PDFs
   const fetchDrivePdfs = useCallback(async (sync = false) => {
@@ -461,7 +446,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     }
   }
 
-  // 1. Generate Notes Handler (Connected to new Cloud AI service)
+  // 1. Generate Notes Handler (Connected to new Claude AI service)
   const handleGenerateNotes = async () => {
     const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
     if (!activeToken) {
@@ -490,7 +475,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     setNotesPreview(null)
     setFullNotesPreview(null)
     setAiNotice(null)
-    setNotesProgressStep('Connecting to Cloud AI & Reading Textbook...')
+    setNotesProgressStep('Connecting to Claude AI & Reading Textbook...')
     setNotesProgressPct(15)
 
     try {
@@ -520,7 +505,6 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           textbookId: textbookMode === 'specific' ? selectedTextbookId : undefined,
           gdriveFileId: textbookMode === 'gdrive' ? selectedDriveFileId : undefined,
           gdriveMaterialId: textbookMode === 'gdrive' ? (selectedDriveMaterialId || undefined) : undefined,
-          apiKey: cloudApiKey.trim() || undefined,
           autoSaveToStaging: true,
         }),
       })
@@ -608,91 +592,6 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     }
   }
 
-  // 2. Generate MCQs Handler (Connected to new Cloud AI service)
-  const handleGenerateMCQs = async () => {
-    const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
-    if (!activeToken) {
-      showToast?.('error', 'Admin authorization token missing. Please sign in again.')
-      return
-    }
-
-    if (!currentLessonTitle) {
-      showToast?.('error', 'Please select a lesson title to generate questions.')
-      return
-    }
-
-    if (textbookMode === 'specific' && !selectedTextbookId) {
-      showToast?.('error', 'Please select a specific textbook from the dropdown or switch to Automatic mode.')
-      return
-    }
-
-    if (textbookMode === 'gdrive' && !selectedDriveFileId) {
-      showToast?.('error', 'Please select a PDF textbook from your connected Google Drive library.')
-      return
-    }
-
-    if (isAIGenerating) return
-
-    setIsAIGenerating(true)
-    setAiGeneratedQuestions([])
-    setAiNotice(null)
-    setAiUploadSuccess(null)
-
-    try {
-      const response = await apiFetch('/api/ai/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${activeToken}`,
-        },
-        timeoutMs: 300000,
-        body: JSON.stringify({
-          category: aiGroupId,
-          standard: currentClassId,
-          subject: selectedSubjectObj?.name || 'General Studies',
-          term: driveUploadTerm || 'Term 1',
-          unitId: currentUnitId,
-          unitTitle: currentUnit?.title,
-          lessonTitle: currentLessonTitle,
-          lessonId: selectedLessonObj?.id,
-          lessonNumber: selectedLessonObj?.lessonNumber || '1.1',
-          topic: currentLessonTitle,
-          language: aiLanguage,
-          mode: 'mcq',
-          questionCount: aiQuestionCount,
-          difficulty: aiDifficulty,
-          textbookMode,
-          textbookId: textbookMode === 'specific' ? selectedTextbookId : undefined,
-          gdriveFileId: textbookMode === 'gdrive' ? selectedDriveFileId : undefined,
-          gdriveMaterialId: textbookMode === 'gdrive' ? (selectedDriveMaterialId || undefined) : undefined,
-          apiKey: cloudApiKey.trim() || undefined,
-          autoSaveToStaging: true,
-        }),
-      })
-
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || data.status === 'error') {
-        const errMsg = data.message || data.error || 'Failed to generate MCQs'
-        throw new Error(errMsg)
-      }
-
-      if (data.mcqs?.questions && data.mcqs.questions.length > 0) {
-        setAiGeneratedQuestions(data.mcqs.questions)
-        showToast?.('success', `Generated and staged ${data.mcqs.questions.length} questions for "${currentLessonTitle}"!`)
-        onRefreshData?.()
-      } else {
-        throw new Error('No valid questions generated for this lesson.')
-      }
-    } catch (err: any) {
-      console.error('MCQ generation error:', err)
-      const msg = err.message || 'Failed to generate MCQs'
-      showToast?.('error', msg)
-      setAiNotice(msg)
-    } finally {
-      setIsAIGenerating(false)
-    }
-  }
-
   // Save Notes to Staging or Published
   const handleSaveNotes = async (publish: boolean) => {
     if (!token) return
@@ -739,62 +638,6 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     }
   }
 
-  // Upload Approved MCQs to Staging
-  const handleUploadApprovedMCQs = async () => {
-    if (!token || aiGeneratedQuestions.length === 0) return
-    setIsAIUploading(true)
-    try {
-      const formatted = aiGeneratedQuestions.map((q) => ({
-        ...q,
-        category: aiGroupId,
-        classId: currentClassId,
-        subject: selectedSubjectObj?.name || 'General Studies',
-        unitId: currentUnitId,
-        lessonTitle: currentLessonTitle,
-        lessonId: selectedLessonObj?.id || null,
-        topic: q.topic || currentLessonTitle,
-        status: 'staging',
-        targetSystem: 'study_materials',
-      }))
-
-      const res = await apiFetch('/api/study-materials/questions/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ questions: formatted }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.message || 'Failed to upload questions')
-
-      showToast?.('success', `Uploaded ${aiGeneratedQuestions.length} approved questions for "${currentLessonTitle}" to Staging!`)
-      setAiUploadSuccess({ count: aiGeneratedQuestions.length, lessonTitle: currentLessonTitle })
-      setAiGeneratedQuestions([])
-      onRefreshData?.()
-    } catch (err: any) {
-      showToast?.('error', err.message || 'Failed to upload questions')
-    } finally {
-      setIsAIUploading(false)
-    }
-  }
-
-  // Next Lesson Navigation in Syllabus
-  const handleProceedToNextLesson = () => {
-    const currentIndex = availableLessons.findIndex((l) => l.title === currentLessonTitle)
-    if (currentIndex >= 0 && currentIndex + 1 < availableLessons.length) {
-      handleLessonChange(availableLessons[currentIndex + 1].title)
-    } else {
-      const unitIndex = availableUnits.findIndex((u) => u.id === currentUnitId)
-      if (unitIndex >= 0 && unitIndex + 1 < availableUnits.length) {
-        handleUnitChange(availableUnits[unitIndex + 1].id)
-      }
-    }
-    setAiGeneratedQuestions([])
-    setAiUploadSuccess(null)
-    setAiNotice(null)
-  }
-
   if (!isOpen) return null
 
   return (
@@ -802,9 +645,8 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
       <div
         className="admin-modal-backdrop ai-modal-backdrop"
         onClick={(e) => {
-          if (e.target === e.currentTarget && !isAIGenerating && !isNotesGenerating) {
+          if (e.target === e.currentTarget && !isNotesGenerating) {
             onClose()
-            setAiUploadSuccess(null)
           }
         }}
       >
@@ -821,7 +663,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
               <div className="ai-badge-row">
                 <span className="ai-header-badge">
                   <Sparkles size={13} />
-                  Cloud AI Generator
+                  Claude AI Generator
                 </span>
                 <span className="ai-group-badge">
                   {TNPSC_GROUPS.find((g) => g.id === aiGroupId)?.name} • {selectedSubjectObj?.name} • {selectedStandardObj?.label}
@@ -830,13 +672,10 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
               <button
                 type="button"
                 className="ai-modal-close-btn"
-                onClick={() => {
-                  onClose()
-                  setAiUploadSuccess(null)
-                }}
+                onClick={onClose}
                 aria-label="Close generator modal"
                 title="Close Generator (Esc)"
-                disabled={isAIGenerating || isNotesGenerating}
+                disabled={isNotesGenerating}
               >
                 <X size={20} strokeWidth={2.5} />
               </button>
@@ -853,7 +692,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                 </h2>
                 <p className="ai-modal-subtitle">
                   {aiMode === 'mcq'
-                    ? 'Select Group, Subject, Standard, Unit, and Lesson to generate authentic syllabus MCQs with Cloud AI.'
+                    ? 'Select Group, Subject, Standard, Unit, and Lesson to generate authentic syllabus MCQs with Claude AI.'
                     : 'Select Group, Class/Standard, Subject, Unit, and Lesson to generate study notes in Tamil or English for student Study Materials.'}
                 </p>
               </div>
@@ -865,7 +704,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                 type="button"
                 className={`ai-nav-tab ${aiMode === 'mcq' ? 'active' : ''}`}
                 onClick={() => setAiMode('mcq')}
-                disabled={isAIGenerating || isNotesGenerating}
+                disabled={isNotesGenerating}
               >
                 <Sparkles size={15} />
                 <span>MCQ Questions Generator</span>
@@ -875,7 +714,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                 type="button"
                 className={`ai-nav-tab ${aiMode === 'notes' ? 'active' : ''}`}
                 onClick={() => setAiMode('notes')}
-                disabled={isAIGenerating || isNotesGenerating}
+                disabled={isNotesGenerating}
               >
                 <BookOpen size={15} />
                 <span>Study Notes Generator</span>
@@ -886,76 +725,48 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
 
           {/* Body */}
           <div className="ai-modal-body">
-            {/* 1. API Key Config Card */}
+            {/* 1. Claude API Configuration Status */}
             <div className="ai-api-card">
               <div className="ai-api-header">
                 <div className="ai-api-title">
                   <Key size={15} style={{ color: '#c084fc' }} />
-                  <span>Cloud AI Configuration</span>
+                  <span>Anthropic Claude Configuration</span>
                 </div>
-                {cloudApiKey.trim() || isKeyConfiguredOnServer ? (
+                {isKeyConfiguredOnServer ? (
                   <span className="ai-api-status-badge ai-status-connected">
                     <Check size={12} />
-                    Cloud AI Ready ({serverModel})
+                    Claude AI Ready ({serverModel})
                   </span>
                 ) : (
                   <span className="ai-api-status-badge ai-status-fallback">
-                    <Cpu size={12} />
-                    Server Environment Active
+                    <AlertTriangle size={12} />
+                    Claude API Not Configured
                   </span>
                 )}
               </div>
-              <div className="ai-api-input-row">
-                <input
-                  type="password"
-                  className="ai-api-input"
-                  placeholder="Paste Cloud AI API Key (sk-... / AIza...) or leave blank to use server environment variable"
-                  value={cloudApiKey}
-                  onChange={(e) => handleApiKeyChange(e.target.value)}
-                />
-              </div>
+              {!isKeyConfiguredOnServer && (
+                <p className="ai-api-help-text">
+                  Set <code>ANTHROPIC_API_KEY</code> (and optionally <code>CLAUDE_MODEL</code>) in the backend
+                  environment variables. API keys are never entered or stored in the browser.
+                </p>
+              )}
             </div>
 
-            {/* 2. Success Banner (when uploaded) */}
-            {aiUploadSuccess && (
-              <div className="ai-success-card">
-                <div className="ai-success-icon-box">
-                  <CheckCircle size={32} />
-                </div>
-                <div>
-                  <h3 className="ai-success-title">Questions Successfully Staged!</h3>
-                  <p className="ai-success-subtitle">
-                    {aiUploadSuccess.count} verified questions for <strong>"{aiUploadSuccess.lessonTitle}"</strong> have been securely saved to Staging.
-                  </p>
-                </div>
-
-                <div className="ai-next-lesson-box">
-                  <div className="ai-next-info">
-                    <span className="ai-next-label">Next Lesson in Syllabus:</span>
-                    <span className="ai-next-title">
-                      {(() => {
-                        const curIdx = availableLessons.findIndex((l) => l.title === currentLessonTitle)
-                        if (curIdx >= 0 && curIdx + 1 < availableLessons.length) {
-                          return `${availableLessons[curIdx + 1].lessonNumber ? availableLessons[curIdx + 1].lessonNumber + ' ' : ''}${availableLessons[curIdx + 1].title}`
-                        }
-                        return 'Next Unit in Syllabus'
-                      })()}
-                    </span>
-                  </div>
-                  <button className="ai-next-btn" onClick={handleProceedToNextLesson}>
-                    <span>Proceed to Next Lesson</span>
-                    <ArrowRight size={16} />
-                  </button>
-                </div>
-              </div>
+            {/* 2. Lesson-grounded MCQ cascade (Group -> Subject -> Standard -> Unit -> Textbook -> Term/Volume -> Lesson) */}
+            {aiMode === 'mcq' && (
+              <McqCascadeGenerator
+                token={token}
+                showToast={showToast}
+                onRefreshData={onRefreshData}
+              />
             )}
 
-            {/* 3. Syllabus 5-Tier Cascading Selector & Lesson Card */}
-            {!aiUploadSuccess && (
+            {/* 3. Syllabus 5-Tier Cascading Selector & Lesson Card (Study Notes) */}
+            {aiMode === 'notes' && (
               <div className="ai-section-box">
                 <h3 className="ai-section-title">
                   <Sparkles size={16} style={{ color: '#c084fc' }} />
-                  <span>{aiMode === 'mcq' ? 'Syllabus MCQ Configuration (1 to 5)' : 'Syllabus Study Notes Configuration (1 to 5)'}</span>
+                  <span>Syllabus Study Notes Configuration (1 to 5)</span>
                 </h3>
 
                 {/* Shared 5-Dropdown Syllabus Cascade Selector */}
@@ -1222,7 +1033,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                                   Selected Google Drive Textbook: {selectedDrivePdf.fileName}
                                 </div>
                                 <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', marginTop: '0.1rem' }}>
-                                  Size: {selectedDrivePdf.fileSizeFormatted || `${((selectedDrivePdf.fileSize || 0) / 1048576).toFixed(1)} MB`} • Gemini AI will extract and generate content strictly from this textbook.
+                                  Size: {selectedDrivePdf.fileSizeFormatted || `${((selectedDrivePdf.fileSize || 0) / 1048576).toFixed(1)} MB`} • Claude AI will extract and generate content strictly from this textbook.
                                 </div>
                               </div>
                             </div>
@@ -1347,64 +1158,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                 </div>
 
                 {/* 5. Generation Settings & Action Buttons */}
-                {aiMode === 'mcq' ? (
-                  <div className="ai-generation-options">
-                    <div className="ai-options-inline">
-                      <div className="ai-field ai-field-compact">
-                        <label>7. Language</label>
-                        <select
-                          className="ai-select"
-                          value={aiLanguage}
-                          onChange={(e) => setAiLanguage(e.target.value as 'tamil' | 'english')}
-                        >
-                          <option value="tamil">Tamil (தமிழ்)</option>
-                          <option value="english">English</option>
-                        </select>
-                      </div>
-
-                      <div className="ai-field ai-field-compact">
-                        <label>8. Questions Count</label>
-                        <select
-                          className="ai-select"
-                          value={aiQuestionCount}
-                          onChange={(e) => setAiQuestionCount(Number(e.target.value))}
-                        >
-                          <option value={50}>50 Questions</option>
-                          <option value={80}>80 Questions</option>
-                          <option value={100}>100 Questions</option>
-                        </select>
-                      </div>
-
-                      <div className="ai-field ai-field-compact">
-                        <label>9. Difficulty</label>
-                        <select
-                          className="ai-select"
-                          value={aiDifficulty}
-                          onChange={(e) => setAiDifficulty(e.target.value as any)}
-                        >
-                          <option value="Medium">Medium (Exam Std)</option>
-                          <option value="Easy">Easy (Conceptual)</option>
-                          <option value="Hard">Hard (Deep Analysis)</option>
-                          <option value="Mixed">Mixed</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <button
-                      className="ai-generate-action-btn"
-                      onClick={handleGenerateMCQs}
-                      disabled={isAIGenerating}
-                    >
-                      <Sparkles size={18} className={isAIGenerating ? 'spin-icon' : ''} />
-                      <span>
-                        {isAIGenerating
-                          ? 'Generating Questions...'
-                          : `Generate ${aiQuestionCount} Questions`}
-                      </span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="ai-generation-options">
+                <div className="ai-generation-options">
                     <div className="ai-options-inline">
                       <div className="ai-field ai-field-compact">
                         <label>7. Language</label>
@@ -1449,7 +1203,6 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                       </span>
                     </button>
                   </div>
-                )}
 
                 {/* Real-time Notes Generation Progress Bar */}
                 {isNotesGenerating && (
@@ -1607,76 +1360,6 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
               </div>
             )}
 
-            {/* 7. MCQ Questions Preview & Approval */}
-            {aiMode === 'mcq' && aiGeneratedQuestions.length > 0 && !aiUploadSuccess && (
-              <div className="ai-section-box" style={{ marginTop: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <h3 className="ai-section-title" style={{ margin: 0 }}>
-                    <Sparkles size={16} style={{ color: '#c084fc' }} />
-                    <span>Generated Questions ({aiGeneratedQuestions.length})</span>
-                  </h3>
-                  <button
-                    type="button"
-                    className="admin-btn admin-btn-primary"
-                    onClick={handleUploadApprovedMCQs}
-                    disabled={isAIUploading}
-                  >
-                    <Upload size={14} />
-                    <span>{isAIUploading ? 'Uploading...' : `Upload ${aiGeneratedQuestions.length} to Staging`}</span>
-                  </button>
-                </div>
-
-                <div style={{ maxHeight: '450px', overflowY: 'auto', paddingRight: '0.5rem' }}>
-                  {aiGeneratedQuestions.map((q, qIdx) => (
-                    <div key={qIdx} className="ai-lesson-card" style={{ marginBottom: '0.75rem', padding: '0.85rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-                          <span style={{ color: 'var(--gold-primary)', marginRight: '0.4rem' }}>Q{qIdx + 1}.</span>
-                          {q.question}
-                        </div>
-                        <button
-                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.2rem' }}
-                          onClick={() => setAiGeneratedQuestions((prev) => prev.filter((_, i) => i !== qIdx))}
-                          title="Remove question"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem', marginTop: '0.5rem' }}>
-                        {q.options.map((opt: string, optIdx: number) => {
-                          const isCorrect = q.correctAnswer === optIdx
-                          return (
-                            <div
-                              key={optIdx}
-                              style={{
-                                padding: '0.45rem 0.65rem',
-                                borderRadius: '6px',
-                                background: isCorrect ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                                border: isCorrect ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(255, 255, 255, 0.06)',
-                                color: isCorrect ? '#86efac' : 'inherit',
-                                fontSize: '0.82rem',
-                                fontWeight: isCorrect ? 600 : 400,
-                              }}
-                            >
-                              <span style={{ fontWeight: 700, marginRight: '0.35rem' }}>{String.fromCharCode(65 + optIdx)}.</span>
-                              {opt}
-                            </div>
-                          )
-                        })}
-                      </div>
-
-                      {q.explanation && (
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.4rem 0.65rem', borderRadius: '4px' }}>
-                          <strong style={{ color: 'var(--text-secondary)' }}>விளக்கம்: </strong>
-                          {q.explanation}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Footer */}
@@ -1684,30 +1367,19 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
             <button
               type="button"
               className="admin-btn admin-btn-secondary"
-              onClick={() => {
-                onClose()
-                setAiUploadSuccess(null)
-              }}
-              disabled={isAIGenerating || isNotesGenerating}
+              onClick={onClose}
+              disabled={isNotesGenerating}
             >
               Close
             </button>
-            {aiMode === 'mcq' && aiGeneratedQuestions.length > 0 && !aiUploadSuccess && (
-              <button
-                type="button"
-                className="admin-btn admin-btn-primary"
-                disabled={isAIUploading}
-                onClick={handleUploadApprovedMCQs}
-              >
-                <Upload size={16} />
-                <span>{isAIUploading ? 'Uploading to Staging...' : `Upload ${aiGeneratedQuestions.length} Approved Questions to Staging`}</span>
-              </button>
-            )}
           </div>
         </motion.div>
       </div>
     </AnimatePresence>
   )
 }
+
+export const ClaudeAiGeneratorModal = CloudAiGeneratorModal
+export type ClaudeAiMode = CloudAiMode
 
 export default CloudAiGeneratorModal
