@@ -9,8 +9,11 @@
 
 import { CloudAIService } from './cloudAi/cloudAiService';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
+import { AIProviderFactory } from './ai/ai-provider.factory';
+import { AIProviderName } from './ai/ai-provider.interface';
 
 export interface StudyNotesRequest {
+  provider?: AIProviderName;
   category: string;
   standard: number;
   subject: string;
@@ -508,9 +511,10 @@ ${isFullFormat
     : 'Generate complete, concise SHORT STUDY NOTES covering all topics and subtopics in this lesson strictly adhering to the requested format.'
 }`;
 
+  const aiProvider = AIProviderFactory.getProvider(req.provider || 'claude');
   let rawResponse = '';
   try {
-    rawResponse = await CloudAIService.generateText(
+    rawResponse = await aiProvider.generateText(
       userPrompt,
       {
         systemPrompt,
@@ -520,10 +524,10 @@ ${isFullFormat
     );
   } catch (aiErr: any) {
     if (!hasSourceText) {
-      throw new Error(`Claude notes generation failed: ${aiErr.message}`);
+      throw new Error(`${aiProvider.displayName} notes generation failed: ${aiErr.message}`);
     }
     console.warn(
-      `[StudyNotesGenerator] Claude call failed (${aiErr.message}), falling back to direct textbook synthesis.`
+      `[StudyNotesGenerator] ${aiProvider.displayName} call failed (${aiErr.message}), falling back to direct textbook synthesis.`
     );
     rawResponse = isFullFormat
       ? synthesizeFullNotesFromTextbook({
@@ -581,7 +585,7 @@ Generate the concise short notes for "${missing}" ONLY in this exact format:
 
 Do not include page numbers, intros or conclusions.`;
 
-        const healResponse = await CloudAIService.generateText(
+        const healResponse = await aiProvider.generateText(
           healPrompt,
           {
             systemPrompt,

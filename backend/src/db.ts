@@ -4,9 +4,10 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config();
-if (!process.env.DATABASE_URL && !process.env.POSTGRES_URL && !process.env.PGPASSWORD) {
-  dotenv.config({ path: path.resolve(__dirname, '../.env') });
-}
+dotenv.config({ path: path.resolve(process.cwd(), 'backend/.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') });
 
 const isProductionOrCloud =
   process.env.NODE_ENV === 'production' ||

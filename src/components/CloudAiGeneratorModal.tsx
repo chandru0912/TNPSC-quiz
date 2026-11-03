@@ -4,7 +4,6 @@ import {
   Sparkles,
   BookOpen,
   X,
-  Key,
   Check,
   CheckCircle,
   AlertTriangle,
@@ -14,6 +13,7 @@ import {
   Upload,
   Cloud,
   Search,
+  Cpu,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { SyllabusCascadeSelector, useSyllabusCascade } from './SyllabusCascadeSelector'
@@ -48,9 +48,12 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
 }) => {
   const [aiMode, setAiMode] = useState<CloudAiMode>(initialMode)
 
-  // API Key Configuration
-  const [isKeyConfiguredOnServer, setIsKeyConfiguredOnServer] = useState<boolean>(false)
-  const [serverModel, setServerModel] = useState<string>('claude-sonnet-5-5')
+  // API Key & Provider Configuration
+  const [selectedProvider, setSelectedProvider] = useState<'claude' | 'gemini'>('claude')
+  const [claudeConfigured, setClaudeConfigured] = useState<boolean>(false)
+  const [geminiConfigured, setGeminiConfigured] = useState<boolean>(false)
+  const [claudeModel, setClaudeModel] = useState<string>('claude-3-5-sonnet-20241022')
+  const [geminiModel, setGeminiModel] = useState<string>('gemini-1.5-flash')
 
   // Shared 5-Dropdown Syllabus Cascade Selector
   const aiSyllabusCascade = useSyllabusCascade({
@@ -170,20 +173,32 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     }
   }, [initialMode])
 
-  // Check server AI status
+  // Check server AI status & multi-provider config
   useEffect(() => {
     if (!token || !isOpen) return
-    apiFetch('/api/ai/status', {
+    apiFetch('/api/ai/providers', {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
-      .then((data) => {
-        if (data.status === 'ok') {
-          setIsKeyConfiguredOnServer(Boolean(data.configured))
-          if (data.model) setServerModel(data.model)
+      .then((statuses) => {
+        if (Array.isArray(statuses)) {
+          const claudeInfo = statuses.find((s: any) => s.provider === 'claude')
+          const geminiInfo = statuses.find((s: any) => s.provider === 'gemini')
+          if (claudeInfo) {
+            setClaudeConfigured(Boolean(claudeInfo.configured))
+            if (claudeInfo.model) setClaudeModel(claudeInfo.model)
+          }
+          if (geminiInfo) {
+            setGeminiConfigured(Boolean(geminiInfo.configured))
+            if (geminiInfo.model) setGeminiModel(geminiInfo.model)
+          }
+          const active = statuses.find((s: any) => s.isActive)
+          if (active && (active.provider === 'gemini' || active.provider === 'claude')) {
+            setSelectedProvider(active.provider)
+          }
         }
       })
-      .catch((e) => console.warn('Could not fetch AI status:', e))
+      .catch((e) => console.warn('Could not fetch AI providers status:', e))
   }, [token, isOpen])
 
   // Fetch Google Drive PDFs
@@ -475,7 +490,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     setNotesPreview(null)
     setFullNotesPreview(null)
     setAiNotice(null)
-    setNotesProgressStep('Connecting to Claude AI & Reading Textbook...')
+    setNotesProgressStep(`Connecting to ${selectedProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} & Reading Textbook...`)
     setNotesProgressPct(15)
 
     try {
@@ -488,6 +503,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
         },
         timeoutMs: 300000,
         body: JSON.stringify({
+          provider: selectedProvider,
           category: aiGroupId,
           standard: currentClassId,
           subject: selectedSubjectObj?.name || 'General Studies',
@@ -725,31 +741,62 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
 
           {/* Body */}
           <div className="ai-modal-body">
-            {/* 1. Claude API Configuration Status */}
+            {/* 1. Independent AI Provider Selector & Status Card */}
             <div className="ai-api-card">
-              <div className="ai-api-header">
-                <div className="ai-api-title">
-                  <Key size={15} style={{ color: '#c084fc' }} />
-                  <span>Anthropic Claude Configuration</span>
+              <div className="ai-api-header" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <Cpu size={16} style={{ color: selectedProvider === 'claude' ? '#c084fc' : '#38bdf8' }} />
+                  <span style={{ fontWeight: 600, fontSize: '0.86rem' }}>AI Provider Engine:</span>
+                  <div style={{ display: 'inline-flex', padding: '2px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvider('claude')}
+                      disabled={isNotesGenerating}
+                      style={{
+                        padding: '0.25rem 0.65rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: isNotesGenerating ? 'not-allowed' : 'pointer',
+                        background: selectedProvider === 'claude' ? 'rgba(192, 132, 252, 0.3)' : 'transparent',
+                        color: selectedProvider === 'claude' ? '#e9d5ff' : '#94a3b8',
+                      }}
+                    >
+                      🟣 Anthropic Claude AI
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvider('gemini')}
+                      disabled={isNotesGenerating}
+                      style={{
+                        padding: '0.25rem 0.65rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: isNotesGenerating ? 'not-allowed' : 'pointer',
+                        background: selectedProvider === 'gemini' ? 'rgba(56, 189, 248, 0.3)' : 'transparent',
+                        color: selectedProvider === 'gemini' ? '#bae6fd' : '#94a3b8',
+                      }}
+                    >
+                      🔵 Google Gemini AI
+                    </button>
+                  </div>
                 </div>
-                {isKeyConfiguredOnServer ? (
+
+                {(selectedProvider === 'claude' ? claudeConfigured : geminiConfigured) ? (
                   <span className="ai-api-status-badge ai-status-connected">
                     <Check size={12} />
-                    Claude AI Ready ({serverModel})
+                    {selectedProvider === 'claude' ? `Claude AI Ready (${claudeModel})` : `Gemini AI Ready (${geminiModel})`}
                   </span>
                 ) : (
                   <span className="ai-api-status-badge ai-status-fallback">
                     <AlertTriangle size={12} />
-                    Claude API Not Configured
+                    {selectedProvider === 'claude' ? 'Claude API Not Configured' : 'Gemini API Not Configured'}
                   </span>
                 )}
               </div>
-              {!isKeyConfiguredOnServer && (
-                <p className="ai-api-help-text">
-                  Set <code>ANTHROPIC_API_KEY</code> (and optionally <code>CLAUDE_MODEL</code>) in the backend
-                  environment variables. API keys are never entered or stored in the browser.
-                </p>
-              )}
             </div>
 
             {/* 2. Lesson-grounded MCQ cascade (Group -> Subject -> Standard -> Unit -> Textbook -> Term/Volume -> Lesson) */}

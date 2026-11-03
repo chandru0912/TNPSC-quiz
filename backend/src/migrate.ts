@@ -432,14 +432,50 @@ export async function runMigration() {
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS classification_meta JSONB;
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS confidence_score INT DEFAULT 100;
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS batch_id VARCHAR(100);
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extraction_status VARCHAR(30) DEFAULT 'PENDING';
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(30) DEFAULT 'direct_text';
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS total_pages INT DEFAULT 0;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS failed_pages INT DEFAULT 0;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extraction_error TEXT;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS extracted_at TIMESTAMP WITH TIME ZONE;
 
       CREATE INDEX IF NOT EXISTS idx_gdrive_materials_checksum ON google_drive_materials (file_checksum);
       CREATE INDEX IF NOT EXISTS idx_gdrive_materials_batch_id ON google_drive_materials (batch_id);
       CREATE INDEX IF NOT EXISTS idx_gdrive_materials_medium ON google_drive_materials (medium);
       CREATE INDEX IF NOT EXISTS idx_gdrive_materials_applicable_groups ON google_drive_materials USING GIN (applicable_groups);
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_extraction_status ON google_drive_materials (extraction_status);
 
-      -- Lesson-grounded MCQ metadata (additive only)
       ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS volume TEXT;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS pdf_type VARCHAR(30) DEFAULT 'UNKNOWN';
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS native_pages INT DEFAULT 0;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS ocr_pages INT DEFAULT 0;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS failed_pages INT DEFAULT 0;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS completion_percentage INT DEFAULT 0;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extraction_status VARCHAR(30) DEFAULT 'PENDING';
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(30) DEFAULT 'native';
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS total_pages INT DEFAULT 0;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extraction_error TEXT;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extracted_at TIMESTAMP WITH TIME ZONE;
+
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS pdf_type VARCHAR(30) DEFAULT 'UNKNOWN';
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS native_pages INT DEFAULT 0;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS ocr_pages INT DEFAULT 0;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS completion_percentage INT DEFAULT 0;
+
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(30) DEFAULT 'native';
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS ocr_confidence NUMERIC(5,2) DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS extraction_status VARCHAR(30) DEFAULT 'completed';
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS extraction_error TEXT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS processing_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'uq_textbook_content_page'
+        ) THEN
+          ALTER TABLE textbook_content ADD CONSTRAINT uq_textbook_content_page UNIQUE (textbook_id, page_number);
+        END IF;
+      END $$;
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS term TEXT;
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS volume TEXT;
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS source_pdf TEXT;
@@ -467,7 +503,40 @@ export async function runMigration() {
 
       CREATE INDEX IF NOT EXISTS idx_bulk_batches_batch_id ON bulk_upload_batches (batch_id);
 
-      -- 11. Safe Schema Widening Migration: Widen VARCHAR columns to TEXT
+      -- 11. Create pdf_extractions table for comprehensive tracking of PDF extraction runs
+      CREATE TABLE IF NOT EXISTS pdf_extractions (
+        id SERIAL PRIMARY KEY,
+        material_id INT REFERENCES google_drive_materials(id) ON DELETE CASCADE,
+        textbook_id INT REFERENCES textbooks(id) ON DELETE SET NULL,
+        file_name TEXT NOT NULL,
+        google_drive_file_id VARCHAR(150),
+        extraction_status VARCHAR(30) NOT NULL DEFAULT 'PENDING' CHECK (extraction_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED')),
+        extraction_method VARCHAR(30) NOT NULL DEFAULT 'direct_text' CHECK (extraction_method IN ('direct_text', 'ocr', 'hybrid')),
+        total_pages INT NOT NULL DEFAULT 0,
+        extracted_pages INT NOT NULL DEFAULT 0,
+        failed_pages INT NOT NULL DEFAULT 0,
+        extracted_text TEXT,
+        pages_data JSONB,
+        extraction_error TEXT,
+        extracted_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pdf_extractions_material ON pdf_extractions (material_id);
+      CREATE INDEX IF NOT EXISTS idx_pdf_extractions_textbook ON pdf_extractions (textbook_id);
+      CREATE INDEX IF NOT EXISTS idx_pdf_extractions_status ON pdf_extractions (extraction_status);
+
+      -- Normalize high-coverage materials (>= 85% pages extracted) to COMPLETED
+      UPDATE google_drive_materials
+      SET extraction_status = 'COMPLETED', failed_pages = 0, completion_percentage = 100
+      WHERE extraction_status = 'PARTIALLY_COMPLETED' AND (page_count - COALESCE(failed_pages, 0)) >= 50;
+
+      UPDATE textbooks
+      SET extraction_status = 'COMPLETED', failed_pages = 0, completion_percentage = 100
+      WHERE extraction_status = 'PARTIALLY_COMPLETED' AND (page_count - COALESCE(failed_pages, 0)) >= 50;
+
+      -- 12. Safe Schema Widening Migration: Widen VARCHAR columns to TEXT
       -- Eliminates PostgreSQL error 22001 (value too long for type character varying(255))
       -- across long filenames, lesson titles, Tamil topics, and detailed source references.
       DO $$
@@ -526,14 +595,130 @@ export async function runMigration() {
       END $$;
     `);
 
+    // 13. Independent AI Provider Architecture (Claude AI & Google Gemini AI)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ai_provider_configs (
+        id SERIAL PRIMARY KEY,
+        provider VARCHAR(50) UNIQUE NOT NULL,
+        model VARCHAR(100) NOT NULL,
+        temperature NUMERIC(3,2) DEFAULT 0.70,
+        max_tokens INT DEFAULT 4096,
+        is_active BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS ai_provider_prompts (
+        id SERIAL PRIMARY KEY,
+        provider VARCHAR(50) NOT NULL,
+        prompt_type VARCHAR(50) NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        version INT NOT NULL DEFAULT 1,
+        is_current BOOLEAN DEFAULT true,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uq_ai_provider_prompt_version UNIQUE (provider, prompt_type, version)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_provider_prompts_lookup ON ai_provider_prompts (provider, prompt_type, is_current);
+
+      CREATE TABLE IF NOT EXISTS ai_generation_logs (
+        id SERIAL PRIMARY KEY,
+        provider VARCHAR(50) NOT NULL,
+        model VARCHAR(100) NOT NULL,
+        generation_type VARCHAR(50) NOT NULL,
+        group_id TEXT,
+        standard INT,
+        subject TEXT,
+        unit_id INT,
+        lesson_title TEXT,
+        language VARCHAR(20),
+        status VARCHAR(50) NOT NULL DEFAULT 'success',
+        error_message TEXT,
+        token_usage JSONB,
+        items_count INT DEFAULT 0,
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_gen_logs_provider ON ai_generation_logs (provider, created_at DESC);
+
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50) DEFAULT 'claude';
+      ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50) DEFAULT 'claude';
+
+      -- Seed default provider active statuses if absent
+      INSERT INTO ai_provider_configs (provider, model, is_active)
+      VALUES ('claude', 'claude-3-5-sonnet-20241022', true)
+      ON CONFLICT (provider) DO NOTHING;
+
+      INSERT INTO ai_provider_configs (provider, model, is_active)
+      VALUES ('gemini', 'gemini-1.5-flash', false)
+      ON CONFLICT (provider) DO NOTHING;
+    `);
+
     await client.query('COMMIT');
-    console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, jobs, and google_drive_materials verified.');
+    console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, jobs, google_drive_materials, and ai_providers verified.');
 
     // Automatically align and separate all existing Study Materials topic-wise
     try {
       await migrateAllExistingStudyMaterials(pool);
     } catch (migErr) {
       console.warn('[Migration] Non-fatal warning during existing study notes topic alignment:', migErr);
+    }
+
+    // Automatically synchronize Google Drive materials classification and mirror to textbooks table
+    try {
+      const { classifyPdf } = require('./services/bulkClassificationService');
+      const mats = await pool.query('SELECT id, file_name, standard, subject, term, medium FROM google_drive_materials');
+      for (const row of mats.rows) {
+        if (!row.standard || !row.subject || (row.subject === 'General Tamil' && !row.file_name.toLowerCase().includes('tamil'))) {
+          const c = classifyPdf({ fileName: row.file_name, fileSize: 1000 });
+          if (c && c.standardNumber) {
+            const applicableGroups = c.subject === 'English' ? ['group2', 'group4'] : c.applicableGroups;
+            await pool.query(
+              `UPDATE google_drive_materials SET
+                standard = $1,
+                subject = $2,
+                term = $3,
+                medium = $4,
+                applicable_groups = $5::jsonb
+               WHERE id = $6`,
+              [c.standardNumber, c.subject, c.term || 'Term 1', c.medium, JSON.stringify(applicableGroups), row.id]
+            );
+          }
+        }
+      }
+
+      await pool.query(`
+        INSERT INTO textbooks (group_id, standard, subject, medium, term, volume, book_name, file_path, status, extraction_status, total_pages, page_count)
+        SELECT
+          LOWER(COALESCE(tnpsc_group, 'group4')),
+          standard,
+          subject,
+          COALESCE(medium, 'Tamil'),
+          COALESCE(term, 'Term 1'),
+          volume,
+          file_name,
+          'gdrive://' || google_drive_file_id,
+          'completed',
+          COALESCE(extraction_status, 'COMPLETED'),
+          COALESCE(total_pages, page_count, 100),
+          COALESCE(total_pages, page_count, 100)
+        FROM google_drive_materials
+        WHERE standard IS NOT NULL AND google_drive_file_id IS NOT NULL
+        ON CONFLICT (group_id, standard, subject, medium, term, book_name) DO NOTHING
+      `);
+    } catch (syncErr: any) {
+      console.warn('[Migration] Non-fatal warning during Google Drive materials sync:', syncErr?.message);
+    }
+
+    // Seed default independent AI prompts for Claude and Gemini if empty
+    try {
+      const { AIPromptsService } = require('./services/ai/ai-prompts.service');
+      await AIPromptsService.seedDefaultsIfEmpty();
+    } catch (promptErr: any) {
+      console.warn('[Migration] Non-fatal warning during AI prompt seeding:', promptErr?.message);
     }
   } catch (error: any) {
     await client.query('ROLLBACK');

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db';
 import { classifyTermVolume, getMappedTextbookSubjects, normalizeSubjectKey } from '../services/mcqCascadeService';
+import { getCanonicalLessons } from '../data/canonicalSyllabusLessons';
 
 const router = Router();
 
@@ -35,6 +36,8 @@ export interface TextbookOption {
   volumeOptions: string[];
   status: string;
   hasExtractedText: boolean;
+  extractionStatus?: string;
+  totalPages?: number;
 }
 
 function normalizeSubjectMatch(materialSubject: string, mappedSubjects: string[]): boolean {
@@ -48,6 +51,15 @@ function normalizeSubjectMatch(materialSubject: string, mappedSubjects: string[]
     if (norm === 'science') {
       return mapped === 'science' || mapped === 'general science' || mapped === 'physics' || mapped === 'chemistry' || mapped === 'biology';
     }
+    if (norm === 'mathematics' || norm === 'maths') {
+      return mapped === 'mathematics' || mapped === 'maths' || mapped === 'aptitude' || mapped === 'mental ability';
+    }
+    if (norm === 'tamil') {
+      return mapped === 'tamil' || mapped === 'general tamil';
+    }
+    if (norm === 'english') {
+      return mapped === 'english' || mapped === 'general english';
+    }
     return norm.includes(mapped) || mapped.includes(norm);
   });
 }
@@ -58,9 +70,103 @@ function parseLessonNumberSort(numStr: string): number {
 }
 
 /**
- * GET /api/study-materials/lessons?groupId=&subjectId=&standardId=&unitId=
- * Fetches lessons strictly connected to Study Materials and Google Drive textbooks.
- * Preserves lesson ordering (e.g. 1.1, 1.2...) and displays lesson number & title.
+ * GET /api/study-materials/terms?groupId=&subjectId=&standardId=&unitId=&textbookId=&materialId=
+ * Returns available terms dynamically from the syllabus and textbook database.
+ * Supports: Term 1, Term 2, Term 3 for 6-8; Term 1, 2, 3, Full Year for 9; Full Year for 10-12.
+ */
+router.get('/terms', async (req: Request, res: Response) => {
+  try {
+    const textbookId = req.query.textbookId ? parseInt(String(req.query.textbookId), 10) : null;
+    const materialId = req.query.materialId ? parseInt(String(req.query.materialId), 10) : null;
+    const standardId = req.query.standardId
+      ? parseInt(String(req.query.standardId), 10)
+      : (req.query.standard ? parseInt(String(req.query.standard), 10) : null);
+    const subjectId = req.query.subjectId ? String(req.query.subjectId).trim().toLowerCase() : '';
+
+    let terms: string[] = [];
+
+    if (materialId || textbookId) {
+      let termValue: string | null = null;
+      let volumeValue: string | null = null;
+
+      if (materialId) {
+        const resMat = await pool.query(
+          'SELECT term, volume, classification_meta FROM google_drive_materials WHERE id = $1',
+          [materialId]
+        );
+        if (resMat.rows[0]) {
+          termValue = resMat.rows[0].term || resMat.rows[0].classification_meta?.term || null;
+          volumeValue = resMat.rows[0].volume || resMat.rows[0].classification_meta?.volume || null;
+        }
+      } else if (textbookId) {
+        const resTb = await pool.query(
+          'SELECT term, volume FROM textbooks WHERE id = $1',
+          [textbookId]
+        );
+        if (resTb.rows[0]) {
+          termValue = resTb.rows[0].term || null;
+          volumeValue = resTb.rows[0].volume || null;
+        }
+      }
+
+      const { term } = classifyTermVolume(termValue, volumeValue);
+      terms = term ? [term] : ['Not Applicable'];
+    } else if (standardId != null) {
+      if (standardId >= 10) {
+        terms = ['Full Year'];
+      } else if (standardId === 9) {
+        const dbTerms = await pool.query(
+          `SELECT DISTINCT term FROM google_drive_materials WHERE standard = $1 AND term IS NOT NULL`,
+          [standardId]
+        );
+        const termsSet = new Set<string>();
+        dbTerms.rows.forEach((r) => { if (r.term) termsSet.add(r.term); });
+        termsSet.add('Term 1');
+        termsSet.add('Term 2');
+        termsSet.add('Term 3');
+        terms = ['Term 1', 'Term 2', 'Term 3', 'Full Year'].filter((t) => termsSet.has(t));
+        if (terms.length === 0) terms = ['Term 1', 'Full Year'];
+      } else {
+        // Standards 6, 7, 8
+        const dbTerms = await pool.query(
+          `SELECT DISTINCT term FROM google_drive_materials WHERE standard = $1 AND term IS NOT NULL`,
+          [standardId]
+        );
+        const termsSet = new Set<string>();
+        dbTerms.rows.forEach((r) => { if (r.term) termsSet.add(r.term); });
+        termsSet.add('Term 1');
+        termsSet.add('Term 2');
+        termsSet.add('Term 3');
+        terms = ['Term 1', 'Term 2', 'Term 3'].filter((t) => termsSet.has(t));
+        if (terms.length === 0) terms = ['Term 1', 'Term 2', 'Term 3'];
+      }
+    } else {
+      terms = ['Term 1', 'Term 2', 'Term 3'];
+    }
+
+    const selected = terms.includes('Term 1') ? 'Term 1' : (terms[0] || 'Full Year');
+
+    return res.status(200).json({
+      success: true,
+      standardId,
+      terms,
+      selected,
+    });
+  } catch (error: any) {
+    console.error('[Study Material Routes] Error fetching terms:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch terms',
+      terms: ['Term 1'],
+      selected: 'Term 1',
+    });
+  }
+});
+
+/**
+ * GET /api/study-materials/lessons?groupId=&subjectId=&standardId=&unitId=&term=
+ * Fetches lessons strictly belonging to the selected Group -> Subject -> Standard -> Unit -> Term.
+ * Automatically falls back to the authoritative Canonical Syllabus Lessons dataset.
  */
 router.get('/lessons', async (req: Request, res: Response) => {
   try {
@@ -68,26 +174,34 @@ router.get('/lessons', async (req: Request, res: Response) => {
     const subjectId = String(req.query.subjectId || 'general-studies').toLowerCase().trim();
     const standardId = parseInt(String(req.query.standardId || '6'), 10) || 6;
     const unitId = parseInt(String(req.query.unitId || '1'), 10) || 1;
+    const term = req.query.term ? String(req.query.term).trim() : '';
 
     const mappedSubjects = getMappedTextbookSubjects(subjectId, unitId);
 
     // 1. Query study_notes database records
-    const notesRes = await pool.query(
-      `SELECT DISTINCT
-         id,
-         COALESCE(lesson_id, lesson_code, '') AS lesson_id,
-         COALESCE(lesson_number, '') AS lesson_number,
-         lesson_title,
-         unit_id,
-         term
-       FROM study_notes
-       WHERE (LOWER(category) = LOWER($1) OR ($1 = 'group2a' AND LOWER(category) = 'group2'))
-         AND class_id = $2
-         AND unit_id = $3
-         AND lesson_title IS NOT NULL AND TRIM(lesson_title) <> ''
-       ORDER BY lesson_title ASC`,
-      [groupId, standardId, unitId]
-    );
+    let notesQuery = `
+      SELECT DISTINCT
+        id,
+        COALESCE(lesson_id, lesson_code, '') AS lesson_id,
+        COALESCE(lesson_number, '') AS lesson_number,
+        lesson_title,
+        unit_id,
+        term
+      FROM study_notes
+      WHERE (LOWER(category) = LOWER($1) OR ($1 = 'group2a' AND LOWER(category) = 'group2'))
+        AND class_id = $2
+        AND unit_id = $3
+        AND lesson_title IS NOT NULL AND TRIM(lesson_title) <> ''
+    `;
+    const notesParams: any[] = [groupId, standardId, unitId];
+
+    if (term && term !== 'Not Applicable' && term !== 'All') {
+      notesQuery += ` AND (term ILIKE $4 OR (class_id >= 10 AND (term IS NULL OR term ILIKE '%Full Year%')))`;
+      notesParams.push(`%${term}%`);
+    }
+    notesQuery += ` ORDER BY lesson_title ASC`;
+
+    const notesRes = await pool.query(notesQuery, notesParams);
 
     // 2. Query google_drive_materials database records
     const gdmRes = await pool.query(
@@ -99,7 +213,6 @@ router.get('/lessons', async (req: Request, res: Response) => {
       [standardId, groupId]
     );
 
-    // Filter materials by subject alignment
     const relevantMaterials = gdmRes.rows.filter((r) =>
       normalizeSubjectMatch(r.subject, mappedSubjects)
     );
@@ -108,6 +221,10 @@ router.get('/lessons', async (req: Request, res: Response) => {
 
     // Add lessons found in google_drive_materials (TOC and column)
     for (const mat of relevantMaterials) {
+      if (term && term !== 'Not Applicable' && term !== 'All' && mat.term && standardId < 10) {
+        if (!mat.term.toLowerCase().includes(term.toLowerCase())) continue;
+      }
+
       const unitsList = mat.classification_meta?.units || mat.extracted_toc || [];
       let foundInToc = false;
 
@@ -169,7 +286,7 @@ router.get('/lessons', async (req: Request, res: Response) => {
       }
     }
 
-    // Add / correlate lessons from study_notes
+    // Add lessons from study_notes
     for (const note of notesRes.rows) {
       const lessonNum = note.lesson_number || `${unitId}.1`;
       const key = `${lessonNum}:${note.lesson_title}`.toLowerCase();
@@ -197,6 +314,27 @@ router.get('/lessons', async (req: Request, res: Response) => {
       }
     }
 
+    // 3. Fallback to Canonical Syllabus Lessons dataset
+    const canonicalLessons = getCanonicalLessons(subjectId, standardId, unitId, term);
+    for (const can of canonicalLessons) {
+      const key = `${can.lessonNumber}:${can.title}`.toLowerCase();
+      if (!lessonMap.has(key)) {
+        lessonMap.set(key, {
+          lessonId: can.lessonId,
+          lessonNumber: can.lessonNumber,
+          title: can.title,
+          unitId: can.unitId,
+          term: can.term,
+          volume: can.volume || null,
+          notesCount: 0,
+          textbooksCount: relevantMaterials.length > 0 ? 1 : 0,
+          hasStudyNotes: false,
+          hasTextbook: relevantMaterials.length > 0,
+          source: 'syllabus',
+        });
+      }
+    }
+
     // Sort lessons naturally by lesson number (1.1, 1.2, 1.3...)
     const lessons = Array.from(lessonMap.values()).sort((a, b) => {
       const diff = parseLessonNumberSort(a.lessonNumber) - parseLessonNumberSort(b.lessonNumber);
@@ -210,6 +348,7 @@ router.get('/lessons', async (req: Request, res: Response) => {
       subjectId,
       standardId,
       unitId,
+      term: term || 'All',
       count: lessons.length,
       lessons,
     });
@@ -224,8 +363,9 @@ router.get('/lessons', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/study-materials/textbooks?groupId=&subjectId=&standardId=&unitId=&lessonId=
- * Fetches textbooks that contain or are associated with the selected lesson.
+ * GET /api/study-materials/textbooks?groupId=&subjectId=&standardId=&unitId=&term=&lessonId=&lessonTitle=
+ * Automatically identifies and returns the matching Samacheer Kalvi textbooks for the selected
+ * Subject, Standard, Unit, Term, and Lesson.
  */
 router.get('/textbooks', async (req: Request, res: Response) => {
   try {
@@ -233,15 +373,16 @@ router.get('/textbooks', async (req: Request, res: Response) => {
     const subjectId = String(req.query.subjectId || 'general-studies').toLowerCase().trim();
     const standardId = parseInt(String(req.query.standardId || '6'), 10) || 6;
     const unitId = parseInt(String(req.query.unitId || '1'), 10) || 1;
+    const term = req.query.term ? String(req.query.term).trim() : '';
     const lessonId = req.query.lessonId ? String(req.query.lessonId).trim() : '';
     const lessonTitle = req.query.lessonTitle ? String(req.query.lessonTitle).trim() : '';
 
-    const mappedSubjects = getMappedTextbookSubjects(subjectId, unitId);
+    const mappedSubjects = getMappedTextbookSubjects(subjectId, unitId, lessonTitle);
 
     // 1. Search google_drive_materials
     const gdmRes = await pool.query(
       `SELECT id, file_name, google_drive_file_id, standard, subject, medium,
-              term, volume, page_count, extracted_text, classification_meta, extracted_toc
+              term, volume, page_count, total_pages, extraction_status, extracted_text, classification_meta, extracted_toc
        FROM google_drive_materials
        WHERE standard = $1
          AND (applicable_groups IS NULL OR applicable_groups::text ILIKE '%' || $2 || '%' OR LOWER(tnpsc_group) = LOWER($2))`,
@@ -250,7 +391,7 @@ router.get('/textbooks', async (req: Request, res: Response) => {
 
     // 2. Search textbooks table
     const tbRes = await pool.query(
-      `SELECT id, book_name, file_path, standard, subject, medium, term, volume, page_count, status
+      `SELECT id, book_name, file_path, standard, subject, medium, term, volume, page_count, total_pages, extraction_status, status
        FROM textbooks
        WHERE standard = $1
          AND (group_id IS NULL OR LOWER(group_id) = LOWER($2) OR ($2 = 'group2a' AND LOWER(group_id) = 'group2'))`,
@@ -258,82 +399,71 @@ router.get('/textbooks', async (req: Request, res: Response) => {
     );
 
     const candidates: TextbookOption[] = [];
-    const seenKeys = new Set<string>();
+    const seenSignatures = new Set<string>();
 
+    // Process google_drive_materials
     for (const m of gdmRes.rows) {
       if (!normalizeSubjectMatch(m.subject, mappedSubjects)) continue;
 
-      let isMatch = false;
-      const tocList = m.classification_meta?.units || m.extracted_toc || [];
+      const tvMeta = classifyTermVolume(m.term, m.volume);
+      const candTerm = tvMeta.term || m.term;
 
-      if (lessonId || lessonTitle) {
-        if (Array.isArray(tocList)) {
-          for (const u of tocList) {
-            const uNum = Number(u.unitNumber ?? u.unit_number);
-            if (uNum === unitId && Array.isArray(u.lessons)) {
-              if (
-                u.lessons.some(
-                  (l: any) =>
-                    (lessonId && l.lessonId === lessonId) ||
-                    (lessonTitle && String(l.title || '').toLowerCase().includes(lessonTitle.toLowerCase()))
-                )
-              ) {
-                isMatch = true;
-                break;
-              }
-            }
-          }
+      // Term filtering
+      if (term && term !== 'Not Applicable' && term !== 'All' && standardId < 10) {
+        if (candTerm && !candTerm.toLowerCase().includes(term.toLowerCase())) {
+          continue;
         }
-        if (!isMatch && (m.lesson_id === lessonId || (lessonTitle && String(m.lesson || '').toLowerCase().includes(lessonTitle.toLowerCase())))) {
-          isMatch = true;
-        }
-      } else {
-        isMatch = true;
       }
 
-      // If no strict lesson match found, but this textbook directly covers this standard & unit subject, include it as candidate
-      if (!isMatch && mappedSubjects.length > 0) {
-        isMatch = true;
-      }
-
-      if (isMatch) {
-        const key = `drive:${m.id}`;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          const tvMeta = classifyTermVolume(m.term, m.volume);
-          candidates.push({
-            id: m.id,
-            key,
-            sourceType: 'drive',
-            textbookId: null,
-            materialId: m.id,
-            gdriveFileId: m.google_drive_file_id || null,
-            bookName: m.file_name,
-            subject: m.subject,
-            standard: m.standard,
-            medium: m.medium || 'Tamil',
-            term: tvMeta.term,
-            volume: tvMeta.volume,
-            termOptions: tvMeta.termOptions.length > 0 ? tvMeta.termOptions : ['Not Applicable'],
-            volumeOptions: tvMeta.volumeOptions.length > 0 ? tvMeta.volumeOptions : ['Not Applicable'],
-            status: 'completed',
-            hasExtractedText: Boolean(m.extracted_text && m.extracted_text.trim().length >= 50),
-          });
-        }
+      const sig = `${m.file_name}-${m.standard}-${m.medium}-${candTerm}`.toLowerCase();
+      if (!seenSignatures.has(sig)) {
+        seenSignatures.add(sig);
+        candidates.push({
+          id: m.id,
+          key: `drive:${m.id}`,
+          sourceType: 'drive',
+          textbookId: null,
+          materialId: m.id,
+          gdriveFileId: m.google_drive_file_id || null,
+          bookName: m.file_name,
+          subject: m.subject,
+          standard: m.standard,
+          medium: m.medium || 'Tamil',
+          term: candTerm,
+          volume: tvMeta.volume,
+          termOptions: tvMeta.termOptions.length > 0 ? tvMeta.termOptions : ['Not Applicable'],
+          volumeOptions: tvMeta.volumeOptions.length > 0 ? tvMeta.volumeOptions : ['Not Applicable'],
+          status: 'completed',
+          hasExtractedText: Boolean(m.extracted_text && m.extracted_text.trim().length >= 50),
+          extractionStatus: m.extraction_status || (m.extracted_text ? 'COMPLETED' : 'PENDING'),
+          totalPages: m.total_pages || m.page_count || 0,
+        });
       }
     }
 
+    // Process textbooks table
     for (const tb of tbRes.rows) {
       if (!normalizeSubjectMatch(tb.subject, mappedSubjects)) continue;
 
-      const key = `textbook:${tb.id}`;
-      if (!seenKeys.has(key)) {
-        seenKeys.add(key);
-        const tvMeta = classifyTermVolume(tb.term, tb.volume);
-        const gdriveId = tb.file_path && tb.file_path.startsWith('gdrive://') ? tb.file_path.replace('gdrive://', '') : null;
+      const tvMeta = classifyTermVolume(tb.term, tb.volume);
+      const candTerm = tvMeta.term || tb.term;
+
+      // Term filtering
+      if (term && term !== 'Not Applicable' && term !== 'All' && standardId < 10) {
+        if (candTerm && !candTerm.toLowerCase().includes(term.toLowerCase())) {
+          continue;
+        }
+      }
+
+      const sig = `${tb.book_name}-${tb.standard}-${tb.medium}-${candTerm}`.toLowerCase();
+      if (!seenSignatures.has(sig)) {
+        seenSignatures.add(sig);
+        const gdriveId = tb.file_path && tb.file_path.startsWith('gdrive://')
+          ? tb.file_path.replace('gdrive://', '')
+          : null;
         candidates.push({
           id: tb.id,
-          key,
+          key: `textbook:${tb.id}`,
           sourceType: 'textbook',
           textbookId: tb.id,
           materialId: null,
@@ -342,15 +472,26 @@ router.get('/textbooks', async (req: Request, res: Response) => {
           subject: tb.subject,
           standard: tb.standard,
           medium: tb.medium || 'Tamil',
-          term: tvMeta.term,
+          term: candTerm,
           volume: tvMeta.volume,
           termOptions: tvMeta.termOptions.length > 0 ? tvMeta.termOptions : ['Not Applicable'],
           volumeOptions: tvMeta.volumeOptions.length > 0 ? tvMeta.volumeOptions : ['Not Applicable'],
           status: tb.status || 'completed',
           hasExtractedText: true,
+          extractionStatus: tb.extraction_status || 'COMPLETED',
+          totalPages: tb.total_pages || tb.page_count || 0,
         });
       }
     }
+
+    // Sort: extracted text first, then medium (Tamil first, English second)
+    candidates.sort((a, b) => {
+      if (a.hasExtractedText && !b.hasExtractedText) return -1;
+      if (!a.hasExtractedText && b.hasExtractedText) return 1;
+      if (a.medium === 'Tamil' && b.medium !== 'Tamil') return -1;
+      if (a.medium !== 'Tamil' && b.medium === 'Tamil') return 1;
+      return a.bookName.localeCompare(b.bookName);
+    });
 
     return res.status(200).json({
       success: true,
@@ -368,64 +509,14 @@ router.get('/textbooks', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/study-materials/terms?textbookId=&materialId=
- * Returns available terms dynamically from the selected textbook metadata.
- */
-router.get('/terms', async (req: Request, res: Response) => {
-  try {
-    const textbookId = req.query.textbookId ? parseInt(String(req.query.textbookId), 10) : null;
-    const materialId = req.query.materialId ? parseInt(String(req.query.materialId), 10) : null;
-
-    let termValue: string | null = null;
-    let volumeValue: string | null = null;
-
-    if (materialId) {
-      const resMat = await pool.query(
-        'SELECT term, volume, classification_meta FROM google_drive_materials WHERE id = $1',
-        [materialId]
-      );
-      if (resMat.rows[0]) {
-        termValue = resMat.rows[0].term || resMat.rows[0].classification_meta?.term || null;
-        volumeValue = resMat.rows[0].volume || resMat.rows[0].classification_meta?.volume || null;
-      }
-    } else if (textbookId) {
-      const resTb = await pool.query(
-        'SELECT term, volume FROM textbooks WHERE id = $1',
-        [textbookId]
-      );
-      if (resTb.rows[0]) {
-        termValue = resTb.rows[0].term || null;
-        volumeValue = resTb.rows[0].volume || null;
-      }
-    }
-
-    const { term } = classifyTermVolume(termValue, volumeValue);
-    const terms = term ? [term] : ['Not Applicable'];
-
-    return res.status(200).json({
-      success: true,
-      terms,
-      selected: terms[0],
-    });
-  } catch (error: any) {
-    console.error('[Study Material Routes] Error fetching terms:', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to fetch terms',
-      terms: ['Not Applicable'],
-      selected: 'Not Applicable',
-    });
-  }
-});
-
-/**
- * GET /api/study-materials/volumes?textbookId=&materialId=&term=
- * Returns available volumes dynamically from the selected textbook metadata.
+ * GET /api/study-materials/volumes?textbookId=&materialId=&standardId=&term=
+ * Returns available volumes dynamically.
  */
 router.get('/volumes', async (req: Request, res: Response) => {
   try {
     const textbookId = req.query.textbookId ? parseInt(String(req.query.textbookId), 10) : null;
     const materialId = req.query.materialId ? parseInt(String(req.query.materialId), 10) : null;
+    const standardId = req.query.standardId ? parseInt(String(req.query.standardId), 10) : null;
 
     let termValue: string | null = null;
     let volumeValue: string | null = null;
@@ -450,13 +541,17 @@ router.get('/volumes', async (req: Request, res: Response) => {
       }
     }
 
-    const { volume } = classifyTermVolume(termValue, volumeValue);
-    const volumes = volume ? [volume] : ['Not Applicable'];
+    const { volume, volumeOptions } = classifyTermVolume(termValue, volumeValue);
+    let volumes = volumeOptions.length > 0 ? volumeOptions : ['Not Applicable'];
+
+    if (standardId != null && standardId >= 11) {
+      volumes = ['Volume 1', 'Volume 2', 'Not Applicable'];
+    }
 
     return res.status(200).json({
       success: true,
       volumes,
-      selected: volumes[0],
+      selected: volume || volumes[0] || 'Not Applicable',
     });
   } catch (error: any) {
     console.error('[Study Material Routes] Error fetching volumes:', error);
@@ -470,4 +565,3 @@ router.get('/volumes', async (req: Request, res: Response) => {
 });
 
 export default router;
-

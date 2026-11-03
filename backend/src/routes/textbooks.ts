@@ -13,6 +13,11 @@ import {
   getMcqLessons,
 } from '../services/mcqCascadeService';
 import {
+  getExtractionStatus,
+  getExtractedPages,
+  processAutomaticPdfExtraction,
+} from '../services/pdfExtractionService';
+import {
   TNPSC_GROUPS_LIST,
   STANDARDS_LIST,
   SAMACHEER_CATALOG,
@@ -468,7 +473,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const query = `
-      SELECT id, group_id, standard, subject, medium, term, book_name, file_size, page_count, status, error_message, created_at, updated_at
+      SELECT id, group_id, standard, subject, medium, term, book_name, file_size, page_count, status, error_message,
+             pdf_type, total_pages, native_pages, ocr_pages, failed_pages, completion_percentage,
+             extraction_status, extraction_method, extracted_at, created_at, updated_at
       FROM textbooks
       ${whereClause}
       ORDER BY standard ASC, subject ASC, id DESC
@@ -509,6 +516,15 @@ router.get('/', async (req: Request, res: Response) => {
         pageCount: r.page_count,
         status: r.status,
         errorMessage: r.error_message,
+        pdfType: r.pdf_type || 'UNKNOWN',
+        totalPages: r.total_pages || r.page_count || 0,
+        nativePages: r.native_pages || 0,
+        ocrPages: r.ocr_pages || 0,
+        failedPages: r.failed_pages || 0,
+        completionPercentage: r.completion_percentage !== null ? Number(r.completion_percentage) : (r.extraction_status === 'COMPLETED' || r.status === 'completed' ? 100 : 0),
+        extractionStatus: r.extraction_status || (r.status === 'completed' && (r.total_pages > 0 || r.page_count > 0) ? 'COMPLETED' : 'PENDING'),
+        extractionMethod: r.extraction_method,
+        extractedAt: r.extracted_at,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
       })),
@@ -729,6 +745,127 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 /**
+ * Helper function: Handles synchronized bulk deletion for textbooks.
+ * Supports:
+ * 1. { ids: number[] } -> Delete selected textbooks
+ * 2. { deleteAll: true, groupId?, standard?, subject?, medium?, status?, search? } -> Delete all matching filtered textbooks
+ * Removes local disk files if present, cascades to textbook_content & textbook_processing_jobs, and deletes from textbooks.
+ */
+const handleBulkDeleteTextbooks = async (req: Request, res: Response) => {
+  try {
+    const { ids, deleteAll, groupId, standard, subject, medium, status, search } = req.body || {};
+
+    let targetRows: { id: number; book_name: string; file_path: string }[] = [];
+
+    if (Array.isArray(ids) && ids.length > 0) {
+      const validIds = ids.map((id: any) => Number(id)).filter((id: number) => !isNaN(id) && id > 0);
+      if (validIds.length === 0) {
+        return res.status(400).json({ status: 'error', message: 'No valid textbook IDs provided.' });
+      }
+      const dbRes = await pool.query(
+        `SELECT id, book_name, file_path FROM textbooks WHERE id = ANY($1)`,
+        [validIds]
+      );
+      targetRows = dbRes.rows;
+    } else if (deleteAll) {
+      const conditions: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      if (groupId && groupId !== 'all') {
+        conditions.push(`LOWER(group_id) = LOWER($${idx++})`);
+        values.push(String(groupId));
+      }
+      if (standard && standard !== 'all') {
+        const stdNum = parseInt(String(standard).replace(/\D/g, ''), 10);
+        if (!isNaN(stdNum)) {
+          conditions.push(`standard = $${idx++}`);
+          values.push(stdNum);
+        }
+      }
+      if (subject && subject !== 'all') {
+        conditions.push(`(LOWER(subject) = LOWER($${idx}) OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%')`);
+        values.push(String(subject));
+        idx++;
+      }
+      if (medium && medium !== 'all') {
+        conditions.push(`LOWER(medium) = LOWER($${idx++})`);
+        values.push(String(medium));
+      }
+      if (status && status !== 'all') {
+        conditions.push(`LOWER(status) = LOWER($${idx++})`);
+        values.push(String(status));
+      }
+      if (search && String(search).trim()) {
+        conditions.push(
+          `(LOWER(book_name) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%')`
+        );
+        values.push(String(search).trim());
+        idx++;
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      const dbRes = await pool.query(
+        `SELECT id, book_name, file_path FROM textbooks ${whereClause}`,
+        values
+      );
+      targetRows = dbRes.rows;
+    } else {
+      return res.status(400).json({ status: 'error', message: 'Provide either "ids" array or "deleteAll: true".' });
+    }
+
+    if (targetRows.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        message: 'No textbooks found to delete.',
+        deletedCount: 0,
+        deletedIds: [],
+      });
+    }
+
+    const targetIds = targetRows.map((r) => r.id);
+
+    // 1. Remove physical files from disk if present
+    for (const row of targetRows) {
+      if (row.file_path && !row.file_path.startsWith('gdrive://') && fs.existsSync(row.file_path)) {
+        try {
+          fs.unlinkSync(row.file_path);
+        } catch (fErr: any) {
+          console.warn(`[BulkDeleteTextbooks] Failed to unlink file ${row.file_path}:`, fErr.message);
+        }
+      }
+    }
+
+    // 2. Cascade delete from textbook_content, textbook_processing_jobs, and textbooks
+    await pool.query(`DELETE FROM textbook_content WHERE textbook_id = ANY($1)`, [targetIds]);
+    await pool.query(`DELETE FROM textbook_processing_jobs WHERE textbook_id = ANY($1)`, [targetIds]);
+    const deleteRes = await pool.query(`DELETE FROM textbooks WHERE id = ANY($1) RETURNING id`, [targetIds]);
+
+    return res.status(200).json({
+      status: 'success',
+      message: `Successfully deleted ${deleteRes.rowCount} textbook(s) and their indexed content.`,
+      deletedCount: deleteRes.rowCount,
+      deletedIds: targetIds,
+    });
+  } catch (error: any) {
+    console.error('[BulkDeleteTextbooks] Error:', error);
+    return res.status(500).json({ status: 'error', message: error.message || 'Failed to delete textbooks.' });
+  }
+};
+
+/**
+ * DELETE /api/textbooks (Protected Admin)
+ * Bulk deletes textbooks by IDs or by current filters.
+ */
+router.delete('/', requireAdminAuth, handleBulkDeleteTextbooks);
+
+/**
+ * POST /api/textbooks/bulk-delete (Protected Admin)
+ * Alternative POST endpoint for bulk deleting textbooks.
+ */
+router.post('/bulk-delete', requireAdminAuth, handleBulkDeleteTextbooks);
+
+/**
  * DELETE /api/textbooks/:id (Protected Admin)
  * Deletes textbook record, cascading to extracted pages and jobs, and removes file from disk.
  */
@@ -823,6 +960,115 @@ router.post('/:id/reprocess', requireAdminAuth, async (req: Request, res: Respon
   } catch (error: any) {
     console.error('[Textbooks Route] Reprocess error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to initiate reprocessing.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/:id/extraction-status
+ * Returns extraction status and metrics for a textbook.
+ */
+router.get('/:id/extraction-status', async (req: Request, res: Response) => {
+  try {
+    const textbookId = parseInt(req.params.id, 10);
+    if (!textbookId || isNaN(textbookId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid textbook ID is required.' });
+    }
+
+    const status = await getExtractionStatus({ textbookId });
+    return res.status(200).json({ status: 'success', data: status });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to check status.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/:id/extracted-pages
+ * Returns extracted pages with Tamil/English text and metadata for Admin review.
+ */
+router.get('/:id/extracted-pages', async (req: Request, res: Response) => {
+  try {
+    const textbookId = parseInt(req.params.id, 10);
+    if (!textbookId || isNaN(textbookId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid textbook ID is required.' });
+    }
+
+    const pagesData = await getExtractedPages({ textbookId });
+    return res.status(200).json({ status: 'success', data: pagesData });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to retrieve extracted pages.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/:id/extract
+ * Triggers automatic extraction (native or OCR) for textbook.
+ */
+router.post('/:id/extract', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const textbookId = parseInt(req.params.id, 10);
+    if (!textbookId || isNaN(textbookId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid textbook ID is required.' });
+    }
+
+    const wait = req.query.wait === 'true' || req.query.wait === '1';
+
+    if (wait) {
+      const result = await processAutomaticPdfExtraction({
+        textbookId,
+        retryOnlyFailed: false,
+      });
+
+      return res.status(200).json({
+        status: result.success ? 'success' : 'error',
+        message: result.success
+          ? `Successfully extracted ${result.totalPages} pages.`
+          : result.errorMessage || 'Extraction failed',
+        data: result,
+      });
+    }
+
+    // Run in background
+    processAutomaticPdfExtraction({ textbookId, retryOnlyFailed: false }).catch((bgErr) => {
+      console.warn(`[TextbookExtract] Background extraction error for #${textbookId}:`, bgErr.message);
+    });
+
+    return res.status(202).json({
+      status: 'success',
+      message: `Extraction initiated for textbook #${textbookId} in background.`,
+      textbookId,
+    });
+  } catch (err: any) {
+    console.error('[TextbookExtract] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Extraction failed.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/:id/retry-failed
+ * Retries failed pages for a textbook.
+ */
+router.post('/:id/retry-failed', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const textbookId = parseInt(req.params.id, 10);
+    if (!textbookId || isNaN(textbookId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid textbook ID is required.' });
+    }
+
+    const result = await processAutomaticPdfExtraction({
+      textbookId,
+      retryOnlyFailed: true,
+    });
+
+    return res.status(200).json({
+      status: result.success ? 'success' : 'error',
+      message: result.success
+        ? `Retry completed: ${result.nativePagesCount} native, ${result.ocrPagesCount} OCR, ${result.failedPagesCount} failed.`
+        : result.errorMessage || 'Retry failed',
+      data: result,
+    });
+  } catch (err: any) {
+    console.error('[TextbookRetryFailed] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Retry failed.' });
   }
 });
 

@@ -33,6 +33,16 @@ export interface GoogleDriveMaterialItem {
   extractedToc?: any[];
   confidenceScore?: number;
   medium?: string;
+  pdfType?: string;
+  totalPages?: number;
+  nativePages?: number;
+  ocrPages?: number;
+  failedPages?: number;
+  completionPercentage?: number;
+  extractionStatus?: string;
+  extractionMethod?: string;
+  extractionError?: string;
+  extractedAt?: string;
 }
 
 interface GoogleDrivePdfViewerProps {

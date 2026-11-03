@@ -10,6 +10,8 @@
 
 import pool from '../db';
 import { CloudAIService } from './cloudAi/cloudAiService';
+import { AIProviderFactory } from './ai/ai-provider.factory';
+import { AIProviderName } from './ai/ai-provider.interface';
 import {
   isSemanticallyDuplicate,
   isValidQuestionText,
@@ -20,6 +22,7 @@ import {
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 
 export interface McqGenerationRequest {
+  provider?: AIProviderName;
   category: string;
   standard: number;
   subject: string;
@@ -299,8 +302,9 @@ Respond strictly in JSON:
   ]
 }`;
 
+    const aiProvider = AIProviderFactory.getProvider(req.provider || 'claude');
     try {
-      const response = await CloudAIService.generateJson<{ questions: any[] }>(
+      const response = await aiProvider.generateJson<any>(
         prompt,
         {
           systemPrompt,
@@ -309,7 +313,11 @@ Respond strictly in JSON:
         }
       );
 
-      const rawList = Array.isArray(response?.questions) ? response.questions : [];
+      const rawList = Array.isArray(response?.questions)
+        ? response.questions
+        : Array.isArray(response)
+        ? response
+        : [];
 
       for (const item of rawList) {
         if (acceptedQuestions.length >= targetCount) break;
@@ -363,10 +371,11 @@ Respond strictly in JSON:
   }
 
   if (acceptedQuestions.length === 0) {
+    const provName = req.provider === 'gemini' ? 'Google Gemini AI' : 'Anthropic Claude AI';
     throw new Error(
       lastError
-        ? `Claude could not generate valid questions: ${lastError.message}`
-        : 'Claude did not return any valid questions. Please try again.'
+        ? `${provName} could not generate valid questions: ${lastError.message}`
+        : `${provName} did not return any valid questions. Please try again.`
     );
   }
 

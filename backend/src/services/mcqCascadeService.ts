@@ -89,15 +89,27 @@ type MappedSubjects = Record<string, Record<number, string[]>>;
 const UNIT_TEXTBOOK_SUBJECTS: MappedSubjects = {
   'general-studies': {
     1: ['science', 'general science', 'physics', 'chemistry', 'biology'],
-    2: ['social science', 'geography'],
-    3: ['social science', 'history'],
-    4: ['social science', 'political science', 'civics', 'polity'],
-    5: ['social science', 'economics', 'economy'],
-    6: ['social science', 'history', 'tamil'],
+    2: ['social science', 'geography', 'current affairs'],
+    3: ['social science', 'geography'],
+    4: ['social science', 'history'],
+    5: ['social science', 'political science', 'civics', 'polity'],
+    6: ['social science', 'economics', 'economy'],
+    7: ['social science', 'history', 'indian national movement'],
+    8: ['social science', 'history', 'tamil'],
+    9: ['social science', 'civics', 'development administration'],
+    10: ['mathematics', 'maths', 'aptitude', 'mental ability'],
   },
   aptitude: {
     1: ['mathematics', 'maths', 'aptitude', 'mental ability'],
     2: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    3: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    4: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    5: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    6: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    7: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    8: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    9: ['mathematics', 'maths', 'aptitude', 'mental ability'],
+    10: ['mathematics', 'maths', 'aptitude', 'mental ability'],
   },
   'general-english': {
     1: ['english'],
@@ -107,6 +119,9 @@ const UNIT_TEXTBOOK_SUBJECTS: MappedSubjects = {
     5: ['english'],
     6: ['english'],
     7: ['english'],
+    8: ['english'],
+    9: ['english'],
+    10: ['english'],
   },
   'general-tamil': {
     1: ['tamil'],
@@ -116,6 +131,9 @@ const UNIT_TEXTBOOK_SUBJECTS: MappedSubjects = {
     5: ['tamil'],
     6: ['tamil'],
     7: ['tamil'],
+    8: ['tamil'],
+    9: ['tamil'],
+    10: ['tamil'],
   },
 };
 
@@ -123,6 +141,7 @@ const SUBJECT_ALIASES: Record<string, string> = {
   generalstudies: 'general-studies',
   generalstudiesgs: 'general-studies',
   aptitudeandmentalability: 'aptitude',
+  aptitudementalability: 'aptitude',
   aptitude: 'aptitude',
   mentalability: 'aptitude',
   generalenglish: 'general-english',
@@ -147,9 +166,73 @@ function normalizeSubjectName(value: string): string {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-export function getMappedTextbookSubjects(subject: string, unitId: number): string[] {
+export function getMappedTextbookSubjects(subject: string, unitId: number, lessonTitle?: string): string[] {
   const subjectKey = normalizeSubjectKey(subject);
-  return UNIT_TEXTBOOK_SUBJECTS[subjectKey]?.[Number(unitId)] || [];
+
+  // General Tamil: Always maps to Tamil textbooks
+  if (subjectKey === 'general-tamil' || subjectKey === 'tamil') {
+    return ['tamil', 'general tamil'];
+  }
+
+  // General English: Always maps to English textbooks
+  if (subjectKey === 'general-english' || subjectKey === 'english') {
+    return ['english', 'general english'];
+  }
+
+  // Aptitude & Mental Ability: Always maps to Mathematics textbooks
+  if (subjectKey === 'aptitude' || subjectKey === 'mentalability') {
+    return ['mathematics', 'maths', 'aptitude', 'mental ability'];
+  }
+
+  // General Studies: Analyze lesson title and unit for precise textbook mapping
+  if (subjectKey === 'general-studies') {
+    const lTitle = String(lessonTitle || '').toLowerCase();
+
+    // Check for explicit Science keywords
+    const scienceKeywords = [
+      'அறிவியல்', 'இயற்பியல்', 'வேதியியல்', 'உயிரியல்', 'தாவர', 'விலங்கு',
+      'science', 'physics', 'chemistry', 'biology', 'measurement', 'motion',
+      'force', 'matter', 'living world', 'cell', 'heat', 'light', 'sound',
+      'electricity', 'magnetism', 'nutrition', 'hygiene', 'microorganism',
+      'periodic', 'element', 'acid', 'base', 'ecology', 'organ system', 'genetics'
+    ];
+    if (scienceKeywords.some((kw) => lTitle.includes(kw))) {
+      return ['science', 'general science', 'physics', 'chemistry', 'biology'];
+    }
+
+    // Check for explicit Social Science / History / Geography / Civics / Economics keywords
+    const socialKeywords = [
+      'வரலாறு', 'புவியியல்', 'குடிமையியல்', 'பொருளியல்', 'சமூக அறிவியல்',
+      'social science', 'history', 'geography', 'civics', 'economics', 'polity',
+      'constitution', 'parliament', 'indus', 'vedic', 'gupta', 'delhi sultanate',
+      'mughal', 'maratha', 'vijayanagar', 'chola', 'pandya', 'sangam', 'atmosphere',
+      'lithosphere', 'hydrosphere', 'resources', 'climate', 'disaster', 'drainage',
+      'agriculture', 'taxation', 'inflation', 'gdp', 'banking', 'rbi', 'panchayat'
+    ];
+    if (socialKeywords.some((kw) => lTitle.includes(kw))) {
+      return ['social science', 'history', 'geography', 'civics', 'economics'];
+    }
+
+    // Check for Mathematics keywords in General Studies
+    const mathsKeywords = ['கணிதம்', 'எண்கள்', 'mathematics', 'maths', 'number'];
+    if (mathsKeywords.some((kw) => lTitle.includes(kw))) {
+      return ['mathematics', 'maths', 'aptitude', 'mental ability'];
+    }
+
+    // Unit-based mapping fallback
+    const unitMap = UNIT_TEXTBOOK_SUBJECTS['general-studies']?.[Number(unitId)];
+    if (unitMap && unitMap.length > 0) {
+      return unitMap;
+    }
+
+    // Default for General Studies: Science (Unit 1) or Social Science (Units 2-9)
+    if (Number(unitId) === 1) {
+      return ['science', 'general science', 'physics', 'chemistry', 'biology'];
+    }
+    return ['social science', 'history', 'geography', 'civics', 'economics'];
+  }
+
+  return UNIT_TEXTBOOK_SUBJECTS[subjectKey]?.[Number(unitId)] || [subjectKey];
 }
 
 function subjectMatches(textbookSubject: string, mappedSubjects: string[]): boolean {
@@ -462,7 +545,23 @@ function driveLessons(
     const title = String(lesson.title || lesson.lessonTitle || 'Untitled lesson');
     const topics = Array.isArray(lesson.topics) ? lesson.topics : [];
     const titleRange = pages.length > 0 ? pagesByTitleHint(pages, title) : null;
-    const range = titleRange || (lessons.length === 1 ? unitRange : null);
+    let range = titleRange || (lessons.length === 1 ? unitRange : null);
+    if (!range && extracted && pages.length > 0) {
+      if (unitRange) {
+        const lessonIdx = lessons.indexOf(lesson);
+        const unitPageCount = Math.max(1, unitRange.end - unitRange.start + 1);
+        const pagesPerLesson = Math.max(1, Math.ceil(unitPageCount / Math.max(1, lessons.length)));
+        const lStart = unitRange.start + (lessonIdx >= 0 ? lessonIdx : 0) * pagesPerLesson;
+        const lEnd = Math.min(unitRange.end, lStart + pagesPerLesson - 1);
+        range = { start: Math.min(pages.length - 1, lStart), end: Math.min(pages.length - 1, lEnd) };
+      } else {
+        const lessonIdx = lessons.indexOf(lesson);
+        const pagesPerLesson = Math.max(1, Math.floor(pages.length / Math.max(1, lessons.length)));
+        const lStart = (lessonIdx >= 0 ? lessonIdx : 0) * pagesPerLesson;
+        const lEnd = Math.min(pages.length - 1, lStart + pagesPerLesson - 1);
+        range = { start: lStart, end: lEnd };
+      }
+    }
     const storedStart = lesson.startPage ?? lesson.start_page ?? null;
     const startPage = storedStart ?? (range ? pages[range.start]?.pageNumber ?? null : null);
     const endPage = lesson.endPage ?? lesson.end_page ?? (range ? pages[range.end]?.pageNumber ?? null : null);

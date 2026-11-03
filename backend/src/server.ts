@@ -21,6 +21,8 @@ import studyMaterialQuestionsRouter from './routes/studyMaterialQuestions';
 import syllabusRouter from './routes/syllabusRoutes';
 import studyMaterialRouter from './routes/studyMaterialRoutes';
 import aiGenerationRouter from './routes/aiGeneration';
+import claudeRouter from './routes/claudeRoutes';
+import geminiRouter from './routes/geminiRoutes';
 import driveRouter from './routes/drive';
 
 const app = express();
@@ -251,6 +253,14 @@ app.use('/api/api/textbooks', requireSchemaMiddleware, textbooksRouter);
 app.use('/api/ai', requireSchemaMiddleware, aiGenerationRouter);
 app.use('/ai', requireSchemaMiddleware, aiGenerationRouter);
 app.use('/api/api/ai', requireSchemaMiddleware, aiGenerationRouter);
+
+app.use('/api/claude', requireSchemaMiddleware, claudeRouter);
+app.use('/claude', requireSchemaMiddleware, claudeRouter);
+app.use('/api/api/claude', requireSchemaMiddleware, claudeRouter);
+
+app.use('/api/gemini', requireSchemaMiddleware, geminiRouter);
+app.use('/gemini', requireSchemaMiddleware, geminiRouter);
+app.use('/api/api/gemini', requireSchemaMiddleware, geminiRouter);
 
 app.use('/api/drive', requireSchemaMiddleware, driveRouter);
 app.use('/drive', requireSchemaMiddleware, driveRouter);

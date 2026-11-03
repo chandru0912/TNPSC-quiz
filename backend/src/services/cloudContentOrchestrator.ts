@@ -13,11 +13,15 @@ import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { splitAndAlignNotesByTopic, persistTopicAlignedNotes, AlignedTopicItem, TopicSeparationResult } from './topicAlignmentService';
 import { extractTextFromGoogleDrivePdf } from './googleDriveService';
 import { resolveMcqSelection, ResolvedMcqSelection } from './mcqCascadeService';
+import { AIProviderFactory } from './ai/ai-provider.factory';
+import { AILogsService } from './ai/ai-logs.service';
+import { AIProviderName } from './ai/ai-provider.interface';
 
 export type GenerationMode = 'notes' | 'mcq' | 'both';
 export type NotesFormatOption = 'short' | 'full' | 'both';
 
 export interface UnifiedGenerationRequest {
+  provider?: AIProviderName;
   category: string;
   standard: number;
   subject: string;
@@ -110,11 +114,21 @@ export class CloudContentOrchestrator {
     };
 
     // Step 1: Provider Status Check & Verification
-    report('Connecting to Claude AI & Checking Provider Readiness', 10);
-    const providerInfo = CloudAIService.getProviderStatus();
+    const activeDefault = await AIProviderFactory.getActiveProvider();
+    const targetProviderName: AIProviderName =
+      req.provider === 'gemini'
+        ? 'gemini'
+        : req.provider === 'claude'
+        ? 'claude'
+        : activeDefault.name;
+
+    const aiProvider = AIProviderFactory.getProvider(targetProviderName);
+    report(`Connecting to ${aiProvider.displayName} & Checking Provider Readiness`, 10);
+    const providerInfo = await aiProvider.getStatus();
     if (!providerInfo.configured) {
+      const keyName = targetProviderName === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
       throw new Error(
-        'Claude AI is not configured. Set ANTHROPIC_API_KEY in the backend environment variables.'
+        `${aiProvider.displayName} is not configured. Set ${keyName} in backend environment or Admin Panel.`
       );
     }
 
@@ -228,7 +242,7 @@ export class CloudContentOrchestrator {
       ? `${mcqSelection.sourcePdf}${mcqSelection.term ? `, ${mcqSelection.term}` : ''}${mcqSelection.volume ? `, ${mcqSelection.volume}` : ''} (Pages: ${mcqSelection.pages.join(',')})`
       : textbookDetails.name
       ? `${textbookDetails.name} (Pages: ${textbookDetails.relevantPages.join(',')})`
-      : 'Claude AI generation (no textbook PDF provided)';
+      : `${aiProvider.displayName} generation (no textbook PDF provided)`;
 
     // Study Notes Generation
     if (isNotesMode) {
@@ -244,6 +258,7 @@ export class CloudContentOrchestrator {
         );
 
         shortNotesResult = await generateStudyNotes({
+          provider: targetProviderName,
           category: req.category,
           standard: req.standard,
           subject: req.subject,
@@ -301,6 +316,7 @@ export class CloudContentOrchestrator {
         );
 
         fullNotesResult = await generateStudyNotes({
+          provider: targetProviderName,
           category: req.category,
           standard: req.standard,
           subject: req.subject,
@@ -363,6 +379,7 @@ export class CloudContentOrchestrator {
 
       mcqsResult = await generateMcqs(
         {
+          provider: targetProviderName,
           category: req.category,
           standard: req.standard,
           subject: req.subject,
@@ -491,11 +508,31 @@ export class CloudContentOrchestrator {
         }
       : undefined;
 
+    // Log generation history independently
+    await AILogsService.logGeneration({
+      provider: targetProviderName,
+      model: providerInfo.model,
+      generationType: req.mode,
+      groupId: req.category,
+      standard: req.standard,
+      subject: req.subject,
+      unitId: req.unitId,
+      lessonTitle: req.lessonTitle,
+      language: req.language,
+      status: 'success',
+      itemsCount: (mcqsResult?.questions?.length || 0) + (shortNotesResult ? 1 : 0) + (fullNotesResult ? 1 : 0),
+      metadata: {
+        textbook: textbookDetails.name,
+        pages: textbookDetails.relevantPages,
+        duplicatesFiltered: mcqsResult?.duplicateCount || 0,
+      },
+    });
+
     return {
       status: 'success',
       mode: req.mode,
       notesFormat,
-      provider: providerInfo.name,
+      provider: targetProviderName,
       model: providerInfo.model,
       textbookUsed: textbookDetails,
       studyNotes: studyNotesOutput,

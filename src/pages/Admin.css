@@ -778,7 +778,10 @@
   margin-bottom: 0.5rem;
 }
 
-.admin-table-wrapper {
+.admin-table-wrapper,
+.admin-table-card {
+  width: 100%;
+  max-width: 100%;
   border-radius: 14px;
   background: rgba(14, 22, 42, 0.65);
   backdrop-filter: blur(14px);
@@ -786,23 +789,39 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
 }
 
-.admin-table-wrapper::-webkit-scrollbar {
+.table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-table-wrapper::-webkit-scrollbar,
+.admin-table-card::-webkit-scrollbar,
+.table-wrapper::-webkit-scrollbar {
   height: 6px;
 }
 
-.admin-table-wrapper::-webkit-scrollbar-track {
+.admin-table-wrapper::-webkit-scrollbar-track,
+.admin-table-card::-webkit-scrollbar-track,
+.table-wrapper::-webkit-scrollbar-track {
   background: rgba(10, 15, 30, 0.5);
   border-radius: 3px;
 }
 
-.admin-table-wrapper::-webkit-scrollbar-thumb {
+.admin-table-wrapper::-webkit-scrollbar-thumb,
+.admin-table-card::-webkit-scrollbar-thumb,
+.table-wrapper::-webkit-scrollbar-thumb {
   background: rgba(255, 215, 0, 0.25);
   border-radius: 3px;
 }
 
-.admin-table-wrapper::-webkit-scrollbar-thumb:hover {
+.admin-table-wrapper::-webkit-scrollbar-thumb:hover,
+.admin-table-card::-webkit-scrollbar-thumb:hover,
+.table-wrapper::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 215, 0, 0.45);
 }
 

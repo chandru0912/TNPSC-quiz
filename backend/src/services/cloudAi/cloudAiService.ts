@@ -8,6 +8,7 @@ import {
   CloudAIProviderInfo,
 } from './cloudAiTypes';
 import { ClaudeCloudProvider } from './claudeProvider';
+import { testClaudeDirectConnection, ClaudeConnectionTestResult } from './claudeTester';
 
 export class CloudAIServiceManager {
   private claudeProvider = new ClaudeCloudProvider();
@@ -89,46 +90,10 @@ export class CloudAIServiceManager {
   }
 
   /**
-   * Tests connectivity to the Claude API.
+   * Tests connectivity directly to the Anthropic Claude API.
    */
-  async testConnection(): Promise<{
-    success: boolean;
-    message: string;
-    provider: string;
-    model: string;
-  }> {
-    const info = this.getProviderStatus();
-
-    if (!info.configured) {
-      return {
-        success: false,
-        message:
-          'Claude API is not configured. Set ANTHROPIC_API_KEY in the backend environment variables or save your API key in Admin Settings.',
-        provider: info.provider,
-        model: info.model,
-      };
-    }
-
-    try {
-      await this.claudeProvider.generateCompletion(
-        'Respond with "OK" if the connection is operational.',
-        { maxTokens: 10, timeoutMs: 15000 }
-      );
-
-      return {
-        success: true,
-        message: 'CLAUDE AI CONNECTED',
-        provider: info.provider,
-        model: info.model,
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: `Connection test failed: ${err.message}`,
-        provider: info.provider,
-        model: info.model,
-      };
-    }
+  async testConnection(apiKeyOverride?: string, modelOverride?: string): Promise<ClaudeConnectionTestResult> {
+    return testClaudeDirectConnection(apiKeyOverride, modelOverride);
   }
 }
 

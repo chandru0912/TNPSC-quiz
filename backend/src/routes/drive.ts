@@ -25,6 +25,13 @@ import {
   ClassifiedPdfMetadata,
 } from '../services/bulkClassificationService';
 import { extractAndIndexFullTextbook } from '../services/fullTextbookExtractor';
+import {
+  extractAndPersistPdf,
+  getExtractionStatus,
+  getExtractedPages,
+  extractAllPendingMaterials,
+  processAutomaticPdfExtraction,
+} from '../services/pdfExtractionService';
 
 const router = Router();
 
@@ -402,6 +409,16 @@ router.post('/upload/complete', requireAdminAuth, async (req: AuthenticatedReque
     }
 
     const row = updateRes.rows[0];
+
+    // Asynchronously trigger automatic PDF text extraction immediately upon upload completion
+    extractAndPersistPdf({
+      materialId: row.id,
+      googleDriveFileId: row.google_drive_file_id,
+      forceReExtract: true,
+    }).catch((bgErr) => {
+      console.warn(`[DriveUploadComplete] Extraction notice for #${row.id}:`, bgErr.message);
+    });
+
     return res.status(200).json({
       status: 'success',
       message: `PDF "${row.file_name}" successfully uploaded and verified in Google Drive!`,
@@ -506,15 +523,159 @@ router.post('/extract-text', requireAdminAuth, async (req: Request, res: Respons
 });
 
 /**
+ * POST /api/drive/extract/:id
+ * Admin only: Triggers full text extraction and syllabus indexing for a specific Google Drive material.
+ * Supports query ?wait=true (synchronous wait up to request timeout) or background async (default).
+ */
+router.post('/extract/:id', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const materialId = parseInt(req.params.id, 10);
+    if (!materialId || isNaN(materialId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
+    }
+
+    const wait = req.query.wait === 'true' || req.query.wait === '1';
+
+    if (wait) {
+      const result = await extractAndPersistPdf({
+        materialId,
+        forceReExtract: true,
+      });
+
+      return res.status(200).json({
+        status: result.success ? 'success' : 'error',
+        message: result.success
+          ? `Successfully extracted and indexed ${result.totalPages} pages.`
+          : result.error || 'Extraction failed',
+        data: result,
+      });
+    }
+
+    // Background processing
+    extractAndPersistPdf({
+      materialId,
+      forceReExtract: true,
+    }).catch((bgErr) => {
+      console.warn(`[DriveExtractEndpoint] Background extraction error for #${materialId}:`, bgErr.message);
+    });
+
+    return res.status(202).json({
+      status: 'success',
+      message: `Extraction initiated for material #${materialId} in background.`,
+      materialId,
+    });
+  } catch (err: any) {
+    console.error('[DriveExtract] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Extraction initiation failed.' });
+  }
+});
+
+/**
+ * GET /api/drive/extract/:id/status and /api/drive/materials/:id/extraction-status
+ * Admin & AI Generators: Returns current extraction status and page metrics for a material.
+ */
+router.get(['/extract/:id/status', '/materials/:id/extraction-status'], async (req: Request, res: Response) => {
+  try {
+    const materialId = parseInt(req.params.id, 10);
+    if (!materialId || isNaN(materialId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
+    }
+
+    const status = await getExtractionStatus({ materialId });
+    return res.status(200).json({ status: 'success', data: status });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to check status.' });
+  }
+});
+
+/**
+ * GET /api/drive/extract/:id/pages and /api/drive/materials/:id/extracted-pages
+ * Admin: Returns all extracted pages for inspection in the Admin Review modal.
+ */
+router.get(['/extract/:id/pages', '/materials/:id/extracted-pages'], async (req: Request, res: Response) => {
+  try {
+    const materialId = parseInt(req.params.id, 10);
+    if (!materialId || isNaN(materialId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
+    }
+
+    const pagesData = await getExtractedPages({ materialId });
+    return res.status(200).json({
+      status: 'success',
+      data: pagesData,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to retrieve extracted pages.' });
+  }
+});
+
+/**
+ * POST /api/drive/extract/:id/retry-failed and /api/drive/materials/:id/retry-failed
+ * Admin: Retries extraction for pages that failed on prior runs.
+ */
+router.post(['/extract/:id/retry-failed', '/materials/:id/retry-failed'], requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const materialId = parseInt(req.params.id, 10);
+    if (!materialId || isNaN(materialId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
+    }
+
+    const result = await processAutomaticPdfExtraction({
+      materialId,
+      retryOnlyFailed: true,
+    });
+
+    return res.status(200).json({
+      status: result.success ? 'success' : 'error',
+      message: result.success
+        ? `Retry completed: ${result.nativePagesCount} native, ${result.ocrPagesCount} OCR, ${result.failedPagesCount} failed.`
+        : result.errorMessage || 'Retry failed',
+      data: result,
+    });
+  } catch (err: any) {
+    console.error('[DriveRetryFailed] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Retry failed.' });
+  }
+});
+
+/**
+ * POST /api/drive/extract-all-pending
+ * Admin only: Scans for all textbooks/materials without extracted text and processes them.
+ */
+router.post('/extract-all-pending', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const summary = await extractAllPendingMaterials();
+    return res.status(200).json({
+      status: 'success',
+      message: `Extracted ${summary.succeeded}/${summary.processed} pending PDF materials.`,
+      data: summary,
+    });
+  } catch (err: any) {
+    console.error('[DriveExtractAllPending] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to process pending materials.' });
+  }
+});
+
+/**
  * POST /api/drive/bulk/classify
  * Admin only: Classifies a batch of PDF files using filename heuristics,
  * cover page metadata, and Table of Contents matching against TNPSC syllabus.
+ * Configurable batch size support up to MAX_BULK_UPLOAD_LIMIT (default 1000).
  */
+const MAX_BULK_UPLOAD_LIMIT = parseInt(process.env.MAX_BULK_UPLOAD_LIMIT || '1000', 10);
+
 router.post('/bulk/classify', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { files } = req.body;
     if (!Array.isArray(files) || files.length === 0) {
       return res.status(400).json({ status: 'error', message: 'Array of files is required for classification.' });
+    }
+
+    if (files.length > MAX_BULK_UPLOAD_LIMIT) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Maximum batch size for bulk classification is ${MAX_BULK_UPLOAD_LIMIT} files (received ${files.length}).`,
+      });
     }
 
     const results: ClassifiedPdfMetadata[] = files.map((f: ClassifyPdfInput) => classifyPdf(f));
@@ -860,7 +1021,7 @@ router.get('/materials', async (req: Request, res: Response) => {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const safeLimit = Math.min(Math.max(1, parseInt(String(limit), 10) || 50), 200);
+    const safeLimit = Math.min(Math.max(1, parseInt(String(limit), 10) || 500), 1000);
     const safeOffset = Math.max(0, parseInt(String(offset), 10) || 0);
 
     const countRes = await pool.query(`SELECT COUNT(*) AS total FROM google_drive_materials ${whereClause}`, values);
@@ -871,7 +1032,10 @@ router.get('/materials', async (req: Request, res: Response) => {
              google_drive_file_id, google_drive_folder_id,
              tnpsc_group, subject, standard, term, unit, lesson, lesson_id,
              upload_status, uploaded_by, created_at, updated_at,
-             applicable_groups, extracted_toc, confidence_score, medium
+             applicable_groups, extracted_toc, confidence_score, medium,
+             pdf_type, total_pages, page_count, native_pages, ocr_pages,
+             failed_pages, completion_percentage, extraction_status,
+             extraction_method, extraction_error, extracted_at
       FROM google_drive_materials
       ${whereClause}
       ORDER BY id DESC
@@ -900,6 +1064,16 @@ router.get('/materials', async (req: Request, res: Response) => {
       lessonId: row.lesson_id,
       uploadStatus: row.upload_status,
       uploadedBy: row.uploaded_by,
+      pdfType: row.pdf_type || 'UNKNOWN',
+      totalPages: row.total_pages || row.page_count || 0,
+      nativePages: row.native_pages || 0,
+      ocrPages: row.ocr_pages || 0,
+      failedPages: row.failed_pages || 0,
+      completionPercentage: row.completion_percentage !== null ? Number(row.completion_percentage) : (row.extraction_status === 'COMPLETED' ? 100 : 0),
+      extractionStatus: row.extraction_status || (row.upload_status === 'completed' && (row.total_pages > 0 || row.page_count > 0) ? 'COMPLETED' : 'PENDING'),
+      extractionMethod: row.extraction_method,
+      extractionError: row.extraction_error,
+      extractedAt: row.extracted_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       viewUrl: `/api/drive/view/${row.id}`,
@@ -1041,13 +1215,10 @@ router.get('/view/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * DELETE /api/drive/materials
- * Admin only: Bulk deletes PDF materials from Google Drive and PostgreSQL database.
- * Supports:
- * 1. { ids: number[] } -> Delete selected materials
- * 2. { deleteAll: true, group?, standard?, subject?, term?, search? } -> Delete all (optionally filtered) materials
+ * Helper function: Handles synchronized bulk deletion across Google Drive and PostgreSQL.
+ * Cascades to mirrored textbooks, textbook_content, and pdf_extractions so zero orphaned records remain.
  */
-router.delete('/materials', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+const handleBulkDeleteMaterials = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { ids, deleteAll, group, standard, subject, term, search } = req.body || {};
 
@@ -1069,14 +1240,19 @@ router.delete('/materials', requireAdminAuth, async (req: AuthenticatedRequest, 
       let idx = 1;
 
       if (group && group !== 'all') {
-        conditions.push(`(tnpsc_group = $${idx} OR applicable_groups @> $${idx + 1}::jsonb)`);
-        values.push(String(group));
-        values.push(JSON.stringify([String(group)]));
-        idx += 2;
+        const cleanGroup = String(group).toLowerCase().trim();
+        if (cleanGroup.includes('group1')) {
+          conditions.push(`(LOWER(tnpsc_group) LIKE '%group1%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group1"]'::jsonb))`);
+        } else if (cleanGroup.includes('group4')) {
+          conditions.push(`(LOWER(tnpsc_group) LIKE '%group4%' OR LOWER(tnpsc_group) LIKE '%vao%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group4"]'::jsonb))`);
+        } else {
+          conditions.push(`(LOWER(tnpsc_group) LIKE '%group2%' OR LOWER(tnpsc_group) LIKE '%2a%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group2"]'::jsonb))`);
+        }
       }
       if (subject && subject !== 'all') {
-        conditions.push(`LOWER(subject) = LOWER($${idx++})`);
-        values.push(String(subject));
+        conditions.push(`(LOWER(subject) = LOWER($${idx}) OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%')`);
+        values.push(String(subject).replace(/-/g, ' '));
+        idx++;
       }
       if (standard && standard !== 'all' && !isNaN(Number(standard))) {
         conditions.push(`standard = $${idx++}`);
@@ -1110,25 +1286,55 @@ router.delete('/materials', requireAdminAuth, async (req: AuthenticatedRequest, 
         status: 'success',
         message: 'No PDF materials found to delete.',
         deletedCount: 0,
+        deletedIds: [],
       });
     }
 
     const targetIds = targetRows.map((r) => r.id);
+    const driveFileIds = targetRows
+      .map((r) => r.google_drive_file_id)
+      .filter((id) => Boolean(id && !id.startsWith('pending_')));
 
-    // Delete associated files from Google Drive in parallel (graceful error handling)
+    // 1. Delete associated files from Google Drive in parallel (graceful error handling)
     await Promise.allSettled(
-      targetRows.map(async (row) => {
-        if (row.google_drive_file_id && !row.google_drive_file_id.startsWith('pending_')) {
-          try {
-            await deleteDriveFile(row.google_drive_file_id);
-          } catch (driveErr: any) {
-            console.warn(`[BulkDeleteDrive] Drive deletion warning for file ID ${row.google_drive_file_id}:`, driveErr.message);
-          }
+      driveFileIds.map(async (fileId) => {
+        try {
+          await deleteDriveFile(fileId);
+        } catch (driveErr: any) {
+          console.warn(`[BulkDeleteDrive] Drive deletion warning for file ID ${fileId}:`, driveErr.message);
         }
       })
     );
 
-    // Delete records from PostgreSQL database
+    // 2. Cascade delete from mirrored textbook_content and textbooks
+    if (driveFileIds.length > 0) {
+      try {
+        const filePatterns = driveFileIds.map((id) => `%${id}%`);
+        const matchingTbRes = await pool.query(
+          `SELECT id FROM textbooks WHERE file_path = ANY($1) OR file_path LIKE 'gdrive://%'`,
+          [filePatterns]
+        );
+        const matchingTbIds = matchingTbRes.rows.map((r) => r.id);
+        if (matchingTbIds.length > 0) {
+          await pool.query(`DELETE FROM textbook_content WHERE textbook_id = ANY($1)`, [matchingTbIds]);
+          await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [matchingTbIds]);
+        }
+      } catch (tbCascadeErr: any) {
+        console.warn('[BulkDeleteDrive] Textbook mirror cleanup warning:', tbCascadeErr.message);
+      }
+    }
+
+    // 3. Cascade delete from pdf_extractions
+    try {
+      await pool.query(
+        `DELETE FROM pdf_extractions WHERE material_id = ANY($1) OR google_drive_file_id = ANY($2)`,
+        [targetIds, driveFileIds]
+      );
+    } catch (peCascadeErr: any) {
+      console.warn('[BulkDeleteDrive] PDF extractions cleanup warning:', peCascadeErr.message);
+    }
+
+    // 4. Delete records from PostgreSQL google_drive_materials
     const deleteRes = await pool.query(
       `DELETE FROM google_drive_materials WHERE id = ANY($1) RETURNING id`,
       [targetIds]
@@ -1147,11 +1353,23 @@ router.delete('/materials', requireAdminAuth, async (req: AuthenticatedRequest, 
       message: err.message || 'Failed to delete PDF materials',
     });
   }
-});
+};
+
+/**
+ * DELETE /api/drive/materials
+ * Admin only: Bulk deletes PDF materials from Google Drive and PostgreSQL database.
+ */
+router.delete('/materials', requireAdminAuth, handleBulkDeleteMaterials);
+
+/**
+ * POST /api/drive/bulk-delete
+ * Admin only: Dedicated bulk delete endpoint supporting { ids: number[] } or { deleteAll: true, ...filters }
+ */
+router.post('/bulk-delete', requireAdminAuth, handleBulkDeleteMaterials);
 
 /**
  * DELETE /api/drive/materials/:id
- * Admin only: Deletes the PDF from Google Drive and removes its record from PostgreSQL.
+ * Admin only: Deletes the PDF from Google Drive and removes its record and mirror records from PostgreSQL.
  */
 router.delete('/materials/:id', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1178,6 +1396,31 @@ router.delete('/materials/:id', requireAdminAuth, async (req: AuthenticatedReque
       } catch (driveErr: any) {
         console.warn(`[DriveDelete] Google Drive file deletion warning:`, driveErr.message);
       }
+
+      // Cascade delete from mirrored textbook records
+      try {
+        const tbRes = await pool.query(
+          `SELECT id FROM textbooks WHERE file_path LIKE $1 LIMIT 10`,
+          [`%${material.google_drive_file_id}%`]
+        );
+        const tbIds = tbRes.rows.map((r) => r.id);
+        if (tbIds.length > 0) {
+          await pool.query(`DELETE FROM textbook_content WHERE textbook_id = ANY($1)`, [tbIds]);
+          await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [tbIds]);
+        }
+      } catch (tbErr: any) {
+        console.warn('[DriveDelete] Textbook cascade warning:', tbErr.message);
+      }
+    }
+
+    // Cascade delete from pdf_extractions
+    try {
+      await pool.query(
+        `DELETE FROM pdf_extractions WHERE material_id = $1 OR google_drive_file_id = $2`,
+        [id, material.google_drive_file_id]
+      );
+    } catch (peErr: any) {
+      console.warn('[DriveDelete] pdf_extractions cascade warning:', peErr.message);
     }
 
     // Delete from PostgreSQL

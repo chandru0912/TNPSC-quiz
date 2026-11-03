@@ -39,7 +39,6 @@ import {
   EyeOff,
   Key,
   Cpu,
-  Copy,
   UploadCloud,
   Target,
   Folder,
@@ -248,7 +247,50 @@ const Admin = () => {
     success: boolean
     message: string
   } | null>(null)
-  const [copiedInstructions, setCopiedInstructions] = useState(false)
+
+  // Gemini AI Configuration state
+  const [geminiStatus, setGeminiStatus] = useState<{
+    configured: boolean
+    model: string
+    name: string
+    maskedKey?: string
+    connected?: boolean
+    error?: string
+  }>({
+    configured: false,
+    model: 'gemini-1.5-flash',
+    name: 'Google Gemini AI',
+  })
+  const [geminiInputKey, setGeminiInputKey] = useState('')
+  const [geminiInputModel, setGeminiInputModel] = useState('gemini-1.5-flash')
+  const [showGeminiKey, setShowGeminiKey] = useState(false)
+  const [isTestingGemini, setIsTestingGemini] = useState(false)
+  const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false)
+  const [geminiTestResult, setGeminiTestResult] = useState<{
+    tested: boolean
+    success: boolean
+    message: string
+  } | null>(null)
+
+  // AI Active Provider & Tab states
+  const [activeAiProvider, setActiveAiProvider] = useState<'claude' | 'gemini'>('claude')
+  const [selectedAiConfigTab, setSelectedAiConfigTab] = useState<'claude' | 'gemini'>('claude')
+  const [isSwitchingProvider, setIsSwitchingProvider] = useState(false)
+
+  // AI Prompts Management state
+  const [promptProvider, setPromptProvider] = useState<'claude' | 'gemini'>('claude')
+  const [selectedPromptType, setSelectedPromptType] = useState<'notes_system' | 'notes_template' | 'mcq_system' | 'mcq_template'>('notes_system')
+  const [promptContent, setPromptContent] = useState('')
+  const [promptVersion, setPromptVersion] = useState<number>(1)
+  const [promptHistoryList, setPromptHistoryList] = useState<any[]>([])
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState(false)
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false)
+  const [isRestoringPrompt, setIsRestoringPrompt] = useState(false)
+
+  // AI Generation History state
+  const [historyProviderFilter, setHistoryProviderFilter] = useState<'all' | 'claude' | 'gemini'>('all')
+  const [aiHistoryLogs, setAiHistoryLogs] = useState<any[]>([])
+  const [isLoadingAiHistory, setIsLoadingAiHistory] = useState(false)
 
   // Google Drive state
   const [driveStatus, setDriveStatus] = useState<{
@@ -290,6 +332,12 @@ const Admin = () => {
   const [deletingDriveMaterial, setDeletingDriveMaterial] = useState<GoogleDriveMaterialItem | null>(null)
   const [isDeletingDriveMaterial, setIsDeletingDriveMaterial] = useState(false)
 
+  // Google Drive PDF Bulk Delete & Multi-selection states
+  const [selectedDriveMaterialIds, setSelectedDriveMaterialIds] = useState<Set<number>>(new Set())
+  const [isDeletingDriveBatch, setIsDeletingDriveBatch] = useState(false)
+  const [showDeleteSelectedDriveModal, setShowDeleteSelectedDriveModal] = useState(false)
+  const [showDeleteAllDriveModal, setShowDeleteAllDriveModal] = useState(false)
+
   // Shared 5-Dropdown Syllabus Cascade Selector for Google Drive upload
   const driveSyllabusCascade = useSyllabusCascade({
     allowAll: false,
@@ -317,6 +365,12 @@ const Admin = () => {
   const [deletingTextbook, setDeletingTextbook] = useState<TextbookItem | null>(null)
   const [isDeletingTextbook, setIsDeletingTextbook] = useState(false)
   const [replacingTextbookId, setReplacingTextbookId] = useState<number | null>(null)
+
+  // Textbook Bulk Delete & Multi-selection states
+  const [selectedTextbookIds, setSelectedTextbookIds] = useState<Set<number>>(new Set())
+  const [isDeletingTextbookBatch, setIsDeletingTextbookBatch] = useState(false)
+  const [showDeleteSelectedTextbooksModal, setShowDeleteSelectedTextbooksModal] = useState(false)
+  const [showDeleteAllTextbooksModal, setShowDeleteAllTextbooksModal] = useState(false)
 
   // Upload Form Fields (Samacheer Kalvi Dynamic Catalog)
   const [tbGroup, setTbGroup] = useState<TnpscGroupId>('group1')
@@ -405,6 +459,81 @@ const Admin = () => {
       setTextbookSubjectFilter('all')
     }
   }, [textbookFilterSubjects, textbookSubjectFilter])
+
+  // Filtered textbooks memoized according to all active filter dropdowns and search query
+  const filteredTextbooks = useMemo(() => {
+    return textbooksList.filter((tb) => {
+      // Group filter
+      if (textbookGroupFilter !== 'all' && tb.groupId?.toLowerCase() !== textbookGroupFilter.toLowerCase()) {
+        return false
+      }
+      // Standard filter
+      if (textbookStandardFilter !== 'all') {
+        const stdNum = parseInt(textbookStandardFilter, 10)
+        if (tb.standard !== stdNum && String(tb.standard).toLowerCase() !== textbookStandardFilter.toLowerCase()) {
+          return false
+        }
+      }
+      // Subject filter
+      if (
+        textbookSubjectFilter !== 'all' &&
+        tb.subject?.toLowerCase() !== textbookSubjectFilter.toLowerCase()
+      ) {
+        return false
+      }
+      // Medium filter
+      if (
+        textbookMediumFilter !== 'all' &&
+        tb.medium?.toLowerCase() !== textbookMediumFilter.toLowerCase()
+      ) {
+        return false
+      }
+      // Status filter
+      if (
+        textbookStatusFilter !== 'all' &&
+        tb.status?.toLowerCase() !== textbookStatusFilter.toLowerCase()
+      ) {
+        return false
+      }
+      // Search query
+      if (textbookSearch.trim()) {
+        const q = textbookSearch.toLowerCase()
+        const matches =
+          (tb.bookName && tb.bookName.toLowerCase().includes(q)) ||
+          (tb.subject && tb.subject.toLowerCase().includes(q)) ||
+          String(tb.standard).toLowerCase().includes(q) ||
+          (tb.filePath && tb.filePath.toLowerCase().includes(q))
+        if (!matches) return false
+      }
+      return true
+    })
+  }, [
+    textbooksList,
+    textbookGroupFilter,
+    textbookStandardFilter,
+    textbookSubjectFilter,
+    textbookMediumFilter,
+    textbookStatusFilter,
+    textbookSearch,
+  ])
+
+  // Multi-selection handlers for Textbooks
+  const handleToggleSelectTextbook = (id: number) => {
+    setSelectedTextbookIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleSelectAllTextbooks = () => {
+    if (selectedTextbookIds.size === filteredTextbooks.length && filteredTextbooks.length > 0) {
+      setSelectedTextbookIds(new Set())
+    } else {
+      setSelectedTextbookIds(new Set(filteredTextbooks.map((tb) => tb.id)))
+    }
+  }
 
   // Notes management state
   const [notesList, setNotesList] = useState<any[]>([])
@@ -509,6 +638,8 @@ const Admin = () => {
     isEditModalOpen ||
     Boolean(isDeleting) ||
     Boolean(deletingTextbook) ||
+    showDeleteSelectedTextbooksModal ||
+    showDeleteAllTextbooksModal ||
     isBulkModalOpen ||
     isBulkPublishModalOpen ||
     isUploadTextbookModalOpen ||
@@ -521,7 +652,9 @@ const Admin = () => {
     isNotesBulkUploadModalOpen ||
     isDriveUploadModalOpen ||
     Boolean(viewingDriveMaterial) ||
-    Boolean(deletingDriveMaterial)
+    Boolean(deletingDriveMaterial) ||
+    showDeleteSelectedDriveModal ||
+    showDeleteAllDriveModal
   useScrollLock(hasOpenAdminModal)
 
   // Login handler (single POST attempt with distinct error classification)
@@ -1153,29 +1286,6 @@ const Admin = () => {
     }
   }
 
-  // Fetch Claude AI Status from backend
-  const fetchClaudeStatus = useCallback(async () => {
-    try {
-      const res = await apiFetch('/api/ai/status', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setClaudeStatus({
-          configured: Boolean(data.configured),
-          model: data.model || 'claude-3-5-sonnet-20241022',
-          name: data.name || 'Anthropic Claude API',
-          maskedKey: data.maskedKey,
-        })
-        if (data.model) {
-          setClaudeInputModel(data.model)
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to fetch Claude status:', e)
-    }
-  }, [token])
-
   // Save Claude AI API Key and Model securely to backend
   const saveClaudeConfig = async () => {
     if (!token) return
@@ -1253,19 +1363,343 @@ const Admin = () => {
     }
   }
 
-  // Copy Claude API setup instructions
-  const copySetupInstructions = () => {
-    const text = `Anthropic Claude API Setup Instructions for TNPSC Study Hub:
-1. Open https://platform.claude.com/settings/keys
-2. Sign in or create an account at Anthropic Console.
-3. Click "+ Create Key" and give it a name (e.g. "TNPSC Study Hub").
-4. Copy the secret key (starts with sk-ant-).
-5. Paste it into TNPSC Study Hub Admin Panel -> Claude AI Configuration.
-6. Click "Save API Key", then click "Test API Connection" until "CLAUDE AI CONNECTED" appears.`
-    navigator.clipboard.writeText(text)
-    setCopiedInstructions(true)
-    setTimeout(() => setCopiedInstructions(false), 2500)
-    setActionMessage({ type: 'success', text: 'API setup instructions copied to clipboard!' })
+  // Fetch Status for both Claude and Gemini
+  const fetchAiProvidersStatus = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/ai/providers', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (res.ok) {
+        const statuses = await res.json()
+        if (Array.isArray(statuses)) {
+          const claudeInfo = statuses.find((s: any) => s.provider === 'claude')
+          const geminiInfo = statuses.find((s: any) => s.provider === 'gemini')
+
+          if (claudeInfo) {
+            setClaudeStatus((prev) => ({
+              ...prev,
+              configured: Boolean(claudeInfo.configured),
+              model: claudeInfo.model || 'claude-3-5-sonnet-20241022',
+              name: claudeInfo.name || 'Anthropic Claude AI',
+              maskedKey: claudeInfo.maskedKey,
+            }))
+            if (claudeInfo.model) setClaudeInputModel(claudeInfo.model)
+            if (claudeInfo.isActive) setActiveAiProvider('claude')
+          }
+
+          if (geminiInfo) {
+            setGeminiStatus((prev) => ({
+              ...prev,
+              configured: Boolean(geminiInfo.configured),
+              model: geminiInfo.model || 'gemini-1.5-flash',
+              name: geminiInfo.name || 'Google Gemini AI',
+              maskedKey: geminiInfo.maskedKey,
+            }))
+            if (geminiInfo.model) setGeminiInputModel(geminiInfo.model)
+            if (geminiInfo.isActive) setActiveAiProvider('gemini')
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch AI provider statuses:', e)
+    }
+  }, [token])
+
+  // Switch System Active AI Provider
+  const handleSwitchActiveProvider = async (targetProvider: 'claude' | 'gemini') => {
+    if (!token || isSwitchingProvider) return
+    setIsSwitchingProvider(true)
+    try {
+      const res = await apiFetch('/api/ai/providers/active', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ provider: targetProvider }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Failed to switch provider')
+      setActiveAiProvider(targetProvider)
+      setActionMessage({ type: 'success', text: `System Active AI Provider switched to ${targetProvider === 'claude' ? 'Anthropic Claude AI' : 'Google Gemini AI'}.` })
+      fetchAiProvidersStatus()
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to switch active provider' })
+    } finally {
+      setIsSwitchingProvider(false)
+    }
+  }
+
+  // Save Gemini Configuration
+  const saveGeminiConfig = async () => {
+    if (!token) return
+    setIsSavingGeminiKey(true)
+    setGeminiTestResult(null)
+    try {
+      const res = await apiFetch('/api/gemini/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          apiKey: geminiInputKey.trim() || undefined,
+          model: geminiInputModel.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Failed to save Gemini configuration')
+      setGeminiStatus((prev) => ({
+        ...prev,
+        configured: Boolean(data.configured),
+        model: data.model || geminiInputModel,
+        maskedKey: data.maskedKey,
+      }))
+      setGeminiInputKey('')
+      setActionMessage({ type: 'success', text: 'Google Gemini AI configuration saved securely on backend.' })
+      fetchAiProvidersStatus()
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to save Gemini configuration' })
+    } finally {
+      setIsSavingGeminiKey(false)
+    }
+  }
+
+  // Test Gemini Connection
+  const testGeminiConnection = async () => {
+    if (!token) return
+    setIsTestingGemini(true)
+    setGeminiTestResult(null)
+    try {
+      const res = await apiFetch('/api/gemini/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          apiKey: geminiInputKey.trim() || undefined,
+          model: geminiInputModel.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.success && data.status === 'CONNECTED') {
+        setGeminiTestResult({
+          tested: true,
+          success: true,
+          message: 'GEMINI AI CONNECTED',
+        })
+        setGeminiStatus((prev) => ({ ...prev, connected: true }))
+        setActionMessage({ type: 'success', text: 'GEMINI AI CONNECTED: Authentication verified with Google Generative AI API.' })
+      } else {
+        setGeminiTestResult({
+          tested: true,
+          success: false,
+          message: data.message || 'Gemini connection test failed',
+        })
+        setGeminiStatus((prev) => ({ ...prev, connected: false }))
+        setActionMessage({ type: 'error', text: `Gemini test failed: ${data.message}` })
+      }
+    } catch (err: any) {
+      setGeminiTestResult({
+        tested: true,
+        success: false,
+        message: err.message || 'Network error during Gemini test',
+      })
+      setGeminiStatus((prev) => ({ ...prev, connected: false }))
+      setActionMessage({ type: 'error', text: err.message || 'Connection test error' })
+    } finally {
+      setIsTestingGemini(false)
+    }
+  }
+
+  // Prompt Management functions
+  const fetchPromptsForProvider = useCallback(async (provider: 'claude' | 'gemini', type: string) => {
+    setIsLoadingPrompts(true)
+    try {
+      const [promptsRes, historyRes] = await Promise.all([
+        apiFetch(`/api/ai/prompts?provider=${provider}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }),
+        apiFetch(`/api/ai/prompts?provider=${provider}&promptType=${type}&history=true`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }),
+      ])
+
+      if (promptsRes.ok) {
+        const pData = await promptsRes.json()
+        const match = (pData.prompts || []).find((p: any) => p.promptType === type)
+        if (match) {
+          setPromptContent(match.content)
+          setPromptVersion(match.version || 1)
+        }
+      }
+
+      if (historyRes.ok) {
+        const hData = await historyRes.json()
+        setPromptHistoryList(hData.versions || [])
+      }
+    } catch (e) {
+      console.warn('Failed to load prompts:', e)
+    } finally {
+      setIsLoadingPrompts(false)
+    }
+  }, [token])
+
+  const handleSavePrompt = async () => {
+    if (!token || !promptContent.trim()) return
+    setIsSavingPrompt(true)
+    try {
+      const res = await apiFetch('/api/ai/prompts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          provider: promptProvider,
+          promptType: selectedPromptType,
+          content: promptContent,
+          title: selectedPromptType,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Failed to save prompt')
+      setActionMessage({ type: 'success', text: `Prompt updated to version ${data.prompt?.version} for ${promptProvider.toUpperCase()}.` })
+      fetchPromptsForProvider(promptProvider, selectedPromptType)
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to save prompt' })
+    } finally {
+      setIsSavingPrompt(false)
+    }
+  }
+
+  const handleRestorePromptVersion = async (targetVersion: number) => {
+    if (!token) return
+    setIsRestoringPrompt(true)
+    try {
+      const res = await apiFetch('/api/ai/prompts/restore', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          provider: promptProvider,
+          promptType: selectedPromptType,
+          version: targetVersion,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Failed to restore prompt version')
+      setActionMessage({ type: 'success', text: `Restored version ${targetVersion} for ${promptProvider.toUpperCase()}.` })
+      fetchPromptsForProvider(promptProvider, selectedPromptType)
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Failed to restore prompt' })
+    } finally {
+      setIsRestoringPrompt(false)
+    }
+  }
+
+  // Generation History functions
+  const fetchAiHistory = useCallback(async (providerFilter: 'all' | 'claude' | 'gemini') => {
+    setIsLoadingAiHistory(true)
+    try {
+      const param = providerFilter !== 'all' ? `?provider=${providerFilter}&limit=25` : '?limit=25'
+      const res = await apiFetch(`/api/ai/history${param}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setAiHistoryLogs(data.logs || [])
+      }
+    } catch (e) {
+      console.warn('Failed to load AI history:', e)
+    } finally {
+      setIsLoadingAiHistory(false)
+    }
+  }, [token])
+
+  // Google Drive Multi-selection & Bulk Delete Handlers
+  const handleToggleSelectDriveMaterial = (id: number) => {
+    setSelectedDriveMaterialIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleSelectAllDriveMaterials = () => {
+    if (selectedDriveMaterialIds.size === driveMaterials.length && driveMaterials.length > 0) {
+      setSelectedDriveMaterialIds(new Set())
+    } else {
+      setSelectedDriveMaterialIds(new Set(driveMaterials.map((m) => m.id)))
+    }
+  }
+
+  const handleDeleteSelectedDriveMaterials = async () => {
+    if (selectedDriveMaterialIds.size === 0) return
+    setIsDeletingDriveBatch(true)
+    try {
+      const res = await apiFetch('/api/drive/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ids: Array.from(selectedDriveMaterialIds),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Bulk delete failed')
+      setActionMessage({
+        type: 'success',
+        text: `Successfully deleted ${data.deletedCount ?? selectedDriveMaterialIds.size} PDF textbook(s) from Google Drive and database.`,
+      })
+      setSelectedDriveMaterialIds(new Set())
+      setShowDeleteSelectedDriveModal(false)
+      fetchDriveMaterials()
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Bulk delete failed' })
+    } finally {
+      setIsDeletingDriveBatch(false)
+    }
+  }
+
+  const handleDeleteAllDriveMaterials = async () => {
+    setIsDeletingDriveBatch(true)
+    try {
+      const res = await apiFetch('/api/drive/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          deleteAll: true,
+          group: driveGroupFilter,
+          standard: driveStandardFilter,
+          subject: driveSubjectFilter,
+          term: driveTermFilter,
+          search: driveSearch,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Delete all failed')
+      setActionMessage({
+        type: 'success',
+        text: `Successfully deleted all ${data.deletedCount ?? driveMaterials.length} filtered PDF textbook(s) from Google Drive and database.`,
+      })
+      setSelectedDriveMaterialIds(new Set())
+      setShowDeleteAllDriveModal(false)
+      fetchDriveMaterials()
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err.message || 'Delete all failed' })
+    } finally {
+      setIsDeletingDriveBatch(false)
+    }
   }
 
   // Resumable Direct Upload to Google Drive (Chunked, CORS-bound, Zero Serverless Limits)
@@ -1521,7 +1955,7 @@ const Admin = () => {
   useEffect(() => {
     checkDriveStatus()
     fetchDriveMaterials()
-    fetchClaudeStatus()
+    fetchAiProvidersStatus()
 
     const urlParams = new URLSearchParams(window.location.search)
     if (urlParams.get('gdrive') === 'connected') {
@@ -1581,10 +2015,12 @@ const Admin = () => {
     if (token) {
       fetchAllMetrics()
       if (adminSection === 'claude') {
-        fetchClaudeStatus()
+        fetchAiProvidersStatus()
+        fetchPromptsForProvider(promptProvider, selectedPromptType)
+        fetchAiHistory(historyProviderFilter)
       }
     }
-  }, [fetchAllMetrics, token, adminSection, fetchClaudeStatus])
+  }, [fetchAllMetrics, token, adminSection, fetchAiProvidersStatus, fetchPromptsForProvider, promptProvider, selectedPromptType, fetchAiHistory, historyProviderFilter])
 
   // Poll active processing jobs
   useEffect(() => {
@@ -1847,6 +2283,88 @@ const Admin = () => {
       showToast('error', friendlyError)
     } finally {
       setIsDeletingTextbook(false)
+    }
+  }
+
+  // Bulk Delete Selected Textbooks
+  const handleDeleteSelectedTextbooks = async () => {
+    if (!token || selectedTextbookIds.size === 0 || isDeletingTextbookBatch) return
+    setIsDeletingTextbookBatch(true)
+    try {
+      const idsArray = Array.from(selectedTextbookIds)
+      const res = await apiFetch('/api/textbooks', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ ids: idsArray }),
+      })
+      const { data, rawText } = await parseApiResponse(res)
+      if (res.ok) {
+        showToast(
+          'success',
+          data?.message || `Successfully deleted ${data?.deletedCount || idsArray.length} selected textbook(s).`
+        )
+        setSelectedTextbookIds(new Set())
+        setShowDeleteSelectedTextbooksModal(false)
+        fetchTextbooks()
+        fetchDriveMaterials()
+      } else {
+        showToast('error', classifyApiError(res, data, rawText, 'DELETE /api/textbooks'))
+      }
+    } catch (err: any) {
+      const friendlyError = await classifyFetchFailure(err, {
+        endpointLabel: 'DELETE /api/textbooks',
+      })
+      showToast('error', friendlyError)
+    } finally {
+      setIsDeletingTextbookBatch(false)
+    }
+  }
+
+  // Delete All Textbooks in Current Filtered View
+  const handleDeleteAllTextbooks = async () => {
+    if (!token || filteredTextbooks.length === 0 || isDeletingTextbookBatch) return
+    setIsDeletingTextbookBatch(true)
+    try {
+      const res = await apiFetch('/api/textbooks', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          deleteAll: true,
+          groupId: textbookGroupFilter,
+          standard: textbookStandardFilter,
+          subject: textbookSubjectFilter,
+          medium: textbookMediumFilter,
+          status: textbookStatusFilter,
+          search: textbookSearch,
+        }),
+      })
+      const { data, rawText } = await parseApiResponse(res)
+      if (res.ok) {
+        showToast(
+          'success',
+          data?.message ||
+            `Successfully deleted all ${data?.deletedCount || filteredTextbooks.length} textbook(s) in current filtered view.`
+        )
+        setSelectedTextbookIds(new Set())
+        setShowDeleteAllTextbooksModal(false)
+        fetchTextbooks()
+        fetchDriveMaterials()
+      } else {
+        showToast('error', classifyApiError(res, data, rawText, 'DELETE /api/textbooks (deleteAll)'))
+      }
+    } catch (err: any) {
+      const friendlyError = await classifyFetchFailure(err, {
+        endpointLabel: 'DELETE /api/textbooks (deleteAll)',
+      })
+      showToast('error', friendlyError)
+    } finally {
+      setIsDeletingTextbookBatch(false)
     }
   }
 
@@ -2780,29 +3298,31 @@ const Admin = () => {
                 )}
               </button>
 
-              {/* Claude AI Status Pill */}
+              {/* AI Provider Hub Status Pill */}
               <button
                 type="button"
                 onClick={() => {
                   setAdminSection('claude')
-                  fetchClaudeStatus()
+                  fetchAiProvidersStatus()
+                  fetchPromptsForProvider(promptProvider, selectedPromptType)
+                  fetchAiHistory(historyProviderFilter)
                 }}
-                title={claudeStatus.connected ? 'Claude AI Connected (Click to configure)' : 'Claude AI (Click to configure)'}
+                title={`AI Provider Hub: ${activeAiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} Active (Click to configure)`}
                 style={{
                   cursor: 'pointer',
-                  border: claudeStatus.connected
+                  border: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
                     ? '1px solid rgba(16, 185, 129, 0.45)'
-                    : claudeStatus.configured
+                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
                     ? '1px solid rgba(192, 132, 252, 0.4)'
                     : '1px solid rgba(239, 68, 68, 0.35)',
-                  background: claudeStatus.connected
+                  background: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
                     ? 'rgba(16, 185, 129, 0.12)'
-                    : claudeStatus.configured
+                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
                     ? 'rgba(192, 132, 252, 0.12)'
                     : 'rgba(239, 68, 68, 0.1)',
-                  color: claudeStatus.connected
+                  color: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
                     ? '#34d399'
-                    : claudeStatus.configured
+                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
                     ? '#c084fc'
                     : '#f87171',
                   display: 'inline-flex',
@@ -2817,11 +3337,13 @@ const Admin = () => {
               >
                 <Cpu size={13} />
                 <span>
-                  {claudeStatus.connected
-                    ? 'Claude AI: Connected'
-                    : claudeStatus.configured
-                    ? 'Claude AI: Configured'
-                    : 'Claude AI: Offline'}
+                  AI: {activeAiProvider === 'claude' ? 'Claude' : 'Gemini'} (
+                  {(activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
+                    ? 'Connected'
+                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
+                    ? 'Ready'
+                    : 'Offline'}
+                  )
                 </span>
               </button>
             </div>
@@ -2830,14 +3352,14 @@ const Admin = () => {
               {adminSection === 'textbooks' && 'Textbook Management'}
               {adminSection === 'notes' && 'Study Notes Management'}
               {adminSection === 'gdrive' && 'Google Drive PDF Materials'}
-              {adminSection === 'claude' && 'Claude AI Configuration'}
+              {adminSection === 'claude' && 'AI Provider Hub (Claude & Gemini)'}
             </h1>
             <p className="admin-subtitle">
               {adminSection === 'questions' && 'Review, edit, stage, and publish verified Samacheer Kalvi topic-wise MCQs directly into the database.'}
               {adminSection === 'textbooks' && 'Upload, index, and organize Samacheer Kalvi PDF textbooks for AI study notes and MCQ generation.'}
               {adminSection === 'notes' && 'Review, edit, stage, and publish comprehensive TNPSC Complete Study Notes directly into the database.'}
               {adminSection === 'gdrive' && 'Connect your personal Google Drive account to store and stream official PDF textbooks and study materials with zero serverless size limits.'}
-              {adminSection === 'claude' && 'Configure Anthropic Claude API credentials, manage models, and verify secure server-side connection for AI generation.'}
+              {adminSection === 'claude' && 'Configure Anthropic Claude AI and Google Gemini AI as two completely independent providers with separate keys, models, prompts, and generation logs.'}
             </p>
           </div>
 
@@ -2915,19 +3437,25 @@ const Admin = () => {
             className={`admin-section-tab ${adminSection === 'claude' ? 'active' : ''}`}
             onClick={() => {
               setAdminSection('claude')
-              fetchClaudeStatus()
+              fetchAiProvidersStatus()
+              fetchPromptsForProvider(promptProvider, selectedPromptType)
+              fetchAiHistory(historyProviderFilter)
             }}
           >
             <Cpu size={16} />
-            <span>Claude AI Configuration</span>
+            <span>AI Provider Hub</span>
             <span
               className="admin-section-tab-count"
               style={{
-                background: claudeStatus.connected ? 'rgba(16, 185, 129, 0.25)' : (claudeStatus.configured ? 'rgba(192, 132, 252, 0.25)' : 'rgba(239, 68, 68, 0.25)'),
-                color: claudeStatus.connected ? '#34d399' : (claudeStatus.configured ? '#c084fc' : '#f87171'),
+                background: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
+                  ? 'rgba(16, 185, 129, 0.25)'
+                  : 'rgba(192, 132, 252, 0.25)',
+                color: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
+                  ? '#34d399'
+                  : '#c084fc',
               }}
             >
-              {claudeStatus.connected ? 'CONNECTED' : (claudeStatus.configured ? 'READY' : 'OFFLINE')}
+              {activeAiProvider.toUpperCase()} ACTIVE
             </span>
           </button>
         </div>
@@ -3130,12 +3658,14 @@ const Admin = () => {
         {adminSection === 'claude' && (
           <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
             <div className="admin-metric-card glass">
-              <div className="metric-icon-box" style={{ background: 'rgba(192, 132, 252, 0.15)', color: '#c084fc' }}>
+              <div className="metric-icon-box" style={{ background: activeAiProvider === 'claude' ? 'rgba(192, 132, 252, 0.15)' : 'rgba(56, 189, 248, 0.15)', color: activeAiProvider === 'claude' ? '#c084fc' : '#38bdf8' }}>
                 <Cpu size={24} />
               </div>
               <div className="metric-info">
-                <span className="metric-value" style={{ fontSize: '1.1rem' }}>Anthropic Claude</span>
-                <span className="metric-label">AI Generation Provider</span>
+                <span className="metric-value" style={{ fontSize: '1.1rem' }}>
+                  {activeAiProvider === 'claude' ? 'Claude AI (Active)' : 'Gemini AI (Active)'}
+                </span>
+                <span className="metric-label">System Default Generation Provider</span>
               </div>
             </div>
 
@@ -3151,13 +3681,7 @@ const Admin = () => {
                   color: claudeStatus.connected ? '#10b981' : claudeStatus.configured ? '#ffd700' : '#ef4444',
                 }}
               >
-                {claudeStatus.connected ? (
-                  <CheckCircle size={24} />
-                ) : claudeStatus.configured ? (
-                  <Clock size={24} />
-                ) : (
-                  <AlertCircle size={24} />
-                )}
+                {claudeStatus.connected ? <CheckCircle size={24} /> : claudeStatus.configured ? <Clock size={24} /> : <AlertCircle size={24} />}
               </div>
               <div className="metric-info">
                 <span
@@ -3167,40 +3691,49 @@ const Admin = () => {
                     color: claudeStatus.connected ? '#34d399' : claudeStatus.configured ? '#ffd700' : '#f87171',
                   }}
                 >
-                  {claudeStatus.connected
-                    ? 'CLAUDE AI CONNECTED'
-                    : claudeStatus.configured
-                    ? 'Configured (Untested)'
-                    : 'Not Connected'}
+                  {claudeStatus.connected ? 'CONNECTED' : (claudeStatus.configured ? 'READY' : 'OFFLINE')}
                 </span>
-                <span className="metric-label">Connection Health</span>
+                <span className="metric-label">Claude Health ({claudeStatus.model})</span>
               </div>
             </div>
 
             <div className="admin-metric-card glass">
-              <div className="metric-icon-box metric-icon-gold">
-                <Sparkles size={24} />
+              <div
+                className="metric-icon-box"
+                style={{
+                  background: geminiStatus.connected
+                    ? 'rgba(16, 185, 129, 0.15)'
+                    : geminiStatus.configured
+                    ? 'rgba(255, 215, 0, 0.15)'
+                    : 'rgba(239, 68, 68, 0.15)',
+                  color: geminiStatus.connected ? '#10b981' : geminiStatus.configured ? '#ffd700' : '#ef4444',
+                }}
+              >
+                {geminiStatus.connected ? <CheckCircle size={24} /> : geminiStatus.configured ? <Clock size={24} /> : <AlertCircle size={24} />}
               </div>
               <div className="metric-info">
                 <span
                   className="metric-value"
-                  style={{ fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  style={{
+                    fontSize: '1.02rem',
+                    color: geminiStatus.connected ? '#34d399' : geminiStatus.configured ? '#ffd700' : '#f87171',
+                  }}
                 >
-                  {claudeStatus.model}
+                  {geminiStatus.connected ? 'CONNECTED' : (geminiStatus.configured ? 'READY' : 'OFFLINE')}
                 </span>
-                <span className="metric-label">Configured Foundation Model</span>
+                <span className="metric-label">Gemini Health ({geminiStatus.model})</span>
               </div>
             </div>
 
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-cyan">
-                <Key size={24} />
+                <Shield size={24} />
               </div>
               <div className="metric-info">
-                <span className="metric-value" style={{ fontSize: '0.92rem' }}>
-                  {claudeStatus.maskedKey ? claudeStatus.maskedKey : 'No Key Configured'}
+                <span className="metric-value" style={{ fontSize: '0.92rem', color: '#38bdf8' }}>
+                  Strict Isolation
                 </span>
-                <span className="metric-label">Backend Secrets Storage</span>
+                <span className="metric-label">Zero Fallback • Separate DB Logs</span>
               </div>
             </div>
           </div>
@@ -3705,11 +4238,144 @@ const Admin = () => {
               </div>
             </div>
 
+            {/* Top Delete Actions Toolbar Section for Textbooks */}
+            <div
+              className="admin-delete-section glass"
+              style={{
+                marginTop: '1rem',
+                marginBottom: '1rem',
+                padding: '0.85rem 1.25rem',
+                borderRadius: '12px',
+                background: 'rgba(15, 23, 42, 0.75)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '0.85rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    id="selectAllTextbooksCheckbox"
+                    checked={filteredTextbooks.length > 0 && selectedTextbookIds.size === filteredTextbooks.length}
+                    onChange={handleSelectAllTextbooks}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#ef4444' }}
+                  />
+                  <label
+                    htmlFor="selectAllTextbooksCheckbox"
+                    style={{ fontSize: '0.84rem', fontWeight: 600, color: '#f8fafc', cursor: 'pointer' }}
+                  >
+                    Select All ({filteredTextbooks.length} Textbooks)
+                  </label>
+                </div>
+
+                {selectedTextbookIds.size > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span
+                      style={{
+                        fontSize: '0.76rem',
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        color: '#fca5a5',
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {selectedTextbookIds.size} Selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTextbookIds(new Set())}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#94a3b8',
+                        fontSize: '0.74rem',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons: Delete Selected & Delete All */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                {/* Option 1: Delete Selected */}
+                <button
+                  type="button"
+                  className="admin-btn"
+                  disabled={selectedTextbookIds.size === 0 || isDeletingTextbookBatch}
+                  onClick={() => setShowDeleteSelectedTextbooksModal(true)}
+                  style={{
+                    background: selectedTextbookIds.size > 0 ? '#ef4444' : 'rgba(239, 68, 68, 0.15)',
+                    color: selectedTextbookIds.size > 0 ? '#ffffff' : '#94a3b8',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    padding: '0.45rem 0.95rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: selectedTextbookIds.size > 0 ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    boxShadow: selectedTextbookIds.size > 0 ? '0 4px 12px rgba(239, 68, 68, 0.3)' : 'none',
+                  }}
+                  title={
+                    selectedTextbookIds.size > 0
+                      ? `Delete ${selectedTextbookIds.size} selected textbook(s)`
+                      : 'Select one or more textbooks to delete'
+                  }
+                >
+                  <Trash2 size={15} />
+                  <span>Delete Selected ({selectedTextbookIds.size})</span>
+                </button>
+
+                {/* Option 2: Delete All */}
+                <button
+                  type="button"
+                  className="admin-btn"
+                  disabled={filteredTextbooks.length === 0 || isDeletingTextbookBatch}
+                  onClick={() => setShowDeleteAllTextbooksModal(true)}
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    color: '#f87171',
+                    border: '1px solid rgba(239, 68, 68, 0.45)',
+                    padding: '0.45rem 0.95rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: filteredTextbooks.length > 0 ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                  }}
+                  title={`Delete all ${filteredTextbooks.length} textbooks in the current filtered view`}
+                >
+                  <AlertTriangle size={15} />
+                  <span>Delete All ({filteredTextbooks.length})</span>
+                </button>
+              </div>
+            </div>
+
             {/* Textbooks Table */}
-            <div className="admin-table-wrapper glass" style={{ marginTop: '1rem' }}>
+            <div className="admin-table-wrapper glass">
               <table className="admin-table">
                 <thead>
                   <tr>
+                    <th style={{ width: '40px', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={filteredTextbooks.length > 0 && selectedTextbookIds.size === filteredTextbooks.length}
+                        onChange={handleSelectAllTextbooks}
+                        style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#ef4444' }}
+                        title="Select All Textbooks"
+                      />
+                    </th>
                     <th style={{ width: '60px' }}>ID</th>
                     <th style={{ width: '90px' }}>Group</th>
                     <th style={{ width: '130px' }}>Standard</th>
@@ -3724,39 +4390,39 @@ const Admin = () => {
                 <tbody>
                   {textbooksLoading ? (
                     <tr>
-                      <td colSpan={9} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                      <td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
                         Loading textbooks...
                       </td>
                     </tr>
-                  ) : textbooksList.length === 0 ? (
+                  ) : filteredTextbooks.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
+                      <td colSpan={10} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
                         <BookOpen size={36} style={{ margin: '0 auto 0.75rem', opacity: 0.4 }} />
-                        <p style={{ fontWeight: 600 }}>No textbooks uploaded yet</p>
+                        <p style={{ fontWeight: 600 }}>No textbooks match the selected filters</p>
                         <p style={{ fontSize: '0.82rem', marginTop: '0.25rem' }}>
-                          Upload Classes 6–12 Samacheer Kalvi PDFs to begin AI question generation.
+                          Try clearing filters or uploading Classes 6–12 Samacheer Kalvi PDFs.
                         </p>
                       </td>
                     </tr>
                   ) : (
-                    textbooksList
-                      .filter((tb) => {
-                        if (
-                          textbookSubjectFilter !== 'all' &&
-                          tb.subject?.toLowerCase() !== textbookSubjectFilter.toLowerCase()
-                        ) {
-                          return false
-                        }
-                        if (!textbookSearch.trim()) return true
-                        const q = textbookSearch.toLowerCase()
-                        return (
-                          tb.bookName.toLowerCase().includes(q) ||
-                          tb.subject.toLowerCase().includes(q) ||
-                          String(tb.standard).toLowerCase().includes(q)
-                        )
-                      })
-                      .map((tb) => (
-                        <tr key={tb.id}>
+                    filteredTextbooks.map((tb) => {
+                      const isSelected = selectedTextbookIds.has(tb.id)
+                      return (
+                        <tr
+                          key={tb.id}
+                          style={{
+                            background: isSelected ? 'rgba(239, 68, 68, 0.08)' : undefined,
+                            transition: 'background 0.15s ease',
+                          }}
+                        >
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectTextbook(tb.id)}
+                              style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#ef4444' }}
+                            />
+                          </td>
                           <td>
                             <span className="qid-badge">#{tb.id}</span>
                           </td>
@@ -3846,7 +4512,8 @@ const Admin = () => {
                             </div>
                           </td>
                         </tr>
-                      ))
+                      )
+                    })
                   )}
                 </tbody>
               </table>
@@ -4490,25 +5157,155 @@ const Admin = () => {
               </div>
             </div>
 
+            {/* Top Delete Actions Toolbar Section for Google Drive Materials */}
+            <div
+              className="admin-delete-section glass"
+              style={{
+                marginTop: '1rem',
+                marginBottom: '1rem',
+                padding: '0.85rem 1.25rem',
+                borderRadius: '12px',
+                background: 'rgba(15, 23, 42, 0.75)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '0.85rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    id="selectAllDriveCheckbox"
+                    checked={driveMaterials.length > 0 && selectedDriveMaterialIds.size === driveMaterials.length}
+                    onChange={handleSelectAllDriveMaterials}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#ef4444' }}
+                  />
+                  <label
+                    htmlFor="selectAllDriveCheckbox"
+                    style={{ fontSize: '0.84rem', fontWeight: 600, color: '#f8fafc', cursor: 'pointer' }}
+                  >
+                    Select All ({driveMaterials.length} PDF Textbooks)
+                  </label>
+                </div>
+
+                {selectedDriveMaterialIds.size > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span
+                      style={{
+                        fontSize: '0.76rem',
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        color: '#fca5a5',
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {selectedDriveMaterialIds.size} Selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDriveMaterialIds(new Set())}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#94a3b8',
+                        fontSize: '0.74rem',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons: Delete Selected & Delete All */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <button
+                  type="button"
+                  className="admin-btn"
+                  disabled={selectedDriveMaterialIds.size === 0 || isDeletingDriveBatch}
+                  onClick={() => setShowDeleteSelectedDriveModal(true)}
+                  style={{
+                    background: selectedDriveMaterialIds.size > 0 ? '#ef4444' : 'rgba(239, 68, 68, 0.15)',
+                    color: selectedDriveMaterialIds.size > 0 ? '#ffffff' : '#94a3b8',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    padding: '0.45rem 0.95rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: selectedDriveMaterialIds.size > 0 ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    boxShadow: selectedDriveMaterialIds.size > 0 ? '0 4px 12px rgba(239, 68, 68, 0.3)' : 'none',
+                  }}
+                  title={
+                    selectedDriveMaterialIds.size > 0
+                      ? `Delete ${selectedDriveMaterialIds.size} selected PDF(s) from Google Drive and database`
+                      : 'Select one or more PDF textbooks to delete'
+                  }
+                >
+                  <Trash2 size={15} />
+                  <span>Delete Selected ({selectedDriveMaterialIds.size})</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="admin-btn"
+                  disabled={driveMaterials.length === 0 || isDeletingDriveBatch}
+                  onClick={() => setShowDeleteAllDriveModal(true)}
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    color: '#f87171',
+                    border: '1px solid rgba(239, 68, 68, 0.45)',
+                    padding: '0.45rem 0.95rem',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: driveMaterials.length > 0 ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                  }}
+                  title={`Delete all ${driveMaterials.length} PDF textbooks currently listed under active filters`}
+                >
+                  <AlertTriangle size={15} />
+                  <span>Delete All ({driveMaterials.length})</span>
+                </button>
+              </div>
+            </div>
+
             {/* Materials Table Card */}
-            <div className="admin-table-card glass">
-              <div className="table-wrapper">
-                <table className="admin-table">
+            <div className="admin-table-wrapper glass">
+              <table className="admin-table">
                   <thead>
                     <tr>
+                      <th style={{ width: '40px', textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={driveMaterials.length > 0 && selectedDriveMaterialIds.size === driveMaterials.length}
+                          onChange={handleSelectAllDriveMaterials}
+                          style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#ef4444' }}
+                          title="Select All PDFs"
+                        />
+                      </th>
                       <th style={{ width: '40px' }}>#</th>
-                      <th style={{ minWidth: '220px' }}>Material / File Name</th>
+                      <th style={{ minWidth: '240px' }}>Material / File Name</th>
                       <th>Syllabus Alignment</th>
                       <th>Class & Term</th>
                       <th>File Size</th>
                       <th>Uploaded Date</th>
-                      <th style={{ textAlign: 'center', width: '190px' }}>Actions</th>
+                      <th style={{ textAlign: 'center', width: '150px' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {driveLoading ? (
                       <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', padding: '3rem' }}>
+                        <td colSpan={8} style={{ textAlign: 'center', padding: '3rem' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
                             <RefreshCw size={24} className="spinning" style={{ color: 'var(--gold-primary)' }} />
                             <span style={{ color: 'var(--text-secondary)' }}>Loading Google Drive materials...</span>
@@ -4517,7 +5314,7 @@ const Admin = () => {
                       </tr>
                     ) : driveMaterials.length === 0 ? (
                       <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
+                        <td colSpan={8} style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
                             <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
                               <Folder size={24} />
@@ -4534,516 +5331,1011 @@ const Admin = () => {
                         </td>
                       </tr>
                     ) : (
-                      driveMaterials.map((item, idx) => (
-                        <tr key={item.id}>
-                          <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{idx + 1}</td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
-                              <FileText size={20} style={{ color: '#ffd700', flexShrink: 0, marginTop: '2px' }} />
-                              <div>
-                                <div style={{ fontWeight: 600, color: '#ffffff', fontSize: '0.9rem', lineHeight: '1.3' }}>
-                                  {item.fileName}
-                                </div>
-                                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
-                                  Original: {item.originalFileName || item.fileName}
-                                </div>
-                                {item.lesson && (
-                                  <div style={{ fontSize: '0.76rem', color: '#c084fc', marginTop: '2px' }}>
-                                    📖 {item.lesson}
+                      driveMaterials.map((item, idx) => {
+                        const isSelected = selectedDriveMaterialIds.has(item.id)
+                        return (
+                          <tr
+                            key={item.id}
+                            style={{
+                              background: isSelected ? 'rgba(239, 68, 68, 0.08)' : undefined,
+                              transition: 'background 0.15s ease',
+                            }}
+                          >
+                            <td style={{ textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelectDriveMaterial(item.id)}
+                                style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#ef4444' }}
+                              />
+                            </td>
+                            <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{idx + 1}</td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                                <FileText size={20} style={{ color: '#ffd700', flexShrink: 0, marginTop: '2px' }} />
+                                <div>
+                                  <div style={{ fontWeight: 600, color: '#ffffff', fontSize: '0.9rem', lineHeight: '1.3' }}>
+                                    {item.fileName}
                                   </div>
+                                  <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
+                                    Original: {item.originalFileName || item.fileName}
+                                  </div>
+                                  {item.lesson && (
+                                    <div style={{ fontSize: '0.76rem', color: '#c084fc', marginTop: '2px' }}>
+                                      📖 {item.lesson}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                <span className="badge badge-group" style={{ width: 'fit-content', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                                  {item.group}
+                                </span>
+                                <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                                  {item.subject}
+                                </span>
+                                {item.unit && (
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                    {item.unit}
+                                  </span>
                                 )}
                               </div>
-                            </div>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              <span className="badge badge-group" style={{ width: 'fit-content', textTransform: 'uppercase', fontSize: '0.7rem' }}>
-                                {item.group}
-                              </span>
-                              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                                {item.subject}
-                              </span>
-                              {item.unit && (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                  {item.unit}
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                                  Class {item.standard}th
                                 </span>
-                              )}
-                            </div>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                              <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
-                                Class {item.standard}th
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  {item.term || 'Full Year'}
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.82rem', color: '#cbd5e1' }}>
+                                {item.fileSize ? `${(item.fileSize / (1024 * 1024)).toFixed(2)} MB` : '—'}
                               </span>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {item.term || 'Full Year'}
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                {item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                               </span>
-                            </div>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: '0.82rem', color: '#cbd5e1' }}>
-                              {item.fileSize ? `${(item.fileSize / (1024 * 1024)).toFixed(2)} MB` : '—'}
-                            </span>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                              {item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
-                              <button
-                                type="button"
-                                className="table-action-btn"
-                                title="View PDF inside Reader Modal"
-                                onClick={() => setViewingDriveMaterial(item)}
-                                style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}
-                              >
-                                <Eye size={14} />
-                              </button>
-                              <a
-                                href={getApiUrl(`/api/drive/view/${item.id}`)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="table-action-btn"
-                                title="Open PDF Stream in New Tab"
-                                style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                              >
-                                <ExternalLink size={14} />
-                              </a>
-                              <button
-                                type="button"
-                                className="table-action-btn table-action-btn-danger"
-                                title="Delete PDF Material"
-                                onClick={() => setDeletingDriveMaterial(item)}
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
+                                <button
+                                  type="button"
+                                  className="table-action-btn"
+                                  title="View PDF inside Reader Modal"
+                                  onClick={() => setViewingDriveMaterial(item)}
+                                  style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}
+                                >
+                                  <Eye size={14} />
+                                </button>
+                                <a
+                                  href={getApiUrl(`/api/drive/view/${item.id}`)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="table-action-btn"
+                                  title="Open PDF Stream in New Tab"
+                                  style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                >
+                                  <ExternalLink size={14} />
+                                </a>
+                                <button
+                                  type="button"
+                                  className="table-action-btn table-action-btn-danger"
+                                  title="Delete PDF Material"
+                                  onClick={() => setDeletingDriveMaterial(item)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })
                     )}
                   </tbody>
                 </table>
               </div>
-            </div>
           </div>
         )}
 
-        {/* Section 5: Claude AI Configuration */}
+        {/* Section 5: AI Provider Hub (Independent Claude AI & Google Gemini AI) */}
         {adminSection === 'claude' && (
-          <div className="admin-claude-section" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {/* 1. Header & Live Status Card */}
-            <div className="claude-config-card glass" style={{ padding: '1.75rem', borderRadius: '16px', background: 'linear-gradient(135deg, rgba(22, 32, 60, 0.75) 0%, rgba(15, 23, 42, 0.95) 100%)', border: '1px solid rgba(192, 132, 252, 0.25)', boxShadow: '0 10px 30px rgba(0, 0, 0, 0.4)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.25rem' }}>
-                <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
-                  <div
-                    style={{
-                      width: '56px',
-                      height: '56px',
-                      borderRadius: '16px',
-                      background: claudeStatus.connected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(192, 132, 252, 0.15)',
-                      border: `1px solid ${claudeStatus.connected ? 'rgba(16, 185, 129, 0.4)' : 'rgba(192, 132, 252, 0.35)'}`,
-                      color: claudeStatus.connected ? '#10b981' : '#c084fc',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Cpu size={30} />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <h2 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 700, color: '#ffffff' }}>
-                        Claude AI Configuration
-                      </h2>
-                      {claudeStatus.connected ? (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            padding: '0.25rem 0.75rem',
-                            borderRadius: '9999px',
-                            fontSize: '0.78rem',
-                            fontWeight: 700,
-                            background: 'rgba(16, 185, 129, 0.2)',
-                            border: '1px solid rgba(16, 185, 129, 0.5)',
-                            color: '#34d399',
-                          }}
-                        >
-                          <CheckCircle2 size={13} />
-                          CLAUDE AI CONNECTED
-                        </span>
-                      ) : claudeStatus.configured ? (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            padding: '0.25rem 0.75rem',
-                            borderRadius: '9999px',
-                            fontSize: '0.78rem',
-                            fontWeight: 700,
-                            background: 'rgba(255, 215, 0, 0.18)',
-                            border: '1px solid rgba(255, 215, 0, 0.45)',
-                            color: '#facc15',
-                          }}
-                        >
-                          <Clock size={13} />
-                          READY FOR VERIFICATION
-                        </span>
-                      ) : (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            padding: '0.25rem 0.75rem',
-                            borderRadius: '9999px',
-                            fontSize: '0.78rem',
-                            fontWeight: 700,
-                            background: 'rgba(239, 68, 68, 0.18)',
-                            border: '1px solid rgba(239, 68, 68, 0.45)',
-                            color: '#f87171',
-                          }}
-                        >
-                          <AlertCircle size={13} />
-                          NOT CONNECTED
-                        </span>
-                      )}
+          <div className="admin-claude-section" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+            {/* 1. Dual Independent Provider Overview Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.25rem' }}>
+              {/* Card 1: Anthropic Claude AI */}
+              <div
+                className="glass"
+                style={{
+                  padding: '1.5rem',
+                  borderRadius: '16px',
+                  background: activeAiProvider === 'claude'
+                    ? 'linear-gradient(135deg, rgba(30, 27, 75, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%)'
+                    : 'linear-gradient(135deg, rgba(15, 23, 42, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
+                  border: activeAiProvider === 'claude'
+                    ? '1.5px solid rgba(192, 132, 252, 0.5)'
+                    : '1px solid rgba(255, 255, 255, 0.1)',
+                  boxShadow: activeAiProvider === 'claude' ? '0 10px 30px rgba(192, 132, 252, 0.15)' : 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    <div
+                      style={{
+                        width: '46px',
+                        height: '46px',
+                        borderRadius: '12px',
+                        background: 'rgba(192, 132, 252, 0.15)',
+                        border: '1px solid rgba(192, 132, 252, 0.35)',
+                        color: '#c084fc',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Cpu size={24} />
                     </div>
-                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                      Anthropic Messages API is the exclusive provider for TNPSC MCQ generation and Study Notes.
-                    </p>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#ffffff' }}>
+                          Anthropic Claude AI
+                        </h3>
+                        {activeAiProvider === 'claude' && (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              padding: '0.15rem 0.5rem',
+                              borderRadius: '999px',
+                              background: 'rgba(192, 132, 252, 0.25)',
+                              color: '#e9d5ff',
+                              border: '1px solid rgba(192, 132, 252, 0.5)',
+                            }}
+                          >
+                            DEFAULT
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                        Model: <strong style={{ color: '#cbd5e1' }}>{claudeStatus.model}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {claudeStatus.connected ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: 700, background: 'rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.5)', color: '#34d399' }}>
+                      <CheckCircle2 size={12} /> CONNECTED
+                    </span>
+                  ) : claudeStatus.configured ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: 700, background: 'rgba(255, 215, 0, 0.18)', border: '1px solid rgba(255, 215, 0, 0.45)', color: '#facc15' }}>
+                      <Clock size={12} /> READY
+                    </span>
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: 700, background: 'rgba(239, 68, 68, 0.18)', border: '1px solid rgba(239, 68, 68, 0.45)', color: '#f87171' }}>
+                      <AlertCircle size={12} /> OFFLINE
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ fontSize: '0.82rem', color: '#cbd5e1', display: 'flex', flexDirection: 'column', gap: '0.35rem', background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>API Key:</span>
+                    <span style={{ fontFamily: 'monospace', color: claudeStatus.maskedKey ? '#ffd700' : '#94a3b8' }}>
+                      {claudeStatus.maskedKey || 'Not configured in .env'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Timeout & Retries:</span>
+                    <span>85s • 2 max retries</span>
                   </div>
                 </div>
 
-                {/* Top Action Buttons */}
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <a
-                    href="https://platform.claude.com/settings/keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="admin-btn"
-                    style={{
-                      background: 'linear-gradient(135deg, rgba(192, 132, 252, 0.2) 0%, rgba(217, 70, 239, 0.2) 100%)',
-                      border: '1px solid rgba(192, 132, 252, 0.4)',
-                      color: '#e9d5ff',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      textDecoration: 'none',
-                      fontWeight: 600,
-                    }}
-                  >
-                    <ExternalLink size={15} />
-                    <span>Get Claude API Key</span>
-                  </a>
-
-                  <button
-                    type="button"
-                    onClick={copySetupInstructions}
-                    className="admin-btn admin-btn-secondary"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-                  >
-                    {copiedInstructions ? <Check size={15} style={{ color: '#10b981' }} /> : <Copy size={15} />}
-                    <span>{copiedInstructions ? 'Instructions Copied!' : 'Copy Instructions'}</span>
-                  </button>
-
+                <div style={{ display: 'flex', gap: '0.65rem', marginTop: 'auto', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     onClick={testClaudeConnection}
                     disabled={isTestingClaude}
                     className="admin-btn"
                     style={{
-                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                      color: '#ffffff',
-                      border: 'none',
+                      flex: 1,
+                      background: 'rgba(192, 132, 252, 0.15)',
+                      border: '1px solid rgba(192, 132, 252, 0.35)',
+                      color: '#e9d5ff',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '0.5rem',
-                      fontWeight: 600,
+                      justifyContent: 'center',
+                      gap: '0.45rem',
+                      padding: '0.45rem 0.75rem',
                     }}
                   >
-                    <RefreshCw size={15} className={isTestingClaude ? 'spinning' : ''} />
-                    <span>{isTestingClaude ? 'Testing Connection...' : 'Test API Connection'}</span>
+                    <RefreshCw size={14} className={isTestingClaude ? 'spinning' : ''} />
+                    <span>{isTestingClaude ? 'Testing...' : 'Test Connection'}</span>
+                  </button>
+
+                  {activeAiProvider !== 'claude' && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchActiveProvider('claude')}
+                      disabled={isSwitchingProvider}
+                      className="admin-btn"
+                      style={{
+                        background: 'linear-gradient(135deg, #c084fc 0%, #a855f7 100%)',
+                        color: '#000000',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        padding: '0.45rem 0.85rem',
+                      }}
+                    >
+                      <span>Set Active</span>
+                    </button>
+                  )}
+                </div>
+
+                {claudeTestResult && (
+                  <div style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', background: claudeTestResult.success ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)', border: `1px solid ${claudeTestResult.success ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`, color: claudeTestResult.success ? '#34d399' : '#f87171' }}>
+                    {claudeTestResult.message}
+                  </div>
+                )}
+              </div>
+
+              {/* Card 2: Google Gemini AI */}
+              <div
+                className="glass"
+                style={{
+                  padding: '1.5rem',
+                  borderRadius: '16px',
+                  background: activeAiProvider === 'gemini'
+                    ? 'linear-gradient(135deg, rgba(8, 47, 73, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%)'
+                    : 'linear-gradient(135deg, rgba(15, 23, 42, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
+                  border: activeAiProvider === 'gemini'
+                    ? '1.5px solid rgba(56, 189, 248, 0.5)'
+                    : '1px solid rgba(255, 255, 255, 0.1)',
+                  boxShadow: activeAiProvider === 'gemini' ? '0 10px 30px rgba(56, 189, 248, 0.15)' : 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    <div
+                      style={{
+                        width: '46px',
+                        height: '46px',
+                        borderRadius: '12px',
+                        background: 'rgba(56, 189, 248, 0.15)',
+                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                        color: '#38bdf8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Sparkles size={24} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#ffffff' }}>
+                          Google Gemini AI
+                        </h3>
+                        {activeAiProvider === 'gemini' && (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              padding: '0.15rem 0.5rem',
+                              borderRadius: '999px',
+                              background: 'rgba(56, 189, 248, 0.25)',
+                              color: '#bae6fd',
+                              border: '1px solid rgba(56, 189, 248, 0.5)',
+                            }}
+                          >
+                            DEFAULT
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                        Model: <strong style={{ color: '#cbd5e1' }}>{geminiStatus.model}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {geminiStatus.connected ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: 700, background: 'rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.5)', color: '#34d399' }}>
+                      <CheckCircle2 size={12} /> CONNECTED
+                    </span>
+                  ) : geminiStatus.configured ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: 700, background: 'rgba(255, 215, 0, 0.18)', border: '1px solid rgba(255, 215, 0, 0.45)', color: '#facc15' }}>
+                      <Clock size={12} /> READY
+                    </span>
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: 700, background: 'rgba(239, 68, 68, 0.18)', border: '1px solid rgba(239, 68, 68, 0.45)', color: '#f87171' }}>
+                      <AlertCircle size={12} /> OFFLINE
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ fontSize: '0.82rem', color: '#cbd5e1', display: 'flex', flexDirection: 'column', gap: '0.35rem', background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>API Key:</span>
+                    <span style={{ fontFamily: 'monospace', color: geminiStatus.maskedKey ? '#38bdf8' : '#94a3b8' }}>
+                      {geminiStatus.maskedKey || 'Not configured in .env'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>SDK Engine:</span>
+                    <span>@google/generative-ai • v1beta</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.65rem', marginTop: 'auto', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={testGeminiConnection}
+                    disabled={isTestingGemini}
+                    className="admin-btn"
+                    style={{
+                      flex: 1,
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                      color: '#bae6fd',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.45rem',
+                      padding: '0.45rem 0.75rem',
+                    }}
+                  >
+                    <RefreshCw size={14} className={isTestingGemini ? 'spinning' : ''} />
+                    <span>{isTestingGemini ? 'Testing...' : 'Test Connection'}</span>
+                  </button>
+
+                  {activeAiProvider !== 'gemini' && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchActiveProvider('gemini')}
+                      disabled={isSwitchingProvider}
+                      className="admin-btn"
+                      style={{
+                        background: 'linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)',
+                        color: '#000000',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        padding: '0.45rem 0.85rem',
+                      }}
+                    >
+                      <span>Set Active</span>
+                    </button>
+                  )}
+                </div>
+
+                {geminiTestResult && (
+                  <div style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.78rem', background: geminiTestResult.success ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)', border: `1px solid ${geminiTestResult.success ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`, color: geminiTestResult.success ? '#34d399' : '#f87171' }}>
+                    {geminiTestResult.message}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Independent Configuration Sub-Tabs */}
+            <div className="admin-table-card glass" style={{ padding: '1.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Key size={18} style={{ color: '#ffd700' }} />
+                    Independent Provider Configuration
+                  </h3>
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    Each provider maintains completely separate API credentials and model settings. Keys are securely stored on backend only.
+                  </p>
+                </div>
+
+                {/* Sub-tab Switcher: Claude vs Gemini */}
+                <div style={{ display: 'inline-flex', padding: '3px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAiConfigTab('claude')}
+                    style={{
+                      padding: '0.45rem 1rem',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      background: selectedAiConfigTab === 'claude' ? 'rgba(192, 132, 252, 0.25)' : 'transparent',
+                      color: selectedAiConfigTab === 'claude' ? '#e9d5ff' : '#94a3b8',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    🟣 Claude Configuration
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAiConfigTab('gemini')}
+                    style={{
+                      padding: '0.45rem 1rem',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      background: selectedAiConfigTab === 'gemini' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                      color: selectedAiConfigTab === 'gemini' ? '#bae6fd' : '#94a3b8',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    🔵 Gemini Configuration
                   </button>
                 </div>
               </div>
 
-              {/* Official Help Text Banner */}
-              <div
-                style={{
-                  marginTop: '1.25rem',
-                  padding: '0.85rem 1.15rem',
-                  borderRadius: '10px',
-                  background: 'rgba(192, 132, 252, 0.08)',
-                  border: '1px solid rgba(192, 132, 252, 0.25)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: '0.75rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', fontSize: '0.87rem', color: '#e2e8f0' }}>
-                  <Sparkles size={16} style={{ color: '#c084fc', flexShrink: 0 }} />
-                  <span>
-                    Don't have a Claude API Key? Create one from the official Anthropic Console.
-                  </span>
-                </div>
-                <a
-                  href="https://platform.claude.com/settings/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    fontSize: '0.82rem',
-                    color: '#c084fc',
-                    fontWeight: 600,
-                    textDecoration: 'underline',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                  }}
-                >
-                  platform.claude.com/settings/keys <ExternalLink size={12} />
-                </a>
-              </div>
+              {/* Sub-tab 1: Claude AI Configuration */}
+              {selectedAiConfigTab === 'claude' && (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
+                    <div className="form-field">
+                      <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.45rem', display: 'block' }}>
+                        Claude Model *
+                      </label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.75rem' }}
+                        value={claudeInputModel}
+                        onChange={(e) => setClaudeInputModel(e.target.value)}
+                      >
+                        <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022 (Recommended - High Accuracy)</option>
+                        <option value="claude-3-7-sonnet-20250219">claude-3-7-sonnet-20250219 (Claude 3.7 Sonnet)</option>
+                        <option value="claude-3-5-haiku-20241022">claude-3-5-haiku-20241022 (Fast & Lightweight)</option>
+                      </select>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                        Anthropic model used when Claude AI is selected.
+                      </span>
+                    </div>
 
-              {/* Live Connection Test Feedback */}
-              {claudeTestResult && (
-                <div
-                  style={{
-                    marginTop: '1rem',
-                    padding: '0.9rem 1.25rem',
-                    borderRadius: '10px',
-                    background: claudeTestResult.success ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                    border: `1px solid ${claudeTestResult.success ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                  }}
-                >
-                  {claudeTestResult.success ? (
-                    <CheckCircle size={20} style={{ color: '#10b981', flexShrink: 0 }} />
-                  ) : (
-                    <AlertTriangle size={20} style={{ color: '#ef4444', flexShrink: 0 }} />
-                  )}
-                  <div style={{ fontSize: '0.86rem' }}>
-                    <div style={{ fontWeight: 700, color: claudeTestResult.success ? '#34d399' : '#f87171' }}>
-                      {claudeTestResult.success ? 'CLAUDE AI CONNECTED' : 'Connection Authentication Failed'}
+                    <div className="form-field">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', margin: 0 }}>
+                          Claude API Key *
+                        </label>
+                        {claudeStatus.maskedKey && (
+                          <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: '6px', background: 'rgba(255, 215, 0, 0.1)', border: '1px solid rgba(255, 215, 0, 0.3)', color: '#ffd700', fontFamily: 'monospace' }}>
+                            Configured: {claudeStatus.maskedKey}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type={showClaudeKey ? 'text' : 'password'}
+                          className="admin-input"
+                          style={{ width: '100%', padding: '0.75rem 2.75rem 0.75rem 0.85rem', fontFamily: 'monospace', fontSize: '0.88rem' }}
+                          value={claudeInputKey}
+                          onChange={(e) => setClaudeInputKey(e.target.value)}
+                          placeholder={claudeStatus.maskedKey ? `Retain: ${claudeStatus.maskedKey}` : 'sk-ant-api03-...'}
+                          autoComplete="off"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowClaudeKey(!showClaudeKey)}
+                          title={showClaudeKey ? 'Hide Secret Key' : 'Show Secret Key'}
+                          style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' }}
+                        >
+                          {showClaudeKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                        Must start with <code>sk-ant-</code>. Stored in <code>ANTHROPIC_API_KEY</code>.
+                      </span>
                     </div>
-                    <div style={{ color: '#cbd5e1', marginTop: '0.15rem' }}>
-                      {claudeTestResult.message}
+                  </div>
+
+                  <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                    <a
+                      href="https://platform.claude.com/settings/keys"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="admin-btn admin-btn-secondary"
+                      style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                    >
+                      <ExternalLink size={14} />
+                      <span>Anthropic Console</span>
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={saveClaudeConfig}
+                      disabled={isSavingClaudeKey || (!claudeInputKey.trim() && claudeInputModel === claudeStatus.model)}
+                      className="admin-btn admin-btn-primary"
+                      style={{ background: 'linear-gradient(135deg, #c084fc 0%, #a855f7 100%)', color: '#000000', fontWeight: 700 }}
+                    >
+                      {isSavingClaudeKey ? <RefreshCw size={14} className="spinning" /> : <Check size={14} />}
+                      <span>Save Claude Configuration</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-tab 2: Google Gemini AI Configuration */}
+              {selectedAiConfigTab === 'gemini' && (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
+                    <div className="form-field">
+                      <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.45rem', display: 'block' }}>
+                        Gemini Model *
+                      </label>
+                      <select
+                        className="filter-select"
+                        style={{ width: '100%', padding: '0.75rem' }}
+                        value={geminiInputModel}
+                        onChange={(e) => setGeminiInputModel(e.target.value)}
+                      >
+                        <option value="gemini-1.5-flash">gemini-1.5-flash (Fast, Low Latency, High Quota)</option>
+                        <option value="gemini-2.0-flash">gemini-2.0-flash (Next-Gen Flash)</option>
+                        <option value="gemini-1.5-pro">gemini-1.5-pro (High Reasoning & Deep Context)</option>
+                      </select>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                        Google Gemini model used when Gemini AI is selected.
+                      </span>
                     </div>
+
+                    <div className="form-field">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', margin: 0 }}>
+                          Gemini API Key *
+                        </label>
+                        {geminiStatus.maskedKey && (
+                          <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', fontFamily: 'monospace' }}>
+                            Configured: {geminiStatus.maskedKey}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type={showGeminiKey ? 'text' : 'password'}
+                          className="admin-input"
+                          style={{ width: '100%', padding: '0.75rem 2.75rem 0.75rem 0.85rem', fontFamily: 'monospace', fontSize: '0.88rem' }}
+                          value={geminiInputKey}
+                          onChange={(e) => setGeminiInputKey(e.target.value)}
+                          placeholder={geminiStatus.maskedKey ? `Retain: ${geminiStatus.maskedKey}` : 'AIzaSy...'}
+                          autoComplete="off"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowGeminiKey(!showGeminiKey)}
+                          title={showGeminiKey ? 'Hide Secret Key' : 'Show Secret Key'}
+                          style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' }}
+                        >
+                          {showGeminiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                        Google AI Studio API key starting with <code>AIzaSy</code>. Stored in <code>GEMINI_API_KEY</code>.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="admin-btn admin-btn-secondary"
+                      style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                    >
+                      <ExternalLink size={14} />
+                      <span>Google AI Studio</span>
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={saveGeminiConfig}
+                      disabled={isSavingGeminiKey || (!geminiInputKey.trim() && geminiInputModel === geminiStatus.model)}
+                      className="admin-btn admin-btn-primary"
+                      style={{ background: 'linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)', color: '#000000', fontWeight: 700 }}
+                    >
+                      {isSavingGeminiKey ? <RefreshCw size={14} className="spinning" /> : <Check size={14} />}
+                      <span>Save Gemini Configuration</span>
+                    </button>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* 2. Secure Configuration Form */}
+            {/* 3. Independent System Prompt Management Section */}
             <div className="admin-table-card glass" style={{ padding: '1.75rem' }}>
-              <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Key size={18} style={{ color: '#ffd700' }} />
-                  API Credentials & Model Setup
-                </h3>
-                <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                  Credentials are encrypted and saved solely on the backend environment (never stored in browser or localStorage).
-                </p>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
-                {/* Field 1: Model Selection */}
-                <div className="form-field">
-                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '0.45rem', display: 'block' }}>
-                    Configured Model *
-                  </label>
-                  <select
-                    className="filter-select"
-                    style={{ width: '100%', padding: '0.75rem' }}
-                    value={claudeInputModel}
-                    onChange={(e) => setClaudeInputModel(e.target.value)}
-                  >
-                    <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022 (Recommended - High Accuracy)</option>
-                    <option value="claude-sonnet-5-5">claude-sonnet-5-5 (Sonnet 3.5 Alias)</option>
-                    <option value="claude-3-7-sonnet-20250219">claude-3-7-sonnet-20250219 (Claude 3.7 Sonnet)</option>
-                    <option value="claude-3-5-haiku-20241022">claude-3-5-haiku-20241022 (High Speed, Low Latency)</option>
-                    <option value="claude-3-haiku-20240307">claude-3-haiku-20240307 (Claude 3 Haiku)</option>
-                  </select>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
-                    Active model for MCQ question generation and comprehensive TNPSC study notes.
-                  </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <FileText size={18} style={{ color: '#c084fc' }} />
+                    System Prompt & Blueprint Management
+                  </h3>
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    Manage and version-control prompts for Claude AI and Gemini AI independently. All edits are preserved in PostgreSQL with full version rollback.
+                  </p>
                 </div>
 
-                {/* Field 2: API Key Input with Toggle and Masked Display */}
-                <div className="form-field">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0', margin: 0 }}>
-                      Claude API Key *
-                    </label>
-                    {claudeStatus.maskedKey && (
-                      <span
-                        style={{
-                          fontSize: '0.75rem',
-                          padding: '0.15rem 0.5rem',
-                          borderRadius: '6px',
-                          background: 'rgba(255, 215, 0, 0.1)',
-                          border: '1px solid rgba(255, 215, 0, 0.3)',
-                          color: '#ffd700',
-                          fontFamily: 'monospace',
-                        }}
-                      >
-                        Configured: {claudeStatus.maskedKey}
-                      </span>
-                    )}
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.08)', color: '#ffd700', fontWeight: 700 }}>
+                    Active Version: v{promptVersion}
+                  </span>
+                </div>
+              </div>
 
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      type={showClaudeKey ? 'text' : 'password'}
-                      className="admin-input"
-                      style={{ width: '100%', padding: '0.75rem 2.75rem 0.75rem 0.85rem', fontFamily: 'monospace', fontSize: '0.88rem' }}
-                      value={claudeInputKey}
-                      onChange={(e) => setClaudeInputKey(e.target.value)}
-                      placeholder={claudeStatus.maskedKey ? `Configured: ${claudeStatus.maskedKey} (enter new key to update)` : 'sk-ant-api03-...'}
-                      autoComplete="off"
-                    />
+              {/* Provider & Prompt Type Selectors */}
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0' }}>Target Provider:</label>
+                  <div style={{ display: 'inline-flex', padding: '2px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
                     <button
                       type="button"
-                      onClick={() => setShowClaudeKey(!showClaudeKey)}
-                      title={showClaudeKey ? 'Hide Secret Key' : 'Show Secret Key'}
+                      onClick={() => {
+                        setPromptProvider('claude')
+                        fetchPromptsForProvider('claude', selectedPromptType)
+                      }}
                       style={{
-                        position: 'absolute',
-                        right: '10px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'transparent',
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '6px',
                         border: 'none',
-                        color: 'var(--text-secondary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
                         cursor: 'pointer',
-                        padding: '4px',
+                        background: promptProvider === 'claude' ? 'rgba(192, 132, 252, 0.3)' : 'transparent',
+                        color: promptProvider === 'claude' ? '#e9d5ff' : '#94a3b8',
                       }}
                     >
-                      {showClaudeKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      Claude AI
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPromptProvider('gemini')
+                        fetchPromptsForProvider('gemini', selectedPromptType)
+                      }}
+                      style={{
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        background: promptProvider === 'gemini' ? 'rgba(56, 189, 248, 0.3)' : 'transparent',
+                        color: promptProvider === 'gemini' ? '#bae6fd' : '#94a3b8',
+                      }}
+                    >
+                      Gemini AI
                     </button>
                   </div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
-                    Must start with <code>sk-ant-</code>. Leave blank to retain current key if only changing model.
-                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: '280px' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0' }}>Prompt Type:</label>
+                  <select
+                    className="filter-select"
+                    style={{ flex: 1, padding: '0.5rem' }}
+                    value={selectedPromptType}
+                    onChange={(e) => {
+                      const type = e.target.value as any
+                      setSelectedPromptType(type)
+                      fetchPromptsForProvider(promptProvider, type)
+                    }}
+                  >
+                    <option value="notes_system">📝 Study Notes System Persona</option>
+                    <option value="notes_template">📑 12-Section Notes Blueprint & Markdown Structure</option>
+                    <option value="mcq_system">❓ MCQ Questions System Persona</option>
+                    <option value="mcq_template">🎯 4-Option MCQ JSON Schema Template</option>
+                  </select>
                 </div>
               </div>
 
-              {/* Form Buttons */}
-              <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={fetchClaudeStatus}
-                  className="admin-btn admin-btn-secondary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-                >
-                  <RefreshCw size={15} />
-                  <span>Refresh Status</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={testClaudeConnection}
-                  disabled={isTestingClaude}
-                  className="admin-btn"
+              {/* Prompt Editor Textarea */}
+              <div style={{ position: 'relative', marginBottom: '1rem' }}>
+                <textarea
+                  className="admin-input"
                   style={{
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    width: '100%',
+                    minHeight: '260px',
+                    fontFamily: 'monospace',
+                    fontSize: '0.84rem',
+                    lineHeight: '1.5',
+                    padding: '0.85rem',
+                    background: 'rgba(0, 0, 0, 0.4)',
                     color: '#e2e8f0',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    fontWeight: 600,
+                    borderRadius: '8px',
+                    resize: 'vertical',
                   }}
-                >
-                  <RefreshCw size={15} className={isTestingClaude ? 'spinning' : ''} />
-                  <span>{isTestingClaude ? 'Testing...' : 'Test Connection'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={saveClaudeConfig}
-                  disabled={isSavingClaudeKey || (!claudeInputKey.trim() && claudeInputModel === claudeStatus.model)}
-                  className="admin-btn admin-btn-primary"
-                  style={{
-                    background: 'linear-gradient(135deg, #ffd700 0%, #f59e0b 100%)',
-                    color: '#000000',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {isSavingClaudeKey ? <RefreshCw size={15} className="spinning" /> : <Check size={15} />}
-                  <span>{isSavingClaudeKey ? 'Saving Key...' : 'Save API Key'}</span>
-                </button>
+                  value={promptContent}
+                  onChange={(e) => setPromptContent(e.target.value)}
+                  placeholder="Enter custom prompt template..."
+                  disabled={isLoadingPrompts}
+                />
               </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.76rem', color: '#94a3b8' }}>
+                  {promptHistoryList.length} revision{promptHistoryList.length === 1 ? '' : 's'} archived in database
+                </span>
+
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => fetchPromptsForProvider(promptProvider, selectedPromptType)}
+                    disabled={isLoadingPrompts}
+                    className="admin-btn admin-btn-secondary"
+                  >
+                    <RefreshCw size={14} className={isLoadingPrompts ? 'spinning' : ''} />
+                    <span>Reset / Reload</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSavePrompt}
+                    disabled={isSavingPrompt || !promptContent.trim()}
+                    className="admin-btn admin-btn-primary"
+                    style={{ background: 'linear-gradient(135deg, #ffd700 0%, #f59e0b 100%)', color: '#000000', fontWeight: 700 }}
+                  >
+                    {isSavingPrompt ? <RefreshCw size={14} className="spinning" /> : <Check size={14} />}
+                    <span>Save New Version (v{promptVersion + 1})</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Version History Table */}
+              {promptHistoryList.length > 0 && (
+                <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.25rem' }}>
+                  <h4 style={{ margin: '0 0 0.85rem', fontSize: '0.92rem', color: '#cbd5e1' }}>
+                    Version History for {promptProvider.toUpperCase()} - {selectedPromptType}
+                  </h4>
+                  <div style={{ maxHeight: '180px', overflowY: 'auto', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94a3b8', textAlign: 'left' }}>
+                          <th style={{ padding: '0.5rem 0.75rem', width: '80px' }}>Version</th>
+                          <th style={{ padding: '0.5rem 0.75rem' }}>Preview</th>
+                          <th style={{ padding: '0.5rem 0.75rem', width: '140px' }}>Saved At</th>
+                          <th style={{ padding: '0.5rem 0.75rem', width: '100px', textAlign: 'center' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {promptHistoryList.map((ver) => (
+                          <tr key={ver.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td style={{ padding: '0.5rem 0.75rem', fontWeight: 700, color: ver.is_current ? '#10b981' : '#cbd5e1' }}>
+                              v{ver.version} {ver.is_current && '(Active)'}
+                            </td>
+                            <td style={{ padding: '0.5rem 0.75rem', color: '#94a3b8', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                              {(ver.content || '').slice(0, 90)}...
+                            </td>
+                            <td style={{ padding: '0.5rem 0.75rem', color: '#94a3b8', fontSize: '0.74rem' }}>
+                              {ver.created_at ? new Date(ver.created_at).toLocaleDateString() : '—'}
+                            </td>
+                            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center' }}>
+                              {!ver.is_current && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestorePromptVersion(ver.version)}
+                                  disabled={isRestoringPrompt}
+                                  style={{
+                                    background: 'rgba(192, 132, 252, 0.15)',
+                                    border: '1px solid rgba(192, 132, 252, 0.35)',
+                                    color: '#c084fc',
+                                    borderRadius: '4px',
+                                    padding: '0.2rem 0.5rem',
+                                    fontSize: '0.72rem',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Restore
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* 3. Integration & Security Architecture Reference */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
-              {/* Setup Workflow */}
-              <div className="admin-table-card glass" style={{ padding: '1.5rem' }}>
-                <h4 style={{ margin: '0 0 1rem', fontSize: '1rem', color: '#ffd700', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Sparkles size={16} />
-                  Claude API Key Setup Workflow
-                </h4>
-                <ol style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.84rem', color: '#cbd5e1', lineHeight: '1.65' }}>
-                  <li style={{ marginBottom: '0.5rem' }}>
-                    Click <strong>Get Claude API Key</strong> or visit{' '}
-                    <a
-                      href="https://platform.claude.com/settings/keys"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: '#c084fc', textDecoration: 'underline' }}
+            {/* 4. Independent Generation History & Audit Logs Section */}
+            <div className="admin-table-card glass" style={{ padding: '1.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Clock size={18} style={{ color: '#38bdf8' }} />
+                    AI Generation History & Usage Logs
+                  </h3>
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    Real-time audit log of all generation events, status tracking, item counts, and error reports partitioned by provider.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div style={{ display: 'inline-flex', padding: '2px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryProviderFilter('all')
+                        fetchAiHistory('all')
+                      }}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        background: historyProviderFilter === 'all' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                        color: historyProviderFilter === 'all' ? '#ffffff' : '#94a3b8',
+                      }}
                     >
-                      Anthropic Console
-                    </a>.
-                  </li>
-                  <li style={{ marginBottom: '0.5rem' }}>
-                    Sign in and create a new API Key with Messages API access.
-                  </li>
-                  <li style={{ marginBottom: '0.5rem' }}>
-                    Copy your secret key (starts with <code>sk-ant-</code>).
-                  </li>
-                  <li style={{ marginBottom: '0.5rem' }}>
-                    Paste the key into the input field above and click <strong>Save API Key</strong>.
-                  </li>
-                  <li>
-                    Click <strong>Test API Connection</strong>. The system performs an authenticated ping and displays{' '}
-                    <strong style={{ color: '#34d399' }}>CLAUDE AI CONNECTED</strong> upon verification.
-                  </li>
-                </ol>
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryProviderFilter('claude')
+                        fetchAiHistory('claude')
+                      }}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        background: historyProviderFilter === 'claude' ? 'rgba(192, 132, 252, 0.3)' : 'transparent',
+                        color: historyProviderFilter === 'claude' ? '#e9d5ff' : '#94a3b8',
+                      }}
+                    >
+                      Claude AI
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryProviderFilter('gemini')
+                        fetchAiHistory('gemini')
+                      }}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        background: historyProviderFilter === 'gemini' ? 'rgba(56, 189, 248, 0.3)' : 'transparent',
+                        color: historyProviderFilter === 'gemini' ? '#bae6fd' : '#94a3b8',
+                      }}
+                    >
+                      Gemini AI
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => fetchAiHistory(historyProviderFilter)}
+                    disabled={isLoadingAiHistory}
+                    className="admin-btn admin-btn-secondary"
+                    style={{ padding: '0.35rem 0.65rem' }}
+                    title="Refresh History"
+                  >
+                    <RefreshCw size={13} className={isLoadingAiHistory ? 'spinning' : ''} />
+                  </button>
+                </div>
               </div>
 
-              {/* Security & Strict Removal Guarantees */}
-              <div className="admin-table-card glass" style={{ padding: '1.5rem' }}>
-                <h4 style={{ margin: '0 0 1rem', fontSize: '1rem', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Shield size={16} />
-                  Security & Architecture Standards
-                </h4>
-                <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.84rem', color: '#cbd5e1', lineHeight: '1.65' }}>
-                  <li style={{ marginBottom: '0.45rem' }}>
-                    <strong>Backend-Only Execution:</strong> All Claude API calls happen on the Node.js backend. Keys are never exposed in frontend bundles or network requests.
-                  </li>
-                  <li style={{ marginBottom: '0.45rem' }}>
-                    <strong>Complete Gemini Removal:</strong> Zero legacy Gemini endpoints or fallback logic. Claude AI is the sole provider.
-                  </li>
-                  <li style={{ marginBottom: '0.45rem' }}>
-                    <strong>Zero Mock Generation:</strong> Only authentic, verified Samacheer Kalvi textbook facts are generated.
-                  </li>
-                  <li>
-                    <strong>Staging Question Workflow:</strong> Claude-generated questions always enter Staging for admin review, editing, deduplication, and bulk publishing.
-                  </li>
-                </ul>
+              {/* Logs Table */}
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table" style={{ fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '130px' }}>Timestamp</th>
+                      <th style={{ width: '100px' }}>Provider</th>
+                      <th style={{ width: '160px' }}>Model</th>
+                      <th style={{ width: '90px' }}>Type</th>
+                      <th>Lesson / Syllabus Target</th>
+                      <th style={{ width: '80px', textAlign: 'center' }}>Items</th>
+                      <th style={{ width: '100px', textAlign: 'center' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {isLoadingAiHistory ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+                          <RefreshCw size={18} className="spinning" style={{ margin: '0 auto 0.5rem', color: '#38bdf8' }} />
+                          <div>Loading audit logs...</div>
+                        </td>
+                      </tr>
+                    ) : aiHistoryLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: '#94a3b8' }}>
+                          <Clock size={28} style={{ margin: '0 auto 0.5rem', opacity: 0.4 }} />
+                          <p style={{ margin: 0 }}>No AI generation logs found for the selected filter.</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      aiHistoryLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td style={{ color: '#94a3b8', fontSize: '0.76rem' }}>
+                            {log.createdAt ? new Date(log.createdAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                          </td>
+                          <td>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '0.15rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                background: log.provider === 'claude' ? 'rgba(192, 132, 252, 0.2)' : 'rgba(56, 189, 248, 0.2)',
+                                color: log.provider === 'claude' ? '#c084fc' : '#38bdf8',
+                                border: `1px solid ${log.provider === 'claude' ? 'rgba(192, 132, 252, 0.4)' : 'rgba(56, 189, 248, 0.4)'}`,
+                              }}
+                            >
+                              {log.provider}
+                            </span>
+                          </td>
+                          <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: '#cbd5e1' }}>
+                            {log.model}
+                          </td>
+                          <td>
+                            <span style={{ textTransform: 'uppercase', fontSize: '0.72rem', fontWeight: 600, color: '#e2e8f0' }}>
+                              {log.generationType}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ color: '#ffffff', fontWeight: 500 }}>
+                              {log.lessonTitle || '—'}
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                              {log.subject ? `${log.subject} • ` : ''}
+                              {log.standard ? `Class ${log.standard}th` : ''}
+                              {log.language ? ` • ${log.language}` : ''}
+                            </div>
+                            {log.errorMessage && (
+                              <div style={{ fontSize: '0.72rem', color: '#f87171', marginTop: '2px' }} title={log.errorMessage}>
+                                Error: {log.errorMessage.slice(0, 80)}...
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 600, color: '#ffd700' }}>
+                            {log.itemsCount || 0}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '0.15rem 0.5rem',
+                                borderRadius: '999px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                background: log.status === 'success' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                color: log.status === 'success' ? '#34d399' : '#f87171',
+                                border: `1px solid ${log.status === 'success' ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)'}`,
+                              }}
+                            >
+                              {log.status.toUpperCase()}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -6415,6 +7707,223 @@ const Admin = () => {
         )}
       </AnimatePresence>
 
+      {/* Delete Selected Textbooks Modal */}
+      <AnimatePresence>
+        {showDeleteSelectedTextbooksModal && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{ maxWidth: '540px' }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f87171' }}>
+                  <Trash2 size={20} />
+                  <h2 className="admin-modal-title" style={{ color: '#f87171' }}>
+                    Delete Selected Textbooks
+                  </h2>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (!isDeletingTextbookBatch) setShowDeleteSelectedTextbooksModal(false)
+                  }}
+                  disabled={isDeletingTextbookBatch}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  Are you sure you want to permanently delete <strong>{selectedTextbookIds.size} selected textbook(s)</strong>?
+                </p>
+
+                <div
+                  style={{
+                    maxHeight: '160px',
+                    overflowY: 'auto',
+                    background: 'rgba(0,0,0,0.3)',
+                    borderRadius: '8px',
+                    padding: '0.6rem 0.8rem',
+                    marginBottom: '0.85rem',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    fontSize: '0.8rem',
+                    color: '#cbd5e1',
+                  }}
+                >
+                  {textbooksList
+                    .filter((tb) => selectedTextbookIds.has(tb.id))
+                    .map((tb) => (
+                      <div
+                        key={tb.id}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.2rem 0' }}
+                      >
+                        <BookOpen size={13} style={{ color: '#ffd700', flexShrink: 0 }} />
+                        <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          #{tb.id} - {tb.bookName}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+
+                <p
+                  style={{
+                    color: '#f87171',
+                    fontSize: '0.8rem',
+                    background: 'rgba(239,68,68,0.1)',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    lineHeight: '1.4',
+                  }}
+                >
+                  ⚠️ <strong>IRREVERSIBLE ACTION:</strong> This will permanently delete the {selectedTextbookIds.size} selected textbook(s), all their extracted pages, OCR text, and processing jobs from the database and disk storage. This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setShowDeleteSelectedTextbooksModal(false)}
+                  disabled={isDeletingTextbookBatch}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn"
+                  style={{ background: '#ef4444', color: '#fff' }}
+                  disabled={isDeletingTextbookBatch}
+                  onClick={handleDeleteSelectedTextbooks}
+                >
+                  <Trash2 size={16} />
+                  <span>
+                    {isDeletingTextbookBatch
+                      ? 'Deleting Selected...'
+                      : `Confirm & Delete Selected (${selectedTextbookIds.size})`}
+                  </span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete All Textbooks in Current Filter Scope Modal */}
+      <AnimatePresence>
+        {showDeleteAllTextbooksModal && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{ maxWidth: '560px' }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f87171' }}>
+                  <AlertTriangle size={20} />
+                  <h2 className="admin-modal-title" style={{ color: '#f87171' }}>
+                    Delete All Textbooks in Filter Scope
+                  </h2>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (!isDeletingTextbookBatch) setShowDeleteAllTextbooksModal(false)
+                  }}
+                  disabled={isDeletingTextbookBatch}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '0.75rem' }}>
+                  Permanently delete all <strong>{filteredTextbooks.length} textbook(s)</strong> in the current active filter scope?
+                </p>
+
+                <div
+                  style={{
+                    padding: '0.65rem 0.85rem',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    marginBottom: '0.85rem',
+                    fontSize: '0.8rem',
+                    color: '#cbd5e1',
+                  }}
+                >
+                  <strong style={{ color: '#ffd700' }}>Active Filter Scope:</strong>
+                  <div
+                    style={{
+                      marginTop: '0.3rem',
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <div>TNPSC Group: <code>{textbookGroupFilter}</code></div>
+                    <div>Class / Std: <code>{textbookStandardFilter}</code></div>
+                    <div>Subject: <code>{textbookSubjectFilter}</code></div>
+                    <div>Medium: <code>{textbookMediumFilter}</code></div>
+                    <div>Status: <code>{textbookStatusFilter}</code></div>
+                    {textbookSearch && (
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        Search Query: <code>"{textbookSearch}"</code>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p
+                  style={{
+                    color: '#f87171',
+                    fontSize: '0.82rem',
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    padding: '0.75rem 0.95rem',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    lineHeight: '1.4',
+                  }}
+                >
+                  ⚠️ <strong>IRREVERSIBLE ACTION:</strong> All {filteredTextbooks.length} textbook(s) matching this filter will be permanently deleted from the database and server storage along with all their extracted pages and OCR text. Textbooks outside this filter will NOT be affected.
+                </p>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setShowDeleteAllTextbooksModal(false)}
+                  disabled={isDeletingTextbookBatch}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn"
+                  style={{ background: '#b91c1c', color: '#fff', fontWeight: 700 }}
+                  disabled={isDeletingTextbookBatch}
+                  onClick={handleDeleteAllTextbooks}
+                >
+                  <AlertTriangle size={16} />
+                  <span>
+                    {isDeletingTextbookBatch
+                      ? 'Deleting All...'
+                      : `Permanently Delete All (${filteredTextbooks.length} Textbooks)`}
+                  </span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Claude AI Study Notes & MCQ Generator Modal */}
       <CloudAiGeneratorModal
         isOpen={isCloudAiModalOpen}
@@ -7182,6 +8691,185 @@ const Admin = () => {
                 >
                   <Trash2 size={16} />
                   <span>{isDeletingDriveMaterial ? 'Deleting...' : 'Delete Permanently'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Bulk Delete Selected Google Drive Materials Confirmation Modal */}
+        {showDeleteSelectedDriveModal && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{ maxWidth: '540px' }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f87171' }}>
+                  <Trash2 size={20} />
+                  <h2 className="admin-modal-title" style={{ color: '#f87171' }}>
+                    Delete Selected PDF Textbooks
+                  </h2>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (!isDeletingDriveBatch) setShowDeleteSelectedDriveModal(false)
+                  }}
+                  disabled={isDeletingDriveBatch}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  Are you sure you want to permanently delete <strong>{selectedDriveMaterialIds.size} selected PDF textbook(s)</strong>?
+                </p>
+
+                <div
+                  style={{
+                    maxHeight: '160px',
+                    overflowY: 'auto',
+                    padding: '0.5rem 0.75rem',
+                    background: 'rgba(0, 0, 0, 0.25)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    marginBottom: '0.85rem',
+                  }}
+                >
+                  {driveMaterials
+                    .filter((m) => selectedDriveMaterialIds.has(m.id))
+                    .map((m) => (
+                      <div
+                        key={m.id}
+                        style={{
+                          fontSize: '0.8rem',
+                          color: '#e2e8f0',
+                          padding: '0.25rem 0',
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                        }}
+                      >
+                        📄 {m.fileName}
+                      </div>
+                    ))}
+                </div>
+
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    fontSize: '0.82rem',
+                    color: '#fca5a5',
+                  }}
+                >
+                  ⚠️ <strong>Permanent Action:</strong> These PDF files will be deleted from your Google Drive ("TNPSC Study Hub Materials") and removed from the database. This action cannot be undone.
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setShowDeleteSelectedDriveModal(false)}
+                  disabled={isDeletingDriveBatch}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn"
+                  style={{ background: '#ef4444', color: '#fff' }}
+                  disabled={isDeletingDriveBatch}
+                  onClick={handleDeleteSelectedDriveMaterials}
+                >
+                  <Trash2 size={16} />
+                  <span>
+                    {isDeletingDriveBatch
+                      ? 'Deleting Selected...'
+                      : `Delete ${selectedDriveMaterialIds.size} PDF(s)`}
+                  </span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Delete All Google Drive Materials in View Confirmation Modal */}
+        {showDeleteAllDriveModal && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{ maxWidth: '540px' }}
+            >
+              <div className="admin-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f87171' }}>
+                  <AlertTriangle size={20} />
+                  <h2 className="admin-modal-title" style={{ color: '#f87171' }}>
+                    Delete All Filtered PDF Textbooks
+                  </h2>
+                </div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (!isDeletingDriveBatch) setShowDeleteAllDriveModal(false)
+                  }}
+                  disabled={isDeletingDriveBatch}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="admin-modal-body">
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  Are you sure you want to permanently delete <strong>all {driveMaterials.length} PDF textbook(s)</strong> matching your current filter selections?
+                </p>
+
+                <div
+                  style={{
+                    padding: '0.85rem 1rem',
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    fontSize: '0.82rem',
+                    color: '#fca5a5',
+                    lineHeight: '1.5',
+                  }}
+                >
+                  🚨 <strong>CRITICAL WARNING:</strong> This will delete all {driveMaterials.length} PDFs from Google Drive and remove all associated indexing from the database. Only files matching current filter selections will be deleted. Unrelated files will not be affected.
+                </div>
+              </div>
+
+              <div className="admin-modal-footer">
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => setShowDeleteAllDriveModal(false)}
+                  disabled={isDeletingDriveBatch}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-btn"
+                  style={{ background: '#b91c1c', color: '#fff', fontWeight: 700 }}
+                  disabled={isDeletingDriveBatch}
+                  onClick={handleDeleteAllDriveMaterials}
+                >
+                  <AlertTriangle size={16} />
+                  <span>
+                    {isDeletingDriveBatch
+                      ? 'Deleting All...'
+                      : `Delete All ${driveMaterials.length} PDFs`}
+                  </span>
                 </button>
               </div>
             </motion.div>

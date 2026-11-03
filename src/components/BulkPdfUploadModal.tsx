@@ -20,16 +20,28 @@ import { ExtractedContentsViewerModal } from './ExtractedContentsViewerModal'
 import type { ClassifiedPdfMetadata } from '../../backend/src/services/bulkClassificationService'
 import { apiFetch } from '../utils/api'
 
+export type BulkUploadStatus =
+  | 'pending'
+  | 'analyzing'
+  | 'classified'
+  | 'approved'
+  | 'uploading'
+  | 'completed'
+  | 'failed'
+  | 'retrying'
+  | 'cancelled';
+
 export interface BulkUploadItem {
   id: string;
   file: File;
   checksum?: string;
-  status: 'pending' | 'analyzing' | 'classified' | 'approved' | 'uploading' | 'completed' | 'failed';
+  status: BulkUploadStatus;
   progress: number;
   currentStep: string;
   metadata?: ClassifiedPdfMetadata;
   googleDriveFileId?: string;
   errorMessage?: string;
+  isDuplicate?: boolean;
 }
 
 interface BulkPdfUploadModalProps {
@@ -91,6 +103,13 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
   const [isUploading, setIsUploading] = useState(false)
   const isCancelledRef = useRef(false)
   const [overallProgress, setOverallProgress] = useState(0)
+  const [uploadSpeed, setUploadSpeed] = useState<string>('')
+  const bytesTransferredRef = useRef<number>(0)
+  const lastSpeedUpdateRef = useRef<number>(Date.now())
+
+  // Configurable batch limit (Default 500) and concurrency (Default 3)
+  const [maxBatchLimit, setMaxBatchLimit] = useState<number>(500)
+  const [concurrency, setConcurrency] = useState<number>(3)
 
   // Drag state
   const [isDragging, setIsDragging] = useState(false)
@@ -107,29 +126,70 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
 
     if (pdfFiles.length === 0) return
 
-    const newItems: BulkUploadItem[] = []
-    for (const file of pdfFiles) {
-      const id = `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
-      newItems.push({
-        id,
+    setItems((prev) => {
+      const remainingSlots = maxBatchLimit > 0 ? Math.max(0, maxBatchLimit - prev.length) : pdfFiles.length
+      if (remainingSlots <= 0) {
+        alert(`Maximum batch upload limit of ${maxBatchLimit} PDFs reached for this batch. Complete or clear current batch to upload more.`)
+        return prev
+      }
+      const filesToTake = pdfFiles.slice(0, remainingSlots)
+      if (filesToTake.length < pdfFiles.length) {
+        alert(`Intake limited to ${filesToTake.length} PDFs (batch limit: ${maxBatchLimit}). The remaining ${pdfFiles.length - filesToTake.length} files can be uploaded in the next batch.`)
+      }
+
+      const newItems: BulkUploadItem[] = filesToTake.map((file) => ({
+        id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         file,
         status: 'pending',
         progress: 0,
         currentStep: 'Awaiting analysis',
-      })
-    }
+      }))
 
-    setItems((prev) => [...prev, ...newItems])
+      // Asynchronously compute checksums in background & check duplicates
+      Promise.all(newItems.map((it) => computeFileSha256(it.file).then((cs) => ({ id: it.id, checksum: cs })))).then(
+        async (checksumResults) => {
+          setItems((curr) =>
+            curr.map((item) => {
+              const found = checksumResults.find((c) => c.id === item.id)
+              return found ? { ...item, checksum: found.checksum } : item
+            })
+          )
 
-    // Asynchronously compute checksums in background
-    for (const it of newItems) {
-      computeFileSha256(it.file).then((checksum) => {
-        setItems((prev) =>
-          prev.map((item) => (item.id === it.id ? { ...item, checksum } : item))
-        )
-      })
-    }
-  }, [])
+          // Query duplicate detection endpoint
+          try {
+            const token = localStorage.getItem('tnpsc_admin_token') || ''
+            const allChecksums = checksumResults.map((c) => c.checksum).filter(Boolean)
+            if (allChecksums.length > 0) {
+              const dupRes = await apiFetch('/api/drive/bulk/check-duplicates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ checksums: allChecksums }),
+              })
+              const dupData = await dupRes.json()
+              if (dupRes.ok && dupData.existing) {
+                setItems((curr) =>
+                  curr.map((item) => {
+                    if (item.checksum && dupData.existing[item.checksum]) {
+                      return {
+                        ...item,
+                        isDuplicate: true,
+                        currentStep: 'Duplicate detected: Already on Google Drive',
+                      }
+                    }
+                    return item
+                  })
+                )
+              }
+            }
+          } catch (dupErr) {
+            console.warn('[CheckDuplicates] Warning:', dupErr)
+          }
+        }
+      )
+
+      return [...prev, ...newItems]
+    })
+  }, [maxBatchLimit])
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
@@ -327,8 +387,28 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
         xhr.setRequestHeader('Content-Range', contentRange)
         xhr.setRequestHeader('Content-Type', 'application/pdf')
 
+        let lastLoadedInChunk = 0
         xhr.upload.onprogress = (evt) => {
           if (evt.lengthComputable) {
+            const chunkDelta = evt.loaded - lastLoadedInChunk
+            lastLoadedInChunk = evt.loaded
+            if (chunkDelta > 0) {
+              bytesTransferredRef.current += chunkDelta
+            }
+
+            const now = Date.now()
+            const timeElapsed = (now - lastSpeedUpdateRef.current) / 1000
+            if (timeElapsed >= 0.5) {
+              const speedBytesSec = bytesTransferredRef.current / timeElapsed
+              const formattedSpeed =
+                speedBytesSec >= 1024 * 1024
+                  ? `${(speedBytesSec / (1024 * 1024)).toFixed(2)} MB/s`
+                  : `${(speedBytesSec / 1024).toFixed(0)} KB/s`
+              setUploadSpeed(formattedSpeed)
+              bytesTransferredRef.current = 0
+              lastSpeedUpdateRef.current = now
+            }
+
             const loadedBytes = currentOffset + evt.loaded
             const pct = Math.min(95, Math.round((loadedBytes / totalSize) * 90))
             setItems((prev) =>
@@ -419,15 +499,17 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
   }
 
   const handleStartBulkUpload = async () => {
-    const approvedItems = items.filter((i) => i.status === 'approved' && i.metadata)
+    const approvedItems = items.filter((i) => (i.status === 'approved' || i.status === 'retrying') && i.metadata)
     if (approvedItems.length === 0 || isUploading) return
 
     setIsUploading(true)
     isCancelledRef.current = false
+    lastSpeedUpdateRef.current = Date.now()
+    bytesTransferredRef.current = 0
     const batchId = `batch_${Date.now()}`
 
-    // Bounded concurrency pool (3 parallel workers)
-    const CONCURRENCY = 3
+    // Configurable parallel concurrency workers
+    const workerCount = Math.min(Math.max(1, concurrency), approvedItems.length)
     let index = 0
     let activeWorkers = 0
     let totalCompleted = 0
@@ -437,6 +519,7 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
         if (isCancelledRef.current || index >= approvedItems.length) {
           if (activeWorkers === 0) {
             setIsUploading(false)
+            setUploadSpeed('')
             // Report summary
             const completedList = items.filter((i) => i.status === 'completed' && i.metadata)
             const units = completedList.reduce((acc, i) => acc + (i.metadata?.totalUnits || 0), 0)
@@ -471,9 +554,9 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
                 i.id === currentItem.id
                   ? {
                       ...i,
-                      status: 'failed',
+                      status: isCancelledRef.current ? 'cancelled' : 'failed',
                       errorMessage: err.message || 'Upload failed',
-                      currentStep: 'Failed',
+                      currentStep: isCancelledRef.current ? 'Cancelled by user' : 'Failed',
                     }
                   : i
               )
@@ -485,15 +568,33 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
           })
       }
 
-      for (let w = 0; w < CONCURRENCY; w++) {
+      for (let w = 0; w < workerCount; w++) {
         next()
       }
     })
   }
 
   const handleRetryFailed = () => {
+    if (isUploading) return
     setItems((prev) =>
-      prev.map((i) => (i.status === 'failed' ? { ...i, status: 'approved', progress: 0, errorMessage: undefined } : i))
+      prev.map((i) =>
+        i.status === 'failed' || i.status === 'cancelled'
+          ? { ...i, status: 'approved', progress: 0, errorMessage: undefined, currentStep: 'Ready to retry' }
+          : i
+      )
+    )
+  }
+
+  const handleCancelPending = () => {
+    isCancelledRef.current = true
+    setIsUploading(false)
+    setUploadSpeed('')
+    setItems((prev) =>
+      prev.map((i) =>
+        i.status === 'uploading' || i.status === 'pending'
+          ? { ...i, status: 'cancelled', currentStep: 'Cancelled by user' }
+          : i
+      )
     )
   }
 
@@ -519,6 +620,8 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
   const approvedCount = items.filter((i) => i.status === 'approved').length
   const completedCount = items.filter((i) => i.status === 'completed').length
   const failedCount = items.filter((i) => i.status === 'failed').length
+  const uploadingCount = items.filter((i) => i.status === 'uploading' || i.status === 'retrying').length
+  const pendingCount = items.filter((i) => i.status === 'pending' || i.status === 'analyzing' || i.status === 'classified').length
 
   return (
     <>
@@ -566,6 +669,59 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
                 Single PDF Upload
               </button>
             </div>
+
+            {/* Header Configuration Controls */}
+            {activeTab === 'bulk' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginLeft: 'auto', marginRight: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: '#94a3b8' }}>
+                  <span>Batch Limit:</span>
+                  <select
+                    value={maxBatchLimit}
+                    onChange={(e) => setMaxBatchLimit(Number(e.target.value))}
+                    disabled={isUploading}
+                    style={{
+                      padding: '0.3rem 0.55rem',
+                      borderRadius: '6px',
+                      background: '#0f172a',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      color: '#60a5fa',
+                      fontSize: '0.76rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <option value={100}>100 PDFs</option>
+                    <option value={250}>250 PDFs</option>
+                    <option value={500}>500 PDFs (Default)</option>
+                    <option value={1000}>1,000 PDFs</option>
+                    <option value={0}>Unlimited</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: '#94a3b8' }}>
+                  <span>Streams:</span>
+                  <select
+                    value={concurrency}
+                    onChange={(e) => setConcurrency(Number(e.target.value))}
+                    disabled={isUploading}
+                    style={{
+                      padding: '0.3rem 0.55rem',
+                      borderRadius: '6px',
+                      background: '#0f172a',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      color: '#34d399',
+                      fontSize: '0.76rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <option value={1}>1 (Sequential)</option>
+                    <option value={2}>2 Parallel</option>
+                    <option value={3}>3 Streams (Balanced)</option>
+                    <option value={5}>5 Streams (Fast)</option>
+                    <option value={8}>8 Streams (Turbo)</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={onClose}
@@ -808,7 +964,118 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
                 </div>
               ) : (
                 /* Active Queue & Review Table */
-                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', gap: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', gap: '0.85rem' }}>
+                  {/* Upload Progress Dashboard */}
+                  <div className="upload-dashboard-card">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <HardDrive size={18} style={{ color: '#60a5fa' }} />
+                        <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#f8fafc' }}>
+                          Upload Progress Dashboard
+                        </span>
+                        {isUploading && (
+                          <span style={{ fontSize: '0.72rem', background: 'rgba(59, 130, 246, 0.25)', color: '#93c5fd', padding: '0.15rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.4)' }}>
+                            Active • {concurrency} Streams
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {failedCount > 0 && !isUploading && (
+                          <button
+                            type="button"
+                            onClick={handleRetryFailed}
+                            style={{
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '6px',
+                              background: 'rgba(239, 68, 68, 0.2)',
+                              border: '1px solid rgba(239, 68, 68, 0.4)',
+                              color: '#fca5a5',
+                              fontSize: '0.76rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                            }}
+                          >
+                            <RotateCcw size={13} />
+                            Retry Failed ({failedCount})
+                          </button>
+                        )}
+
+                        {isUploading && (
+                          <button
+                            type="button"
+                            onClick={handleCancelPending}
+                            style={{
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '6px',
+                              background: 'rgba(239, 68, 68, 0.25)',
+                              border: '1px solid rgba(239, 68, 68, 0.5)',
+                              color: '#ef4444',
+                              fontSize: '0.76rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                            }}
+                          >
+                            <X size={13} />
+                            Cancel Pending
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="upload-dashboard-grid">
+                      <div className="metric-pill">
+                        <span className="metric-pill-label">Total Selected</span>
+                        <span className="metric-pill-value">{items.length}</span>
+                      </div>
+                      <div className="metric-pill">
+                        <span className="metric-pill-label" style={{ color: '#93c5fd' }}>Uploaded</span>
+                        <span className="metric-pill-value" style={{ color: '#93c5fd' }}>{completedCount}</span>
+                      </div>
+                      <div className="metric-pill">
+                        <span className="metric-pill-label" style={{ color: '#60a5fa' }}>Uploading</span>
+                        <span className="metric-pill-value" style={{ color: '#60a5fa' }}>{uploadingCount}</span>
+                      </div>
+                      <div className="metric-pill">
+                        <span className="metric-pill-label" style={{ color: '#cbd5e1' }}>Pending</span>
+                        <span className="metric-pill-value" style={{ color: '#cbd5e1' }}>{pendingCount}</span>
+                      </div>
+                      <div className="metric-pill">
+                        <span className="metric-pill-label" style={{ color: '#fca5a5' }}>Failed</span>
+                        <span className="metric-pill-value" style={{ color: '#fca5a5' }}>{failedCount}</span>
+                      </div>
+                      <div className="metric-pill">
+                        <span className="metric-pill-label" style={{ color: '#34d399' }}>Upload Speed</span>
+                        <span className="metric-pill-value" style={{ color: '#34d399', fontSize: '0.95rem' }}>
+                          {uploadSpeed || (isUploading ? 'Streaming...' : 'Idle')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#cbd5e1', marginBottom: '0.35rem' }}>
+                        <span>Overall Batch Progress</span>
+                        <strong style={{ color: '#60a5fa' }}>{overallProgress}% ({completedCount} of {items.length} completed)</strong>
+                      </div>
+                      <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${overallProgress}%`,
+                            height: '100%',
+                            background: 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)',
+                            transition: 'width 0.3s ease',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Top Toolbar */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -1000,30 +1267,50 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
                               </td>
                               <td>
                                 {item.status === 'uploading' ? (
-                                  <div style={{ minWidth: '120px' }}>
-                                    <div style={{ fontSize: '0.7rem', color: '#93c5fd', marginBottom: '0.2rem' }}>
-                                      {item.currentStep}
+                                  <div style={{ minWidth: '130px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '0.2rem' }}>
+                                      <span className="status-pill status-uploading">UPLOADING</span>
+                                      <span style={{ fontSize: '0.72rem', color: '#60a5fa', fontWeight: 600 }}>{item.progress}%</span>
                                     </div>
-                                    <div style={{ height: '5px', background: 'rgba(255,255,255,0.1)', borderRadius: '999px', overflow: 'hidden' }}>
+                                    <div style={{ height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '999px', overflow: 'hidden' }}>
                                       <div style={{ width: `${item.progress}%`, height: '100%', background: '#3b82f6', transition: 'width 0.2s' }} />
                                     </div>
+                                    <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: '2px' }}>{item.currentStep}</div>
                                   </div>
                                 ) : item.status === 'completed' ? (
-                                  <span style={{ color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.76rem', fontWeight: 500 }}>
-                                    <CheckCircle2 size={13} /> Uploaded
+                                  <span className="status-pill status-completed">
+                                    <CheckCircle2 size={13} /> COMPLETED
                                   </span>
                                 ) : item.status === 'failed' ? (
-                                  <span style={{ color: '#f87171', fontSize: '0.74rem' }} title={item.errorMessage}>
-                                    Failed: {item.errorMessage}
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="status-pill status-failed">FAILED</span>
+                                    <span style={{ fontSize: '0.68rem', color: '#fca5a5' }} title={item.errorMessage}>
+                                      {item.errorMessage || 'Upload failed'}
+                                    </span>
+                                  </div>
+                                ) : item.status === 'retrying' ? (
+                                  <span className="status-pill status-retrying">
+                                    <RotateCcw size={12} className="spinning" /> RETRYING
+                                  </span>
+                                ) : item.status === 'cancelled' ? (
+                                  <span className="status-pill status-cancelled">
+                                    CANCELLED
                                   </span>
                                 ) : item.status === 'approved' ? (
-                                  <span style={{ color: '#6ee7b7', fontSize: '0.74rem', fontWeight: 500 }}>
-                                    Ready to Upload
+                                  <span className="status-pill status-approved">
+                                    READY
                                   </span>
                                 ) : (
-                                  <span style={{ color: '#94a3b8', fontSize: '0.74rem' }}>
-                                    {item.currentStep}
-                                  </span>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="status-pill status-pending">
+                                      PENDING
+                                    </span>
+                                    {item.isDuplicate && (
+                                      <span style={{ fontSize: '0.68rem', color: '#fbbf24' }}>
+                                        On Drive
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
                               </td>
                               <td>
@@ -1161,9 +1448,8 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
                     <div style={{ display: 'flex', gap: '0.75rem' }}>
                       {isUploading && (
                         <button
-                          onClick={() => {
-                            isCancelledRef.current = true
-                          }}
+                          type="button"
+                          onClick={handleCancelPending}
                           style={{
                             padding: '0.6rem 1.1rem',
                             borderRadius: '8px',

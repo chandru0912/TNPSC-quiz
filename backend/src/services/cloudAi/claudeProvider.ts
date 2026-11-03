@@ -11,6 +11,7 @@ import {
   CloudAICompletionOptions,
   CloudAIProviderInfo,
 } from './cloudAiTypes';
+import { resolveAnthropicModel } from './claudeTester';
 
 const DEFAULT_MODEL = 'claude-3-5-sonnet-20241022';
 
@@ -58,7 +59,7 @@ export class ClaudeCloudProvider implements CloudAIProvider {
   }
 
   private getModel(): string {
-    return (process.env.CLAUDE_MODEL || DEFAULT_MODEL).trim();
+    return resolveAnthropicModel(process.env.CLAUDE_MODEL || DEFAULT_MODEL);
   }
 
   isConfigured(): boolean {
