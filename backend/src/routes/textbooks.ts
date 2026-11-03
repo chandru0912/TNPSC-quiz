@@ -16,6 +16,7 @@ import {
   getExtractionStatus,
   getExtractedPages,
   processAutomaticPdfExtraction,
+  getOverallExtractionOverview,
 } from '../services/pdfExtractionService';
 import {
   TNPSC_GROUPS_LIST,
@@ -892,6 +893,10 @@ router.delete('/:id', requireAdminAuth, async (req: Request, res: Response) => {
       }
     }
 
+    // Cascade delete from textbook_content & pdf_extractions
+    await pool.query(`DELETE FROM textbook_content WHERE textbook_id = $1`, [id]);
+    await pool.query(`DELETE FROM pdf_extractions WHERE textbook_id = $1`, [id]);
+
     await pool.query(`DELETE FROM textbooks WHERE id = $1`, [id]);
 
     return res.status(200).json({
@@ -926,36 +931,25 @@ router.post('/:id/reprocess', requireAdminAuth, async (req: Request, res: Respon
 
     const r = tbRes.rows[0];
 
-    await processTextbookPdf({
+    const result = await processAutomaticPdfExtraction({
       textbookId: r.id,
-      filePath: r.file_path,
-      groupId: r.group_id,
-      standard: r.standard,
-      subject: r.subject,
-      medium: r.medium,
+      retryOnlyFailed: false,
     });
 
-    const finalRes = await pool.query(
-      `SELECT status, page_count, error_message FROM textbooks WHERE id = $1`,
-      [id]
-    );
-    const finalRow = finalRes.rows[0] || { status: 'completed', page_count: 0, error_message: null };
-
-    if (finalRow.status === 'failed') {
+    if (result.status === 'FAILED') {
       return res.status(422).json({
         status: 'error',
-        message: finalRow.error_message || `Reprocessing failed for "${r.book_name}".`,
+        message: result.errorMessage || `Reprocessing failed for "${r.book_name}".`,
+        data: result,
       });
     }
 
     return res.status(200).json({
       status: 'success',
-      message: `Reprocessing completed for "${r.book_name}" (${finalRow.page_count || 0} pages).`,
-      data: {
-        id: r.id,
-        status: finalRow.status,
-        pageCount: finalRow.page_count || 0,
-      },
+      message: result.inProgress
+        ? `Reprocessing started for "${r.book_name}" (${result.extractedPagesCount}/${result.totalPages} pages stored, continuing).`
+        : `Reprocessing completed for "${r.book_name}" (${result.extractedPagesCount}/${result.totalPages} pages).`,
+      data: { id: r.id, pageCount: result.extractedPagesCount, ...result },
     });
   } catch (error: any) {
     console.error('[Textbooks Route] Reprocess error:', error);
@@ -978,6 +972,20 @@ router.get('/:id/extraction-status', async (req: Request, res: Response) => {
     return res.status(200).json({ status: 'success', data: status });
   } catch (err: any) {
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to check status.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/extraction-overview
+ * Returns aggregate extraction statistics across all registered PDF materials.
+ */
+router.get('/extraction-overview', async (_req: Request, res: Response) => {
+  try {
+    const overview = await getOverallExtractionOverview();
+    return res.status(200).json({ status: 'success', data: overview });
+  } catch (err: any) {
+    console.error('[TextbookExtractionOverview] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to get extraction overview.' });
   }
 });
 
@@ -1010,32 +1018,23 @@ router.post('/:id/extract', requireAdminAuth, async (req: Request, res: Response
       return res.status(400).json({ status: 'error', message: 'Valid textbook ID is required.' });
     }
 
-    const wait = req.query.wait === 'true' || req.query.wait === '1';
+    const processAll = req.query.all === 'true' || req.body?.processAll === true;
 
-    if (wait) {
-      const result = await processAutomaticPdfExtraction({
-        textbookId,
-        retryOnlyFailed: false,
-      });
-
-      return res.status(200).json({
-        status: result.success ? 'success' : 'error',
-        message: result.success
-          ? `Successfully extracted ${result.totalPages} pages.`
-          : result.errorMessage || 'Extraction failed',
-        data: result,
-      });
-    }
-
-    // Run in background
-    processAutomaticPdfExtraction({ textbookId, retryOnlyFailed: false }).catch((bgErr) => {
-      console.warn(`[TextbookExtract] Background extraction error for #${textbookId}:`, bgErr.message);
+    // Process a bounded slice or full document
+    const result = await processAutomaticPdfExtraction({
+      textbookId,
+      retryOnlyFailed: false,
+      processAllPages: processAll,
     });
 
-    return res.status(202).json({
-      status: 'success',
-      message: `Extraction initiated for textbook #${textbookId} in background.`,
-      textbookId,
+    return res.status(200).json({
+      status: result.success ? 'success' : 'error',
+      message: result.inProgress
+        ? `Extracting: ${result.extractedPagesCount}/${result.totalPages} pages stored, ${result.remainingPages} remaining.`
+        : result.success
+        ? `Successfully extracted ${result.extractedPagesCount}/${result.totalPages} pages.`
+        : result.errorMessage || 'Extraction failed',
+      data: result,
     });
   } catch (err: any) {
     console.error('[TextbookExtract] Error:', err.message);
@@ -1061,9 +1060,9 @@ router.post('/:id/retry-failed', requireAdminAuth, async (req: Request, res: Res
 
     return res.status(200).json({
       status: result.success ? 'success' : 'error',
-      message: result.success
-        ? `Retry completed: ${result.nativePagesCount} native, ${result.ocrPagesCount} OCR, ${result.failedPagesCount} failed.`
-        : result.errorMessage || 'Retry failed',
+      message: result.inProgress
+        ? `Retrying failed pages: ${result.remainingPages} page(s) still pending.`
+        : `Retry completed: ${result.nativePagesCount} native, ${result.ocrPagesCount} OCR, ${result.failedPagesCount} failed.`,
       data: result,
     });
   } catch (err: any) {

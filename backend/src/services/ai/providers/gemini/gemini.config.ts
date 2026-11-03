@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 
-export const GEMINI_DEFAULT_MODEL = 'gemini-1.5-flash';
+export const GEMINI_DEFAULT_MODEL = 'gemini-3.8-flash';
 
 /**
  * Normalizes model aliases to valid Gemini model identifiers.
@@ -15,6 +15,12 @@ export function resolveGeminiModel(rawModel?: string): string {
   const model = String(rawModel || '').trim().toLowerCase();
   if (!model) return GEMINI_DEFAULT_MODEL;
 
+  if (model === 'gemini-3.8' || model === 'gemini-3.8-flash') {
+    return 'gemini-3.8-flash';
+  }
+  if (model === 'gemini-3.5' || model === 'gemini-3.5-flash-lite') {
+    return 'gemini-3.5-flash-lite';
+  }
   if (model === 'gemini-flash' || model === 'gemini-1.5-flash' || model === 'flash') {
     return 'gemini-1.5-flash';
   }

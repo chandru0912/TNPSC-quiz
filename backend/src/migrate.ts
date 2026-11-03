@@ -467,6 +467,11 @@ export async function runMigration() {
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS extraction_status VARCHAR(30) DEFAULT 'completed';
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS extraction_error TEXT DEFAULT NULL;
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS processing_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS file_name TEXT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS standard INT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS subject TEXT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS term TEXT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS material_id INT DEFAULT NULL;
 
       DO $$
       BEGIN
@@ -527,14 +532,11 @@ export async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_pdf_extractions_textbook ON pdf_extractions (textbook_id);
       CREATE INDEX IF NOT EXISTS idx_pdf_extractions_status ON pdf_extractions (extraction_status);
 
-      -- Normalize high-coverage materials (>= 85% pages extracted) to COMPLETED
-      UPDATE google_drive_materials
-      SET extraction_status = 'COMPLETED', failed_pages = 0, completion_percentage = 100
-      WHERE extraction_status = 'PARTIALLY_COMPLETED' AND (page_count - COALESCE(failed_pages, 0)) >= 50;
-
-      UPDATE textbooks
-      SET extraction_status = 'COMPLETED', failed_pages = 0, completion_percentage = 100
-      WHERE extraction_status = 'PARTIALLY_COMPLETED' AND (page_count - COALESCE(failed_pages, 0)) >= 50;
+      -- Durable resume cursor + real per-method metrics for the extraction job.
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS next_page INT DEFAULT 1;
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS native_pages INT DEFAULT 0;
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS ocr_pages INT DEFAULT 0;
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS pdf_type VARCHAR(30) DEFAULT 'UNKNOWN';
 
       -- 12. Safe Schema Widening Migration: Widen VARCHAR columns to TEXT
       -- Eliminates PostgreSQL error 22001 (value too long for type character varying(255))
@@ -646,6 +648,11 @@ export async function runMigration() {
 
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50) DEFAULT 'claude';
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50) DEFAULT 'claude';
+
+      ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS api_key TEXT;
+      ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'READY';
+      ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS status_message TEXT;
+      ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMP WITH TIME ZONE;
 
       -- Seed default provider active statuses if absent
       INSERT INTO ai_provider_configs (provider, model, is_active)

@@ -29,19 +29,25 @@ export class ClaudeProviderService implements IAIProvider {
     return getClaudeApiKey().length > 5;
   }
 
-  async getStatus(): Promise<AIProviderConfigInfo> {
+  async getStatus(): Promise<AIProviderConfigInfo & { connected?: boolean; status?: string }> {
     const key = getClaudeApiKey();
-    const model = getClaudeModel();
+    let model = getClaudeModel();
 
-    // Check database if configured as active
-    let isActive = true;
+    let isActive = false;
+    let connected = false;
+    let status = key.length > 5 ? 'READY' : 'OFFLINE';
     try {
       const res = await pool.query(
-        'SELECT is_active, temperature, max_tokens FROM ai_provider_configs WHERE provider = $1',
+        'SELECT is_active, model, status, temperature, max_tokens FROM ai_provider_configs WHERE provider = $1',
         ['claude']
       );
       if (res.rows.length > 0) {
         isActive = Boolean(res.rows[0].is_active);
+        if (res.rows[0].model) model = res.rows[0].model;
+        if (res.rows[0].status) {
+          status = res.rows[0].status;
+          connected = res.rows[0].status === 'CONNECTED';
+        }
       }
     } catch {
       // Table may not yet be initialized during initial startup
@@ -50,11 +56,13 @@ export class ClaudeProviderService implements IAIProvider {
     return {
       provider: 'claude',
       name: this.displayName,
-      configured: Boolean(key),
+      configured: key.length > 5,
+      connected,
       model,
       configuredVia: key ? 'env' : 'none',
       maskedKey: maskClaudeApiKey(key),
       isActive,
+      status,
     };
   }
 

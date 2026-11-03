@@ -1,59 +1,29 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BookOpen, CheckCircle, Info, RefreshCw, Sparkles, Zap, Cpu } from 'lucide-react'
+import {
+  AlertTriangle,
+  BookOpen,
+  Check,
+  CheckCircle,
+  Cpu,
+  Info,
+  RefreshCw,
+  Sparkles,
+  Zap,
+} from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import {
+  TNPSC_GROUPS,
   getStandardsForSubject,
   getSubjectsForGroup,
-  getUnitsForSubjectStandard,
+  getTermsForStandard,
+  getUnitsForSubjectStandardAndTerm,
+  getLessonsForSelection,
+  type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
 
 export type GroupId = 'group1' | 'group2' | 'group2a' | 'group4'
 export type Language = 'tamil' | 'english'
-export type Difficulty = 'Easy' | 'Medium' | 'Hard'
-
-export interface GroupItem {
-  id: GroupId
-  name: string
-  code: string
-  badge: string
-}
-
-export interface SubjectItem {
-  id: string
-  name: string
-  description?: string
-}
-
-export interface StandardItem {
-  id: number
-  label: string
-  shortLabel: string
-}
-
-export interface UnitItem {
-  id: number
-  unitNumber: string
-  title: string
-  subjectName: string
-  notesCount?: number
-  materialsCount?: number
-  hasStudyNotes?: boolean
-  hasTextbook?: boolean
-}
-
-export interface LessonItem {
-  lessonId: string
-  lessonNumber: string
-  title: string
-  unitId: number
-  term?: string | null
-  volume?: string | null
-  notesCount: number
-  textbooksCount: number
-  hasStudyNotes: boolean
-  hasTextbook: boolean
-  source?: 'study_notes' | 'google_drive' | 'syllabus'
-}
+export type Difficulty = 'Easy' | 'Medium' | 'Hard' | 'Mixed'
 
 export interface TextbookCandidate {
   id: number
@@ -83,8 +53,10 @@ export interface GeneratedQuestion {
   explanation: string
   lessonTitle: string
   lessonNumber?: string | null
+  topic?: string | null
   sourcePdf?: string | null
   sourcePage?: number | null
+  aiProvider?: 'claude' | 'gemini' | string
 }
 
 export interface GenerationResult {
@@ -101,227 +73,293 @@ export interface McqCascadeGeneratorProps {
   onRefreshData?: () => void
 }
 
-const GROUPS_LIST: GroupItem[] = [
-  { id: 'group1', name: 'TNPSC Group 1', code: 'Code: 497', badge: 'Degree Standard • Prelims' },
-  { id: 'group2', name: 'TNPSC Group 2', code: 'Code: 495', badge: 'Degree Standard • Prelims' },
-  { id: 'group2a', name: 'TNPSC Group 2A', code: 'Code: 495', badge: 'Degree Standard • Non-Interview' },
-  { id: 'group4', name: 'TNPSC Group 4', code: 'Code: 496', badge: 'SSLC Standard • Single Paper' },
-]
-
 export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   token,
   showToast,
   onRefreshData,
 }) => {
-  // Step 1: TNPSC Group
+  // =========================================================================
+  // Dropdown States: Synchronized with Study Notes Generation
+  // 1. TNPSC Group
+  // 2. Subject
+  // 3. Standard
+  // 4. Term (4th field)
+  // 5. Unit (5th field)
+  // 6. Lesson Title (6th field)
+  // =========================================================================
+
   const [groupId, setGroupId] = useState<GroupId>('group4')
-
-  // Step 2: Subject
   const [subjectId, setSubjectId] = useState('general-studies')
-
-  // Step 3: Standard
   const [standard, setStandard] = useState(6)
-
-  // Step 4: Unit
-  const [unitId, setUnitId] = useState<number | ''>(1)
-  const [unitsList, setUnitsList] = useState<UnitItem[]>([])
-  const [isLoadingUnits, setIsLoadingUnits] = useState(false)
-
-  // Step 5: Term (Dynamic Term Selection: 5th position)
   const [term, setTerm] = useState('Term 1')
-  const [termOptions, setTermOptions] = useState<string[]>(['Term 1', 'Term 2', 'Term 3'])
-  const [isLoadingTerms, setIsLoadingTerms] = useState(false)
+  const [unitId, setUnitId] = useState<number>(1)
+  const [selectedLessonTitle, setSelectedLessonTitle] = useState('')
 
-  // Step 6: Lesson Selection (Mandatory before textbook mapping)
-  const [lessonsList, setLessonsList] = useState<LessonItem[]>([])
-  const [selectedLessonKey, setSelectedLessonKey] = useState('')
-  const [isLoadingLessons, setIsLoadingLessons] = useState(false)
+  // Step 7: Topic / Subtopic Selection
+  const [availableTopics, setAvailableTopics] = useState<string[]>([])
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([])
 
-  // Step 7: Automatic Textbook Selection (Mapped to Subject, Standard, Unit, Term, Lesson)
+  // Textbook Candidate Grounding (Auto-matched to lesson)
   const [textbooksList, setTextbooksList] = useState<TextbookCandidate[]>([])
   const [selectedTextbookKey, setSelectedTextbookKey] = useState('')
   const [isLoadingTextbooks, setIsLoadingTextbooks] = useState(false)
 
-  // Step 8: Volume (when applicable)
+  // Volume (optional / when applicable)
   const [volume, setVolume] = useState('Not Applicable')
   const [volumeOptions, setVolumeOptions] = useState<string[]>(['Not Applicable'])
-  const [isLoadingVolumes, setIsLoadingVolumes] = useState(false)
 
-  // Independent Settings: Steps 9, 10, 11 (Preserved across cascading resets)
-  const [language, setLanguage] = useState<Language>('tamil')
-  const [questionCount, setQuestionCount] = useState(50)
-  const [difficulty, setDifficulty] = useState<Difficulty>('Medium')
-
-  // Independent AI Provider Selection
+  // Step 8: AI Provider Engine Selection (Independent Claude & Gemini)
   const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude')
+  const [claudeStatusInfo, setClaudeStatusInfo] = useState<{ configured: boolean; connected: boolean; model?: string } | null>(null)
+  const [geminiStatusInfo, setGeminiStatusInfo] = useState<{ configured: boolean; connected: boolean; model?: string; status?: string } | null>(null)
 
-  // Execution & Progress State
+  // Steps 9, 10, 11: Generation Settings
+  const [questionCount, setQuestionCount] = useState(25)
+  const [difficulty, setDifficulty] = useState<Difficulty>('Medium')
+  const [language, setLanguage] = useState<Language>('tamil')
+
+  // Step 12: Execution & Progress State
   const [isGenerating, setIsGenerating] = useState(false)
   const [extractingMap, setExtractingMap] = useState<Record<string, boolean>>({})
   const [progress, setProgress] = useState<{ pct: number; step: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<GenerationResult | null>(null)
 
-  // Dynamic Subjects & Standards derived from registry
-  const subjects = useMemo(() => getSubjectsForGroup(groupId), [groupId])
-  const standards = useMemo(
-    () => getStandardsForSubject(groupId, subjectId),
-    [groupId, subjectId]
+  // =========================================================================
+  // Synchronized Data Sources directly from unifiedSyllabusRegistry
+  // (The exact single source of truth used by Study Notes Generation)
+  // =========================================================================
+
+  const effectiveGroupId: 'group1' | 'group2' | 'group4' =
+    groupId === 'group2a' ? 'group2' : groupId
+
+  // 1. Available subjects for selected Group
+  const availableSubjects = useMemo(
+    () => getSubjectsForGroup(effectiveGroupId),
+    [effectiveGroupId]
   )
 
-  const selectedLesson = useMemo(() => {
-    return (
-      lessonsList.find((l) => `${l.lessonNumber}:${l.title}` === selectedLessonKey) ||
-      lessonsList.find((l) => l.lessonId === selectedLessonKey) ||
-      null
-    )
-  }, [lessonsList, selectedLessonKey])
+  // 2. Available standards for selected Group & Subject
+  const availableStandards = useMemo(
+    () => getStandardsForSubject(effectiveGroupId, subjectId),
+    [effectiveGroupId, subjectId]
+  )
+
+  // 3. Available terms for selected Standard (Classes 6-9: Term 1, 2, 3; Classes 10-12: Full Year)
+  const availableTerms = useMemo(
+    () => getTermsForStandard(standard),
+    [standard]
+  )
+
+  // 4. Available units for selected Group, Subject, Standard & Term
+  const availableUnits = useMemo(
+    () => getUnitsForSubjectStandardAndTerm(effectiveGroupId, subjectId, standard, term),
+    [effectiveGroupId, subjectId, standard, term]
+  )
+
+  // 5. Available lesson titles strictly from Study Notes Generation structure
+  const availableLessons = useMemo(
+    () => getLessonsForSelection(effectiveGroupId, subjectId, standard, Number(unitId), term),
+    [effectiveGroupId, subjectId, standard, unitId, term]
+  )
+
+  // 6. Currently selected Lesson object
+  const selectedLessonObj: LessonItem | undefined = useMemo(() => {
+    return availableLessons.find((l) => l.title === selectedLessonTitle) || availableLessons[0]
+  }, [availableLessons, selectedLessonTitle])
 
   const selectedTextbook = useMemo(() => {
     return textbooksList.find((t) => t.key === selectedTextbookKey) || null
   }, [textbooksList, selectedTextbookKey])
 
-  const selectedUnit = useMemo(() => {
-    return unitsList.find((u) => u.id === unitId) || null
-  }, [unitsList, unitId])
+  // =========================================================================
+  // Validation before MCQ generation
+  // =========================================================================
 
-  // Validation before MCQ generation (Part 9)
   const validationErrors = useMemo(() => {
     const errs: string[] = []
     if (!groupId) errs.push('1. Select TNPSC Group')
     if (!subjectId) errs.push('2. Select Subject')
     if (!standard) errs.push('3. Select Standard')
-    if (unitId === '') errs.push('4. Select Unit')
-    if (!term) errs.push('5. Select Term')
-    if (!selectedLesson) errs.push('6. Select a Lesson (Mandatory)')
-    if (!selectedTextbook) errs.push('7. Match a Textbook')
+    if (!term) errs.push('4. Select Term')
+    if (!unitId) errs.push('5. Select Unit')
+    if (!selectedLessonObj) errs.push('6. Select a Lesson Title')
+    if (availableTopics.length > 0 && selectedTopics.length === 0) {
+      errs.push('7. Select at least one Topic / Subtopic')
+    }
+    if (!selectedTextbook) errs.push('Match a Verified Textbook')
     if (
       selectedTextbook &&
       !selectedTextbook.hasExtractedText &&
       selectedTextbook.extractionStatus !== 'COMPLETED' &&
       selectedTextbook.extractionStatus !== 'PARTIALLY_COMPLETED'
     ) {
-      errs.push('8. Extract textbook PDF text before generation')
+      errs.push('Extract textbook PDF text before generation')
     }
     return errs
-  }, [groupId, subjectId, standard, unitId, term, selectedLesson, selectedTextbook])
+  }, [groupId, subjectId, standard, term, unitId, selectedLessonObj, availableTopics, selectedTopics, selectedTextbook])
+
+  // Helper to apply newly selected lesson and ground textbook
+  const applySelectedLesson = (
+    lesson: LessonItem | undefined,
+    grp: GroupId,
+    sub: string,
+    std: number,
+    uId: number,
+    t: string
+  ) => {
+    if (!lesson) {
+      setSelectedLessonTitle('')
+      setAvailableTopics([])
+      setSelectedTopics([])
+      setTextbooksList([])
+      setSelectedTextbookKey('')
+      setResult(null)
+      setError(null)
+      return
+    }
+
+    setSelectedLessonTitle(lesson.title)
+    setResult(null)
+    setError(null)
+
+    // Extract syllabus topics strictly from the lesson structure
+    const topics: string[] = []
+    if (Array.isArray(lesson.topics) && lesson.topics.length > 0) {
+      lesson.topics.forEach((tp) => {
+        if (typeof tp === 'string') topics.push(tp)
+        else if (tp && typeof tp.name === 'string') topics.push(tp.name)
+      })
+    }
+
+    if (topics.length > 0) {
+      setAvailableTopics(topics)
+      setSelectedTopics(topics)
+    } else {
+      setAvailableTopics([lesson.title])
+      setSelectedTopics([lesson.title])
+    }
+
+    loadTextbooks(grp, sub, std, uId, t, lesson.id, lesson.title)
+  }
 
   // =========================================================================
-  // Cascading Reset Handlers (Part 7)
+  // Cascading Selection Handlers with Downstream Resets
   // =========================================================================
 
-  // 1. Group Change -> Resets: Subject, Standard, Unit, Term, Lesson, Textbook
-  const handleGroupChange = (nextGroup: GroupId) => {
-    setGroupId(nextGroup)
-    const nextSubjects = getSubjectsForGroup(nextGroup)
+  // 1. Group Change -> filters Subjects, resets downstream
+  const handleGroupChange = (newGroupId: GroupId) => {
+    setGroupId(newGroupId)
+    const effGroup: 'group1' | 'group2' | 'group4' = newGroupId === 'group2a' ? 'group2' : newGroupId
+    const nextSubjects = getSubjectsForGroup(effGroup)
     const nextSub = nextSubjects[0]?.id || 'general-studies'
     setSubjectId(nextSub)
-    const nextStandards = getStandardsForSubject(nextGroup, nextSub)
+
+    const nextStandards = getStandardsForSubject(effGroup, nextSub)
     const nextStd = nextStandards[0]?.id || 6
     setStandard(nextStd)
-    setUnitId('')
-    setUnitsList([])
-    setLessonsList([])
-    setSelectedLessonKey('')
-    setTextbooksList([])
-    setSelectedTextbookKey('')
-    setVolume('Not Applicable')
-    setVolumeOptions(['Not Applicable'])
-    setResult(null)
-    setError(null)
-    loadUnits(nextGroup, nextSub, nextStd)
-  }
 
-  // 2. Subject Change -> Resets: Standard, Unit, Term, Lesson, Textbook
-  const handleSubjectChange = (nextSubject: string) => {
-    setSubjectId(nextSubject)
-    const nextStandards = getStandardsForSubject(groupId, nextSubject)
-    const nextStd = nextStandards[0]?.id || 6
-    setStandard(nextStd)
-    setUnitId('')
-    setUnitsList([])
-    setLessonsList([])
-    setSelectedLessonKey('')
-    setTextbooksList([])
-    setSelectedTextbookKey('')
-    setVolume('Not Applicable')
-    setVolumeOptions(['Not Applicable'])
-    setResult(null)
-    setError(null)
-    loadUnits(groupId, nextSubject, nextStd)
-  }
-
-  // 3. Standard Change -> Resets: Unit, Term, Lesson, Textbook
-  const handleStandardChange = (nextStandard: number) => {
-    setStandard(nextStandard)
-    setUnitId('')
-    setUnitsList([])
-    setLessonsList([])
-    setSelectedLessonKey('')
-    setTextbooksList([])
-    setSelectedTextbookKey('')
-    setVolume('Not Applicable')
-    setVolumeOptions(['Not Applicable'])
-    setResult(null)
-    setError(null)
-    loadUnits(groupId, subjectId, nextStandard)
-  }
-
-  // 4. Unit Change -> Resets: Term, Lesson, Textbook
-  const handleUnitChange = (nextUnitId: number | '') => {
-    setUnitId(nextUnitId)
-    setLessonsList([])
-    setSelectedLessonKey('')
-    setTextbooksList([])
-    setSelectedTextbookKey('')
-    setVolume('Not Applicable')
-    setVolumeOptions(['Not Applicable'])
-    setResult(null)
-    setError(null)
-
-    if (nextUnitId !== '') {
-      loadTerms(groupId, subjectId, standard, nextUnitId)
-    }
-  }
-
-  // 5. Term Change -> Resets: Lesson, Textbook
-  const handleTermChange = (nextTerm: string) => {
+    const nextTerms = getTermsForStandard(nextStd)
+    const nextTerm = nextTerms[0] || 'Term 1'
     setTerm(nextTerm)
-    setLessonsList([])
-    setSelectedLessonKey('')
-    setTextbooksList([])
-    setSelectedTextbookKey('')
-    setVolume('Not Applicable')
-    setVolumeOptions(['Not Applicable'])
-    setResult(null)
-    setError(null)
 
-    if (unitId !== '') {
-      loadLessons(groupId, subjectId, standard, Number(unitId), nextTerm)
-    }
+    const nextUnits = getUnitsForSubjectStandardAndTerm(effGroup, nextSub, nextStd, nextTerm)
+    const nextUnit = nextUnits[0]?.id || 1
+    setUnitId(nextUnit)
+
+    const nextLessons = getLessonsForSelection(effGroup, nextSub, nextStd, nextUnit, nextTerm)
+    const nextLesson = nextLessons[0]
+    applySelectedLesson(nextLesson, newGroupId, nextSub, nextStd, nextUnit, nextTerm)
   }
 
-  // 6. Lesson Selection -> Refreshes: Matching Textbooks
-  const handleLessonSelect = (lesson: LessonItem) => {
-    const key = `${lesson.lessonNumber}:${lesson.title}`
-    setSelectedLessonKey(key)
-    setTextbooksList([])
-    setSelectedTextbookKey('')
-    setVolume('Not Applicable')
-    setVolumeOptions(['Not Applicable'])
-    setResult(null)
-    setError(null)
+  // 2. Subject Change -> filters Standards, resets downstream
+  const handleSubjectChange = (newSubject: string) => {
+    setSubjectId(newSubject)
+    const nextStandards = getStandardsForSubject(effectiveGroupId, newSubject)
+    const nextStd = nextStandards[0]?.id || 6
+    setStandard(nextStd)
 
-    loadTextbooks(groupId, subjectId, standard, lesson.unitId, term, lesson.lessonId, lesson.title)
+    const nextTerms = getTermsForStandard(nextStd)
+    const nextTerm = nextTerms[0] || 'Term 1'
+    setTerm(nextTerm)
+
+    const nextUnits = getUnitsForSubjectStandardAndTerm(effectiveGroupId, newSubject, nextStd, nextTerm)
+    const nextUnit = nextUnits[0]?.id || 1
+    setUnitId(nextUnit)
+
+    const nextLessons = getLessonsForSelection(effectiveGroupId, newSubject, nextStd, nextUnit, nextTerm)
+    const nextLesson = nextLessons[0]
+    applySelectedLesson(nextLesson, groupId, newSubject, nextStd, nextUnit, nextTerm)
   }
 
-  // 7. Textbook Selection -> Updates Volume Options
+  // 3. Standard Change -> filters Terms, resets downstream
+  const handleStandardChange = (newStandard: number) => {
+    setStandard(newStandard)
+    const nextTerms = getTermsForStandard(newStandard)
+    const nextTerm = nextTerms.includes(term) ? term : nextTerms[0]
+    setTerm(nextTerm)
+
+    const nextUnits = getUnitsForSubjectStandardAndTerm(effectiveGroupId, subjectId, newStandard, nextTerm)
+    const nextUnit = nextUnits[0]?.id || 1
+    setUnitId(nextUnit)
+
+    const nextLessons = getLessonsForSelection(effectiveGroupId, subjectId, newStandard, nextUnit, nextTerm)
+    const nextLesson = nextLessons[0]
+    applySelectedLesson(nextLesson, groupId, subjectId, newStandard, nextUnit, nextTerm)
+  }
+
+  // 4. Term Change -> filters Units, resets downstream
+  const handleTermChange = (newTerm: string) => {
+    setTerm(newTerm)
+    const nextUnits = getUnitsForSubjectStandardAndTerm(effectiveGroupId, subjectId, standard, newTerm)
+    const validUnit = nextUnits.some((u) => u.id === Number(unitId)) ? Number(unitId) : nextUnits[0]?.id || 1
+    setUnitId(validUnit)
+
+    const nextLessons = getLessonsForSelection(effectiveGroupId, subjectId, standard, validUnit, newTerm)
+    const nextLesson = nextLessons[0]
+    applySelectedLesson(nextLesson, groupId, subjectId, standard, validUnit, newTerm)
+  }
+
+  // 5. Unit Change -> filters Lesson Titles, resets downstream
+  const handleUnitChange = (newUnitId: number) => {
+    setUnitId(newUnitId)
+    const nextLessons = getLessonsForSelection(effectiveGroupId, subjectId, standard, newUnitId, term)
+    const nextLesson = nextLessons[0]
+    applySelectedLesson(nextLesson, groupId, subjectId, standard, newUnitId, term)
+  }
+
+  // 6. Lesson Title Change
+  const handleLessonChange = (newLessonTitle: string) => {
+    const nextLesson = availableLessons.find((l) => l.title === newLessonTitle) || availableLessons[0]
+    applySelectedLesson(nextLesson, groupId, subjectId, standard, Number(unitId), term)
+  }
+
+  // Step 7: Topic selection handlers
+  const handleToggleTopic = (t: string) => {
+    setSelectedTopics((prev) => {
+      if (prev.includes(t)) {
+        return prev.filter((item) => item !== t)
+      } else {
+        return [...prev, t]
+      }
+    })
+  }
+
+  const handleSelectAllTopics = () => {
+    setSelectedTopics([...availableTopics])
+  }
+
+  const handleClearAllTopics = () => {
+    setSelectedTopics([])
+  }
+
+  // Textbook candidate selection
   const handleTextbookSelect = (candidate: TextbookCandidate) => {
     setSelectedTextbookKey(candidate.key)
     loadVolumes(candidate, standard, term)
   }
 
-  // 8. Volume Change
+  // Volume Change
   const handleVolumeChange = (nextVolume: string) => {
     setVolume(nextVolume)
     setResult(null)
@@ -329,115 +367,8 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   }
 
   // =========================================================================
-  // Data Fetching Functions
+  // Textbook Matching & Extraction
   // =========================================================================
-
-  const loadUnits = (grp: GroupId, sub: string, std: number) => {
-    setIsLoadingUnits(true)
-    setError(null)
-
-    const query = new URLSearchParams({
-      groupId: grp,
-      subjectId: sub,
-      standardId: String(std),
-    })
-
-    apiFetch(`/api/syllabus/units?${query.toString()}`)
-      .then(async (res) => {
-        const data = await res.json()
-        if (data.success && Array.isArray(data.units) && data.units.length > 0) {
-          setUnitsList(data.units)
-          const firstUnit = data.units[0]
-          setUnitId(firstUnit.id)
-          loadTerms(grp, sub, std, firstUnit.id)
-        } else {
-          const fallback = getUnitsForSubjectStandard(grp, sub, std)
-          setUnitsList(fallback)
-          if (fallback.length > 0) {
-            setUnitId(fallback[0].id)
-            loadTerms(grp, sub, std, fallback[0].id)
-          }
-        }
-      })
-      .catch(() => {
-        const fallback = getUnitsForSubjectStandard(grp, sub, std)
-        setUnitsList(fallback)
-        if (fallback.length > 0) {
-          setUnitId(fallback[0].id)
-          loadTerms(grp, sub, std, fallback[0].id)
-        }
-      })
-      .finally(() => {
-        setIsLoadingUnits(false)
-      })
-  }
-
-  const loadTerms = (grp: GroupId, sub: string, std: number, uId: number) => {
-    setIsLoadingTerms(true)
-
-    const query = new URLSearchParams({
-      groupId: grp,
-      subjectId: sub,
-      standardId: String(std),
-      unitId: String(uId),
-    })
-
-    apiFetch(`/api/study-materials/terms?${query.toString()}`)
-      .then(async (res) => {
-        const data = await res.json()
-        if (data.success && Array.isArray(data.terms) && data.terms.length > 0) {
-          setTermOptions(data.terms)
-          const chosenTerm = data.selected || data.terms[0]
-          setTerm(chosenTerm)
-          loadLessons(grp, sub, std, uId, chosenTerm)
-        } else {
-          const fallback = std >= 10 ? ['Full Year'] : ['Term 1', 'Term 2', 'Term 3']
-          setTermOptions(fallback)
-          setTerm(fallback[0])
-          loadLessons(grp, sub, std, uId, fallback[0])
-        }
-      })
-      .catch(() => {
-        const fallback = std >= 10 ? ['Full Year'] : ['Term 1', 'Term 2', 'Term 3']
-        setTermOptions(fallback)
-        setTerm(fallback[0])
-        loadLessons(grp, sub, std, uId, fallback[0])
-      })
-      .finally(() => {
-        setIsLoadingTerms(false)
-      })
-  }
-
-  const loadLessons = (grp: GroupId, sub: string, std: number, uId: number, t: string) => {
-    setIsLoadingLessons(true)
-    setError(null)
-
-    const query = new URLSearchParams({
-      groupId: grp,
-      subjectId: sub,
-      standardId: String(std),
-      unitId: String(uId),
-      term: t,
-    })
-
-    apiFetch(`/api/study-materials/lessons?${query.toString()}`)
-      .then(async (res) => {
-        const data = await res.json()
-        if (data.success && Array.isArray(data.lessons)) {
-          setLessonsList(data.lessons)
-        } else {
-          setLessonsList([])
-        }
-      })
-      .catch((err) => {
-        console.error('Error fetching lessons:', err)
-        setError('Failed to load lessons from Study Materials database.')
-        setLessonsList([])
-      })
-      .finally(() => {
-        setIsLoadingLessons(false)
-      })
-  }
 
   const loadTextbooks = (
     grp: GroupId,
@@ -467,9 +398,6 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
         if (data.success && Array.isArray(data.textbooks) && data.textbooks.length > 0) {
           setTextbooksList(data.textbooks)
 
-          // Auto-select:
-          // 1. If only 1 textbook, select it!
-          // 2. If multiple, select the one matching the active Language preference (Tamil / English)
           let autoChoice = data.textbooks[0]
           if (data.textbooks.length > 1) {
             const prefMedium = language === 'tamil' ? 'Tamil' : 'English'
@@ -498,8 +426,6 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   }
 
   const loadVolumes = (candidate: TextbookCandidate, std: number, t: string) => {
-    setIsLoadingVolumes(true)
-
     const query = new URLSearchParams({
       standardId: String(std),
       term: t,
@@ -522,32 +448,64 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
         setVolumeOptions(['Not Applicable'])
         setVolume('Not Applicable')
       })
-      .finally(() => {
-        setIsLoadingVolumes(false)
-      })
   }
 
   // Initial load on mount
   useEffect(() => {
-    loadUnits(groupId, subjectId, standard)
-    apiFetch('/api/ai/providers')
+    const effGroup: 'group1' | 'group2' | 'group4' = 'group4'
+    const nextSubjects = getSubjectsForGroup(effGroup)
+    const nextSub = nextSubjects[0]?.id || 'general-studies'
+    const nextStandards = getStandardsForSubject(effGroup, nextSub)
+    const nextStd = nextStandards[0]?.id || 6
+    const nextTerms = getTermsForStandard(nextStd)
+    const nextTerm = nextTerms[0] || 'Term 1'
+    const nextUnits = getUnitsForSubjectStandardAndTerm(effGroup, nextSub, nextStd, nextTerm)
+    const nextUnit = nextUnits[0]?.id || 1
+    const nextLessons = getLessonsForSelection(effGroup, nextSub, nextStd, nextUnit, nextTerm)
+    const nextLesson = nextLessons[0]
+
+    setGroupId('group4')
+    setSubjectId(nextSub)
+    setStandard(nextStd)
+    setTerm(nextTerm)
+    setUnitId(nextUnit)
+    if (nextLesson) {
+      setSelectedLessonTitle(nextLesson.title)
+      const topics: string[] = []
+      if (Array.isArray(nextLesson.topics) && nextLesson.topics.length > 0) {
+        nextLesson.topics.forEach((tp) => {
+          if (typeof tp === 'string') topics.push(tp)
+          else if (tp && typeof tp.name === 'string') topics.push(tp.name)
+        })
+      }
+      setAvailableTopics(topics.length > 0 ? topics : [nextLesson.title])
+      setSelectedTopics(topics.length > 0 ? topics : [nextLesson.title])
+      loadTextbooks('group4', nextSub, nextStd, nextUnit, nextTerm, nextLesson.id, nextLesson.title)
+    }
+
+    const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+    apiFetch('/api/ai/providers', {
+      headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+    })
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) {
-          const active = data.find((p: any) => p.isActive)
+        const statuses = Array.isArray(data) ? data : (data?.providers || [])
+        if (Array.isArray(statuses) && statuses.length > 0) {
+          const active = statuses.find((p: any) => p.isActive) || statuses.find((p: any) => p.provider === data?.activeProvider)
           if (active && (active.provider === 'gemini' || active.provider === 'claude')) {
             setAiProvider(active.provider)
           }
+          const c = statuses.find((p: any) => p.provider === 'claude')
+          if (c) setClaudeStatusInfo({ configured: Boolean(c.configured), connected: Boolean(c.connected), model: c.model })
+          const g = statuses.find((p: any) => p.provider === 'gemini')
+          if (g) setGeminiStatusInfo({ configured: Boolean(g.configured), connected: Boolean(g.connected), model: g.model, status: g.status })
         }
       })
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // =========================================================================
-  // Manual / Real-time PDF Extraction
-  // =========================================================================
-
+  // Real-time PDF Extraction
   const handleTriggerExtract = async (candidate: TextbookCandidate) => {
     const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
     const key = candidate.key
@@ -562,27 +520,45 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
       }
 
       if (endpoint) {
-        const res = await apiFetch(endpoint, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${activeToken}` },
-        })
-        const data = await res.json()
-        if (data.status === 'success' || data.success) {
-          showToast?.('success', 'PDF text successfully extracted and indexed!')
-          if (selectedLesson) {
-            loadTextbooks(
-              groupId,
-              subjectId,
-              standard,
-              selectedLesson.unitId,
-              term,
-              selectedLesson.lessonId,
-              selectedLesson.title
-            )
+        const MAX_ROUNDS = 120
+        let last: any = null
+
+        for (let round = 0; round < MAX_ROUNDS; round++) {
+          const res = await apiFetch(endpoint, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${activeToken}` },
+          })
+          const data = await res.json()
+
+          if (!res.ok || (!data.success && data.status !== 'success')) {
+            showToast?.('error', data.message || 'Extraction failed.')
+            return
           }
-        } else {
-          showToast?.('error', data.message || 'Extraction failed.')
+
+          last = data.data || data
+          if (!last?.inProgress) {
+            showToast?.('success', data.message || 'PDF text successfully extracted and indexed!')
+            if (selectedLessonObj) {
+              loadTextbooks(
+                groupId,
+                subjectId,
+                standard,
+                Number(unitId),
+                term,
+                selectedLessonObj.id,
+                selectedLessonObj.title
+              )
+            }
+            return
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 400))
         }
+
+        showToast?.(
+          'error',
+          `Extraction is still running (${last?.extractedPagesCount ?? 0}/${last?.totalPages ?? 0} pages). Click Extract again to resume.`
+        )
       }
     } catch (err: any) {
       showToast?.('error', err.message || 'Failed to extract PDF text.')
@@ -592,7 +568,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   }
 
   // =========================================================================
-  // Generate MCQs with Claude AI Execution (Part 8 & 9)
+  // Generate MCQs with Claude AI or Gemini AI Execution
   // =========================================================================
 
   const handleGenerate = async () => {
@@ -607,26 +583,29 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
       return
     }
 
-    if (!selectedLesson || !selectedTextbook) return
+    if (!selectedLessonObj || !selectedTextbook) return
 
     setIsGenerating(true)
     setProgress({ pct: 5, step: `Connecting to ${aiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} & verifying lesson textbook...` })
     setError(null)
     setResult(null)
 
+    const topicsToPass = selectedTopics.length > 0 ? selectedTopics : [selectedLessonObj.title]
+
     const payload = {
       provider: aiProvider,
       category: groupId,
       standard,
-      subject: subjects.find((s) => s.id === subjectId)?.name || 'General Studies',
+      subject: availableSubjects.find((s) => s.id === subjectId)?.name || 'General Studies',
       term: term !== 'Not Applicable' ? term : undefined,
       volume: volume !== 'Not Applicable' ? volume : undefined,
       unitId: Number(unitId) || 1,
-      unitTitle: selectedUnit?.title || `Unit ${unitId}`,
-      lessonTitle: selectedLesson.title,
-      lessonId: selectedLesson.lessonId || undefined,
-      lessonNumber: selectedLesson.lessonNumber || undefined,
-      topic: selectedLesson.title,
+      unitTitle: availableUnits.find((u) => u.id === Number(unitId))?.title || `Unit ${unitId}`,
+      lessonTitle: selectedLessonObj.title,
+      lessonId: selectedLessonObj.id || undefined,
+      lessonNumber: selectedLessonObj.lessonNumber || undefined,
+      topic: topicsToPass[0],
+      selectedTopics: topicsToPass,
       language,
       mode: 'mcq',
       questionCount,
@@ -685,17 +664,17 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
           } else if (data.type === 'complete') {
             completed = data
           } else if (data.type === 'error' || data.status === 'error') {
-            throw new Error(data.error || data.message || 'Claude MCQ generation failed.')
+            throw new Error(data.error || data.message || `${aiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} MCQ generation failed.`)
           }
         }
       }
 
-      if (!completed) throw new Error('Claude did not return a completion event. Please try again.')
+      if (!completed) throw new Error(`${aiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} did not return a completion event. Please try again.`)
       const questions: GeneratedQuestion[] = Array.isArray(completed?.mcqs?.questions)
         ? completed.mcqs.questions
         : []
       if (questions.length === 0) {
-        throw new Error('Claude returned no verified questions for this lesson.')
+        throw new Error(`${aiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} returned no verified questions for this lesson.`)
       }
 
       setResult({
@@ -723,16 +702,18 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
     <div className="ai-section-box">
       <h3 className="ai-section-title">
         <Sparkles size={16} style={{ color: '#c084fc' }} />
-        <span>TNPSC Syllabus-Wise Claude AI MCQ Generator</span>
+        <span>TNPSC Syllabus-Wise Claude & Gemini AI MCQ Generator</span>
       </h3>
 
       {/* =====================================================================
-          PART 1 & 2: STRICT SELECTION ORDER (Steps 1 to 5)
+          PART 1: EXACT 6-DROPDOWN SYLLABUS HIERARCHY
+          Sequence exactly matches Study Notes Generation:
           1. TNPSC Group
           2. Subject
           3. Standard
-          4. Unit
-          5. Term (Dynamic: 5th position)
+          4. Term
+          5. Unit
+          6. Lesson Title
       ====================================================================== */}
       <div
         style={{
@@ -749,7 +730,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
             value={groupId}
             onChange={(e) => handleGroupChange(e.target.value as GroupId)}
           >
-            {GROUPS_LIST.map((g) => (
+            {TNPSC_GROUPS.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
               </option>
@@ -759,13 +740,13 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
 
         {/* 2. Subject */}
         <div className="ai-field">
-          <label>2. Subject *</label>
+          <label>2. Subject ({availableSubjects.length}) *</label>
           <select
             className="ai-select"
             value={subjectId}
             onChange={(e) => handleSubjectChange(e.target.value)}
           >
-            {subjects.map((sub) => (
+            {availableSubjects.map((sub) => (
               <option key={sub.id} value={sub.id}>
                 {sub.name}
               </option>
@@ -775,13 +756,13 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
 
         {/* 3. Standard */}
         <div className="ai-field">
-          <label>3. Standard *</label>
+          <label>3. Standard ({availableStandards.length}) *</label>
           <select
             className="ai-select"
             value={standard}
             onChange={(e) => handleStandardChange(Number(e.target.value))}
           >
-            {standards.map((std) => (
+            {availableStandards.map((std) => (
               <option key={std.id} value={std.id}>
                 {std.label}
               </option>
@@ -789,156 +770,229 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
           </select>
         </div>
 
-        {/* 4. Unit */}
+        {/* 4. Term (4th field) */}
         <div className="ai-field">
-          <label>4. Unit *</label>
-          <select
-            className="ai-select"
-            value={unitId}
-            onChange={(e) => handleUnitChange(e.target.value === '' ? '' : Number(e.target.value))}
-            disabled={isLoadingUnits}
-          >
-            <option value="">-- Select Unit --</option>
-            {unitsList.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.unitNumber}: {unit.title} {unit.hasStudyNotes ? '★ (Notes)' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* 5. Term (Dynamic Term Selection: 5th position) */}
-        <div className="ai-field">
-          <label>5. Term *</label>
+          <label>4. Term ({availableTerms.length}) *</label>
           <select
             className="ai-select"
             value={term}
             onChange={(e) => handleTermChange(e.target.value)}
-            disabled={!unitId || isLoadingTerms}
           >
-            {termOptions.map((opt) => (
+            {availableTerms.map((opt) => (
               <option key={opt} value={opt}>
                 {opt}
               </option>
             ))}
           </select>
         </div>
-      </div>
 
-      {/* =====================================================================
-          PART 3: DYNAMIC LESSON SELECTION (Step 6)
-          Mandatory before proceeding to textbook mapping
-      ====================================================================== */}
-      <div className="ai-field" style={{ marginTop: '0.95rem' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '0.35rem',
-          }}
-        >
-          <label style={{ margin: 0 }}>
-            6. Lesson Selection ({term}) *
-          </label>
-          {lessonsList.length > 0 && (
-            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-              {lessonsList.length} lesson{lessonsList.length > 1 ? 's' : ''} available
-            </span>
-          )}
+        {/* 5. Unit (5th field) */}
+        <div className="ai-field">
+          <label>5. Unit ({availableUnits.length}) *</label>
+          <select
+            className="ai-select"
+            value={unitId}
+            onChange={(e) => handleUnitChange(Number(e.target.value))}
+          >
+            {availableUnits.map((unit) => (
+              <option key={unit.id} value={unit.id}>
+                {unit.unitNumber}: {unit.title}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {isLoadingLessons ? (
-          <div className="ai-notice-box">
-            <RefreshCw
-              size={14}
-              className="spin-icon"
-              style={{ display: 'inline', marginRight: '0.4rem' }}
-            />
-            Loading lessons for {term}...
-          </div>
-        ) : !unitId ? (
-          <div className="ai-notice-box">Select a Unit above to load its connected lessons.</div>
-        ) : lessonsList.length === 0 ? (
-          <div
-            className="ai-notice-box"
-            style={{
-              background: 'rgba(245, 158, 11, 0.12)',
-              borderColor: 'rgba(245, 158, 11, 0.35)',
-              color: '#fcd34d',
-            }}
+        {/* 6. Lesson Title (6th field) */}
+        <div className="ai-field">
+          <label>6. Lesson Title ({availableLessons.length}) *</label>
+          <select
+            className="ai-select"
+            value={selectedLessonTitle}
+            onChange={(e) => handleLessonChange(e.target.value)}
           >
-            No lessons registered for Unit {unitId} in {term}. Try selecting another term or unit.
-          </div>
-        ) : (
-          <div
-            style={{
-              display: 'grid',
-              gap: '0.5rem',
-              maxHeight: '280px',
-              overflowY: 'auto',
-              paddingRight: '0.35rem',
-            }}
-          >
-            {lessonsList.map((lesson) => {
-              const active =
-                selectedLessonKey === `${lesson.lessonNumber}:${lesson.title}` ||
-                selectedLessonKey === lesson.lessonId
-              return (
-                <button
-                  key={`${lesson.lessonNumber}-${lesson.title}`}
-                  type="button"
-                  className={`ai-lesson-card ${active ? 'active' : ''}`}
-                  onClick={() => handleLessonSelect(lesson)}
-                  style={{
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    borderColor: active ? 'var(--gold-primary)' : undefined,
-                    background: active ? 'rgba(234, 179, 8, 0.08)' : undefined,
-                  }}
-                >
-                  <div className="ai-lesson-meta-row">
-                    <span
-                      className="ai-lesson-pill"
-                      style={{ color: 'var(--gold-primary)', fontWeight: 600 }}
-                    >
-                      Lesson {lesson.lessonNumber}
-                    </span>
-                    <span className="ai-lesson-pill">{lesson.term || term}</span>
-                    <span className="ai-lesson-pill">Unit {lesson.unitId}</span>
-                    {lesson.hasStudyNotes && (
-                      <span
-                        className="ai-lesson-pill"
-                        style={{ color: '#86efac', background: 'rgba(34, 197, 94, 0.15)' }}
-                      >
-                        ✓ Notes ({lesson.notesCount})
-                      </span>
-                    )}
-                    {lesson.hasTextbook && (
-                      <span
-                        className="ai-lesson-pill"
-                        style={{ color: '#93c5fd', background: 'rgba(59, 130, 246, 0.15)' }}
-                      >
-                        ✓ Textbook ({lesson.textbooksCount})
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    className="ai-lesson-title-display"
-                    style={{ fontSize: '0.88rem', marginTop: '0.3rem', fontWeight: 600 }}
-                  >
-                    {lesson.title}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        )}
+            {availableLessons.length === 0 ? (
+              <option value="" disabled>No lessons available</option>
+            ) : (
+              availableLessons.map((lesson) => (
+                <option key={lesson.id} value={lesson.title}>
+                  {lesson.lessonNumber ? `${lesson.lessonNumber} – ` : ''}{lesson.title}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
       </div>
 
+      {/* Active Lesson Details Card */}
+      {selectedLessonObj && (
+        <div className="ai-lesson-card" style={{ marginTop: '0.85rem' }}>
+          <div className="ai-lesson-meta-row">
+            <span className="ai-lesson-pill" style={{ color: 'var(--gold-primary)', fontWeight: 600 }}>
+              {selectedLessonObj.lessonNumber ? `Lesson ${selectedLessonObj.lessonNumber}` : 'Selected Lesson'}
+            </span>
+            <span className="ai-lesson-pill">{selectedLessonObj.term || term}</span>
+            <span className="ai-lesson-pill">Unit {unitId}</span>
+            <span className="ai-lesson-pill">Class {standard}th</span>
+          </div>
+          <div className="ai-lesson-title-display" style={{ fontSize: '0.92rem', marginTop: '0.35rem', fontWeight: 600 }}>
+            {selectedLessonObj.title}
+          </div>
+          {selectedLessonObj.description && (
+            <p className="ai-lesson-desc" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.3rem 0 0' }}>
+              {selectedLessonObj.description}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* =====================================================================
-          PART 4 & 6: AUTOMATIC TEXTBOOK SELECTION & DISPLAY (Step 7)
-          Appears automatically based on Subject, Standard, Unit, Term, Lesson
+          STEP 7: TOPIC / SUBTOPIC SELECTION
+          Interactive checkboxes/pills with Select All and Clear toggle
+      ====================================================================== */}
+      {selectedLessonObj && (
+        <div className="ai-field" style={{ marginTop: '0.95rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '0.35rem',
+              flexWrap: 'wrap',
+              gap: '0.5rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <label style={{ margin: 0 }}>
+                7. Topic / Subtopic Selection *
+              </label>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  color: selectedTopics.length > 0 ? '#38bdf8' : '#94a3b8',
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                }}
+              >
+                {selectedTopics.length} of {availableTopics.length} Selected
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <button
+                type="button"
+                onClick={handleSelectAllTopics}
+                disabled={availableTopics.length === 0}
+                style={{
+                  background: 'rgba(56, 189, 248, 0.15)',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  color: '#38bdf8',
+                  borderRadius: '6px',
+                  padding: '3px 9px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAllTopics}
+                disabled={selectedTopics.length === 0}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: '#94a3b8',
+                  borderRadius: '6px',
+                  padding: '3px 9px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {availableTopics.length === 0 ? (
+            <div className="ai-notice-box" style={{ color: 'var(--text-muted)' }}>
+              No granular subtopics found. The full lesson title will be used as the topic focus.
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.45rem',
+                padding: '0.75rem',
+                background: 'rgba(15, 23, 42, 0.55)',
+                borderRadius: '8px',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                maxHeight: '200px',
+                overflowY: 'auto',
+              }}
+            >
+              {availableTopics.map((topicItem, tIdx) => {
+                const isSelected = selectedTopics.includes(topicItem)
+                return (
+                  <button
+                    key={`${tIdx}-${topicItem}`}
+                    type="button"
+                    onClick={() => handleToggleTopic(topicItem)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      padding: '0.4rem 0.75rem',
+                      borderRadius: '8px',
+                      fontSize: '0.8rem',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      border: isSelected
+                        ? '1px solid rgba(192, 132, 252, 0.6)'
+                        : '1px solid rgba(255, 255, 255, 0.12)',
+                      background: isSelected
+                        ? 'rgba(192, 132, 252, 0.18)'
+                        : 'rgba(255, 255, 255, 0.03)',
+                      color: isSelected ? '#f5d0fe' : 'var(--text-secondary)',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '14px',
+                        height: '14px',
+                        borderRadius: '3px',
+                        border: isSelected ? '1px solid #c084fc' : '1px solid #64748b',
+                        background: isSelected ? '#c084fc' : 'transparent',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#000',
+                        fontSize: '10px',
+                        fontWeight: 900,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isSelected ? '✓' : ''}
+                    </span>
+                    <span>{topicItem}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =====================================================================
+          AUTOMATICALLY MATCHED TEXTBOOK GROUNDING
+          Keeps verified textbook card visible showing auto-attached textbook & page count
       ====================================================================== */}
       <div className="ai-field" style={{ marginTop: '0.95rem' }}>
         <div
@@ -950,7 +1004,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
           }}
         >
           <label style={{ margin: 0 }}>
-            7. Automatically Matched Textbook(s) *
+            Prescribed Samacheer Kalvi Textbook *
           </label>
           {textbooksList.length > 0 && (
             <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
@@ -959,7 +1013,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
           )}
         </div>
 
-        {!selectedLesson ? (
+        {!selectedLessonObj ? (
           <div className="ai-notice-box">
             <Info size={14} style={{ display: 'inline', marginRight: '0.35rem' }} />
             Select a Lesson above to automatically match the prescribed Samacheer Kalvi textbook.
@@ -971,7 +1025,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
               className="spin-icon"
               style={{ display: 'inline', marginRight: '0.4rem' }}
             />
-            Matching Samacheer Kalvi textbooks for &ldquo;{selectedLesson.title}&rdquo;...
+            Matching Samacheer Kalvi textbooks for &ldquo;{selectedLessonObj.title}&rdquo;...
           </div>
         ) : textbooksList.length === 0 ? (
           <div
@@ -982,7 +1036,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
               color: '#fcd34d',
             }}
           >
-            No textbook mapped yet for &ldquo;{selectedLesson.title}&rdquo;. Please upload the
+            No textbook mapped yet for &ldquo;{selectedLessonObj.title}&rdquo;. Please upload the
             prescribed Samacheer Kalvi textbook PDF to Google Drive.
           </div>
         ) : (
@@ -1063,7 +1117,6 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
                       )}
                     </div>
 
-                    {/* Metadata Badges */}
                     <div
                       style={{
                         display: 'flex',
@@ -1102,7 +1155,6 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
                     </div>
                   </div>
 
-                  {/* Extraction & Status Action */}
                   <div
                     style={{
                       display: 'flex',
@@ -1179,99 +1231,9 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
       </div>
 
       {/* =====================================================================
-          PART 5: DYNAMIC VOLUME (Step 8) & GENERATION OPTIONS (Steps 9 to 11)
-          8. Volume (when applicable)
-          9. Language
-          10. Questions Count
-          11. Difficulty
+          STEP 8: INDEPENDENT AI PROVIDER SELECTION
+          Claude AI & Gemini AI with real-time connection badges
       ====================================================================== */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
-          gap: '0.75rem',
-          marginTop: '1rem',
-        }}
-      >
-        {/* 8. Volume (when applicable) */}
-        <div className="ai-field">
-          <label>8. Volume</label>
-          <select
-            className="ai-select"
-            value={volume}
-            onChange={(e) => handleVolumeChange(e.target.value)}
-            disabled={!selectedTextbook || isLoadingVolumes}
-          >
-            {volumeOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* 9. Language */}
-        <div className="ai-field">
-          <label>9. Language</label>
-          <select
-            className="ai-select"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value as Language)}
-          >
-            <option value="tamil">Tamil (தமிழ்)</option>
-            <option value="english">English</option>
-          </select>
-        </div>
-
-        {/* 10. Questions Count */}
-        <div className="ai-field">
-          <label>10. Questions Count</label>
-          <select
-            className="ai-select"
-            value={questionCount}
-            onChange={(e) => setQuestionCount(Number(e.target.value))}
-          >
-            <option value={10}>10 Questions</option>
-            <option value={20}>20 Questions</option>
-            <option value={25}>25 Questions</option>
-            <option value={30}>30 Questions</option>
-            <option value={50}>50 Questions</option>
-            <option value={100}>100 Questions</option>
-            <option value={200}>200 Questions</option>
-          </select>
-        </div>
-
-        {/* 11. Difficulty */}
-        <div className="ai-field">
-          <label>11. Difficulty</label>
-          <select
-            className="ai-select"
-            value={difficulty}
-            onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-          >
-            <option value="Easy">Easy</option>
-            <option value="Medium">Medium</option>
-            <option value="Hard">Hard</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Error & Validation Notice */}
-      {error && (
-        <div
-          className="ai-notice-box"
-          style={{
-            marginTop: '0.85rem',
-            background: 'rgba(239, 68, 68, 0.12)',
-            borderColor: 'rgba(239, 68, 68, 0.35)',
-            color: '#fca5a5',
-          }}
-        >
-          <AlertTriangle size={14} style={{ display: 'inline', marginRight: '0.35rem' }} /> {error}
-        </div>
-      )}
-
-      {/* AI Provider Selector Pill Row */}
       <div
         style={{
           marginTop: '1.25rem',
@@ -1288,47 +1250,191 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Cpu size={16} style={{ color: aiProvider === 'claude' ? '#c084fc' : '#38bdf8' }} />
-          <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#f8fafc' }}>AI Provider Engine:</span>
+          <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#f8fafc' }}>
+            8. AI Provider Engine:
+          </span>
         </div>
-        <div style={{ display: 'inline-flex', padding: '3px', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
-          <button
-            type="button"
-            onClick={() => setAiProvider('claude')}
-            disabled={isGenerating}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          <div
             style={{
-              padding: '0.35rem 0.85rem',
-              borderRadius: '6px',
-              border: 'none',
-              fontSize: '0.78rem',
-              fontWeight: 700,
-              cursor: isGenerating ? 'not-allowed' : 'pointer',
-              background: aiProvider === 'claude' ? 'rgba(192, 132, 252, 0.25)' : 'transparent',
-              color: aiProvider === 'claude' ? '#e9d5ff' : '#94a3b8',
-              boxShadow: aiProvider === 'claude' ? '0 2px 8px rgba(192, 132, 252, 0.2)' : 'none',
+              display: 'inline-flex',
+              padding: '3px',
+              background: 'rgba(0, 0, 0, 0.3)',
+              borderRadius: '8px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
             }}
           >
-            🟣 Anthropic Claude AI
-          </button>
-          <button
-            type="button"
-            onClick={() => setAiProvider('gemini')}
-            disabled={isGenerating}
-            style={{
-              padding: '0.35rem 0.85rem',
-              borderRadius: '6px',
-              border: 'none',
-              fontSize: '0.78rem',
-              fontWeight: 700,
-              cursor: isGenerating ? 'not-allowed' : 'pointer',
-              background: aiProvider === 'gemini' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-              color: aiProvider === 'gemini' ? '#bae6fd' : '#94a3b8',
-              boxShadow: aiProvider === 'gemini' ? '0 2px 8px rgba(56, 189, 248, 0.2)' : 'none',
-            }}
-          >
-            🔵 Google Gemini AI
-          </button>
+            <button
+              type="button"
+              onClick={() => setAiProvider('claude')}
+              disabled={isGenerating}
+              style={{
+                padding: '0.35rem 0.85rem',
+                borderRadius: '6px',
+                border: 'none',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: isGenerating ? 'not-allowed' : 'pointer',
+                background: aiProvider === 'claude' ? 'rgba(192, 132, 252, 0.25)' : 'transparent',
+                color: aiProvider === 'claude' ? '#e9d5ff' : '#94a3b8',
+                boxShadow: aiProvider === 'claude' ? '0 2px 8px rgba(192, 132, 252, 0.2)' : 'none',
+              }}
+            >
+              🟣 Anthropic Claude AI
+            </button>
+            <button
+              type="button"
+              onClick={() => setAiProvider('gemini')}
+              disabled={isGenerating}
+              style={{
+                padding: '0.35rem 0.85rem',
+                borderRadius: '6px',
+                border: 'none',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: isGenerating ? 'not-allowed' : 'pointer',
+                background: aiProvider === 'gemini' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                color: aiProvider === 'gemini' ? '#bae6fd' : '#94a3b8',
+                boxShadow: aiProvider === 'gemini' ? '0 2px 8px rgba(56, 189, 248, 0.2)' : 'none',
+              }}
+            >
+              🔵 Google Gemini AI
+            </button>
+          </div>
+
+          {/* Real-time Status Badge */}
+          {aiProvider === 'gemini' ? (
+            geminiStatusInfo?.connected ? (
+              <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.45)', color: '#34d399', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <Check size={11} /> CONNECTED ({geminiStatusInfo.model})
+              </span>
+            ) : geminiStatusInfo?.status === 'MODEL_NOT_AVAILABLE' ? (
+              <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.45)', color: '#f87171', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <AlertTriangle size={11} /> MODEL UNAVAILABLE ({geminiStatusInfo.model})
+              </span>
+            ) : geminiStatusInfo?.configured ? (
+              <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px', background: 'rgba(56, 189, 248, 0.2)', border: '1px solid rgba(56, 189, 248, 0.45)', color: '#38bdf8', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <Check size={11} /> READY ({geminiStatusInfo.model})
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#f87171', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <AlertTriangle size={11} /> NOT CONFIGURED
+              </span>
+            )
+          ) : (
+            claudeStatusInfo?.connected ? (
+              <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.45)', color: '#34d399', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <Check size={11} /> CONNECTED ({claudeStatusInfo.model})
+              </span>
+            ) : claudeStatusInfo?.configured ? (
+              <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px', background: 'rgba(192, 132, 252, 0.2)', border: '1px solid rgba(192, 132, 252, 0.45)', color: '#c084fc', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <Check size={11} /> READY ({claudeStatusInfo.model})
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#f87171', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <AlertTriangle size={11} /> NOT CONFIGURED
+              </span>
+            )
+          )}
         </div>
       </div>
+
+      {/* =====================================================================
+          STEPS 9, 10, 11: GENERATION SETTINGS
+          9. Number of Questions
+          10. Difficulty
+          11. Language
+      ====================================================================== */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+          gap: '0.75rem',
+          marginTop: '1rem',
+        }}
+      >
+        {/* 9. Questions Count */}
+        <div className="ai-field">
+          <label>9. Questions Count</label>
+          <select
+            className="ai-select"
+            value={questionCount}
+            onChange={(e) => setQuestionCount(Number(e.target.value))}
+          >
+            <option value={5}>5 Questions</option>
+            <option value={10}>10 Questions</option>
+            <option value={15}>15 Questions</option>
+            <option value={20}>20 Questions</option>
+            <option value={25}>25 Questions</option>
+            <option value={30}>30 Questions</option>
+            <option value={50}>50 Questions</option>
+            <option value={80}>80 Questions</option>
+            <option value={100}>100 Questions</option>
+            <option value={200}>200 Questions</option>
+          </select>
+        </div>
+
+        {/* 10. Difficulty */}
+        <div className="ai-field">
+          <label>10. Difficulty</label>
+          <select
+            className="ai-select"
+            value={difficulty}
+            onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+          >
+            <option value="Easy">Easy</option>
+            <option value="Medium">Medium</option>
+            <option value="Hard">Hard</option>
+            <option value="Mixed">Mixed</option>
+          </select>
+        </div>
+
+        {/* 11. Language */}
+        <div className="ai-field">
+          <label>11. Language</label>
+          <select
+            className="ai-select"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as Language)}
+          >
+            <option value="tamil">Tamil (தமிழ்)</option>
+            <option value="english">English</option>
+          </select>
+        </div>
+
+        {/* Volume selector (if candidate has multiple volumes) */}
+        {volumeOptions.length > 1 && volumeOptions[0] !== 'Not Applicable' && (
+          <div className="ai-field">
+            <label>Volume</label>
+            <select
+              className="ai-select"
+              value={volume}
+              onChange={(e) => handleVolumeChange(e.target.value)}
+            >
+              {volumeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Error & Validation Notice */}
+      {error && (
+        <div
+          className="ai-notice-box"
+          style={{
+            marginTop: '0.85rem',
+            background: 'rgba(239, 68, 68, 0.12)',
+            borderColor: 'rgba(239, 68, 68, 0.35)',
+            color: '#fca5a5',
+          }}
+        >
+          <AlertTriangle size={14} style={{ display: 'inline', marginRight: '0.35rem' }} /> {error}
+        </div>
+      )}
 
       {/* =====================================================================
           STEP 12: GENERATE MCQS WITH CLAUDE OR GEMINI AI
@@ -1518,6 +1624,27 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
                   {question.sourcePdf || result.sourceName}
                   {question.sourcePage ? ` • p. ${question.sourcePage}` : ''}
                   {question.lessonNumber ? ` • Lesson ${question.lessonNumber}` : ''}
+                  {question.topic ? ` • Topic: ${question.topic}` : ''}
+                  {question.aiProvider && (
+                    <span
+                      style={{
+                        marginLeft: '0.5rem',
+                        padding: '0.12rem 0.45rem',
+                        borderRadius: '4px',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.02em',
+                        background: question.aiProvider === 'gemini' ? 'rgba(56, 189, 248, 0.18)' : 'rgba(192, 132, 252, 0.18)',
+                        border: question.aiProvider === 'gemini' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(192, 132, 252, 0.4)',
+                        color: question.aiProvider === 'gemini' ? '#38bdf8' : '#c084fc',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.2rem',
+                      }}
+                    >
+                      {question.aiProvider === 'gemini' ? '🔵 Gemini AI' : '🟣 Claude AI'}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

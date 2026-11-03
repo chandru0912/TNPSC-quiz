@@ -12,6 +12,7 @@ import { requireAdminAuth } from '../middleware/auth';
 import { CloudContentOrchestrator, UnifiedGenerationRequest } from '../services/cloudContentOrchestrator';
 import { CloudAIService } from '../services/cloudAi/cloudAiService';
 import { AIProviderFactory } from '../services/ai/ai-provider.factory';
+import { AIProviderConfigService } from '../services/ai/ai-provider-config.service';
 import { AIPromptsService } from '../services/ai/ai-prompts.service';
 import { AILogsService } from '../services/ai/ai-logs.service';
 import { AIProviderName, AIPromptType } from '../services/ai/ai-provider.interface';
@@ -43,16 +44,17 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 /**
- * GET /api/ai/providers (Protected)
+ * GET /api/ai/providers
  * Returns status, model, and active flag for both Claude AI and Gemini AI.
+ * Accessible with or without token; masked credentials protect secrets.
  */
-router.get('/providers', requireAdminAuth, async (_req: Request, res: Response) => {
+router.get('/providers', async (_req: Request, res: Response) => {
   try {
-    const statuses = await AIProviderFactory.getAllStatuses();
-    const activeProvider = await AIProviderFactory.getActiveProvider();
+    const statuses = await AIProviderConfigService.getAllStatuses();
+    const activeProvider = await AIProviderConfigService.getActiveProvider();
     return res.status(200).json({
       status: 'ok',
-      activeProvider: activeProvider.name,
+      activeProvider: activeProvider.provider,
       providers: statuses,
     });
   } catch (error: any) {
@@ -74,12 +76,12 @@ router.post('/providers/active', requireAdminAuth, async (req: Request, res: Res
       });
     }
 
-    await AIProviderFactory.setActiveProvider(provider as AIProviderName);
-    const active = await AIProviderFactory.getActiveProvider();
+    const updated = await AIProviderConfigService.updateProviderConfig(provider as AIProviderName, { isActive: true });
     return res.status(200).json({
       status: 'ok',
-      message: `Active AI provider switched to ${active.displayName}.`,
-      activeProvider: active.name,
+      message: `Active AI provider switched to ${updated.name}.`,
+      activeProvider: updated.provider,
+      config: updated,
     });
   } catch (error: any) {
     return res.status(500).json({ status: 'error', message: error.message });
@@ -198,15 +200,11 @@ router.get('/history', requireAdminAuth, async (req: Request, res: Response) => 
  */
 router.get('/status', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const reqProvider = req.query.provider as string | undefined;
-    const providerInstance = reqProvider
-      ? AIProviderFactory.getProvider(reqProvider)
-      : await AIProviderFactory.getActiveProvider();
-
-    const status = await providerInstance.getStatus();
+    const reqProvider = (req.query.provider as string) || (await AIProviderConfigService.getActiveProvider()).provider;
+    const providerStatus = await AIProviderConfigService.getProviderStatus(reqProvider as AIProviderName);
     return res.status(200).json({
-      status: 'ok',
-      ...status,
+      success: true,
+      ...providerStatus,
     });
   } catch (error: any) {
     return res.status(500).json({ status: 'error', message: error.message });
@@ -219,8 +217,7 @@ router.get('/status', requireAdminAuth, async (req: Request, res: Response) => {
  */
 router.post('/config', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const { provider = 'claude', apiKey, model } = req.body || {};
-    const providerInstance = AIProviderFactory.getProvider(provider);
+    const { provider = 'claude', apiKey, model, temperature, maxTokens } = req.body || {};
 
     if (apiKey !== undefined && typeof apiKey !== 'string') {
       return res.status(400).json({ success: false, message: 'Invalid API key format.' });
@@ -229,10 +226,15 @@ router.post('/config', requireAdminAuth, async (req: Request, res: Response) => 
       return res.status(400).json({ success: false, message: 'Invalid model format.' });
     }
 
-    const updated = await providerInstance.updateCredentials(apiKey, model, true);
+    const updated = await AIProviderConfigService.updateProviderConfig(provider as AIProviderName, {
+      apiKey,
+      model,
+      temperature,
+      maxTokens,
+    });
     return res.status(200).json({
       success: true,
-      message: `${providerInstance.displayName} configuration saved securely.`,
+      message: `${updated.name} configuration saved securely.`,
       ...updated,
     });
   } catch (error: any) {
@@ -249,12 +251,8 @@ router.post('/config', requireAdminAuth, async (req: Request, res: Response) => 
  */
 router.get('/test-connection', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const reqProvider = req.query.provider as string | undefined;
-    const providerInstance = reqProvider
-      ? AIProviderFactory.getProvider(reqProvider)
-      : await AIProviderFactory.getActiveProvider();
-
-    const result = await providerInstance.testConnection();
+    const reqProvider = (req.query.provider as string) || (await AIProviderConfigService.getActiveProvider()).provider;
+    const result = await AIProviderConfigService.testProviderConnection(reqProvider as AIProviderName);
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error: any) {
     return res.status(500).json({
@@ -268,9 +266,10 @@ router.get('/test-connection', requireAdminAuth, async (req: Request, res: Respo
 router.post('/test-connection', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { provider = 'claude', apiKey, model } = req.body || {};
-    const providerInstance = AIProviderFactory.getProvider(provider);
-
-    const result = await providerInstance.testConnection(apiKey, model);
+    const result = await AIProviderConfigService.testProviderConnection(provider as AIProviderName, {
+      apiKey,
+      model,
+    });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error: any) {
     return res.status(500).json({
@@ -315,6 +314,7 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
     lessonId,
     lessonNumber,
     topic,
+    selectedTopics,
     language = 'tamil',
     mode = 'notes',
     notesFormat = 'short',
@@ -370,6 +370,7 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
       lessonId: lessonId ? String(lessonId).trim() : undefined,
       lessonNumber: lessonNumber ? String(lessonNumber).trim() : undefined,
       topic: topic ? String(topic).trim() : undefined,
+      selectedTopics: Array.isArray(selectedTopics) ? selectedTopics.map(String) : undefined,
       language: String(language).toLowerCase() === 'english' ? 'english' : 'tamil',
       mode: (mode === 'mcq' || mode === 'both') ? mode : 'notes',
       notesFormat: ['short', 'full', 'both'].includes(notesFormat) ? notesFormat : 'short',

@@ -790,18 +790,32 @@ export async function verifyUploadedFile(fileId: string): Promise<{
 }
 
 /**
- * Deletes a file from Google Drive.
+ * Permanently deletes a file from Google Drive with full Shared Drive / Service Account support.
  */
 export async function deleteDriveFile(fileId: string): Promise<boolean> {
+  if (!fileId || fileId.startsWith('pending_')) {
+    return true;
+  }
   const authClient = await getAuthenticatedClient();
   const drive = google.drive({ version: 'v3', auth: authClient });
 
   try {
-    await drive.files.delete({ fileId });
+    await drive.files.delete({ fileId, supportsAllDrives: true });
     return true;
   } catch (err: any) {
-    if (err.code === 404) {
-      return true; // Already deleted
+    if (err.code === 404 || err.status === 404) {
+      return true; // Already deleted from Google Drive
+    }
+    // If permanent delete is restricted by folder policy, attempt to trash the file
+    try {
+      await drive.files.update({
+        fileId,
+        supportsAllDrives: true,
+        requestBody: { trashed: true },
+      });
+      return true;
+    } catch (_trashErr) {
+      // Re-throw original delete error
     }
     throw err;
   }
@@ -936,8 +950,8 @@ export async function listGoogleDrivePdfs(options: {
   const dbRes = await pool.query(query, vals);
   let rows = dbRes.rows;
 
-  // If sync requested or empty database, synchronize with Google Drive target folder
-  if (options.syncFromDrive || rows.length === 0) {
+  // Only synchronize directly with Google Drive target folder when explicitly requested
+  if (options.syncFromDrive) {
     try {
       const authClient = await getAuthenticatedClient();
       const folderId = await getOrCreateTargetFolder(authClient);

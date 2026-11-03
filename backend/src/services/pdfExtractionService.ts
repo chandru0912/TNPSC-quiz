@@ -21,7 +21,16 @@ import { cleanTamilUnicodeText, repairInDesignPdfArtifacts } from './tamilUnicod
 import { getDriveFileBuffer } from './googleDriveService';
 
 export type PdfType = 'TEXT_BASED' | 'SCANNED' | 'MIXED' | 'INVALID' | 'UNKNOWN';
-export type ExtractionStatus = 'PENDING' | 'DETECTING' | 'EXTRACTING' | 'OCR_PROCESSING' | 'PARTIALLY_COMPLETED' | 'COMPLETED' | 'FAILED';
+export type ExtractionStatus = 'PENDING' | 'PROCESSING' | 'DETECTING' | 'EXTRACTING' | 'OCR_PROCESSING' | 'PARTIALLY_COMPLETED' | 'COMPLETED' | 'FAILED';
+
+// Each HTTP invocation processes a bounded slice so Vercel function termination can never lose progress:
+// the page cursor is committed to pdf_extractions after every page and the next call resumes from it.
+const DEFAULT_MAX_DURATION_MS = Math.max(2000, parseInt(process.env.PDF_EXTRACTION_TIME_BUDGET_MS || '20000', 10) || 20000);
+const DEFAULT_PAGE_LIMIT = Math.max(1, parseInt(process.env.PDF_EXTRACTION_PAGE_LIMIT || '25', 10) || 25);
+
+function meaningfulCharCount(text: string): number {
+  return cleanText(text).replace(/[^a-zA-Z0-9\u0B80-\u0BFF]/g, '').length;
+}
 
 export interface PageInspectionResult {
   pageNumber: number;
@@ -183,14 +192,255 @@ export async function getOrCreateTextbookForDriveMaterial(material: any): Promis
 }
 
 /**
+ * Returns the durable extraction job row for a textbook/material, creating it when missing.
+ * The row is the resumable cursor + status record; no in-memory queue is involved.
+ */
+async function getOrCreateExtractionJob(options: {
+  textbookId: number;
+  materialId?: number | null;
+  fileName: string;
+  driveFileId?: string | null;
+}): Promise<number> {
+  const { textbookId, materialId = null, fileName, driveFileId = null } = options;
+
+  const existing = await pool.query(
+    `SELECT id FROM pdf_extractions
+     WHERE textbook_id = $1 OR ($2::int IS NOT NULL AND material_id = $2)
+     ORDER BY id DESC LIMIT 1`,
+    [textbookId, materialId]
+  );
+
+  if (existing.rows.length > 0) {
+    const jobId = existing.rows[0].id;
+    await pool.query(
+      `UPDATE pdf_extractions SET
+         material_id = COALESCE($2, material_id),
+         file_name = $3,
+         google_drive_file_id = COALESCE($4, google_drive_file_id),
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [jobId, materialId, fileName, driveFileId]
+    );
+    return jobId;
+  }
+
+  const inserted = await pool.query(
+    `INSERT INTO pdf_extractions (material_id, textbook_id, file_name, google_drive_file_id, extraction_status)
+     VALUES ($1, $2, $3, $4, 'PENDING') RETURNING id`,
+    [materialId, textbookId, fileName, driveFileId]
+  );
+  return inserted.rows[0].id;
+}
+
+/**
+ * Creates the durable job row for a Drive material without downloading the PDF.
+ * Upload endpoints call this before any fire-and-forget work so status survives function termination.
+ */
+export async function ensureExtractionJobForMaterial(materialId: number): Promise<number | null> {
+  const res = await pool.query(`SELECT * FROM google_drive_materials WHERE id = $1`, [materialId]);
+  if (res.rows.length === 0) return null;
+  const material = res.rows[0];
+  const textbookId = await getOrCreateTextbookForDriveMaterial(material);
+  return getOrCreateExtractionJob({
+    textbookId,
+    materialId,
+    fileName: material.file_name,
+    driveFileId: material.google_drive_file_id,
+  });
+}
+
+async function aggregateExtractedPages(textbookId: number): Promise<{
+  completed: number;
+  native: number;
+  ocr: number;
+  failed: number;
+  pageRows: Map<number, { status: string; isOcr: boolean }>;
+}> {
+  const res = await pool.query(
+    `SELECT page_number, extraction_status, is_ocr
+     FROM textbook_content WHERE textbook_id = $1`,
+    [textbookId]
+  );
+  const pageRows = new Map<number, { status: string; isOcr: boolean }>();
+  let native = 0;
+  let ocr = 0;
+  let failed = 0;
+
+  for (const row of res.rows) {
+    const status = String(row.extraction_status || 'completed');
+    const isOcr = Boolean(row.is_ocr);
+    pageRows.set(Number(row.page_number), { status, isOcr });
+    if (status === 'completed') {
+      if (isOcr) ocr++;
+      else native++;
+    } else if (status === 'failed') {
+      failed++;
+    }
+  }
+
+  return { completed: native + ocr, native, ocr, failed, pageRows };
+}
+
+function methodForPdfType(pdfType: PdfType): 'direct_text' | 'ocr' | 'hybrid' {
+  if (pdfType === 'TEXT_BASED') return 'direct_text';
+  if (pdfType === 'SCANNED') return 'ocr';
+  return 'hybrid';
+}
+
+async function finalizeExtraction(options: {
+  textbookId: number;
+  materialId?: number | null;
+  jobId: number;
+  totalPages: number;
+  pdfType: PdfType;
+  fileName: string;
+}): Promise<{
+  status: ExtractionStatus;
+  nativePagesCount: number;
+  ocrPagesCount: number;
+  failedPagesCount: number;
+  completionPercentage: number;
+}> {
+  const { textbookId, materialId = null, jobId, totalPages, pdfType, fileName } = options;
+  const counts = await aggregateExtractedPages(textbookId);
+  const completed = counts.native + counts.ocr;
+  const status: ExtractionStatus =
+    counts.failed === 0 && completed >= totalPages
+      ? 'COMPLETED'
+      : completed > 0
+      ? 'PARTIALLY_COMPLETED'
+      : 'FAILED';
+  const pct = totalPages > 0 ? Math.min(100, Math.round((completed / totalPages) * 100)) : 0;
+  const errorMessage = counts.failed > 0 ? `${counts.failed} of ${totalPages} pages could not be extracted.` : null;
+
+  const pagesRes = await pool.query(
+    `SELECT page_number, content, unit_id, unit_title, lesson_title, topic, is_ocr, extraction_method,
+            ocr_confidence, extraction_status, file_name, standard, subject, term, material_id
+     FROM textbook_content WHERE textbook_id = $1 ORDER BY page_number ASC`,
+    [textbookId]
+  );
+  const pagesData = pagesRes.rows.map((r) => ({
+    pageNumber: Number(r.page_number),
+    text: String(r.content || ''),
+    method: r.extraction_method || (r.is_ocr ? 'ocr' : 'native'),
+    isOcr: Boolean(r.is_ocr),
+    unitId: r.unit_id == null ? undefined : Number(r.unit_id),
+    unitTitle: r.unit_title || undefined,
+    lessonTitle: r.lesson_title || undefined,
+    topic: r.topic || undefined,
+    fileName: r.file_name || fileName,
+    standard: r.standard || undefined,
+    subject: r.subject || undefined,
+    term: r.term || undefined,
+    pdfId: textbookId,
+    materialId: r.material_id || materialId || undefined,
+    status: r.extraction_status || 'completed',
+    ocrConfidence: r.ocr_confidence ? Number(r.ocr_confidence) : undefined,
+  }));
+  const extractedText = pagesData
+    .map((p) => `=== [Page ${p.pageNumber}] ===\n${p.text}`)
+    .join('\n\n')
+    .slice(0, 1000000);
+
+  await pool.query(
+    `UPDATE textbooks SET
+       page_count = $1, total_pages = $1, native_pages = $2, ocr_pages = $3, failed_pages = $4,
+       completion_percentage = $5, pdf_type = $6, extraction_status = $7, extraction_method = $8,
+       status = $9, error_message = $10, extracted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $11`,
+    [
+      totalPages,
+      counts.native,
+      counts.ocr,
+      counts.failed,
+      pct,
+      pdfType,
+      status,
+      methodForPdfType(pdfType),
+      status === 'FAILED' ? 'failed' : 'completed',
+      errorMessage,
+      textbookId,
+    ]
+  );
+
+  if (materialId) {
+    await pool.query(
+      `UPDATE google_drive_materials SET
+         page_count = $1, total_pages = $1, native_pages = $2, ocr_pages = $3, failed_pages = $4,
+         completion_percentage = $5, pdf_type = $6, extraction_status = $7, extraction_method = $8,
+         upload_status = $9, extracted_text = $10, extracted_pages = $11::jsonb, extraction_error = $12,
+         extracted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $13`,
+      [
+        totalPages,
+        counts.native,
+        counts.ocr,
+        counts.failed,
+        pct,
+        pdfType,
+        status,
+        methodForPdfType(pdfType),
+        status === 'FAILED' ? 'failed' : 'completed',
+        extractedText,
+        JSON.stringify(pagesData),
+        errorMessage,
+        materialId,
+      ]
+    );
+  }
+
+  await pool.query(
+    `UPDATE pdf_extractions SET
+       extraction_status = $2, extraction_method = $3, total_pages = $4, next_page = $5,
+       extracted_pages = $6, failed_pages = $7, native_pages = $8, ocr_pages = $9,
+       pdf_type = $10, extracted_text = $11, pages_data = $12::jsonb, extraction_error = $13,
+       extracted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1`,
+    [
+      jobId,
+      status,
+      methodForPdfType(pdfType),
+      totalPages,
+      totalPages + 1,
+      completed,
+      counts.failed,
+      counts.native,
+      counts.ocr,
+      pdfType,
+      extractedText,
+      JSON.stringify(pagesData),
+      errorMessage,
+    ]
+  );
+
+  console.log(
+    `[PDF Extraction] Finalized ${fileName} (textbook #${textbookId}): ${status}, ${completed}/${totalPages} pages, ${counts.failed} failed.`
+  );
+
+  return {
+    status,
+    nativePagesCount: counts.native,
+    ocrPagesCount: counts.ocr,
+    failedPagesCount: counts.failed,
+    completionPercentage: pct,
+  };
+}
+
+/**
  * Main Automatic Extraction and OCR Pipeline.
  * Can be called with either textbookId or materialId.
+ *
+ * Processes a bounded slice of pages per invocation and persists the page cursor, so the caller
+ * (frontend polling or Admin retry) can resume until `inProgress` is false.
  */
 export async function processAutomaticPdfExtraction(options: {
   textbookId?: number;
   materialId?: number;
   retryOnlyFailed?: boolean;
   onProgress?: (progress: ExtractionProgressUpdate) => void;
+  maxDurationMs?: number;
+  pageLimit?: number;
+  processAllPages?: boolean;
 }): Promise<{
   success: boolean;
   pdfType: PdfType;
@@ -198,11 +448,24 @@ export async function processAutomaticPdfExtraction(options: {
   nativePagesCount: number;
   ocrPagesCount: number;
   failedPagesCount: number;
+  extractedPagesCount: number;
   status: ExtractionStatus;
+  inProgress: boolean;
+  nextPage: number;
+  remainingPages: number;
   errorMessage?: string;
 }> {
-  const { textbookId: inputTbId, materialId: inputMatId, retryOnlyFailed = false, onProgress } = options;
+  const {
+    textbookId: inputTbId,
+    materialId: inputMatId,
+    retryOnlyFailed = false,
+    onProgress,
+    maxDurationMs = DEFAULT_MAX_DURATION_MS,
+    pageLimit = DEFAULT_PAGE_LIMIT,
+    processAllPages = false,
+  } = options;
 
+  const startedAt = Date.now();
   let textbookId = inputTbId;
   let materialId = inputMatId;
   let pdfBuffer: Buffer | null = null;
@@ -270,7 +533,7 @@ export async function processAutomaticPdfExtraction(options: {
     throw new Error('Unable to acquire PDF buffer (file is empty or missing).');
   }
 
-  // 2. Inspection: Automatically classify PDF Type
+  // 2. Durable job + bounded per-page processing
   const reportProgress = async (
     step: string,
     pct: number,
@@ -282,7 +545,7 @@ export async function processAutomaticPdfExtraction(options: {
     total = 0,
     processed = 0
   ) => {
-    const update: ExtractionProgressUpdate = {
+    onProgress?.({
       textbookId,
       materialId,
       totalPages: total,
@@ -294,180 +557,305 @@ export async function processAutomaticPdfExtraction(options: {
       currentStep: step,
       status,
       pdfType,
-    };
-    onProgress?.(update);
+    });
 
-    // Update textbook record in database
     if (textbookId) {
+      const textbookStatus =
+        status === 'COMPLETED' || status === 'PARTIALLY_COMPLETED'
+          ? 'completed'
+          : status === 'FAILED'
+          ? 'failed'
+          : 'processing';
       await pool.query(
         `UPDATE textbooks SET
-          extraction_status = $1,
-          pdf_type = $2,
-          completion_percentage = $3,
-          updated_at = CURRENT_TIMESTAMP
-         WHERE id = $4`,
-        [status, pdfType, pct, textbookId]
+           extraction_status = $1, pdf_type = $2, completion_percentage = $3,
+           native_pages = $4, ocr_pages = $5, failed_pages = $6, status = $7,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = $8`,
+        [status, pdfType, pct, native, ocr, failed, textbookStatus, textbookId]
       );
     }
 
     if (materialId) {
       await pool.query(
         `UPDATE google_drive_materials SET
-          extraction_status = $1,
-          pdf_type = $2,
-          completion_percentage = $3,
-          updated_at = CURRENT_TIMESTAMP
-         WHERE id = $4`,
-        [status, pdfType, pct, materialId]
+           extraction_status = $1, pdf_type = $2, completion_percentage = $3,
+           native_pages = $4, ocr_pages = $5, failed_pages = $6, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7`,
+        [status, pdfType, pct, native, ocr, failed, materialId]
       );
     }
   };
 
-  await reportProgress('Analyzing PDF structure & inspecting page types...', 10, 'DETECTING');
-  const inspection = await inspectPdfPages(pdfBuffer);
+  // Advisory lock prevents two overlapping HTTP invocations from processing the same PDF twice.
+  const lockClient = await pool.connect();
+  const lockKey = `pdf_extraction:${textbookId}`;
+  let lockHeld = false;
+  let parser: any = null;
 
-  if (inspection.pdfType === 'INVALID' || inspection.totalPages === 0) {
-    const errorMsg = inspection.error || 'Corrupted or unreadable PDF document.';
-    await reportProgress(errorMsg, 0, 'FAILED', 'INVALID');
-    if (textbookId) {
-      await pool.query(`UPDATE textbooks SET status = 'failed', error_message = $1 WHERE id = $2`, [errorMsg, textbookId]);
-    }
-    if (materialId) {
-      await pool.query(`UPDATE google_drive_materials SET upload_status = 'failed', extraction_error = $1 WHERE id = $2`, [errorMsg, materialId]);
-    }
-    return {
-      success: false,
-      pdfType: 'INVALID',
-      totalPages: 0,
-      nativePagesCount: 0,
-      ocrPagesCount: 0,
-      failedPagesCount: 0,
-      status: 'FAILED',
-      errorMessage: errorMsg,
-    };
-  }
+  try {
+    const lockRes = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext($1)) AS locked`, [lockKey]);
+    lockHeld = Boolean(lockRes.rows[0]?.locked);
 
-  const totalPages = inspection.totalPages;
-  console.log(`[PDF Extraction] Detected PDF Type: ${inspection.pdfType} (${totalPages} pages: ${inspection.nativePages.length} native, ${inspection.scannedPages.length} scanned)`);
-
-  await reportProgress(
-    `Detected ${inspection.pdfType} document (${totalPages} pages). Starting extraction...`,
-    20,
-    inspection.scannedPages.length > 0 ? 'OCR_PROCESSING' : 'EXTRACTING',
-    inspection.pdfType,
-    inspection.nativePages.length,
-    inspection.scannedPages.length,
-    0,
-    totalPages,
-    0
-  );
-
-  // 3. Determine which pages need processing (supporting resume / retry)
-  const completedPageSet = new Set<number>();
-  if (retryOnlyFailed && textbookId) {
-    const existingRes = await pool.query(
-      `SELECT page_number FROM textbook_content WHERE textbook_id = $1 AND extraction_status = 'completed'`,
-      [textbookId]
-    );
-    existingRes.rows.forEach((r) => completedPageSet.add(Number(r.page_number)));
-  }
-
-  // Pre-fetch native parsed pages using pdf-parse v2
-  const PDFParseClass = getPdfParseClass();
-  const parser = new PDFParseClass({ data: pdfBuffer });
-  const textResult = await parser.getText();
-
-  let nativeCount = 0;
-  let ocrCount = 0;
-  let failedCount = 0;
-  const extractedPagesData: Array<{ pageNumber: number; text: string; method: string; isOcr: boolean; unitId?: number; unitTitle?: string; lessonTitle?: string }> = [];
-
-  let activeUnitId: number | undefined;
-  let activeUnitTitle: string | undefined;
-  let activeLessonTitle: string | undefined;
-
-  // Process pages in manageable batches
-  for (let i = 0; i < totalPages; i++) {
-    const pageNum = i + 1;
-
-    // Skip already completed pages during retry
-    if (completedPageSet.has(pageNum)) {
-      continue;
+    if (!lockHeld) {
+      const current = await getExtractionStatus({ textbookId, materialId });
+      const finished = current.status === 'COMPLETED' || current.status === 'PARTIALLY_COMPLETED' || current.status === 'FAILED';
+      return {
+        success: current.status !== 'FAILED',
+        pdfType: current.pdfType,
+        totalPages: current.totalPages,
+        nativePagesCount: current.nativePages,
+        ocrPagesCount: current.ocrPages,
+        failedPagesCount: current.failedPages,
+        extractedPagesCount: current.nativePages + current.ocrPages,
+        status: finished ? current.status : 'PROCESSING',
+        inProgress: !finished,
+        nextPage: current.nextPage || 1,
+        remainingPages: current.remainingPages || 0,
+      };
     }
 
-    const isNative = inspection.nativePages.includes(pageNum);
-    let pageText = '';
-    let extractionMethod = 'native';
-    let isOcr = false;
-    let ocrConfidence: number | null = null;
-    let pageStatus = 'completed';
-    let pageError: string | null = null;
+    const jobId = await getOrCreateExtractionJob({
+      textbookId: textbookId!,
+      materialId,
+      fileName,
+      driveFileId: materialRow?.google_drive_file_id || null,
+    });
 
-    if (isNative) {
-      // Phase 3: Native Text Extraction
-      const raw = textResult.pages?.[i]?.text || '';
-      pageText = repairInDesignPdfArtifacts(cleanTamilUnicodeText(cleanText(raw)));
-      extractionMethod = 'native';
-      nativeCount++;
+    const jobRes = await pool.query(`SELECT * FROM pdf_extractions WHERE id = $1`, [jobId]);
+    const job = jobRes.rows[0] || {};
+    const finishedJob = ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(String(job.extraction_status));
+
+    // An explicit new run restarts the cursor; an interrupted run resumes where it stopped.
+    let cursor = finishedJob && !retryOnlyFailed ? 1 : Number(job.next_page) || 1;
+    if (finishedJob && !retryOnlyFailed) {
+      await pool.query(
+        `UPDATE pdf_extractions SET
+           next_page = 1, extraction_status = 'PROCESSING', extracted_pages = 0, failed_pages = 0,
+           native_pages = 0, ocr_pages = 0, extraction_error = NULL, extracted_at = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [jobId]
+      );
+    } else if (String(job.extraction_status) !== 'PROCESSING') {
+      await pool.query(
+        `UPDATE pdf_extractions SET extraction_status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [jobId]
+      );
+    }
+
+    await reportProgress('Analyzing PDF structure & inspecting page types...', 5, 'DETECTING');
+
+    // One parse for native text; the parser stays alive so scanned pages can be rasterized for OCR.
+    const PDFParseClass = getPdfParseClass();
+    parser = new PDFParseClass({ data: pdfBuffer });
+    let textResult: any;
+    try {
+      textResult = await parser.getText();
+    } catch (parseErr: any) {
+      const errorMsg = parseErr?.message || 'Corrupted or unreadable PDF document.';
+      await pool.query(
+        `UPDATE pdf_extractions SET extraction_status='FAILED', extraction_error=$2, extracted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=$1`,
+        [jobId, errorMsg]
+      );
+      await reportProgress(errorMsg, 0, 'FAILED', 'INVALID');
+      if (textbookId) {
+        await pool.query(`UPDATE textbooks SET status='failed', extraction_status='FAILED', error_message=$1 WHERE id=$2`, [errorMsg, textbookId]);
+      }
+      if (materialId) {
+        await pool.query(`UPDATE google_drive_materials SET upload_status='failed', extraction_status='FAILED', extraction_error=$1 WHERE id=$2`, [errorMsg, materialId]);
+      }
+      return {
+        success: false,
+        pdfType: 'INVALID',
+        totalPages: 0,
+        nativePagesCount: 0,
+        ocrPagesCount: 0,
+        failedPagesCount: 0,
+        extractedPagesCount: 0,
+        status: 'FAILED',
+        inProgress: false,
+        nextPage: 1,
+        remainingPages: 0,
+        errorMessage: errorMsg,
+      };
+    }
+
+    const totalPages = Number(textResult?.total || textResult?.pages?.length || 0);
+    if (!totalPages) {
+      const errorMsg = 'PDF has 0 pages or could not be decoded.';
+      await pool.query(
+        `UPDATE pdf_extractions SET extraction_status='FAILED', extraction_error=$2, extracted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=$1`,
+        [jobId, errorMsg]
+      );
+      await reportProgress(errorMsg, 0, 'FAILED', 'INVALID');
+      return {
+        success: false,
+        pdfType: 'INVALID',
+        totalPages: 0,
+        nativePagesCount: 0,
+        ocrPagesCount: 0,
+        failedPagesCount: 0,
+        extractedPagesCount: 0,
+        status: 'FAILED',
+        inProgress: false,
+        nextPage: 1,
+        remainingPages: 0,
+        errorMessage: errorMsg,
+      };
+    }
+
+    const nativePages = new Set<number>();
+    for (let i = 0; i < totalPages; i++) {
+      if (meaningfulCharCount(textResult.pages?.[i]?.text || '') >= 40) nativePages.add(i + 1);
+    }
+    const pdfType: PdfType =
+      nativePages.size === totalPages ? 'TEXT_BASED' : nativePages.size === 0 ? 'SCANNED' : 'MIXED';
+
+    const counts = await aggregateExtractedPages(textbookId!);
+    let nativeCount = counts.native;
+    let ocrCount = counts.ocr;
+    let failedCount = counts.failed;
+    const pageRows = counts.pageRows;
+
+    let pagesToProcess: number[];
+    if (retryOnlyFailed) {
+      const failedRes = await pool.query(
+        `SELECT page_number FROM textbook_content WHERE textbook_id = $1 AND extraction_status = 'failed' ORDER BY page_number ASC`,
+        [textbookId]
+      );
+      pagesToProcess = failedRes.rows.map((r) => Number(r.page_number));
     } else {
-      // Phase 4: Automatic OCR for Scanned Pages
-      isOcr = true;
-      extractionMethod = 'ocr_vision';
+      pagesToProcess = [];
+      for (let p = cursor; p <= totalPages; p++) pagesToProcess.push(p);
+    }
 
-      // Perform OCR Dispatch
-      const ocrResult = await extractOcrForPage({
-        pdfBuffer,
-        pageNumber: pageNum,
-        standard,
-        medium,
-        subject,
-        totalPages,
-      });
-
-      if (ocrResult.text && ocrResult.text.trim().length >= 10) {
-        pageText = ocrResult.text;
-        extractionMethod = ocrResult.method;
-        ocrConfidence = ocrResult.confidence;
-        ocrCount++;
-      } else {
-        pageStatus = 'failed';
-        pageError = ocrResult.error || `OCR produced no readable characters for page ${pageNum}.`;
-        failedCount++;
+    // Preserve syllabus continuity for pages that carry no unit/lesson header of their own.
+    let activeUnitId: number | undefined;
+    let activeUnitTitle: string | undefined;
+    let activeLessonTitle: string | undefined;
+    if (pagesToProcess.length > 0) {
+      const prev = await pool.query(
+        `SELECT unit_id, unit_title, lesson_title FROM textbook_content
+         WHERE textbook_id = $1 AND page_number < $2 ORDER BY page_number DESC LIMIT 1`,
+        [textbookId, pagesToProcess[0]]
+      );
+      if (prev.rows.length > 0) {
+        activeUnitId = prev.rows[0].unit_id == null ? undefined : Number(prev.rows[0].unit_id);
+        activeUnitTitle = prev.rows[0].unit_title || undefined;
+        activeLessonTitle = prev.rows[0].lesson_title || undefined;
       }
     }
 
-    // Phase 9: TNPSC Syllabus Mapping
-    const meta = extractPageSyllabusMeta(pageText, subject, pageNum, totalPages);
-    if (meta.unitId) {
-      if (meta.unitId !== activeUnitId) activeLessonTitle = undefined;
-      activeUnitId = meta.unitId;
-    }
-    if (meta.unitTitle) activeUnitTitle = meta.unitTitle;
-    if (meta.lessonTitle) activeLessonTitle = meta.lessonTitle;
+    await reportProgress(
+      `Detected ${pdfType} document (${totalPages} pages). Extracting...`,
+      Math.min(99, Math.round((counts.completed / totalPages) * 100)),
+      'PROCESSING',
+      pdfType,
+      nativeCount,
+      ocrCount,
+      failedCount,
+      totalPages,
+      counts.completed
+    );
 
-    const unitId = meta.unitId || activeUnitId || 1;
-    const unitTitle = meta.unitTitle || activeUnitTitle || `Unit ${unitId}`;
-    const lessonTitle = meta.lessonTitle || activeLessonTitle || `${subject} Chapter ${unitId}`;
-    const topic = meta.topic || lessonTitle;
+    let processedThisRun = 0;
+    let budgetExhausted = false;
 
-    extractedPagesData.push({
-      pageNumber: pageNum,
-      text: pageText,
-      method: extractionMethod,
-      isOcr,
-      unitId,
-      unitTitle,
-      lessonTitle,
-    });
+    for (const pageNum of pagesToProcess) {
+      if (!processAllPages && (Date.now() - startedAt >= maxDurationMs || processedThisRun >= pageLimit)) {
+        budgetExhausted = true;
+        break;
+      }
 
-    // Save page into PostgreSQL textbook_content with ON CONFLICT update
-    if (textbookId) {
+      // When extracting all pages, yield briefly every 25 pages so the node event loop remains responsive
+      if (processAllPages && processedThisRun > 0 && processedThisRun % 25 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      const i = pageNum - 1;
+      const isNative = nativePages.has(pageNum);
+      let pageText = '';
+      let extractionMethod = 'native';
+      let isOcr = false;
+      let ocrConfidence: number | null = null;
+      let pageStatus = 'completed';
+      let pageError: string | null = null;
+
+      if (isNative) {
+        const raw = textResult.pages?.[i]?.text || '';
+        pageText = repairInDesignPdfArtifacts(cleanTamilUnicodeText(cleanText(raw)));
+      } else {
+        isOcr = true;
+        extractionMethod = 'ocr_vision';
+        try {
+          const shot = await parser.getScreenshot({
+            partial: [pageNum],
+            desiredWidth: 1600,
+            imageBuffer: true,
+            imageDataUrl: false,
+          });
+          const imageData = shot?.pages?.[0]?.data;
+          const imageBuffer = imageData ? Buffer.from(imageData) : null;
+
+          if (!imageBuffer || imageBuffer.length === 0) {
+            pageStatus = 'failed';
+            pageError = `Could not render page ${pageNum} to an image for OCR.`;
+          } else {
+            const ocrResult = await extractOcrForPage({
+              imageBuffer,
+              pageNumber: pageNum,
+              standard,
+              medium,
+              subject,
+              totalPages,
+            });
+
+            if (ocrResult.text && ocrResult.text.trim().length >= 10) {
+              pageText = ocrResult.text;
+              extractionMethod = ocrResult.method;
+              ocrConfidence = ocrResult.confidence;
+            } else {
+              pageStatus = 'failed';
+              pageError =
+                ocrResult.error ||
+                `OCR produced no readable characters for page ${pageNum} (blank or unreadable page).`;
+            }
+          }
+        } catch (ocrErr: any) {
+          pageStatus = 'failed';
+          pageError = `OCR failed for page ${pageNum}: ${ocrErr?.message || 'unknown error'}`;
+        }
+      }
+
+      // TNPSC syllabus mapping via existing heuristics (no hardcoded lesson data).
+      const meta = extractPageSyllabusMeta(pageText, subject, pageNum, totalPages);
+      if (meta.unitId) {
+        if (meta.unitId !== activeUnitId) activeLessonTitle = undefined;
+        activeUnitId = meta.unitId;
+      }
+      if (meta.unitTitle) activeUnitTitle = meta.unitTitle;
+      if (meta.lessonTitle) activeLessonTitle = meta.lessonTitle;
+
+      const unitId = meta.unitId || activeUnitId || 1;
+      const unitTitle = meta.unitTitle || activeUnitTitle || `Unit ${unitId}`;
+      const lessonTitle = meta.lessonTitle || activeLessonTitle || `${subject} Chapter ${unitId}`;
+      const topic = meta.topic || lessonTitle;
+
+      const previous = pageRows.get(pageNum);
+      if (previous?.status === 'completed') {
+        if (previous.isOcr) ocrCount = Math.max(0, ocrCount - 1);
+        else nativeCount = Math.max(0, nativeCount - 1);
+      } else if (previous?.status === 'failed') {
+        failedCount = Math.max(0, failedCount - 1);
+      }
+
       await pool.query(
         `INSERT INTO textbook_content (
           textbook_id, page_number, unit_id, unit_title, lesson_title, topic,
           content, text_length, is_ocr, extraction_method, ocr_confidence,
-          extraction_status, extraction_error, processing_timestamp
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+          extraction_status, extraction_error, file_name, standard, subject,
+          term, material_id, processing_timestamp
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, CURRENT_TIMESTAMP)
         ON CONFLICT (textbook_id, page_number) DO UPDATE SET
           unit_id = EXCLUDED.unit_id,
           unit_title = EXCLUDED.unit_title,
@@ -480,6 +868,11 @@ export async function processAutomaticPdfExtraction(options: {
           ocr_confidence = EXCLUDED.ocr_confidence,
           extraction_status = EXCLUDED.extraction_status,
           extraction_error = EXCLUDED.extraction_error,
+          file_name = EXCLUDED.file_name,
+          standard = EXCLUDED.standard,
+          subject = EXCLUDED.subject,
+          term = EXCLUDED.term,
+          material_id = EXCLUDED.material_id,
           processing_timestamp = CURRENT_TIMESTAMP`,
         [
           textbookId,
@@ -495,142 +888,136 @@ export async function processAutomaticPdfExtraction(options: {
           ocrConfidence,
           pageStatus,
           pageError,
+          fileName,
+          standard,
+          subject,
+          term,
+          materialId || null,
         ]
       );
+
+      pageRows.set(pageNum, { status: pageStatus, isOcr });
+      if (pageStatus === 'completed') {
+        if (isOcr) ocrCount++;
+        else nativeCount++;
+      } else {
+        failedCount++;
+      }
+      processedThisRun++;
+      if (!retryOnlyFailed) cursor = pageNum + 1;
+
+      const completedCount = nativeCount + ocrCount;
+      const pct = Math.min(99, Math.round((completedCount / totalPages) * 100));
+
+      // Commit the cursor after every page so a killed invocation resumes exactly here.
+      await pool.query(
+        `UPDATE pdf_extractions SET
+           extraction_status = 'PROCESSING', total_pages = $2, next_page = $3, extracted_pages = $4,
+           failed_pages = $5, native_pages = $6, ocr_pages = $7, pdf_type = $8, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [jobId, totalPages, cursor, completedCount, failedCount, nativeCount, ocrCount, pdfType]
+      );
+
+      if (processedThisRun % 5 === 0) {
+        await reportProgress(
+          `Extracted page ${pageNum} of ${totalPages} (${isOcr ? 'OCR' : 'Native'})...`,
+          pct,
+          'PROCESSING',
+          pdfType,
+          nativeCount,
+          ocrCount,
+          failedCount,
+          totalPages,
+          completedCount
+        );
+      }
     }
 
-    // Periodic progress reporting (every 5 pages or at the end)
-    if (pageNum % 5 === 0 || pageNum === totalPages) {
-      const pct = Math.min(95, Math.round(20 + ((pageNum / totalPages) * 75)));
+    const done = retryOnlyFailed ? !budgetExhausted : cursor > totalPages;
+
+    if (!done) {
+      const completedCount = nativeCount + ocrCount;
+      const pct = Math.min(99, Math.round((completedCount / totalPages) * 100));
       await reportProgress(
-        `Extracted page ${pageNum} of ${totalPages} (${isOcr ? 'OCR' : 'Native'})...`,
+        `Extraction in progress: ${completedCount}/${totalPages} pages stored.`,
         pct,
-        isOcr ? 'OCR_PROCESSING' : 'EXTRACTING',
-        inspection.pdfType,
+        'PROCESSING',
+        pdfType,
         nativeCount,
         ocrCount,
         failedCount,
         totalPages,
-        pageNum
+        completedCount
       );
+      return {
+        success: true,
+        pdfType,
+        totalPages,
+        nativePagesCount: nativeCount,
+        ocrPagesCount: ocrCount,
+        failedPagesCount: failedCount,
+        extractedPagesCount: completedCount,
+        status: 'PROCESSING',
+        inProgress: true,
+        nextPage: cursor,
+        remainingPages: Math.max(0, totalPages - completedCount),
+      };
     }
-  }
 
-  try {
-    await parser.destroy();
-  } catch {}
+    const final = await finalizeExtraction({
+      textbookId: textbookId!,
+      materialId,
+      jobId,
+      totalPages,
+      pdfType,
+      fileName,
+    });
 
-  // 4. Final Aggregation & Status Computation
-  // When >= 85% of pages have extractable text (e.g. 101/107 pages), the few non-text pages
-  // are cover illustrations, title blanks, or divider pages; the textbook is fully COMPLETED.
-  const successfulPages = totalPages - failedCount;
-  const isHighCoverage = totalPages > 0 && (successfulPages / totalPages >= 0.85);
-  const overallStatus: ExtractionStatus =
-    failedCount === 0 || isHighCoverage
-      ? 'COMPLETED'
-      : successfulPages > 0
-      ? 'PARTIALLY_COMPLETED'
-      : 'FAILED';
-  const effectiveFailedCount = isHighCoverage ? 0 : failedCount;
-
-  const fullConcatenatedText = extractedPagesData
-    .map((p) => `=== [Page ${p.pageNumber}] ===\n${p.text}`)
-    .join('\n\n');
-
-  // Update Textbook Record
-  if (textbookId) {
-    await pool.query(
-      `UPDATE textbooks SET
-        page_count = $1,
-        total_pages = $1,
-        native_pages = $2,
-        ocr_pages = $3,
-        failed_pages = $4,
-        completion_percentage = $5,
-        pdf_type = $6,
-        extraction_status = $7,
-        status = $8,
-        error_message = $9,
-        extracted_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-       WHERE id = $10`,
-      [
-        totalPages,
-        nativeCount,
-        ocrCount,
-        effectiveFailedCount,
-        overallStatus === 'COMPLETED' ? 100 : Math.round((successfulPages / Math.max(1, totalPages)) * 100),
-        inspection.pdfType,
-        overallStatus,
-        overallStatus === 'FAILED' ? 'failed' : 'completed',
-        effectiveFailedCount > 0 ? `${effectiveFailedCount} of ${totalPages} pages could not be extracted.` : null,
-        textbookId,
-      ]
+    await reportProgress(
+      final.status === 'COMPLETED'
+        ? `Successfully extracted all ${totalPages} pages (${final.nativePagesCount} native, ${final.ocrPagesCount} OCR).`
+        : `Extraction completed with ${final.failedPagesCount} failed page(s).`,
+      final.completionPercentage,
+      final.status,
+      pdfType,
+      final.nativePagesCount,
+      final.ocrPagesCount,
+      final.failedPagesCount,
+      totalPages,
+      final.nativePagesCount + final.ocrPagesCount
     );
-  }
 
-  // Update Google Drive Material Record
-  if (materialId) {
-    await pool.query(
-      `UPDATE google_drive_materials SET
-        page_count = $1,
-        total_pages = $1,
-        native_pages = $2,
-        ocr_pages = $3,
-        failed_pages = $4,
-        completion_percentage = $5,
-        pdf_type = $6,
-        extraction_status = $7,
-        upload_status = $8,
-        extracted_text = $9,
-        extracted_pages = $10,
-        extraction_error = $11,
-        extracted_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-       WHERE id = $12`,
-      [
-        totalPages,
-        nativeCount,
-        ocrCount,
-        effectiveFailedCount,
-        overallStatus === 'COMPLETED' ? 100 : Math.round((successfulPages / Math.max(1, totalPages)) * 100),
-        inspection.pdfType,
-        overallStatus,
-        overallStatus === 'FAILED' ? 'failed' : 'completed',
-        fullConcatenatedText.slice(0, 1000000), // persist full text
-        JSON.stringify(extractedPagesData), // persist page-by-page data
-        effectiveFailedCount > 0 ? `${effectiveFailedCount} pages failed extraction.` : null,
-        materialId,
-      ]
+    console.log(
+      `[PDF Extraction] ${fileName}: status=${final.status}, native=${final.nativePagesCount}, ocr=${final.ocrPagesCount}, failed=${final.failedPagesCount}`
     );
+
+    return {
+      success: final.status !== 'FAILED',
+      pdfType,
+      totalPages,
+      nativePagesCount: final.nativePagesCount,
+      ocrPagesCount: final.ocrPagesCount,
+      failedPagesCount: final.failedPagesCount,
+      extractedPagesCount: final.nativePagesCount + final.ocrPagesCount,
+      status: final.status,
+      inProgress: false,
+      nextPage: totalPages + 1,
+      remainingPages: 0,
+      errorMessage: final.failedPagesCount > 0 ? `${final.failedPagesCount} page(s) failed extraction.` : undefined,
+    };
+  } finally {
+    if (parser) {
+      try {
+        await parser.destroy();
+      } catch {}
+    }
+    if (lockHeld) {
+      try {
+        await lockClient.query(`SELECT pg_advisory_unlock(hashtext($1))`, [lockKey]);
+      } catch {}
+    }
+    lockClient.release();
   }
-
-  await reportProgress(
-    overallStatus === 'COMPLETED'
-      ? `Successfully extracted all ${totalPages} pages (${nativeCount} native, ${ocrCount} OCR).`
-      : `Extraction completed with ${effectiveFailedCount} failed page(s).`,
-    overallStatus === 'COMPLETED' ? 100 : Math.round((successfulPages / Math.max(1, totalPages)) * 100),
-    overallStatus,
-    inspection.pdfType,
-    nativeCount,
-    ocrCount,
-    effectiveFailedCount,
-    totalPages,
-    totalPages
-  );
-
-  console.log(`[PDF Extraction] Completed processing for ${fileName}: Status=${overallStatus}, Native=${nativeCount}, OCR=${ocrCount}, Failed=${effectiveFailedCount}`);
-
-  return {
-    success: overallStatus !== 'FAILED',
-    pdfType: inspection.pdfType,
-    totalPages,
-    nativePagesCount: nativeCount,
-    ocrPagesCount: ocrCount,
-    failedPagesCount: effectiveFailedCount,
-    status: overallStatus,
-    errorMessage: effectiveFailedCount > 0 ? `${effectiveFailedCount} page(s) failed extraction.` : undefined,
-  };
 }
 
 /**
@@ -642,11 +1029,17 @@ export async function extractAndPersistPdf(options: {
   googleDriveFileId?: string;
   buffer?: Buffer;
   forceReExtract?: boolean;
+  processAllPages?: boolean;
 }): Promise<{
   success: boolean;
   totalPages: number;
   extractedPages: number;
+  failedPages: number;
   method: 'direct_text' | 'ocr' | 'hybrid';
+  status: ExtractionStatus;
+  inProgress: boolean;
+  nextPage: number;
+  remainingPages: number;
   error?: string;
 }> {
   let materialId = options.materialId;
@@ -659,13 +1052,19 @@ export async function extractAndPersistPdf(options: {
     materialId,
     textbookId: options.textbookId,
     retryOnlyFailed: !options.forceReExtract,
+    processAllPages: options.processAllPages ?? false,
   });
 
   return {
     success: result.success,
     totalPages: result.totalPages,
     extractedPages: result.nativePagesCount + result.ocrPagesCount,
+    failedPages: result.failedPagesCount,
     method: result.pdfType === 'TEXT_BASED' ? 'direct_text' : result.pdfType === 'SCANNED' ? 'ocr' : 'hybrid',
+    status: result.status,
+    inProgress: result.inProgress,
+    nextPage: result.nextPage,
+    remainingPages: result.remainingPages,
     error: result.errorMessage,
   };
 }
@@ -687,39 +1086,32 @@ export async function getExtractionStatus(options: {
   failedPages: number;
   completionPercentage: number;
   status: ExtractionStatus;
+  nextPage: number;
+  remainingPages: number;
   errorMessage?: string | null;
   extractedAt?: string | null;
 }> {
   const { materialId, textbookId } = options;
 
+  let base: any;
+  let job: any;
+  let resolvedTextbookId = textbookId;
+
   if (materialId) {
     const res = await pool.query(
-      `SELECT id, file_name, pdf_type, total_pages, page_count, native_pages, ocr_pages,
+      `SELECT id, file_name, google_drive_file_id, pdf_type, total_pages, page_count, native_pages, ocr_pages,
               failed_pages, completion_percentage, extraction_status, upload_status,
               extraction_error, extracted_at
        FROM google_drive_materials WHERE id = $1`,
       [materialId]
     );
     if (res.rows.length === 0) throw new Error(`Material #${materialId} not found.`);
-    const r = res.rows[0];
-    const total = r.total_pages || r.page_count || 0;
-    const status = (r.extraction_status || (r.extracted_at ? 'COMPLETED' : 'PENDING')) as ExtractionStatus;
-    return {
-      id: r.id,
-      fileName: r.file_name,
-      pdfType: (r.pdf_type || 'UNKNOWN') as PdfType,
-      totalPages: total,
-      nativePages: r.native_pages || 0,
-      ocrPages: r.ocr_pages || 0,
-      failedPages: r.failed_pages || 0,
-      completionPercentage: r.completion_percentage || (status === 'COMPLETED' ? 100 : 0),
-      status,
-      errorMessage: r.extraction_error,
-      extractedAt: r.extracted_at,
-    };
-  }
-
-  if (textbookId) {
+    base = res.rows[0];
+    if (!resolvedTextbookId) {
+      const tbRes = await pool.query(`SELECT id FROM textbooks WHERE file_path = $1 LIMIT 1`, [`gdrive://${base.google_drive_file_id}`]);
+      resolvedTextbookId = tbRes.rows[0]?.id;
+    }
+  } else if (textbookId) {
     const res = await pool.query(
       `SELECT id, book_name, pdf_type, total_pages, page_count, native_pages, ocr_pages,
               failed_pages, completion_percentage, extraction_status, status,
@@ -728,63 +1120,135 @@ export async function getExtractionStatus(options: {
       [textbookId]
     );
     if (res.rows.length === 0) throw new Error(`Textbook #${textbookId} not found.`);
-    const r = res.rows[0];
-    const total = r.total_pages || r.page_count || 0;
-    const status = (r.extraction_status || (r.status === 'completed' && total > 0 ? 'COMPLETED' : 'PENDING')) as ExtractionStatus;
-    return {
-      id: r.id,
-      fileName: r.book_name,
-      pdfType: (r.pdf_type || 'UNKNOWN') as PdfType,
-      totalPages: total,
-      nativePages: r.native_pages || 0,
-      ocrPages: r.ocr_pages || 0,
-      failedPages: r.failed_pages || 0,
-      completionPercentage: r.completion_percentage || (status === 'COMPLETED' ? 100 : 0),
-      status,
-      errorMessage: r.error_message,
-      extractedAt: r.extracted_at,
-    };
+    base = res.rows[0];
+  } else {
+    throw new Error('Either materialId or textbookId must be provided.');
   }
 
-  throw new Error('Either materialId or textbookId must be provided.');
+  if (resolvedTextbookId || materialId) {
+    const jobRes = await pool.query(
+      `SELECT * FROM pdf_extractions
+       WHERE ($1::int IS NOT NULL AND textbook_id = $1) OR ($2::int IS NOT NULL AND material_id = $2)
+       ORDER BY id DESC LIMIT 1`,
+      [resolvedTextbookId ?? null, materialId ?? null]
+    );
+    job = jobRes.rows[0];
+  }
+
+  const total = Number(job?.total_pages || base.total_pages || base.page_count || 0);
+  const nativePages = Number(job?.native_pages || base.native_pages || 0);
+  const ocrPages = Number(job?.ocr_pages || base.ocr_pages || 0);
+  const failedPages = Number(job?.failed_pages ?? base.failed_pages ?? 0);
+  const status = (job?.extraction_status ||
+    base.extraction_status ||
+    (base.extracted_at ? 'COMPLETED' : 'PENDING')) as ExtractionStatus;
+  const nextPage = Number(job?.next_page || 1);
+  const completed = nativePages + ocrPages;
+
+  return {
+    id: base.id,
+    fileName: base.file_name || base.book_name,
+    pdfType: (job?.pdf_type || base.pdf_type || 'UNKNOWN') as PdfType,
+    totalPages: total,
+    nativePages,
+    ocrPages,
+    failedPages,
+    completionPercentage:
+      base.completion_percentage != null
+        ? Number(base.completion_percentage)
+        : total > 0
+        ? Math.min(100, Math.round((completed / total) * 100))
+        : 0,
+    status,
+    nextPage,
+    remainingPages: total > 0 ? Math.max(0, total - completed) : 0,
+    errorMessage: job?.extraction_error ?? base.extraction_error ?? base.error_message ?? null,
+    extractedAt: job?.extracted_at || base.extracted_at || null,
+  };
+}
+
+export interface ExtractedPageItem {
+  pageNumber: number;
+  text: string;
+  unitId?: number;
+  unitTitle?: string;
+  lessonTitle?: string;
+  topic?: string;
+  fileName?: string;
+  pdfId?: number;
+  materialId?: number;
+  standard?: number;
+  subject?: string;
+  term?: string;
+  isOcr: boolean;
+  extractionMethod?: string;
+  ocrConfidence?: number | null;
+  status?: string;
+}
+
+export interface ExtractedPagesResponse {
+  totalPages: number;
+  fileName?: string;
+  pdfId?: number;
+  materialId?: number;
+  standard?: number;
+  subject?: string;
+  term?: string;
+  pdfType?: string;
+  status?: string;
+  nativePages?: number;
+  ocrPages?: number;
+  failedPages?: number;
+  pages: ExtractedPageItem[];
 }
 
 /**
  * Returns all extracted pages for Admin Review Screen.
+ * Includes complete PDF metadata (PDF File Name, PDF ID, Standard, Subject, Term, Unit, Lesson, Page, Text, Status)
  */
 export async function getExtractedPages(options: {
   materialId?: number;
   textbookId?: number;
-}): Promise<{
-  totalPages: number;
-  pages: Array<{
-    pageNumber: number;
-    text: string;
-    unitId?: number;
-    unitTitle?: string;
-    lessonTitle?: string;
-    topic?: string;
-    isOcr: boolean;
-    extractionMethod?: string;
-    ocrConfidence?: number | null;
-    status?: string;
-  }>;
-}> {
+}): Promise<ExtractedPagesResponse> {
   let targetTbId = options.textbookId;
+  let materialRow: any = null;
+  let textbookRow: any = null;
 
-  if (!targetTbId && options.materialId) {
-    const matRes = await pool.query(`SELECT google_drive_file_id FROM google_drive_materials WHERE id = $1`, [options.materialId]);
+  if (options.materialId) {
+    const matRes = await pool.query(`SELECT * FROM google_drive_materials WHERE id = $1`, [options.materialId]);
     if (matRes.rows.length > 0) {
-      const fileId = matRes.rows[0].google_drive_file_id;
-      const tbRes = await pool.query(`SELECT id FROM textbooks WHERE file_path LIKE $1 LIMIT 1`, [`%${fileId}%`]);
-      if (tbRes.rows.length > 0) targetTbId = tbRes.rows[0].id;
+      materialRow = matRes.rows[0];
+      if (!targetTbId) {
+        const fileId = materialRow.google_drive_file_id;
+        const tbRes = await pool.query(`SELECT * FROM textbooks WHERE file_path LIKE $1 LIMIT 1`, [`%${fileId}%`]);
+        if (tbRes.rows.length > 0) {
+          textbookRow = tbRes.rows[0];
+          targetTbId = textbookRow.id;
+        }
+      }
     }
   }
+
+  if (targetTbId && !textbookRow) {
+    const tbRes = await pool.query(`SELECT * FROM textbooks WHERE id = $1`, [targetTbId]);
+    if (tbRes.rows.length > 0) textbookRow = tbRes.rows[0];
+  }
+
+  const docFileName = materialRow?.file_name || textbookRow?.book_name || 'textbook.pdf';
+  const docStandard = Number(materialRow?.standard || textbookRow?.standard || 6);
+  const docSubject = materialRow?.subject || textbookRow?.subject || 'General Studies';
+  const docTerm = materialRow?.term || textbookRow?.term || 'Term 1';
+  const docPdfType = materialRow?.pdf_type || textbookRow?.pdf_type || 'UNKNOWN';
+  const docStatus = materialRow?.extraction_status || textbookRow?.extraction_status || 'PENDING';
+  const docNativePages = Number(materialRow?.native_pages || textbookRow?.native_pages || 0);
+  const docOcrPages = Number(materialRow?.ocr_pages || textbookRow?.ocr_pages || 0);
+  const docFailedPages = Number(materialRow?.failed_pages || textbookRow?.failed_pages || 0);
 
   if (targetTbId) {
     const pagesRes = await pool.query(
       `SELECT page_number, content AS text, unit_id, unit_title, lesson_title, topic,
-              is_ocr, extraction_method, ocr_confidence, extraction_status
+              is_ocr, extraction_method, ocr_confidence, extraction_status,
+              file_name, standard, subject, term, material_id
        FROM textbook_content
        WHERE textbook_id = $1
        ORDER BY page_number ASC`,
@@ -794,6 +1258,17 @@ export async function getExtractedPages(options: {
     if (pagesRes.rows.length > 0) {
       return {
         totalPages: pagesRes.rows.length,
+        fileName: docFileName,
+        pdfId: targetTbId,
+        materialId: options.materialId || materialRow?.id,
+        standard: docStandard,
+        subject: docSubject,
+        term: docTerm,
+        pdfType: docPdfType,
+        status: docStatus,
+        nativePages: docNativePages,
+        ocrPages: docOcrPages,
+        failedPages: docFailedPages,
         pages: pagesRes.rows.map((r) => ({
           pageNumber: Number(r.page_number),
           text: r.text,
@@ -801,6 +1276,12 @@ export async function getExtractedPages(options: {
           unitTitle: r.unit_title,
           lessonTitle: r.lesson_title,
           topic: r.topic,
+          fileName: r.file_name || docFileName,
+          pdfId: targetTbId,
+          materialId: r.material_id || options.materialId || materialRow?.id,
+          standard: r.standard || docStandard,
+          subject: r.subject || docSubject,
+          term: r.term || docTerm,
           isOcr: Boolean(r.is_ocr),
           extractionMethod: r.extraction_method || (r.is_ocr ? 'ocr' : 'native'),
           ocrConfidence: r.ocr_confidence ? Number(r.ocr_confidence) : null,
@@ -811,56 +1292,153 @@ export async function getExtractedPages(options: {
   }
 
   // Fallback: check google_drive_materials.extracted_pages JSONB
-  if (options.materialId) {
-    const matRes = await pool.query(`SELECT extracted_pages, page_count FROM google_drive_materials WHERE id = $1`, [options.materialId]);
-    if (matRes.rows.length > 0 && Array.isArray(matRes.rows[0].extracted_pages)) {
-      const rawPages = matRes.rows[0].extracted_pages;
-      return {
-        totalPages: rawPages.length,
-        pages: rawPages.map((p: any) => ({
-          pageNumber: Number(p.pageNumber || p.pageNum || 1),
-          text: p.text || '',
-          unitId: p.unitId,
-          unitTitle: p.unitTitle,
-          lessonTitle: p.lessonTitle,
-          topic: p.topic,
-          isOcr: Boolean(p.isOcr),
-          extractionMethod: p.method || (p.isOcr ? 'ocr' : 'native'),
-          ocrConfidence: p.ocrConfidence || null,
-          status: 'completed',
-        })),
-      };
-    }
+  if (options.materialId && materialRow?.extracted_pages && Array.isArray(materialRow.extracted_pages)) {
+    const rawPages = materialRow.extracted_pages;
+    return {
+      totalPages: rawPages.length,
+      fileName: docFileName,
+      pdfId: targetTbId,
+      materialId: options.materialId,
+      standard: docStandard,
+      subject: docSubject,
+      term: docTerm,
+      pdfType: docPdfType,
+      status: docStatus,
+      nativePages: docNativePages,
+      ocrPages: docOcrPages,
+      failedPages: docFailedPages,
+      pages: rawPages.map((p: any) => ({
+        pageNumber: Number(p.pageNumber || p.pageNum || 1),
+        text: p.text || '',
+        unitId: p.unitId,
+        unitTitle: p.unitTitle,
+        lessonTitle: p.lessonTitle,
+        topic: p.topic,
+        fileName: p.fileName || docFileName,
+        pdfId: targetTbId,
+        materialId: options.materialId,
+        standard: p.standard || docStandard,
+        subject: p.subject || docSubject,
+        term: p.term || docTerm,
+        isOcr: Boolean(p.isOcr),
+        extractionMethod: p.method || (p.isOcr ? 'ocr' : 'native'),
+        ocrConfidence: p.ocrConfidence || null,
+        status: p.status || 'completed',
+      })),
+    };
   }
 
-  return { totalPages: 0, pages: [] };
+  return {
+    totalPages: 0,
+    fileName: docFileName,
+    pdfId: targetTbId,
+    materialId: options.materialId,
+    standard: docStandard,
+    subject: docSubject,
+    term: docTerm,
+    pdfType: docPdfType,
+    status: docStatus,
+    pages: [],
+  };
 }
 
 /**
- * Scans all pending or failed materials and extracts them sequentially.
+ * Returns aggregated extraction statistics across all registered PDF materials.
  */
-export async function extractAllPendingMaterials(): Promise<{
+export async function getOverallExtractionOverview(): Promise<{
+  totalFiles: number;
+  totalPages: number;
+  extractedPages: number;
+  failedPages: number;
+  nativePages: number;
+  ocrPages: number;
+  completionPercentage: number;
+  statusBreakdown: {
+    completed: number;
+    partiallyCompleted: number;
+    processing: number;
+    pending: number;
+    failed: number;
+  };
+}> {
+  const res = await pool.query(`
+    SELECT
+      COUNT(*)::int AS total_files,
+      COALESCE(SUM(COALESCE(total_pages, page_count, 0)), 0)::int AS total_pages,
+      COALESCE(SUM(COALESCE(native_pages, 0) + COALESCE(ocr_pages, 0)), 0)::int AS extracted_pages,
+      COALESCE(SUM(COALESCE(failed_pages, 0)), 0)::int AS failed_pages,
+      COALESCE(SUM(COALESCE(native_pages, 0)), 0)::int AS native_pages,
+      COALESCE(SUM(COALESCE(ocr_pages, 0)), 0)::int AS ocr_pages,
+      COUNT(*) FILTER (WHERE extraction_status = 'COMPLETED')::int AS count_completed,
+      COUNT(*) FILTER (WHERE extraction_status = 'PARTIALLY_COMPLETED')::int AS count_partial,
+      COUNT(*) FILTER (WHERE extraction_status IN ('PROCESSING', 'EXTRACTING', 'OCR_PROCESSING', 'DETECTING'))::int AS count_processing,
+      COUNT(*) FILTER (WHERE extraction_status IN ('PENDING') OR extraction_status IS NULL)::int AS count_pending,
+      COUNT(*) FILTER (WHERE extraction_status = 'FAILED')::int AS count_failed
+    FROM google_drive_materials
+  `);
+
+  const row = res.rows[0] || {};
+  const totalFiles = Number(row.total_files || 0);
+  const totalPages = Number(row.total_pages || 0);
+  const extractedPages = Number(row.extracted_pages || 0);
+  const failedPages = Number(row.failed_pages || 0);
+  const pct = totalPages > 0 ? Math.min(100, Math.round((extractedPages / totalPages) * 100)) : 0;
+
+  return {
+    totalFiles,
+    totalPages,
+    extractedPages,
+    failedPages,
+    nativePages: Number(row.native_pages || 0),
+    ocrPages: Number(row.ocr_pages || 0),
+    completionPercentage: pct,
+    statusBreakdown: {
+      completed: Number(row.count_completed || 0),
+      partiallyCompleted: Number(row.count_partial || 0),
+      processing: Number(row.count_processing || 0),
+      pending: Number(row.count_pending || 0),
+      failed: Number(row.count_failed || 0),
+    },
+  };
+}
+
+/**
+ * Scans all pending or failed materials and extracts them sequentially to 100% completion.
+ */
+export async function extractAllPendingMaterials(options?: {
+  limit?: number;
+  onProgress?: (processed: number, total: number, currentItem: string) => void;
+}): Promise<{
   processed: number;
   succeeded: number;
   failed: number;
   materials: any[];
 }> {
+  const limit = options?.limit || 100;
   const pendingRes = await pool.query(
     `SELECT id, file_name, google_drive_file_id
      FROM google_drive_materials
      WHERE extracted_text IS NULL
         OR extraction_status IN ('PENDING', 'FAILED', 'PARTIALLY_COMPLETED')
-     ORDER BY id ASC`
+     ORDER BY id ASC
+     LIMIT $1`,
+    [limit]
   );
 
   let succeeded = 0;
   let failed = 0;
   const materials: any[] = [];
+  const total = pendingRes.rows.length;
 
-  for (const item of pendingRes.rows) {
+  for (let idx = 0; idx < total; idx++) {
+    const item = pendingRes.rows[idx];
     try {
-      console.log(`[BatchExtract] Processing pending material #${item.id} ("${item.file_name}")...`);
-      const res = await processAutomaticPdfExtraction({ materialId: item.id });
+      console.log(`[BatchExtract] (${idx + 1}/${total}) Processing material #${item.id} ("${item.file_name}")...`);
+      options?.onProgress?.(idx + 1, total, item.file_name);
+      const res = await processAutomaticPdfExtraction({
+        materialId: item.id,
+        processAllPages: true,
+      });
       if (res.success) {
         succeeded++;
       } else {
@@ -875,7 +1453,7 @@ export async function extractAllPendingMaterials(): Promise<{
   }
 
   return {
-    processed: pendingRes.rows.length,
+    processed: total,
     succeeded,
     failed,
     materials,

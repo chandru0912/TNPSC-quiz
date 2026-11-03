@@ -20,6 +20,8 @@ import {
   Difficulty,
 } from './questionValidator';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
+import { randomizeQuestionOptions } from './ai/shared/option-randomizer';
+import { OptionKey } from './ai/shared/mcq-schema';
 
 export interface McqGenerationRequest {
   provider?: AIProviderName;
@@ -38,6 +40,7 @@ export interface McqGenerationRequest {
   lessonId?: string;
   lessonNumber?: string;
   topic?: string;
+  selectedTopics?: string[];
   language: 'tamil' | 'english';
   count: number;
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Mixed';
@@ -73,6 +76,7 @@ export interface GeneratedMcqItem {
   lessonNumber?: string | null;
   status: 'staging' | 'published';
   targetSystem: 'study_materials';
+  aiProvider?: 'claude' | 'gemini';
 }
 
 export interface McqGenerationResult {
@@ -273,7 +277,7 @@ Standard: ${req.standard}th Standard
 Subject: ${req.subject}${req.textbookSubject && req.textbookSubject !== req.subject ? ` (textbook subject: ${req.textbookSubject})` : ''}
 Unit: ${req.unitId} (${req.unitTitle || 'General'})
 Lesson: ${req.lessonTitle}${req.lessonNumber ? ` (Lesson ${req.lessonNumber})` : ''}
-Textbook: ${req.textbookName || req.sourcePdf || 'Processed PDF'}
+${req.selectedTopics && req.selectedTopics.length > 0 ? `Selected Lesson Topics/Subtopics to focus on:\n${req.selectedTopics.map((t) => `- ${t}`).join('\n')}\n` : ''}Textbook: ${req.textbookName || req.sourcePdf || 'Processed PDF'}
 Term: ${req.term || 'Not applicable'}
 Volume: ${req.volume || 'Not applicable'}
 Source pages: ${req.sourcePages && req.sourcePages.length > 0 ? req.sourcePages.join(', ') : 'Indexed lesson pages'}
@@ -286,7 +290,7 @@ SOURCE TEXTBOOK CONTENT (the ONLY permitted factual source):
 ${req.textbookContent.slice(0, 24000)}
 """
 
-Generate ${currentBatchCount} distinct, high-quality MCQs covering different sections, facts, personalities, definitions, and concepts in this lesson.
+Generate ${currentBatchCount} distinct, high-quality MCQs covering different sections, facts, personalities, definitions, and concepts in this lesson${req.selectedTopics && req.selectedTopics.length > 0 ? ', strictly emphasizing the selected topics/subtopics above' : ''}.
 Every question and explanation must be supportable from the source text above. If the text is insufficient, return fewer questions instead of inventing facts.
 Respond strictly in JSON:
 {
@@ -297,7 +301,7 @@ Respond strictly in JSON:
       "correctAnswer": 0,
       "explanation": "Concise explanation.",
       "difficulty": "Medium",
-      "topic": "${req.lessonTitle}"
+      "topic": "${req.selectedTopics?.[0] || req.topic || req.lessonTitle}"
     }
   ]
 }`;
@@ -346,6 +350,11 @@ Respond strictly in JSON:
         candidate.sourcePdf = req.sourcePdf ?? req.textbookName ?? null;
         candidate.sourcePage = req.sourcePages?.[0] ?? null;
         candidate.lessonNumber = req.lessonNumber ?? null;
+        if (!candidate.topic || candidate.topic === 'General' || candidate.topic === req.lessonTitle) {
+          candidate.topic = (req.selectedTopics && req.selectedTopics.length > 0)
+            ? req.selectedTopics[acceptedQuestions.length % req.selectedTopics.length]
+            : (req.topic || req.lessonTitle);
+        }
 
         // Multi-level deduplication:
         // Level 1: Against questions already accepted in current run
@@ -379,12 +388,54 @@ Respond strictly in JSON:
     );
   }
 
-  onProgress?.(95, 'Finalizing quality review and deduplication audit...');
+  onProgress?.(95, 'Finalizing server-side option randomization & quality review...');
+
+  // Apply Server-Side Option Randomizer & Distribution Balancing (Part 5)
+  const randomizedQuestions: GeneratedMcqItem[] = [];
+  const counts: Record<OptionKey, number> = { A: 0, B: 0, C: 0, D: 0 };
+  let lastPos: OptionKey | null = null;
+  let streak = 0;
+
+  for (const q of acceptedQuestions) {
+    const candidates = (['A', 'B', 'C', 'D'] as OptionKey[]).sort((a, b) => counts[a] - counts[b]);
+    let filteredCandidates = candidates;
+    if (streak >= 2 && lastPos) {
+      filteredCandidates = candidates.filter((k) => k !== lastPos);
+    }
+    const preferred = (filteredCandidates[0] || 'B') as OptionKey;
+
+    const randomized = randomizeQuestionOptions(
+      [q.optionA, q.optionB, q.optionC, q.optionD],
+      q.correctAnswer,
+      preferred
+    );
+
+    const pos = randomized.correctAnswer;
+    if (pos === lastPos) {
+      streak++;
+    } else {
+      streak = 1;
+      lastPos = pos;
+    }
+    counts[pos]++;
+
+    randomizedQuestions.push({
+      ...q,
+      options: [randomized.options.A, randomized.options.B, randomized.options.C, randomized.options.D],
+      optionA: randomized.options.A,
+      optionB: randomized.options.B,
+      optionC: randomized.options.C,
+      optionD: randomized.options.D,
+      correctAnswer: randomized.shuffledIndex,
+      correctAnswerText: randomized.options[randomized.correctAnswer],
+      aiProvider: (req.provider || 'claude').toLowerCase() === 'gemini' ? 'gemini' : 'claude',
+    });
+  }
 
   return {
-    questions: acceptedQuestions,
+    questions: randomizedQuestions,
     requestedCount: targetCount,
-    generatedCount: acceptedQuestions.length,
+    generatedCount: randomizedQuestions.length,
     duplicateCount: totalDuplicatesDetected,
     invalidCount: totalInvalidDetected,
   };

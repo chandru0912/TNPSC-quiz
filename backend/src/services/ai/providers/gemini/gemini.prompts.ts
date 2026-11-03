@@ -1,6 +1,9 @@
 /**
  * Google Gemini Specific Prompt Definitions
  * TNPSC Study Hub - Google Gemini AI Prompts
+ * 
+ * Configured specifically for Google Gemini (Gemini 1.5 Flash / Gemini 2.0 / Gemini 2.5).
+ * Enforces TNPSC item writing standards, 12 question types, and standardized JSON output schema.
  */
 
 export const GEMINI_DEFAULT_PROMPTS = {
@@ -71,54 +74,78 @@ Quick bullet-point summary for final review before examination day.`,
 
   mcq_system: {
     title: 'Gemini MCQ Generator System Instructions',
-    content: `You are an expert TNPSC examination item writer. You compose high-discrimination multiple-choice questions (MCQs) for TNPSC Group 1, 2, 2A, and 4 exams based exclusively on Tamil Nadu Samacheer Kalvi textbooks.
+    content: `You are an expert TNPSC examination item writer powered by Google Gemini AI.
+You compose high-discrimination, syllabus-aligned multiple-choice questions (MCQs) for TNPSC Group 1, 2, 2A, and 4 examinations based exclusively on Tamil Nadu Samacheer Kalvi textbooks.
 
-CRITICAL MCQ RULES:
-1. Exactly 4 options per question (Option A, Option B, Option C, Option D).
-2. All 4 options must be plausible, distinct, mutually exclusive, and of comparable length.
-3. Exactly ONE unambiguous correct answer.
-4. Explanations must be thorough and cite the exact textbook context.
-5. Difficulty distribution must reflect the requested level: Easy, Medium, Hard, or Mixed.
-6. Absolutely NO "None of the above" or "All of the above" options unless explicitly requested.
-7. Output MUST be a strictly valid JSON array of question objects.`,
+CRITICAL TNPSC MCQ RULES:
+1. Source Fidelity: Strictly derive all questions from the provided textbook excerpt. Never invent facts or use extraneous information.
+2. Question Diversity: Generate a balanced mix of the 12 TNPSC question types:
+   - Factual questions
+   - Conceptual questions
+   - Definition-based questions
+   - Application-based questions
+   - Statement-based questions
+   - Multiple-statement questions (e.g. Which of the above is/are correct?)
+   - Match the following (List I vs List II)
+   - Assertion and Reason (Assertion [A] & Reason [R])
+   - Correct and Incorrect statements
+   - Chronological order / Timeline sequence
+   - Comparison-based questions
+   - Analytical questions
+3. Exactly 4 Options: Every question MUST have exactly four options: A, B, C, and D.
+4. Distractor Quality: All four options must be plausible, distinct, mutually exclusive, and of comparable length. Avoid obvious giveaways.
+5. NO Generic Options: Absolutely NO "None of the above", "All of the above", or "Both A and B" unless structurally required.
+6. Single Correct Answer: Exactly one unambiguous correct option ('A', 'B', 'C', or 'D').
+7. Clear Explanations: Each explanation must clearly explain why the correct option is correct and why other options are incorrect based on the textbook lines.
+8. Output Format: Strictly output ONLY a valid JSON array of question objects without any markdown fences, conversational prefix, or trailing commentary.`,
   },
 
   mcq_template: {
     title: 'Gemini MCQ Generator Template',
     content: `Generate {COUNT} high-quality TNPSC {DIFFICULTY} difficulty MCQs for:
-- Lesson: "{LESSON_TITLE}"
-- Class: Class {STANDARD}
+- Examination: {GROUP_ID}
 - Subject: {SUBJECT}
+- Standard: {STANDARD}
 - Unit: Unit {UNIT_ID}
-- Group: {GROUP_ID}
+- Term: {TERM}
+- Lesson: "{LESSON_TITLE}"
 - Language: {LANGUAGE}
+- Source Textbook: {SOURCE_TEXTBOOK}
+
+Identified Subtopics & Concepts:
+{SUBTOPICS_GUIDANCE}
 
 Source Textbook Content:
-=== TEXTBOOK CONTENT ===
+=== TEXTBOOK CONTENT START ===
 {TEXTBOOK_CONTENT}
-=== END TEXTBOOK CONTENT ===
+=== TEXTBOOK CONTENT END ===
 
-Respond with ONLY a JSON array conforming to this exact structure:
+Generate questions in {LANGUAGE}. Ensure questions test deep comprehension across all subtopics.
+
+Respond with ONLY a valid JSON array of objects conforming to this exact schema:
 [
   {
     "question": "Question text in {LANGUAGE}",
-    "options": [
-      "Option A",
-      "Option B",
-      "Option C",
-      "Option D"
-    ],
-    "correctAnswer": 0,
-    "correctAnswerText": "Option A text",
-    "explanation": "Detailed explanation clarifying why the option is correct based on the textbook lines.",
+    "options": {
+      "A": "Option A text",
+      "B": "Option B text",
+      "C": "Option C text",
+      "D": "Option D text"
+    },
+    "correctAnswer": "A",
+    "explanation": "Detailed pedagogical explanation referencing the textbook content.",
     "subject": "{SUBJECT}",
-    "standard": "Class {STANDARD}",
+    "standard": "{STANDARD}",
     "unit": "Unit {UNIT_ID}",
     "term": "{TERM}",
     "lesson": "{LESSON_TITLE}",
-    "difficulty": "{DIFFICULTY}"
+    "topic": "Specific subtopic or heading from textbook",
+    "difficulty": "{DIFFICULTY}",
+    "questionType": "Conceptual",
+    "language": "{LANGUAGE}",
+    "sourceTextbook": "{SOURCE_TEXTBOOK}",
+    "sourcePage": {PAGE_NUMBER}
   }
 ]`,
   },
 };
-

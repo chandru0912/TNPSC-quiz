@@ -48,6 +48,7 @@ import {
 } from 'lucide-react'
 import './Admin.css'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
+import { ExtractedPagesModal } from '../components/ExtractedPagesModal'
 import { BulkPdfUploadModal } from '../components/BulkPdfUploadModal'
 import { CloudAiGeneratorModal, type CloudAiMode } from '../components/CloudAiGeneratorModal'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
@@ -331,6 +332,27 @@ const Admin = () => {
   const [viewingDriveMaterial, setViewingDriveMaterial] = useState<GoogleDriveMaterialItem | null>(null)
   const [deletingDriveMaterial, setDeletingDriveMaterial] = useState<GoogleDriveMaterialItem | null>(null)
   const [isDeletingDriveMaterial, setIsDeletingDriveMaterial] = useState(false)
+
+  // Extracted PDF Pages Modal state & Overview
+  const [viewingExtractedMaterial, setViewingExtractedMaterial] = useState<GoogleDriveMaterialItem | null>(null)
+  const [extractionOverview, setExtractionOverview] = useState<{
+    totalFiles: number
+    totalPages: number
+    extractedPages: number
+    failedPages: number
+    nativePages: number
+    ocrPages: number
+    completionPercentage: number
+    statusBreakdown: {
+      completed: number
+      partiallyCompleted: number
+      processing: number
+      pending: number
+      failed: number
+    }
+  } | null>(null)
+  const [isExtractingAllPending, setIsExtractingAllPending] = useState(false)
+  const [extractingMaterialId, setExtractingMaterialId] = useState<number | null>(null)
 
   // Google Drive PDF Bulk Delete & Multi-selection states
   const [selectedDriveMaterialIds, setSelectedDriveMaterialIds] = useState<Set<number>>(new Set())
@@ -652,6 +674,7 @@ const Admin = () => {
     isNotesBulkUploadModalOpen ||
     isDriveUploadModalOpen ||
     Boolean(viewingDriveMaterial) ||
+    Boolean(viewingExtractedMaterial) ||
     Boolean(deletingDriveMaterial) ||
     showDeleteSelectedDriveModal ||
     showDeleteAllDriveModal
@@ -1208,6 +1231,19 @@ const Admin = () => {
     }
   }, [])
 
+  // Fetch Aggregated PDF Extraction Overview
+  const fetchExtractionOverview = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/drive/extraction-overview')
+      const json = await res.json()
+      if (json.status === 'success' && json.data) {
+        setExtractionOverview(json.data)
+      }
+    } catch (err: any) {
+      console.warn('Could not fetch extraction overview:', err.message)
+    }
+  }, [])
+
   // Fetch Google Drive Materials
   const fetchDriveMaterials = useCallback(async () => {
     setDriveLoading(true)
@@ -1226,13 +1262,66 @@ const Admin = () => {
       } else {
         setDriveMaterials([])
       }
+      fetchExtractionOverview()
     } catch (err: any) {
       console.error('Failed to fetch Google Drive materials:', err)
       setDriveMaterials([])
     } finally {
       setDriveLoading(false)
     }
-  }, [driveGroupFilter, driveStandardFilter, driveSubjectFilter, driveTermFilter, driveSearch])
+  }, [driveGroupFilter, driveStandardFilter, driveSubjectFilter, driveTermFilter, driveSearch, fetchExtractionOverview])
+
+  // Extract single PDF material
+  const handleExtractDriveMaterial = async (item: GoogleDriveMaterialItem, retryFailedOnly = false) => {
+    setExtractingMaterialId(item.id)
+    try {
+      const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+      const endpoint = retryFailedOnly
+        ? `/api/drive/materials/${item.id}/retry-failed?all=true`
+        : `/api/drive/materials/${item.id}/extract?all=true`
+      const res = await apiFetch(endpoint, {
+        method: 'POST',
+        headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+      })
+      const json = await res.json()
+      if (res.ok && (json.status === 'success' || json.data?.success)) {
+        showToast('success', json.message || `PDF "${item.fileName}" extracted successfully!`)
+      } else {
+        showToast('error', json.message || 'Extraction could not be completed.')
+      }
+      fetchDriveMaterials()
+      fetchExtractionOverview()
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to trigger extraction.')
+    } finally {
+      setExtractingMaterialId(null)
+    }
+  }
+
+  // Extract all pending PDF materials
+  const handleExtractAllPendingMaterials = async () => {
+    setIsExtractingAllPending(true)
+    try {
+      const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+      showToast('success', 'Starting batch extraction for pending PDF textbooks...')
+      const res = await apiFetch('/api/drive/extract-all-pending', {
+        method: 'POST',
+        headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+      })
+      const json = await res.json()
+      if (res.ok && json.status === 'success') {
+        showToast('success', json.message || 'Batch PDF extraction completed!')
+      } else {
+        showToast('error', json.message || 'Batch extraction encountered issues.')
+      }
+      fetchDriveMaterials()
+      fetchExtractionOverview()
+    } catch (err: any) {
+      showToast('error', err.message || 'Batch extraction failed.')
+    } finally {
+      setIsExtractingAllPending(false)
+    }
+  }
 
   // Connect Google Drive
   const handleConnectGoogleDrive = async () => {
@@ -1370,7 +1459,8 @@ const Admin = () => {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (res.ok) {
-        const statuses = await res.json()
+        const data = await res.json()
+        const statuses = Array.isArray(data) ? data : (data?.providers || [])
         if (Array.isArray(statuses)) {
           const claudeInfo = statuses.find((s: any) => s.provider === 'claude')
           const geminiInfo = statuses.find((s: any) => s.provider === 'gemini')
@@ -1379,6 +1469,7 @@ const Admin = () => {
             setClaudeStatus((prev) => ({
               ...prev,
               configured: Boolean(claudeInfo.configured),
+              connected: Boolean(claudeInfo.connected),
               model: claudeInfo.model || 'claude-3-5-sonnet-20241022',
               name: claudeInfo.name || 'Anthropic Claude AI',
               maskedKey: claudeInfo.maskedKey,
@@ -1391,12 +1482,17 @@ const Admin = () => {
             setGeminiStatus((prev) => ({
               ...prev,
               configured: Boolean(geminiInfo.configured),
+              connected: Boolean(geminiInfo.connected),
               model: geminiInfo.model || 'gemini-1.5-flash',
               name: geminiInfo.name || 'Google Gemini AI',
               maskedKey: geminiInfo.maskedKey,
             }))
             if (geminiInfo.model) setGeminiInputModel(geminiInfo.model)
             if (geminiInfo.isActive) setActiveAiProvider('gemini')
+          }
+
+          if (data?.activeProvider) {
+            setActiveAiProvider(data.activeProvider)
           }
         }
       }
@@ -1661,6 +1757,7 @@ const Admin = () => {
       setSelectedDriveMaterialIds(new Set())
       setShowDeleteSelectedDriveModal(false)
       fetchDriveMaterials()
+      fetchExtractionOverview()
     } catch (err: any) {
       setActionMessage({ type: 'error', text: err.message || 'Bulk delete failed' })
     } finally {
@@ -1695,6 +1792,7 @@ const Admin = () => {
       setSelectedDriveMaterialIds(new Set())
       setShowDeleteAllDriveModal(false)
       fetchDriveMaterials()
+      fetchExtractionOverview()
     } catch (err: any) {
       setActionMessage({ type: 'error', text: err.message || 'Delete all failed' })
     } finally {
@@ -1941,9 +2039,10 @@ const Admin = () => {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Delete failed')
-      setActionMessage({ type: 'success', text: 'PDF material successfully deleted from Google Drive and database.' })
+      setActionMessage({ type: 'success', text: data.message || 'PDF material permanently deleted from Google Drive and database.' })
       setDeletingDriveMaterial(null)
       fetchDriveMaterials()
+      fetchExtractionOverview()
     } catch (err: any) {
       setActionMessage({ type: 'error', text: err.message || 'Delete failed' })
     } finally {
@@ -3742,6 +3841,236 @@ const Admin = () => {
         {/* Section 1: Question Bank Management */}
         {adminSection === 'questions' && (
           <>
+            {/* PDF Processing Dashboard (Page-by-Page Extraction Status & Overview) */}
+            <div
+              className="glass"
+              style={{
+                marginBottom: '1.25rem',
+                padding: '1.25rem',
+                borderRadius: '14px',
+                background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%)',
+                border: '1px solid rgba(234, 179, 8, 0.25)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                  marginBottom: '1rem',
+                  paddingBottom: '0.85rem',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      background: 'rgba(234, 179, 8, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fbbf24',
+                    }}
+                  >
+                    <BookOpen size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>
+                      PDF Page-by-Page Text Extraction Dashboard
+                    </h3>
+                    <div style={{ fontSize: '0.76rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+                      Automatic native text & multi-tier OCR pipeline for TNPSC Samacheer Kalvi textbooks
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleExtractAllPendingMaterials()}
+                    disabled={isExtractingAllPending}
+                    style={{
+                      background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)',
+                      color: '#000',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.45rem 1rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: isExtractingAllPending ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      boxShadow: '0 4px 12px rgba(245, 158, 11, 0.25)',
+                    }}
+                  >
+                    <RefreshCw size={14} className={isExtractingAllPending ? 'spinning' : ''} />
+                    <span>{isExtractingAllPending ? 'Extracting Pending PDFs...' : 'Extract All Pending PDFs'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetchDriveMaterials()
+                      fetchExtractionOverview()
+                    }}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      color: '#cbd5e1',
+                      borderRadius: '8px',
+                      padding: '0.45rem 0.75rem',
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                    title="Refresh extraction statistics"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Metrics Grid */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                  gap: '0.75rem',
+                }}
+              >
+                {/* 1. Total PDF Files */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.55)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Total PDF Files
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff', marginTop: '0.2rem' }}>
+                    {extractionOverview?.totalFiles ?? driveMaterials.length}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
+                    {extractionOverview?.statusBreakdown?.completed ?? 0} completed • {extractionOverview?.statusBreakdown?.pending ?? driveMaterials.length} pending
+                  </div>
+                </div>
+
+                {/* 2. Total Pages */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.55)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Total Pages
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#38bdf8', marginTop: '0.2rem' }}>
+                    {extractionOverview?.totalPages ?? 0}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
+                    Across all scanned & native PDFs
+                  </div>
+                </div>
+
+                {/* 3. Successfully Extracted Pages */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.25)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: '#86efac', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Successfully Extracted
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#86efac', marginTop: '0.2rem' }}>
+                    {extractionOverview?.extractedPages ?? 0}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'rgba(255, 255, 255, 0.6)', marginTop: '2px' }}>
+                    {extractionOverview?.nativePages ?? 0} native • {extractionOverview?.ocrPages ?? 0} OCR
+                  </div>
+                </div>
+
+                {/* 4. Failed Pages */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background:
+                      (extractionOverview?.failedPages ?? 0) > 0
+                        ? 'rgba(239, 68, 68, 0.12)'
+                        : 'rgba(255, 255, 255, 0.03)',
+                    border:
+                      (extractionOverview?.failedPages ?? 0) > 0
+                        ? '1px solid rgba(239, 68, 68, 0.35)'
+                        : '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: (extractionOverview?.failedPages ?? 0) > 0 ? '#fca5a5' : 'rgba(255, 255, 255, 0.55)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Failed Pages
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: (extractionOverview?.failedPages ?? 0) > 0 ? '#f87171' : '#ffffff', marginTop: '0.2rem' }}>
+                    {extractionOverview?.failedPages ?? 0}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
+                    {(extractionOverview?.failedPages ?? 0) === 0 ? 'Zero extraction failures' : 'Eligible for instant retry'}
+                  </div>
+                </div>
+
+                {/* 5. Extraction Progress */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(234, 179, 8, 0.08)',
+                    border: '1px solid rgba(234, 179, 8, 0.25)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: '#fbbf24', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Extraction Progress
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#fef08a', marginTop: '0.2rem' }}>
+                    {extractionOverview?.completionPercentage ?? 0}%
+                  </div>
+                  <div
+                    style={{
+                      marginTop: '6px',
+                      height: '6px',
+                      borderRadius: '999px',
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${extractionOverview?.completionPercentage ?? 0}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #f59e0b, #10b981)',
+                        transition: 'width 0.3s ease',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Toolbar & Filters */}
         <div className="admin-toolbar glass">
           {/* Target System Toggle: Study Materials (Lesson-wise) vs Main Practice */}
@@ -5032,25 +5361,273 @@ const Admin = () => {
               </div>
             </div>
 
+            {/* PDF Processing Dashboard (Page-by-Page Extraction Status & Overview) */}
+            <div
+              className="glass"
+              style={{
+                marginBottom: '1.25rem',
+                padding: '1.25rem',
+                borderRadius: '14px',
+                background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%)',
+                border: '1px solid rgba(234, 179, 8, 0.25)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                  marginBottom: '1rem',
+                  paddingBottom: '0.85rem',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      background: 'rgba(234, 179, 8, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fbbf24',
+                    }}
+                  >
+                    <BookOpen size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>
+                      PDF Page-by-Page Text Extraction Dashboard
+                    </h3>
+                    <div style={{ fontSize: '0.76rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+                      Automatic native text & multi-tier OCR pipeline for TNPSC Samacheer Kalvi textbooks
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleExtractAllPendingMaterials()}
+                    disabled={isExtractingAllPending}
+                    style={{
+                      background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)',
+                      color: '#000',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.45rem 1rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: isExtractingAllPending ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      boxShadow: '0 4px 12px rgba(245, 158, 11, 0.25)',
+                    }}
+                  >
+                    <RefreshCw size={14} className={isExtractingAllPending ? 'spinning' : ''} />
+                    <span>{isExtractingAllPending ? 'Extracting Pending PDFs...' : 'Extract All Pending PDFs'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetchDriveMaterials()
+                      fetchExtractionOverview()
+                    }}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      color: '#cbd5e1',
+                      borderRadius: '8px',
+                      padding: '0.45rem 0.75rem',
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                    title="Refresh extraction statistics"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Metrics Grid */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                  gap: '0.75rem',
+                }}
+              >
+                {/* 1. Total PDF Files */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.55)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Total PDF Files
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff', marginTop: '0.2rem' }}>
+                    {extractionOverview?.totalFiles ?? driveMaterials.length}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
+                    {extractionOverview?.statusBreakdown?.completed ?? 0} completed • {extractionOverview?.statusBreakdown?.pending ?? driveMaterials.length} pending
+                  </div>
+                </div>
+
+                {/* 2. Total Pages */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: 'rgba(255, 255, 255, 0.55)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Total Pages
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#38bdf8', marginTop: '0.2rem' }}>
+                    {extractionOverview?.totalPages ?? 0}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
+                    Across all scanned & native PDFs
+                  </div>
+                </div>
+
+                {/* 3. Successfully Extracted Pages */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.25)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: '#86efac', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Successfully Extracted
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#86efac', marginTop: '0.2rem' }}>
+                    {extractionOverview?.extractedPages ?? 0}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'rgba(255, 255, 255, 0.6)', marginTop: '2px' }}>
+                    {extractionOverview?.nativePages ?? 0} native • {extractionOverview?.ocrPages ?? 0} OCR
+                  </div>
+                </div>
+
+                {/* 4. Failed Pages */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background:
+                      (extractionOverview?.failedPages ?? 0) > 0
+                        ? 'rgba(239, 68, 68, 0.12)'
+                        : 'rgba(255, 255, 255, 0.03)',
+                    border:
+                      (extractionOverview?.failedPages ?? 0) > 0
+                        ? '1px solid rgba(239, 68, 68, 0.35)'
+                        : '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: (extractionOverview?.failedPages ?? 0) > 0 ? '#fca5a5' : 'rgba(255, 255, 255, 0.55)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Failed Pages
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: (extractionOverview?.failedPages ?? 0) > 0 ? '#f87171' : '#ffffff', marginTop: '0.2rem' }}>
+                    {extractionOverview?.failedPages ?? 0}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
+                    {(extractionOverview?.failedPages ?? 0) === 0 ? 'Zero extraction failures' : 'Eligible for instant retry'}
+                  </div>
+                </div>
+
+                {/* 5. Extraction Progress */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(234, 179, 8, 0.08)',
+                    border: '1px solid rgba(234, 179, 8, 0.25)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.74rem', color: '#fbbf24', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Extraction Progress
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#fef08a', marginTop: '0.2rem' }}>
+                    {extractionOverview?.completionPercentage ?? 0}%
+                  </div>
+                  <div
+                    style={{
+                      marginTop: '6px',
+                      height: '6px',
+                      borderRadius: '999px',
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${extractionOverview?.completionPercentage ?? 0}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #f59e0b, #10b981)',
+                        transition: 'width 0.3s ease',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Toolbar & Filters */}
             <div className="admin-toolbar glass" style={{ marginBottom: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div className="search-bar" style={{ maxWidth: '360px', minWidth: '240px' }}>
-                    <Search size={16} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 340px' }}>
+                  <div className="admin-search-wrapper" style={{ maxWidth: '420px', minWidth: '240px', flex: '1', position: 'relative' }}>
+                    <Search size={16} className="admin-search-icon" />
                     <input
                       type="text"
+                      className="admin-search-input"
                       placeholder="Search PDF materials or lessons..."
                       value={driveSearch}
                       onChange={(e) => setDriveSearch(e.target.value)}
                     />
                     {driveSearch && (
-                      <button className="search-clear-btn" onClick={() => setDriveSearch('')}>
+                      <button
+                        type="button"
+                        onClick={() => setDriveSearch('')}
+                        style={{
+                          position: 'absolute',
+                          right: '0.75rem',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.2rem',
+                        }}
+                        title="Clear search"
+                      >
                         <X size={14} />
                       </button>
                     )}
                   </div>
-                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                     {driveMaterials.length} PDF file{driveMaterials.length === 1 ? '' : 's'} indexed
                   </span>
                 </div>
@@ -5299,13 +5876,14 @@ const Admin = () => {
                       <th>Class & Term</th>
                       <th>File Size</th>
                       <th>Uploaded Date</th>
-                      <th style={{ textAlign: 'center', width: '150px' }}>Actions</th>
+                      <th style={{ minWidth: '150px' }}>Extraction Status</th>
+                      <th style={{ textAlign: 'center', width: '180px' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {driveLoading ? (
                       <tr>
-                        <td colSpan={8} style={{ textAlign: 'center', padding: '3rem' }}>
+                        <td colSpan={9} style={{ textAlign: 'center', padding: '3rem' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
                             <RefreshCw size={24} className="spinning" style={{ color: 'var(--gold-primary)' }} />
                             <span style={{ color: 'var(--text-secondary)' }}>Loading Google Drive materials...</span>
@@ -5314,7 +5892,7 @@ const Admin = () => {
                       </tr>
                     ) : driveMaterials.length === 0 ? (
                       <tr>
-                        <td colSpan={8} style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
+                        <td colSpan={9} style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
                             <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
                               <Folder size={24} />
@@ -5403,6 +5981,78 @@ const Admin = () => {
                                 {item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                               </span>
                             </td>
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      padding: '2px 8px',
+                                      borderRadius: '12px',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 700,
+                                      textTransform: 'uppercase',
+                                      background:
+                                        item.extractionStatus === 'COMPLETED'
+                                          ? 'rgba(34, 197, 94, 0.15)'
+                                          : item.extractionStatus === 'PARTIALLY_COMPLETED'
+                                          ? 'rgba(234, 179, 8, 0.15)'
+                                          : item.extractionStatus === 'FAILED'
+                                          ? 'rgba(239, 68, 68, 0.15)'
+                                          : item.extractionStatus === 'PROCESSING'
+                                          ? 'rgba(59, 130, 246, 0.15)'
+                                          : 'rgba(148, 163, 184, 0.12)',
+                                      color:
+                                        item.extractionStatus === 'COMPLETED'
+                                          ? '#86efac'
+                                          : item.extractionStatus === 'PARTIALLY_COMPLETED'
+                                          ? '#fde047'
+                                          : item.extractionStatus === 'FAILED'
+                                          ? '#fca5a5'
+                                          : item.extractionStatus === 'PROCESSING'
+                                          ? '#93c5fd'
+                                          : '#cbd5e1',
+                                      border: `1px solid ${
+                                        item.extractionStatus === 'COMPLETED'
+                                          ? 'rgba(34, 197, 94, 0.3)'
+                                          : item.extractionStatus === 'PARTIALLY_COMPLETED'
+                                          ? 'rgba(234, 179, 8, 0.3)'
+                                          : item.extractionStatus === 'FAILED'
+                                          ? 'rgba(239, 68, 68, 0.3)'
+                                          : item.extractionStatus === 'PROCESSING'
+                                          ? 'rgba(59, 130, 246, 0.3)'
+                                          : 'rgba(148, 163, 184, 0.2)'
+                                      }`,
+                                    }}
+                                  >
+                                    {item.extractionStatus === 'PROCESSING' && (
+                                      <RefreshCw size={10} className="spinning" />
+                                    )}
+                                    {item.extractionStatus || 'PENDING'}
+                                  </span>
+                                  {item.pdfType && item.pdfType !== 'UNKNOWN' && (
+                                    <span
+                                      style={{
+                                        fontSize: '0.68rem',
+                                        padding: '1px 5px',
+                                        borderRadius: '4px',
+                                        background: 'rgba(255, 255, 255, 0.06)',
+                                        color: '#94a3b8',
+                                      }}
+                                    >
+                                      {item.pdfType}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.73rem', color: '#94a3b8' }}>
+                                  {item.totalPages
+                                    ? `${item.totalPages - (item.failedPages || 0)}/${item.totalPages} pages (${item.completionPercentage ?? (item.extractionStatus === 'COMPLETED' ? 100 : 0)}%)`
+                                    : 'Pages not indexed yet'}
+                                </div>
+                              </div>
+                            </td>
                             <td style={{ textAlign: 'center' }}>
                               <div style={{ display: 'flex', justifyContent: 'center', gap: '0.4rem' }}>
                                 <button
@@ -5413,6 +6063,49 @@ const Admin = () => {
                                   style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}
                                 >
                                   <Eye size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-action-btn"
+                                  title="View Extracted Pages & Content"
+                                  onClick={() => setViewingExtractedMaterial(item)}
+                                  style={{
+                                    background: 'rgba(234, 179, 8, 0.15)',
+                                    color: '#facc15',
+                                    borderColor: 'rgba(234, 179, 8, 0.3)',
+                                  }}
+                                >
+                                  <BookOpen size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-action-btn"
+                                  title={
+                                    extractingMaterialId === item.id
+                                      ? 'Extracting PDF...'
+                                      : item.extractionStatus === 'COMPLETED'
+                                      ? 'Re-extract All Pages'
+                                      : 'Extract All Pages'
+                                  }
+                                  disabled={extractingMaterialId === item.id}
+                                  onClick={() => handleExtractDriveMaterial(item)}
+                                  style={{
+                                    background:
+                                      item.extractionStatus === 'COMPLETED'
+                                        ? 'rgba(59, 130, 246, 0.12)'
+                                        : 'rgba(245, 158, 11, 0.18)',
+                                    color: item.extractionStatus === 'COMPLETED' ? '#93c5fd' : '#fbbf24',
+                                    borderColor:
+                                      item.extractionStatus === 'COMPLETED'
+                                        ? 'rgba(59, 130, 246, 0.3)'
+                                        : 'rgba(245, 158, 11, 0.4)',
+                                    cursor: extractingMaterialId === item.id ? 'not-allowed' : 'pointer',
+                                  }}
+                                >
+                                  <RefreshCw
+                                    size={13}
+                                    className={extractingMaterialId === item.id ? 'spinning' : ''}
+                                  />
                                 </button>
                                 <a
                                   href={getApiUrl(`/api/drive/view/${item.id}`)}
@@ -5883,8 +6576,11 @@ const Admin = () => {
                         value={geminiInputModel}
                         onChange={(e) => setGeminiInputModel(e.target.value)}
                       >
-                        <option value="gemini-1.5-flash">gemini-1.5-flash (Fast, Low Latency, High Quota)</option>
+                        <option value="gemini-3.8-flash">gemini-3.8-flash (Recommended: Current Fast Stable)</option>
+                        <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Ultra-Fast, Low Latency)</option>
+                        <option value="gemini-2.5-flash">gemini-2.5-flash (Balanced Multimodal)</option>
                         <option value="gemini-2.0-flash">gemini-2.0-flash (Next-Gen Flash)</option>
+                        <option value="gemini-1.5-flash">gemini-1.5-flash (Legacy)</option>
                         <option value="gemini-1.5-pro">gemini-1.5-pro (High Reasoning & Deep Context)</option>
                       </select>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
@@ -8882,6 +9578,17 @@ const Admin = () => {
         isOpen={Boolean(viewingDriveMaterial)}
         material={viewingDriveMaterial}
         onClose={() => setViewingDriveMaterial(null)}
+      />
+
+      {/* 9. Extracted PDF Pages & Extraction Viewer Modal */}
+      <ExtractedPagesModal
+        isOpen={Boolean(viewingExtractedMaterial)}
+        material={viewingExtractedMaterial}
+        onClose={() => setViewingExtractedMaterial(null)}
+        onExtractionFinished={() => {
+          fetchDriveMaterials()
+          fetchExtractionOverview()
+        }}
       />
 
     </div>

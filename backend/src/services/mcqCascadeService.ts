@@ -34,6 +34,7 @@ export interface McqTextbookCandidate {
   volumeOptions: string[];
   pageCount: number;
   status: CandidateStatus;
+  isPublished: boolean;
   hasExtractedText: boolean;
   hasIndexedContent: boolean;
   lessonCount: number;
@@ -346,7 +347,7 @@ async function loadTextbooks(standard: number): Promise<any[]> {
             EXISTS (SELECT 1 FROM textbook_content c WHERE c.textbook_id = t.id) AS has_indexed_content
      FROM textbooks t
      WHERE t.standard = $1
-     ORDER BY t.id ASC`,
+     ORDER BY CASE WHEN t.status IN ('completed', 'published') THEN 0 ELSE 1 END ASC, t.id DESC`,
     [standard]
   );
   return res.rows;
@@ -382,8 +383,14 @@ function toCandidate(
   const hasIndexedContent = Boolean(row.has_indexed_content);
   const extracted = hasIndexedContent || hasMaterialText(material);
 
+  const isPublished =
+    sourceType === 'textbook'
+      ? ['completed', 'published'].includes(String(row.status || '').toLowerCase())
+      : String(row.upload_status || '').toLowerCase() === 'completed';
+
   let status: CandidateStatus = 'processing';
   if (row.status === 'failed') status = 'failed';
+  else if (extracted && isPublished) status = 'completed';
   else if (extracted) status = 'completed';
   else if (!material && sourceType === 'textbook' && row.file_path && !String(row.file_path).startsWith('gdrive://')) {
     status = 'processing';
@@ -413,6 +420,7 @@ function toCandidate(
     volumeOptions: tv.volumeOptions,
     pageCount: Number(sourceType === 'textbook' ? row.page_count : row.page_count) || 0,
     status,
+    isPublished,
     hasExtractedText: extracted,
     hasIndexedContent,
     lessonCount: material ? countMaterialLessons(material) : 0,
@@ -589,6 +597,35 @@ function driveLessons(
   });
 }
 
+export function extractKeywords(lessonTitle?: string, topic?: string): string[] {
+  const text = `${lessonTitle || ''} ${topic || ''}`.toLowerCase();
+  const stopWords = new Set([
+    'and', 'the', 'for', 'with', 'from', 'into', 'under', 'that', 'this',
+    'lesson', 'unit', 'chapter', 'part', 'standard', 'term', 'tnpsc', 'study',
+    'class', 'std', 'new', 'syllabus', 'general',
+    'மற்றும்', 'ஒரு', 'ஆகிய', 'போன்ற', 'பற்றி', 'பகுதி', 'வகுப்பு', 'பாடம்', 'இயல்'
+  ]);
+
+  const rawWords = text
+    .replace(/[^a-zA-Z0-9\u0B80-\u0BFF\s]/g, ' ')
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 3 && !stopWords.has(w));
+
+  const list = Array.from(new Set(rawWords)).slice(0, 20);
+
+  // Synonyms and bilingual mappings for core science / TNPSC syllabus terms
+  if (text.includes('measurement') || text.includes('si unit') || text.includes('அளவீடு')) {
+    list.push('அளவீடு', 'அளவீடுகள்', 'பன்னாட்டு அலகு', 'மீட்டர்', 'நீளம்', 'நிறை', 'காலம்', 'measure', 'si');
+  } else if (text.includes('force') || text.includes('motion') || text.includes('இயக்க')) {
+    list.push('விசை', 'இயக்கம்', 'விசையும் இயக்கமும்', 'motion', 'speed');
+  } else if (text.includes('matter') || text.includes('பருப்பொருள்')) {
+    list.push('பருப்பொருள்', 'பருப்பொருட்கள்', 'matter', 'solid', 'liquid');
+  }
+
+  return Array.from(new Set(list));
+}
+
 export async function getMcqLessons(params: {
   groupId: string;
   subject: string;
@@ -599,31 +636,63 @@ export async function getMcqLessons(params: {
   gdriveFileId?: string;
   term?: string;
   volume?: string;
+  lessonTitle?: string;
 }): Promise<{ candidate: McqTextbookCandidate; lessons: McqCascadeLesson[] }> {
   const { candidates } = await getMcqTextbookCandidates(params);
-  const candidate =
+
+  // 1. Resolve candidate by exact ID if provided
+  let candidate =
     (params.textbookId && candidates.find((c) => c.textbookId === Number(params.textbookId))) ||
     (params.materialId && candidates.find((c) => c.materialId === Number(params.materialId))) ||
     (params.gdriveFileId && candidates.find((c) => c.gdriveFileId === params.gdriveFileId)) ||
     null;
 
+  // 2. If not specified by ID, auto-resolve candidate by matching term / volume
+  if (!candidate && params.term) {
+    const termClean = String(params.term).trim().toLowerCase();
+    candidate =
+      candidates.find(
+        (c) =>
+          c.hasExtractedText &&
+          ((c.term && c.term.toLowerCase() === termClean) ||
+            (c.termOptions && c.termOptions.some((t) => t.toLowerCase() === termClean)))
+      ) ||
+      candidates.find(
+        (c) =>
+          (c.term && c.term.toLowerCase() === termClean) ||
+          (c.termOptions && c.termOptions.some((t) => t.toLowerCase() === termClean))
+      ) ||
+      null;
+  }
+
+  // 3. Fallback: single candidate or candidate with indexed content
+  if (!candidate && candidates.length === 1) {
+    candidate = candidates[0];
+  } else if (!candidate && candidates.length > 0) {
+    candidate =
+      candidates.find((c) => c.hasIndexedContent || c.hasExtractedText) ||
+      candidates[0];
+  }
+
   if (!candidate) {
-    throw new Error('The selected textbook does not belong to the selected Group, Subject, Standard and Unit.');
+    throw new Error(
+      `No approved textbook was found for ${params.groupId.toUpperCase()} Standard ${params.standard} ${params.subject} Unit ${params.unitId}${params.term ? ` (${params.term})` : ''}. Please publish and index the textbook first.`
+    );
   }
 
   validateTermVolume(candidate, params.term, params.volume);
 
-  if (candidate.textbookId && candidate.hasIndexedContent) {
+  if ((candidate.textbookId || candidate.materialId) && (candidate.hasIndexedContent || candidate.hasExtractedText)) {
     const res = await pool.query(
       `SELECT unit_id, unit_title, lesson_title, lesson_id,
               MIN(page_number) AS start_page, MAX(page_number) AS end_page,
               COUNT(*) FILTER (WHERE topic IS NOT NULL AND topic <> '') AS topic_count
        FROM textbook_content
-       WHERE textbook_id = $1
+       WHERE (textbook_id = $1 OR ($3::int IS NOT NULL AND material_id = $3))
          AND ($2::int IS NULL OR unit_id = $2)
        GROUP BY unit_id, unit_title, lesson_title, lesson_id
        ORDER BY unit_id NULLS LAST, MIN(page_number) ASC`,
-      [candidate.textbookId, params.unitId]
+      [candidate.textbookId || null, params.unitId, candidate.materialId || null]
     );
     if (res.rows.length > 0) {
       return { candidate, lessons: dbLessons(candidate, res.rows) };
@@ -633,6 +702,35 @@ export async function getMcqLessons(params: {
   const material = await loadCandidateMaterial(candidate);
   if (material && materialUnits(material).length > 0) {
     return { candidate, lessons: driveLessons(candidate, material, params.unitId) };
+  }
+
+  // No TOC/classification metadata: expose the extracted PDF as one full-text lesson so
+  // generation can still use real page text instead of failing on missing lesson boundaries.
+  if (material && hasMaterialText(material)) {
+    const pages = parseMaterialPages(material);
+    const firstPage = pages.length > 0 ? pages[0].pageNumber : 1;
+    const lastPage = pages.length > 0 ? pages[pages.length - 1].pageNumber : null;
+    return {
+      candidate,
+      lessons: [
+        {
+          key: lessonKeyForDrive(Number(candidate.materialId || material.id), Number(params.unitId), '1', candidate.bookName),
+          sourceType: 'drive',
+          lessonNumber: '1',
+          lessonId: null,
+          title: candidate.bookName,
+          unitId: Number(params.unitId),
+          unitTitle: `Unit ${params.unitId}`,
+          topicCount: 0,
+          startPage: firstPage,
+          endPage: lastPage,
+          pageLabel: pageLabel(firstPage, lastPage),
+          contentAvailable: true,
+          processingStatus: 'completed',
+          message: null,
+        },
+      ],
+    };
   }
 
   return { candidate, lessons: [] };
@@ -762,7 +860,9 @@ function extractDriveLessonPages(
 ): { text: string; pages: number[] } {
   const pages = parseMaterialPages(material);
   if (pages.length === 0) {
-    throw new Error('The selected PDF has no extracted page text. Process the PDF and try again.');
+    throw new Error(
+      `The published PDF "${material.file_name || 'book'}" has no extracted page text. Please run PDF extraction in Admin Panel before generating MCQs.`
+    );
   }
 
   let range = pagesByTitleHint(pages, lesson.title);
@@ -771,11 +871,22 @@ function extractDriveLessonPages(
   }
   if (!range && lesson.startPage != null) {
     const index = pages.findIndex((p) => p.pageNumber === lesson.startPage);
-    if (index >= 0) range = { start: index, end: Math.min(pages.length - 1, index + 12) };
+    if (index >= 0) {
+      const endIndex = lesson.endPage != null ? pages.findIndex((p) => p.pageNumber === lesson.endPage) : -1;
+      range = { start: index, end: endIndex >= index ? endIndex : Math.min(pages.length - 1, index + 12) };
+    }
   }
 
+  // Fallback to unit marker if unitId is known
+  if (!range && lesson.unitId != null) {
+    range = firstPagesWithMarker(pages, lesson.unitId);
+  }
+
+  // REQUIREMENT 7: Never generate questions using unrelated lessons or arbitrary page ranges
   if (!range) {
-    range = { start: 0, end: Math.min(pages.length - 1, 19) };
+    throw new Error(
+      `Could not locate lesson "${lesson.title}" in the extracted pages of "${material.file_name || 'textbook'}". Indexing is incomplete for this lesson. Please re-index the PDF before generating questions.`
+    );
   }
 
   const selected = pages.slice(range.start, range.end + 1);
@@ -785,7 +896,9 @@ function extractDriveLessonPages(
     .trim();
 
   if (text.length < 50) {
-    throw new Error(`Extracted lesson text for "${lesson.title}" is too short to generate grounded MCQs.`);
+    throw new Error(
+      `Extracted lesson text for "${lesson.title}" is too short (${text.length} characters, minimum 50 required) to generate grounded MCQs. Indexing is incomplete.`
+    );
   }
 
   return { text, pages: selected.map((p) => p.pageNumber) };
@@ -793,20 +906,64 @@ function extractDriveLessonPages(
 
 async function loadDbLessonContent(
   textbookId: number,
-  lesson: McqCascadeLesson
+  lesson: McqCascadeLesson,
+  materialId?: number | null
 ): Promise<{ text: string; pages: number[] }> {
-  const res = await pool.query(
-    `SELECT page_number, content
+  // 1. Try exact or case-insensitive match on lesson_title
+  let res = await pool.query(
+    `SELECT page_number, content, lesson_title, topic
      FROM textbook_content
-     WHERE textbook_id = $1
+     WHERE (textbook_id = $1 OR ($4::int IS NOT NULL AND material_id = $4))
        AND ($2::int IS NULL OR unit_id = $2)
-       AND lesson_title = $3
+       AND (
+         LOWER(TRIM(lesson_title)) = LOWER(TRIM($3))
+         OR LOWER(lesson_title) LIKE '%' || LOWER(TRIM($3)) || '%'
+         OR LOWER(TRIM($3)) LIKE '%' || LOWER(TRIM(lesson_title)) || '%'
+       )
      ORDER BY page_number ASC`,
-    [textbookId, lesson.unitId, lesson.title]
+    [textbookId, lesson.unitId, lesson.title, materialId || null]
   );
 
+  // 2. Keyword-based matching if lesson title in DB is slightly different (e.g. Tamil or synonyms)
+  if (res.rows.length === 0 && lesson.unitId != null) {
+    const keywords = extractKeywords(lesson.title);
+    if (keywords.length > 0) {
+      const kwConditions = keywords.map((_, i) => `content ILIKE $${i + 4}`).join(' OR ');
+      const kwVals = [textbookId, lesson.unitId, materialId || null, ...keywords.map((k) => `%${k}%`)];
+      const kwRes = await pool.query(
+        `SELECT page_number, content, lesson_title, topic
+         FROM textbook_content
+         WHERE (textbook_id = $1 OR ($3::int IS NOT NULL AND material_id = $3))
+           AND unit_id = $2
+           AND (${kwConditions})
+         ORDER BY page_number ASC`,
+        kwVals
+      );
+      if (kwRes.rows.length > 0) {
+        res = kwRes;
+      }
+    }
+  }
+
+  // 3. If unit has pages and this unit corresponds to the lesson
+  if (res.rows.length === 0 && lesson.unitId != null) {
+    const unitRes = await pool.query(
+      `SELECT page_number, content, lesson_title, topic
+       FROM textbook_content
+       WHERE (textbook_id = $1 OR ($3::int IS NOT NULL AND material_id = $3))
+         AND unit_id = $2
+       ORDER BY page_number ASC`,
+      [textbookId, lesson.unitId, materialId || null]
+    );
+    if (unitRes.rows.length > 0) {
+      res = unitRes;
+    }
+  }
+
   if (res.rows.length === 0) {
-    throw new Error(`No indexed content was found for the selected lesson "${lesson.title}".`);
+    throw new Error(
+      `No indexed content was found for the selected lesson "${lesson.title}". The published textbook is available, but page indexing for this lesson has not been generated yet.`
+    );
   }
 
   const text = res.rows
@@ -815,7 +972,9 @@ async function loadDbLessonContent(
     .trim();
 
   if (text.length < 50) {
-    throw new Error(`Indexed text for "${lesson.title}" is too short to generate grounded MCQs.`);
+    throw new Error(
+      `Extracted text for "${lesson.title}" is too short (${text.length} characters, minimum 50 required) to generate grounded MCQs. Indexing is incomplete.`
+    );
   }
 
   const pages = Array.from(
@@ -838,7 +997,13 @@ export async function resolveMcqSelection(
     gdriveFileId: input.gdriveFileId,
     term: input.term,
     volume: input.volume,
+    lessonTitle: input.lessonTitle,
   });
+
+  // Verify candidate is published / approved
+  if (candidate.status === 'failed') {
+    throw new Error(`The textbook "${candidate.bookName}" failed processing: ${candidate.errorMessage || 'Unknown error'}`);
+  }
 
   let lesson =
     (input.lessonKey && lessons.find((l) => l.key === input.lessonKey)) ||
@@ -853,6 +1018,10 @@ export async function resolveMcqSelection(
         String(input.lessonTitle || '').trim().toLowerCase().includes(l.title.trim().toLowerCase())
     ) ||
     null;
+
+  if (!lesson && input.lessonNumber && lessons.length > 0) {
+    lesson = lessons.find((l) => String(l.lessonNumber || '') === String(input.lessonNumber)) || null;
+  }
 
   if (!lesson && lessons.length > 0) {
     lesson = {
@@ -873,30 +1042,37 @@ export async function resolveMcqSelection(
       startPage: 1,
       endPage: 15,
       pageLabel: 'Pages 1–15',
-      contentAvailable: candidate.hasExtractedText,
+      contentAvailable: candidate.hasExtractedText || candidate.hasIndexedContent,
       processingStatus: candidate.status,
       message: null,
     };
   }
 
-  if (!lesson.contentAvailable) {
-    throw new Error(lesson.message || `No processed PDF content is available for "${lesson.title}".`);
+  if (!lesson.contentAvailable && !candidate.hasExtractedText && !candidate.hasIndexedContent) {
+    throw new Error(
+      `No extracted content exists for "${lesson.title}" (Standard ${input.standard}, ${input.subject}, ${input.term || 'Term 1'}, Unit ${input.unitId}). The textbook is published, but indexing is incomplete (${candidate.status}). Please run PDF text extraction before generating MCQs.`
+    );
   }
 
   let extracted: { text: string; pages: number[] };
   let sourceMaterial: any = null;
-  if (lesson.sourceType === 'textbook' && candidate.textbookId) {
-    extracted = await loadDbLessonContent(Number(candidate.textbookId), lesson);
+  if (candidate.hasIndexedContent || (lesson.sourceType === 'textbook' && candidate.textbookId)) {
+    extracted = await loadDbLessonContent(Number(candidate.textbookId), lesson, candidate.materialId);
   } else {
     sourceMaterial = await loadCandidateMaterial(candidate);
     if (!sourceMaterial) {
-      throw new Error('The selected Google Drive material could not be found.');
+      if (candidate.textbookId) {
+        extracted = await loadDbLessonContent(Number(candidate.textbookId), lesson, candidate.materialId);
+      } else {
+        throw new Error('The selected Google Drive material could not be found.');
+      }
+    } else {
+      const unit = materialUnits(sourceMaterial).find(
+        (u) => Number(u.unitNumber ?? u.unit_number) === Number(lesson.unitId)
+      );
+      const unitLessonCount = Array.isArray(unit?.lessons) ? unit.lessons.length : 0;
+      extracted = extractDriveLessonPages(sourceMaterial, lesson, unitLessonCount);
     }
-    const unit = materialUnits(sourceMaterial).find(
-      (u) => Number(u.unitNumber ?? u.unit_number) === Number(lesson.unitId)
-    );
-    const unitLessonCount = Array.isArray(unit?.lessons) ? unit.lessons.length : 0;
-    extracted = extractDriveLessonPages(sourceMaterial, lesson, unitLessonCount);
   }
 
   const sourcePdf = sourceMaterial?.file_name

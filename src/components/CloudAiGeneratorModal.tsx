@@ -52,6 +52,9 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   const [selectedProvider, setSelectedProvider] = useState<'claude' | 'gemini'>('claude')
   const [claudeConfigured, setClaudeConfigured] = useState<boolean>(false)
   const [geminiConfigured, setGeminiConfigured] = useState<boolean>(false)
+  const [claudeConnected, setClaudeConnected] = useState<boolean>(false)
+  const [geminiConnected, setGeminiConnected] = useState<boolean>(false)
+  const [geminiStatusType, setGeminiStatusType] = useState<string>('READY')
   const [claudeModel, setClaudeModel] = useState<string>('claude-3-5-sonnet-20241022')
   const [geminiModel, setGeminiModel] = useState<string>('gemini-1.5-flash')
 
@@ -175,24 +178,29 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
 
   // Check server AI status & multi-provider config
   useEffect(() => {
-    if (!token || !isOpen) return
+    if (!isOpen) return
+    const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
     apiFetch('/api/ai/providers', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
     })
       .then((res) => res.json())
-      .then((statuses) => {
-        if (Array.isArray(statuses)) {
+      .then((data) => {
+        const statuses = Array.isArray(data) ? data : (data?.providers || [])
+        if (Array.isArray(statuses) && statuses.length > 0) {
           const claudeInfo = statuses.find((s: any) => s.provider === 'claude')
           const geminiInfo = statuses.find((s: any) => s.provider === 'gemini')
           if (claudeInfo) {
             setClaudeConfigured(Boolean(claudeInfo.configured))
+            setClaudeConnected(Boolean(claudeInfo.connected))
             if (claudeInfo.model) setClaudeModel(claudeInfo.model)
           }
           if (geminiInfo) {
             setGeminiConfigured(Boolean(geminiInfo.configured))
+            setGeminiConnected(Boolean(geminiInfo.connected))
+            setGeminiStatusType(geminiInfo.status || (geminiInfo.configured ? 'READY' : 'OFFLINE'))
             if (geminiInfo.model) setGeminiModel(geminiInfo.model)
           }
-          const active = statuses.find((s: any) => s.isActive)
+          const active = statuses.find((s: any) => s.isActive) || statuses.find((s: any) => s.provider === data?.activeProvider)
           if (active && (active.provider === 'gemini' || active.provider === 'claude')) {
             setSelectedProvider(active.provider)
           }
@@ -785,16 +793,45 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                   </div>
                 </div>
 
-                {(selectedProvider === 'claude' ? claudeConfigured : geminiConfigured) ? (
-                  <span className="ai-api-status-badge ai-status-connected">
-                    <Check size={12} />
-                    {selectedProvider === 'claude' ? `Claude AI Ready (${claudeModel})` : `Gemini AI Ready (${geminiModel})`}
-                  </span>
+                {selectedProvider === 'claude' ? (
+                  claudeConnected ? (
+                    <span className="ai-api-status-badge ai-status-connected" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+                      <Check size={12} />
+                      Claude AI Connected ({claudeModel})
+                    </span>
+                  ) : claudeConfigured ? (
+                    <span className="ai-api-status-badge ai-status-connected">
+                      <Check size={12} />
+                      Claude AI Ready ({claudeModel})
+                    </span>
+                  ) : (
+                    <span className="ai-api-status-badge ai-status-fallback">
+                      <AlertTriangle size={12} />
+                      Claude API Not Configured
+                    </span>
+                  )
                 ) : (
-                  <span className="ai-api-status-badge ai-status-fallback">
-                    <AlertTriangle size={12} />
-                    {selectedProvider === 'claude' ? 'Claude API Not Configured' : 'Gemini API Not Configured'}
-                  </span>
+                  geminiConnected ? (
+                    <span className="ai-api-status-badge ai-status-connected" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.35)' }}>
+                      <Check size={12} />
+                      Gemini AI Connected ({geminiModel})
+                    </span>
+                  ) : geminiStatusType === 'MODEL_NOT_AVAILABLE' ? (
+                    <span className="ai-api-status-badge" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.35)' }}>
+                      <AlertTriangle size={12} />
+                      Gemini Model Unavailable ({geminiModel})
+                    </span>
+                  ) : geminiConfigured ? (
+                    <span className="ai-api-status-badge ai-status-connected" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.35)' }}>
+                      <Check size={12} />
+                      Gemini AI Ready ({geminiModel})
+                    </span>
+                  ) : (
+                    <span className="ai-api-status-badge ai-status-fallback">
+                      <AlertTriangle size={12} />
+                      Gemini API Not Configured
+                    </span>
+                  )
                 )}
               </div>
             </div>

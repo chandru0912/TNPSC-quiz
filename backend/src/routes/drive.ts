@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { Router, Request, Response, NextFunction } from 'express';
 import pool from '../db';
 import { requireAdminAuth, AuthenticatedRequest } from '../middleware/auth';
@@ -31,6 +34,8 @@ import {
   getExtractedPages,
   extractAllPendingMaterials,
   processAutomaticPdfExtraction,
+  ensureExtractionJobForMaterial,
+  getOverallExtractionOverview,
 } from '../services/pdfExtractionService';
 
 const router = Router();
@@ -410,11 +415,19 @@ router.post('/upload/complete', requireAdminAuth, async (req: AuthenticatedReque
 
     const row = updateRes.rows[0];
 
-    // Asynchronously trigger automatic PDF text extraction immediately upon upload completion
+    // Persist the durable job row first, then start a bounded pass. If Vercel terminates the
+    // background work, the PENDING/PROCESSING row still lets Admin resume the exact page cursor.
+    try {
+      await ensureExtractionJobForMaterial(row.id);
+    } catch (jobErr: any) {
+      console.warn(`[DriveUploadComplete] Could not create extraction job for #${row.id}:`, jobErr.message);
+    }
+
     extractAndPersistPdf({
       materialId: row.id,
       googleDriveFileId: row.google_drive_file_id,
       forceReExtract: true,
+      processAllPages: true,
     }).catch((bgErr) => {
       console.warn(`[DriveUploadComplete] Extraction notice for #${row.id}:`, bgErr.message);
     });
@@ -523,46 +536,47 @@ router.post('/extract-text', requireAdminAuth, async (req: Request, res: Respons
 });
 
 /**
- * POST /api/drive/extract/:id
- * Admin only: Triggers full text extraction and syllabus indexing for a specific Google Drive material.
- * Supports query ?wait=true (synchronous wait up to request timeout) or background async (default).
+ * GET /api/drive/extraction-overview
+ * Admin & Dashboard: Returns aggregate extraction statistics across all registered PDF materials.
  */
-router.post('/extract/:id', requireAdminAuth, async (req: Request, res: Response) => {
+router.get('/extraction-overview', async (_req: Request, res: Response) => {
+  try {
+    const overview = await getOverallExtractionOverview();
+    return res.status(200).json({ status: 'success', data: overview });
+  } catch (err: any) {
+    console.error('[DriveExtractionOverview] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to get extraction overview.' });
+  }
+});
+
+/**
+ * POST /api/drive/extract/:id and /api/drive/materials/:id/extract
+ * Admin only: Triggers full text extraction and syllabus indexing for a specific Google Drive material.
+ * Supports query ?wait=true (synchronous wait up to request timeout) or ?all=true (process all pages).
+ */
+router.post(['/extract/:id', '/materials/:id/extract'], requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const materialId = parseInt(req.params.id, 10);
     if (!materialId || isNaN(materialId)) {
       return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
     }
 
-    const wait = req.query.wait === 'true' || req.query.wait === '1';
+    const processAll = req.query.all === 'true' || req.body?.processAll === true;
 
-    if (wait) {
-      const result = await extractAndPersistPdf({
-        materialId,
-        forceReExtract: true,
-      });
-
-      return res.status(200).json({
-        status: result.success ? 'success' : 'error',
-        message: result.success
-          ? `Successfully extracted and indexed ${result.totalPages} pages.`
-          : result.error || 'Extraction failed',
-        data: result,
-      });
-    }
-
-    // Background processing
-    extractAndPersistPdf({
+    const result = await extractAndPersistPdf({
       materialId,
       forceReExtract: true,
-    }).catch((bgErr) => {
-      console.warn(`[DriveExtractEndpoint] Background extraction error for #${materialId}:`, bgErr.message);
+      processAllPages: processAll,
     });
 
-    return res.status(202).json({
-      status: 'success',
-      message: `Extraction initiated for material #${materialId} in background.`,
-      materialId,
+    return res.status(200).json({
+      status: result.success ? 'success' : 'error',
+      message: result.inProgress
+        ? `Extracting: ${result.extractedPages}/${result.totalPages} pages stored, ${result.remainingPages} remaining.`
+        : result.success
+        ? `Successfully extracted and indexed ${result.extractedPages}/${result.totalPages} pages.`
+        : result.error || 'Extraction failed',
+      data: result,
     });
   } catch (err: any) {
     console.error('[DriveExtract] Error:', err.message);
@@ -627,9 +641,9 @@ router.post(['/extract/:id/retry-failed', '/materials/:id/retry-failed'], requir
 
     return res.status(200).json({
       status: result.success ? 'success' : 'error',
-      message: result.success
-        ? `Retry completed: ${result.nativePagesCount} native, ${result.ocrPagesCount} OCR, ${result.failedPagesCount} failed.`
-        : result.errorMessage || 'Retry failed',
+      message: result.inProgress
+        ? `Retrying failed pages: ${result.remainingPages} page(s) still pending.`
+        : `Retry completed: ${result.nativePagesCount} native, ${result.ocrPagesCount} OCR, ${result.failedPagesCount} failed.`,
       data: result,
     });
   } catch (err: any) {
@@ -1222,7 +1236,7 @@ const handleBulkDeleteMaterials = async (req: AuthenticatedRequest, res: Respons
   try {
     const { ids, deleteAll, group, standard, subject, term, search } = req.body || {};
 
-    let targetRows: { id: number; file_name: string; google_drive_file_id: string }[] = [];
+    let targetRows: { id: number; file_name: string; original_file_name?: string; google_drive_file_id: string }[] = [];
 
     if (Array.isArray(ids) && ids.length > 0) {
       const validIds = ids.map((id: any) => Number(id)).filter((id: number) => !isNaN(id) && id > 0);
@@ -1230,7 +1244,7 @@ const handleBulkDeleteMaterials = async (req: AuthenticatedRequest, res: Respons
         return res.status(400).json({ status: 'error', message: 'No valid material IDs provided.' });
       }
       const dbRes = await pool.query(
-        `SELECT id, file_name, google_drive_file_id FROM google_drive_materials WHERE id = ANY($1)`,
+        `SELECT id, file_name, original_file_name, google_drive_file_id FROM google_drive_materials WHERE id = ANY($1)`,
         [validIds]
       );
       targetRows = dbRes.rows;
@@ -1273,7 +1287,7 @@ const handleBulkDeleteMaterials = async (req: AuthenticatedRequest, res: Respons
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const dbRes = await pool.query(
-        `SELECT id, file_name, google_drive_file_id FROM google_drive_materials ${whereClause}`,
+        `SELECT id, file_name, original_file_name, google_drive_file_id FROM google_drive_materials ${whereClause}`,
         values
       );
       targetRows = dbRes.rows;
@@ -1290,61 +1304,161 @@ const handleBulkDeleteMaterials = async (req: AuthenticatedRequest, res: Respons
       });
     }
 
-    const targetIds = targetRows.map((r) => r.id);
-    const driveFileIds = targetRows
+    // Expand target rows to include duplicate and cross-group records sharing the same Google Drive File ID or File Name
+    const initialIds = targetRows.map((r) => r.id);
+    const initialDriveFileIds = targetRows
       .map((r) => r.google_drive_file_id)
       .filter((id) => Boolean(id && !id.startsWith('pending_')));
-
-    // 1. Delete associated files from Google Drive in parallel (graceful error handling)
-    await Promise.allSettled(
-      driveFileIds.map(async (fileId) => {
-        try {
-          await deleteDriveFile(fileId);
-        } catch (driveErr: any) {
-          console.warn(`[BulkDeleteDrive] Drive deletion warning for file ID ${fileId}:`, driveErr.message);
-        }
-      })
+    const initialFileNames = Array.from(
+      new Set(targetRows.flatMap((r) => [r.file_name, r.original_file_name]).filter(Boolean))
     );
 
-    // 2. Cascade delete from mirrored textbook_content and textbooks
-    if (driveFileIds.length > 0) {
-      try {
-        const filePatterns = driveFileIds.map((id) => `%${id}%`);
-        const matchingTbRes = await pool.query(
-          `SELECT id FROM textbooks WHERE file_path = ANY($1) OR file_path LIKE 'gdrive://%'`,
-          [filePatterns]
-        );
-        const matchingTbIds = matchingTbRes.rows.map((r) => r.id);
-        if (matchingTbIds.length > 0) {
-          await pool.query(`DELETE FROM textbook_content WHERE textbook_id = ANY($1)`, [matchingTbIds]);
-          await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [matchingTbIds]);
+    const expandedRes = await pool.query(
+      `SELECT id, file_name, original_file_name, google_drive_file_id 
+       FROM google_drive_materials 
+       WHERE id = ANY($1) 
+          OR (google_drive_file_id = ANY($2) AND $2 <> '{}')
+          OR file_name = ANY($3)`,
+      [
+        initialIds,
+        initialDriveFileIds.length > 0 ? initialDriveFileIds : ['__none__'],
+        initialFileNames,
+      ]
+    );
+
+    const allMaterials = expandedRes.rows;
+    const allMaterialIds = Array.from(new Set(allMaterials.map((r) => r.id)));
+    const allDriveFileIds = Array.from(
+      new Set(
+        allMaterials
+          .map((r) => r.google_drive_file_id)
+          .filter((id) => Boolean(id && !id.startsWith('pending_')))
+      )
+    );
+    const allFileNames = Array.from(
+      new Set(allMaterials.flatMap((r) => [r.file_name, r.original_file_name]).filter(Boolean))
+    );
+
+    // 1. Permanently delete associated files from Google Drive
+    const driveErrors: string[] = [];
+    if (allDriveFileIds.length > 0) {
+      const results = await Promise.allSettled(
+        allDriveFileIds.map(async (fileId) => {
+          try {
+            await deleteDriveFile(fileId);
+          } catch (driveErr: any) {
+            if (driveErr.code !== 404 && driveErr.status !== 404) {
+              console.error(`[BulkDeleteDrive] Drive deletion error for file ID ${fileId}:`, driveErr.message);
+              throw driveErr;
+            }
+          }
+        })
+      );
+
+      results.forEach((r, idx) => {
+        if (r.status === 'rejected') {
+          driveErrors.push(`File ${allDriveFileIds[idx]}: ${r.reason?.message || 'Delete error'}`);
         }
-      } catch (tbCascadeErr: any) {
-        console.warn('[BulkDeleteDrive] Textbook mirror cleanup warning:', tbCascadeErr.message);
+      });
+
+      // If all Google Drive file deletions failed, abort database purge to prevent desynchronization
+      if (driveErrors.length > 0 && driveErrors.length === allDriveFileIds.length) {
+        return res.status(502).json({
+          status: 'error',
+          message: `Failed to delete files from Google Drive: ${driveErrors.join('; ')}. Database records and extracted text have NOT been removed to prevent state desynchronization.`,
+        });
       }
     }
 
-    // 3. Cascade delete from pdf_extractions
-    try {
-      await pool.query(
-        `DELETE FROM pdf_extractions WHERE material_id = ANY($1) OR google_drive_file_id = ANY($2)`,
-        [targetIds, driveFileIds]
-      );
-    } catch (peCascadeErr: any) {
-      console.warn('[BulkDeleteDrive] PDF extractions cleanup warning:', peCascadeErr.message);
+    // 2. Cascade delete from mirrored textbook_content and textbooks
+    const filePatterns = allDriveFileIds.map((id) => `gdrive://${id}`);
+    const altPatterns = allDriveFileIds.map((id) => `%${id}%`);
+    const cleanNames = allFileNames.map((fn) => fn.replace(/\.pdf$/i, ''));
+
+    const matchingTbRes = await pool.query(
+      `SELECT DISTINCT id, file_path, book_name 
+       FROM textbooks 
+       WHERE file_path = ANY($1) 
+          OR file_path LIKE ANY($2) 
+          OR book_name = ANY($3) 
+          OR book_name = ANY($4)
+          OR id IN (SELECT textbook_id FROM textbook_content WHERE material_id = ANY($5))`,
+      [
+        filePatterns.length > 0 ? filePatterns : ['__none__'],
+        altPatterns.length > 0 ? altPatterns : ['__none__'],
+        allFileNames,
+        cleanNames,
+        allMaterialIds,
+      ]
+    );
+
+    const matchingTbRows = matchingTbRes.rows;
+    const matchingTbIds = matchingTbRows.map((r) => r.id);
+
+    // 3. Remove physical files on disk if any exist
+    for (const tb of matchingTbRows) {
+      if (tb.file_path && !tb.file_path.startsWith('gdrive://') && fs.existsSync(tb.file_path)) {
+        try {
+          fs.unlinkSync(tb.file_path);
+        } catch (diskErr: any) {
+          console.warn(`[BulkDeleteDrive] Disk unlink warning for ${tb.file_path}:`, diskErr.message);
+        }
+      }
     }
 
-    // 4. Delete records from PostgreSQL google_drive_materials
+    for (const fn of allFileNames) {
+      const candidatePaths = [
+        path.resolve(__dirname, '../../uploads/textbooks', fn),
+        path.join(os.tmpdir(), 'tnpsc-uploads', 'textbooks', fn),
+        path.resolve(__dirname, '../../../uploads/textbooks', fn),
+      ];
+      for (const cp of candidatePaths) {
+        if (fs.existsSync(cp)) {
+          try {
+            fs.unlinkSync(cp);
+          } catch (_) {}
+        }
+      }
+    }
+
+    // 4. Cascade delete from textbook_content (page-by-page extracted text & indexed content)
+    await pool.query(
+      `DELETE FROM textbook_content 
+       WHERE material_id = ANY($1) 
+          OR (textbook_id = ANY($2) AND $2 <> '{}') 
+          OR file_name = ANY($3)`,
+      [allMaterialIds, matchingTbIds.length > 0 ? matchingTbIds : [-1], allFileNames]
+    );
+
+    // 5. Cascade delete from pdf_extractions
+    await pool.query(
+      `DELETE FROM pdf_extractions 
+       WHERE material_id = ANY($1) 
+          OR (google_drive_file_id = ANY($2) AND $2 <> '{}')
+          OR (textbook_id = ANY($3) AND $3 <> '{}')`,
+      [
+        allMaterialIds,
+        allDriveFileIds.length > 0 ? allDriveFileIds : ['__none__'],
+        matchingTbIds.length > 0 ? matchingTbIds : [-1],
+      ]
+    );
+
+    // 6. Cascade delete from textbooks
+    if (matchingTbIds.length > 0) {
+      await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [matchingTbIds]);
+    }
+
+    // 7. Delete records from PostgreSQL google_drive_materials
     const deleteRes = await pool.query(
       `DELETE FROM google_drive_materials WHERE id = ANY($1) RETURNING id`,
-      [targetIds]
+      [allMaterialIds]
     );
 
     return res.status(200).json({
       status: 'success',
-      message: `Successfully deleted ${deleteRes.rowCount} PDF material(s) from Google Drive and database.`,
+      message: `Successfully deleted ${deleteRes.rowCount} PDF material record(s) and all extracted content from Google Drive and database.${driveErrors.length > 0 ? ` (Note: ${driveErrors.length} Drive warnings: ${driveErrors.join('; ')})` : ''}`,
       deletedCount: deleteRes.rowCount,
-      deletedIds: targetIds,
+      deletedIds: allMaterialIds,
     });
   } catch (err: any) {
     console.error('[BulkDriveDelete] Error:', err.message);
@@ -1369,7 +1483,8 @@ router.post('/bulk-delete', requireAdminAuth, handleBulkDeleteMaterials);
 
 /**
  * DELETE /api/drive/materials/:id
- * Admin only: Deletes the PDF from Google Drive and removes its record and mirror records from PostgreSQL.
+ * Admin only: Permanently deletes the PDF from Google Drive and completely purges all related
+ * database records, extracted page text, indexed content, and mirror records.
  */
 router.delete('/materials/:id', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1378,8 +1493,11 @@ router.delete('/materials/:id', requireAdminAuth, async (req: AuthenticatedReque
       return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
     }
 
+    // 1. Fetch target material
     const resDb = await pool.query(
-      `SELECT id, file_name, google_drive_file_id FROM google_drive_materials WHERE id = $1 LIMIT 1`,
+      `SELECT id, file_name, original_file_name, google_drive_file_id 
+       FROM google_drive_materials 
+       WHERE id = $1 LIMIT 1`,
       [id]
     );
 
@@ -1387,49 +1505,147 @@ router.delete('/materials/:id', requireAdminAuth, async (req: AuthenticatedReque
       return res.status(404).json({ status: 'error', message: 'PDF study material not found in database.' });
     }
 
-    const material = resDb.rows[0];
+    const primaryMaterial = resDb.rows[0];
 
-    // Delete from Google Drive if it has an assigned Drive file ID
-    if (material.google_drive_file_id && !material.google_drive_file_id.startsWith('pending_')) {
-      try {
-        await deleteDriveFile(material.google_drive_file_id);
-      } catch (driveErr: any) {
-        console.warn(`[DriveDelete] Google Drive file deletion warning:`, driveErr.message);
-      }
+    // 2. Expand to all related duplicate/cross-group records sharing Google Drive File ID or File Name
+    const relatedMaterialsRes = await pool.query(
+      `SELECT id, file_name, original_file_name, google_drive_file_id 
+       FROM google_drive_materials 
+       WHERE id = $1 
+          OR (google_drive_file_id IS NOT NULL AND google_drive_file_id != '' AND google_drive_file_id = $2)
+          OR file_name = $3 
+          OR (original_file_name IS NOT NULL AND original_file_name = $3)`,
+      [id, primaryMaterial.google_drive_file_id, primaryMaterial.file_name]
+    );
 
-      // Cascade delete from mirrored textbook records
-      try {
-        const tbRes = await pool.query(
-          `SELECT id FROM textbooks WHERE file_path LIKE $1 LIMIT 10`,
-          [`%${material.google_drive_file_id}%`]
-        );
-        const tbIds = tbRes.rows.map((r) => r.id);
-        if (tbIds.length > 0) {
-          await pool.query(`DELETE FROM textbook_content WHERE textbook_id = ANY($1)`, [tbIds]);
-          await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [tbIds]);
+    const targetMaterials = relatedMaterialsRes.rows;
+    const materialIds = Array.from(new Set(targetMaterials.map((m) => m.id)));
+    const driveFileIds = Array.from(
+      new Set(
+        targetMaterials
+          .map((m) => m.google_drive_file_id)
+          .filter((fileId) => Boolean(fileId && !fileId.startsWith('pending_')))
+      )
+    );
+    const fileNames = Array.from(
+      new Set(
+        targetMaterials
+          .flatMap((m) => [m.file_name, m.original_file_name])
+          .filter(Boolean)
+      )
+    );
+
+    // 3. SYNCHRONIZED GOOGLE DRIVE DELETION (Delete from Google Drive FIRST)
+    // Only proceed to purge database records if Google Drive confirms deletion
+    let driveDeleteErrors: string[] = [];
+    if (driveFileIds.length > 0) {
+      for (const fileId of driveFileIds) {
+        try {
+          await deleteDriveFile(fileId);
+        } catch (driveErr: any) {
+          if (driveErr.code !== 404 && driveErr.status !== 404) {
+            console.error(`[DriveDelete] Google Drive file deletion failed for ${fileId}:`, driveErr);
+            driveDeleteErrors.push(driveErr.message || 'Failed to delete file from Google Drive');
+          }
         }
-      } catch (tbErr: any) {
-        console.warn('[DriveDelete] Textbook cascade warning:', tbErr.message);
+      }
+
+      if (driveDeleteErrors.length > 0) {
+        return res.status(502).json({
+          status: 'error',
+          message: `Failed to delete PDF file from Google Drive: ${driveDeleteErrors.join(', ')}. Database records and extracted text have NOT been removed to prevent state desynchronization. Please check Google Drive credentials and try again.`,
+        });
       }
     }
 
-    // Cascade delete from pdf_extractions
-    try {
-      await pool.query(
-        `DELETE FROM pdf_extractions WHERE material_id = $1 OR google_drive_file_id = $2`,
-        [id, material.google_drive_file_id]
-      );
-    } catch (peErr: any) {
-      console.warn('[DriveDelete] pdf_extractions cascade warning:', peErr.message);
+    // 4. Cascade delete mirrored textbooks records
+    const filePatterns = driveFileIds.map((fId) => `gdrive://${fId}`);
+    const altPatterns = driveFileIds.map((fId) => `%${fId}%`);
+    const cleanNames = fileNames.map((fn) => fn.replace(/\.pdf$/i, ''));
+
+    const tbRes = await pool.query(
+      `SELECT DISTINCT id, file_path, book_name 
+       FROM textbooks 
+       WHERE file_path = ANY($1) 
+          OR file_path LIKE ANY($2) 
+          OR book_name = ANY($3) 
+          OR book_name = ANY($4)
+          OR id IN (SELECT textbook_id FROM textbook_content WHERE material_id = ANY($5))`,
+      [
+        filePatterns.length > 0 ? filePatterns : ['__none__'],
+        altPatterns.length > 0 ? altPatterns : ['__none__'],
+        fileNames,
+        cleanNames,
+        materialIds,
+      ]
+    );
+
+    const tbRows = tbRes.rows;
+    const tbIds = tbRows.map((r) => r.id);
+
+    // 5. Clean up any physical / local files on disk
+    for (const tb of tbRows) {
+      if (tb.file_path && !tb.file_path.startsWith('gdrive://') && fs.existsSync(tb.file_path)) {
+        try {
+          fs.unlinkSync(tb.file_path);
+        } catch (diskErr: any) {
+          console.warn(`[DriveDelete] Disk unlink warning for ${tb.file_path}:`, diskErr.message);
+        }
+      }
     }
 
-    // Delete from PostgreSQL
-    await pool.query(`DELETE FROM google_drive_materials WHERE id = $1`, [id]);
+    for (const fn of fileNames) {
+      const candidatePaths = [
+        path.resolve(__dirname, '../../uploads/textbooks', fn),
+        path.join(os.tmpdir(), 'tnpsc-uploads', 'textbooks', fn),
+        path.resolve(__dirname, '../../../uploads/textbooks', fn),
+      ];
+      for (const cp of candidatePaths) {
+        if (fs.existsSync(cp)) {
+          try {
+            fs.unlinkSync(cp);
+          } catch (_) {}
+        }
+      }
+    }
+
+    // 6. Delete all extracted page-by-page text & indexed content
+    await pool.query(
+      `DELETE FROM textbook_content 
+       WHERE material_id = ANY($1) 
+          OR (textbook_id = ANY($2) AND $2 <> '{}')
+          OR file_name = ANY($3)`,
+      [materialIds, tbIds.length > 0 ? tbIds : [-1], fileNames]
+    );
+
+    // 7. Cascade delete from pdf_extractions
+    await pool.query(
+      `DELETE FROM pdf_extractions 
+       WHERE material_id = ANY($1) 
+          OR (google_drive_file_id = ANY($2) AND $2 <> '{}')
+          OR (textbook_id = ANY($3) AND $3 <> '{}')`,
+      [
+        materialIds,
+        driveFileIds.length > 0 ? driveFileIds : ['__none__'],
+        tbIds.length > 0 ? tbIds : [-1],
+      ]
+    );
+
+    // 8. Delete from textbooks
+    if (tbIds.length > 0) {
+      await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [tbIds]);
+    }
+
+    // 9. Delete from google_drive_materials
+    await pool.query(`DELETE FROM google_drive_materials WHERE id = ANY($1)`, [materialIds]);
 
     return res.status(200).json({
       status: 'success',
-      message: `PDF material "${material.file_name}" successfully removed from Google Drive and database.`,
+      message: `PDF material "${primaryMaterial.file_name}" permanently deleted from Google Drive, database records, and extracted text index.`,
       deletedId: id,
+      deletedMaterialIds: materialIds,
+      deletedTextbookIds: tbIds,
+      driveFilesDeleted: driveFileIds,
     });
   } catch (err: any) {
     console.error('[DriveDelete] Error:', err.message);

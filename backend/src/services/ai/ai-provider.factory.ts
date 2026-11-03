@@ -67,7 +67,7 @@ export class AIProviderFactory {
         `INSERT INTO ai_provider_configs (provider, model, is_active, updated_at)
          VALUES ($1, $2, true, CURRENT_TIMESTAMP)
          ON CONFLICT (provider) DO UPDATE SET is_active = true, updated_at = CURRENT_TIMESTAMP`,
-        [cleanName, cleanName === 'gemini' ? 'gemini-1.5-flash' : 'claude-3-5-sonnet-20241022']
+        [cleanName, cleanName === 'gemini' ? 'gemini-3.8-flash' : 'claude-3-5-sonnet-20241022']
       );
       await pool.query('COMMIT');
     } catch (e) {

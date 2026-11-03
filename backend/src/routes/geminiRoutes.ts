@@ -9,7 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireAdminAuth } from '../middleware/auth';
-import { GeminiService } from '../services/ai/providers/gemini/gemini.service';
+import { AIProviderConfigService } from '../services/ai/ai-provider-config.service';
 
 const router = Router();
 
@@ -20,7 +20,7 @@ const router = Router();
  */
 router.get('/test', requireAdminAuth, async (_req: Request, res: Response) => {
   try {
-    const result = await GeminiService.testConnection();
+    const result = await AIProviderConfigService.testProviderConnection('gemini');
     const httpStatus = result.success ? 200 : 400;
     return res.status(httpStatus).json(result);
   } catch (error: any) {
@@ -28,7 +28,6 @@ router.get('/test', requireAdminAuth, async (_req: Request, res: Response) => {
       success: false,
       status: 'FAILED',
       provider: 'Google Gemini',
-      model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
       message: error?.message || 'Server error while testing Gemini API connection.',
     });
   }
@@ -41,7 +40,7 @@ router.get('/test', requireAdminAuth, async (_req: Request, res: Response) => {
 router.post('/test', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { apiKey, model } = req.body || {};
-    const result = await GeminiService.testConnection(apiKey, model);
+    const result = await AIProviderConfigService.testProviderConnection('gemini', { apiKey, model });
     const httpStatus = result.success ? 200 : 400;
     return res.status(httpStatus).json(result);
   } catch (error: any) {
@@ -49,7 +48,6 @@ router.post('/test', requireAdminAuth, async (req: Request, res: Response) => {
       success: false,
       status: 'FAILED',
       provider: 'Google Gemini',
-      model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
       message: error?.message || 'Server error while testing Gemini API connection.',
     });
   }
@@ -61,12 +59,13 @@ router.post('/test', requireAdminAuth, async (req: Request, res: Response) => {
  */
 router.get('/status', requireAdminAuth, async (_req: Request, res: Response) => {
   try {
-    const statusInfo = await GeminiService.getStatus();
+    const statusInfo = await AIProviderConfigService.getProviderStatus('gemini');
     return res.status(200).json({
       success: true,
       provider: 'Google Gemini',
       status: statusInfo.configured ? 'CONFIGURED' : 'NOT_CONFIGURED',
       configured: statusInfo.configured,
+      connected: statusInfo.connected,
       name: 'Google Gemini AI',
       model: statusInfo.model,
       maskedKey: statusInfo.maskedKey,
@@ -94,16 +93,15 @@ router.post('/config', requireAdminAuth, async (req: Request, res: Response) => 
       return res.status(400).json({ success: false, message: 'Invalid model format.' });
     }
 
-    const updated = await GeminiService.updateCredentials(apiKey, model, true);
+    const updated = await AIProviderConfigService.updateProviderConfig('gemini', { apiKey, model });
     return res.status(200).json({
       success: true,
       provider: 'Google Gemini',
       message: 'Google Gemini AI configuration saved securely.',
-      configured: updated.configured,
+      configured: updated.isConfigured,
       name: 'Google Gemini AI',
       model: updated.model,
       maskedKey: updated.maskedKey,
-      configuredVia: updated.configuredVia,
     });
   } catch (error: any) {
     return res.status(500).json({

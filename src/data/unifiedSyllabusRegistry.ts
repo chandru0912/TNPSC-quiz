@@ -18,6 +18,7 @@ export interface LessonItem {
   id: string
   lessonNumber: string
   title: string
+  term?: string
   description?: string
   subjectName?: string
   classId?: number
@@ -751,20 +752,21 @@ function resolveClassData(
 }
 
 /**
- * Returns all valid lessons belonging to the exact Group, Subject, Standard, and Unit.
+ * Returns all valid lessons belonging to the exact Group, Subject, Standard, Unit, and optional Term.
  */
 export function getLessonsForSelection(
   groupId: 'group1' | 'group2' | 'group4',
   subjectId: string,
   classId: number,
-  unitId: number
+  unitId: number,
+  term?: string
 ): LessonItem[] {
   const classData = resolveClassData(groupId, subjectId, classId, unitId)
   if (!classData || !Array.isArray(classData.lessons) || classData.lessons.length === 0) {
     return []
   }
 
-  return classData.lessons.map((l: any, idx: number) => {
+  const allLessons = classData.lessons.map((l: any, idx: number) => {
     const topics: TopicItem[] = []
 
     // 1. Extract topics from keyConcepts if present
@@ -802,12 +804,47 @@ export function getLessonsForSelection(
       id: l.id || `l-${subjectId}-${unitId}-${classId}-${idx + 1}`,
       lessonNumber: l.lessonNumber || `1.${idx + 1}`,
       title: l.title,
+      term: l.term || (classId >= 10 ? 'Full Year' : 'Term 1'),
       description: l.description,
       subjectName: classData.subjectName || subjectId,
       classId,
       topics,
     }
   })
+
+  if (term && term !== 'all' && term !== 'Full Year') {
+    const filtered = allLessons.filter((item) => item.term?.toLowerCase() === term.toLowerCase())
+    return filtered.length > 0 ? filtered : allLessons
+  }
+
+  return allLessons
+}
+
+/**
+ * Returns available terms for a given standard (Classes 6-9: Term 1, 2, 3; Classes 10-12: Full Year).
+ */
+export function getTermsForStandard(classId: number): string[] {
+  return classId >= 10 ? ['Full Year'] : ['Term 1', 'Term 2', 'Term 3']
+}
+
+/**
+ * Returns available units for a given subject and standard, optionally filtered by term.
+ */
+export function getUnitsForSubjectStandardAndTerm(
+  groupId: 'group1' | 'group2' | 'group4',
+  subjectId: string,
+  classId: number,
+  term?: string
+): SyllabusUnitOption[] {
+  const allUnits = getUnitsForSubjectStandard(groupId, subjectId, classId)
+  if (!term || term === 'all' || term === 'Full Year' || classId >= 10) {
+    return allUnits
+  }
+  const matchingUnits = allUnits.filter((u) => {
+    const lessons = getLessonsForSelection(groupId, subjectId, classId, u.id)
+    return lessons.some((l) => l.term?.toLowerCase() === term.toLowerCase())
+  })
+  return matchingUnits.length > 0 ? matchingUnits : allUnits
 }
 
 /**

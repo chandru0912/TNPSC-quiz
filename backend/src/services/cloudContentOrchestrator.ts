@@ -12,8 +12,9 @@ import { CloudAIService } from './cloudAi/cloudAiService';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { splitAndAlignNotesByTopic, persistTopicAlignedNotes, AlignedTopicItem, TopicSeparationResult } from './topicAlignmentService';
 import { extractTextFromGoogleDrivePdf } from './googleDriveService';
-import { resolveMcqSelection, ResolvedMcqSelection } from './mcqCascadeService';
+import { resolveMcqSelection, ResolvedMcqSelection, normalizeSubjectKey } from './mcqCascadeService';
 import { AIProviderFactory } from './ai/ai-provider.factory';
+import { AIProviderConfigService } from './ai/ai-provider-config.service';
 import { AILogsService } from './ai/ai-logs.service';
 import { AIProviderName } from './ai/ai-provider.interface';
 
@@ -33,6 +34,7 @@ export interface UnifiedGenerationRequest {
   lessonId?: string;
   lessonNumber?: string;
   topic?: string;
+  selectedTopics?: string[];
   language: 'tamil' | 'english';
   mode: GenerationMode;
   notesFormat?: NotesFormatOption;
@@ -113,22 +115,22 @@ export class CloudContentOrchestrator {
       });
     };
 
-    // Step 1: Provider Status Check & Verification
-    const activeDefault = await AIProviderFactory.getActiveProvider();
+    // Step 1: Provider Status Check & Verification via Central Single Source of Truth
+    const activeDefault = await AIProviderConfigService.getActiveProvider();
     const targetProviderName: AIProviderName =
       req.provider === 'gemini'
         ? 'gemini'
         : req.provider === 'claude'
         ? 'claude'
-        : activeDefault.name;
+        : activeDefault.provider;
 
+    const providerStatus = await AIProviderConfigService.getProviderStatus(targetProviderName);
     const aiProvider = AIProviderFactory.getProvider(targetProviderName);
-    report(`Connecting to ${aiProvider.displayName} & Checking Provider Readiness`, 10);
-    const providerInfo = await aiProvider.getStatus();
-    if (!providerInfo.configured) {
+    report(`Connecting to ${providerStatus.name} & Checking Provider Readiness`, 10);
+    if (!providerStatus.configured) {
       const keyName = targetProviderName === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
       throw new Error(
-        `${aiProvider.displayName} is not configured. Set ${keyName} in backend environment or Admin Panel.`
+        `${providerStatus.name} is not configured. Set ${keyName} in backend environment or Admin Panel.`
       );
     }
 
@@ -391,6 +393,7 @@ export class CloudContentOrchestrator {
           lessonId: req.lessonId,
           lessonNumber: req.lessonNumber,
           topic: req.topic,
+          selectedTopics: req.selectedTopics,
           language: req.language,
           count: req.questionCount || 20,
           difficulty: req.difficulty || 'Medium',
@@ -424,27 +427,32 @@ export class CloudContentOrchestrator {
           for (const q of mcqsResult.questions) {
             await client.query(
               `INSERT INTO questions (
-                category, unit_id, class_id, subject, lesson_title, lesson_number,
+                category, exam_group_id, unit_id, class_id, standard_id, subject, subject_id,
+                lesson_title, lesson_number, lesson_id,
                 topic, difficulty, question_text, options, correct_answer,
                 explanation, status, source_reference, target_system,
                 language, option_a, option_b, option_c, option_d,
-                term, volume, source_pdf, source_page, textbook_id
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'staging', $13, 'study_materials', $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                term, volume, source_pdf, source_page, textbook_id, ai_provider
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'staging', $17, 'study_materials', $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
               ON CONFLICT (lesson_title, question_text) DO NOTHING`,
               [
                 q.category,
+                req.category,
                 q.unitId,
                 q.standard,
+                q.standard,
                 q.subject,
+                normalizeSubjectKey(q.subject),
                 q.lessonTitle,
                 req.lessonNumber || null,
-                q.topic || q.lessonTitle,
+                req.lessonId || null,
+                q.topic || (req.selectedTopics && req.selectedTopics.length > 0 ? req.selectedTopics[0] : q.lessonTitle),
                 q.difficulty,
                 q.question,
                 JSON.stringify(q.options),
                 q.correctAnswer,
                 q.explanation,
-                mcqSelection ? sourceRef : (textbookDetails.name || 'Claude AI generation (no textbook PDF provided)'),
+                mcqSelection ? sourceRef : (textbookDetails.name || `${targetProviderName === 'gemini' ? 'Gemini AI' : 'Claude AI'} generation`),
                 q.language || 'tamil',
                 q.optionA || q.options[0] || '',
                 q.optionB || q.options[1] || '',
@@ -455,6 +463,7 @@ export class CloudContentOrchestrator {
                 mcqSelection?.sourcePdf || textbookDetails.name || null,
                 mcqSelection?.pages[0] ?? null,
                 mcqSelection?.candidate.textbookId || null,
+                targetProviderName,
               ]
             );
           }
@@ -511,7 +520,7 @@ export class CloudContentOrchestrator {
     // Log generation history independently
     await AILogsService.logGeneration({
       provider: targetProviderName,
-      model: providerInfo.model,
+      model: providerStatus.model,
       generationType: req.mode,
       groupId: req.category,
       standard: req.standard,
@@ -533,7 +542,7 @@ export class CloudContentOrchestrator {
       mode: req.mode,
       notesFormat,
       provider: targetProviderName,
-      model: providerInfo.model,
+      model: providerStatus.model,
       textbookUsed: textbookDetails,
       studyNotes: studyNotesOutput,
       fullStudyNotes: fullNotesOutput,

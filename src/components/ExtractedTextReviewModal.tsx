@@ -143,10 +143,18 @@ export const ExtractedTextReviewModal: React.FC<ExtractedTextReviewModalProps> =
         target.type === 'drive'
           ? `/api/drive/materials/${target.id}/retry-failed`
           : `/api/textbooks/${target.id}/retry-failed`;
-      const res = await apiFetch(url, { method: 'POST' });
-      const data = await res.json();
+      let data: any = null;
+      for (let round = 0; round < 120; round++) {
+        const res = await apiFetch(url, { method: 'POST' });
+        data = await res.json();
+        if (data.status !== 'success' || !data.data?.inProgress) break;
+        setRetryMessage(
+          `Retrying failed pages... ${data.data.extractedPagesCount}/${data.data.totalPages} stored, ${data.data.remainingPages} remaining.`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
 
-      if (data.status === 'success') {
+      if (data?.status === 'success' && !data.data?.inProgress) {
         setRetryMessage('Retry completed successfully. Refreshing pages...');
         setTimeout(async () => {
           setRetryMessage(null);

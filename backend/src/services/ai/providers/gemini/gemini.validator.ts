@@ -78,10 +78,20 @@ export function classifyGeminiError(error: any): {
   }
 
   if (
+    errMsg.includes('free tier is not available') ||
+    errMsg.includes('set up billing') ||
+    (status === 403 && errMsg.includes('billing'))
+  ) {
+    return {
+      message: 'The Gemini API free tier is not available for this project. Please enable billing in Google AI Studio (https://aistudio.google.com/billing) or configure a project with active quota.',
+      errorType: 'quota_exceeded',
+    };
+  }
+
+  if (
     errMsg.includes('resource_exhausted') ||
-    errMsg.includes('quota') ||
     errMsg.includes('quota exceeded') ||
-    errMsg.includes('billing')
+    (status === 429 && errMsg.includes('quota'))
   ) {
     return {
       message: 'Google Gemini quota exceeded or billing limit reached for this API key tier.',
@@ -93,10 +103,12 @@ export function classifyGeminiError(error: any): {
     status === 404 ||
     errMsg.includes('is not found') ||
     errMsg.includes('model not found') ||
-    errMsg.includes('unsupported model')
+    errMsg.includes('unsupported model') ||
+    errMsg.includes('no longer available') ||
+    errMsg.includes('is no longer available')
   ) {
     return {
-      message: 'Requested Gemini model was not found for this API version. Try gemini-1.5-flash or gemini-2.0-flash.',
+      message: 'The selected Gemini model was not found or has been deprecated by Google. Please select gemini-3.8-flash, gemini-3.5-flash-lite, or gemini-2.5-flash in the Admin Panel.',
       errorType: 'model_not_found',
     };
   }

@@ -29,18 +29,25 @@ export class GeminiProviderService implements IAIProvider {
     return getGeminiApiKey().length > 5;
   }
 
-  async getStatus(): Promise<AIProviderConfigInfo> {
+  async getStatus(): Promise<AIProviderConfigInfo & { connected?: boolean; status?: string }> {
     const key = getGeminiApiKey();
-    const model = getGeminiModel();
-
+    let model = getGeminiModel();
     let isActive = false;
+    let connected = false;
+    let status = key.length > 5 ? 'READY' : 'OFFLINE';
+
     try {
       const res = await pool.query(
-        'SELECT is_active, temperature, max_tokens FROM ai_provider_configs WHERE provider = $1',
+        'SELECT is_active, model, status, temperature, max_tokens FROM ai_provider_configs WHERE provider = $1',
         ['gemini']
       );
       if (res.rows.length > 0) {
         isActive = Boolean(res.rows[0].is_active);
+        if (res.rows[0].model) model = res.rows[0].model;
+        if (res.rows[0].status) {
+          status = res.rows[0].status;
+          connected = res.rows[0].status === 'CONNECTED';
+        }
       }
     } catch {
       // Table may not yet be initialized
@@ -49,11 +56,13 @@ export class GeminiProviderService implements IAIProvider {
     return {
       provider: 'gemini',
       name: this.displayName,
-      configured: Boolean(key),
+      configured: key.length > 5,
+      connected,
       model,
       configuredVia: key ? 'env' : 'none',
       maskedKey: maskGeminiApiKey(key),
       isActive,
+      status,
     };
   }
 
@@ -159,7 +168,11 @@ export class GeminiProviderService implements IAIProvider {
 
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = getGeminiModel();
+      let model = getGeminiModel();
+      try {
+        const dbRes = await pool.query('SELECT model FROM ai_provider_configs WHERE provider = $1', ['gemini']);
+        if (dbRes.rows[0]?.model) model = dbRes.rows[0].model;
+      } catch {}
 
       const modelConfig: any = {
         model,

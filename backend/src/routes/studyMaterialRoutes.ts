@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import pool from '../db';
 import { classifyTermVolume, getMappedTextbookSubjects, normalizeSubjectKey } from '../services/mcqCascadeService';
 import { getCanonicalLessons } from '../data/canonicalSyllabusLessons';
+import { getRegisteredTopicsForLesson } from '../services/topicAlignmentService';
 
 const router = Router();
 
@@ -17,6 +18,17 @@ export interface LessonOption {
   hasStudyNotes: boolean;
   hasTextbook: boolean;
   source: 'study_notes' | 'google_drive' | 'syllabus';
+  topics: string[];
+}
+
+function resolveTopicsForLesson(title: string): string[] {
+  const reg = getRegisteredTopicsForLesson(title);
+  if (reg && reg.length > 0) return reg;
+  return [
+    `${title}: Core Principles & Definitions`,
+    `${title}: Facts, Figures & Key Concepts`,
+    `${title}: TNPSC Exam Applications`,
+  ];
 }
 
 export interface TextbookOption {
@@ -254,6 +266,7 @@ router.get('/lessons', async (req: Request, res: Response) => {
                   hasStudyNotes: false,
                   hasTextbook: true,
                   source: 'google_drive',
+                  topics: resolveTopicsForLesson(l.title),
                 });
               }
             });
@@ -281,6 +294,7 @@ router.get('/lessons', async (req: Request, res: Response) => {
             hasStudyNotes: false,
             hasTextbook: true,
             source: 'google_drive',
+            topics: resolveTopicsForLesson(mat.lesson),
           });
         }
       }
@@ -310,6 +324,7 @@ router.get('/lessons', async (req: Request, res: Response) => {
           hasStudyNotes: true,
           hasTextbook: false,
           source: 'study_notes',
+          topics: resolveTopicsForLesson(note.lesson_title),
         });
       }
     }
@@ -331,6 +346,7 @@ router.get('/lessons', async (req: Request, res: Response) => {
           hasStudyNotes: false,
           hasTextbook: relevantMaterials.length > 0,
           source: 'syllabus',
+          topics: resolveTopicsForLesson(can.title),
         });
       }
     }
@@ -363,6 +379,30 @@ router.get('/lessons', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/study-materials/topics?lessonTitle=&lessonNumber=
+ * Returns topics and subtopics for a specific lesson from the authoritative registry.
+ */
+router.get('/topics', async (req: Request, res: Response) => {
+  try {
+    const lessonTitle = String(req.query.lessonTitle || '').trim();
+    const lessonNumber = String(req.query.lessonNumber || '').trim();
+    if (!lessonTitle) {
+      return res.status(400).json({ success: false, message: 'lessonTitle is required' });
+    }
+    const topics = resolveTopicsForLesson(lessonTitle);
+    return res.status(200).json({
+      success: true,
+      lessonTitle,
+      lessonNumber,
+      count: topics.length,
+      topics,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message, topics: [] });
+  }
+});
+
+/**
  * GET /api/study-materials/textbooks?groupId=&subjectId=&standardId=&unitId=&term=&lessonId=&lessonTitle=
  * Automatically identifies and returns the matching Samacheer Kalvi textbooks for the selected
  * Subject, Standard, Unit, Term, and Lesson.
@@ -391,10 +431,12 @@ router.get('/textbooks', async (req: Request, res: Response) => {
 
     // 2. Search textbooks table
     const tbRes = await pool.query(
-      `SELECT id, book_name, file_path, standard, subject, medium, term, volume, page_count, total_pages, extraction_status, status
-       FROM textbooks
-       WHERE standard = $1
-         AND (group_id IS NULL OR LOWER(group_id) = LOWER($2) OR ($2 = 'group2a' AND LOWER(group_id) = 'group2'))`,
+      `SELECT t.id, t.book_name, t.file_path, t.standard, t.subject, t.medium, t.term, t.volume,
+              t.page_count, t.total_pages, t.extraction_status, t.status,
+              EXISTS (SELECT 1 FROM textbook_content c WHERE c.textbook_id = t.id) AS has_indexed_content
+       FROM textbooks t
+       WHERE t.standard = $1
+         AND (t.group_id IS NULL OR LOWER(t.group_id) = LOWER($2) OR ($2 = 'group2a' AND LOWER(t.group_id) = 'group2'))`,
       [standardId, groupId]
     );
 
@@ -477,8 +519,8 @@ router.get('/textbooks', async (req: Request, res: Response) => {
           termOptions: tvMeta.termOptions.length > 0 ? tvMeta.termOptions : ['Not Applicable'],
           volumeOptions: tvMeta.volumeOptions.length > 0 ? tvMeta.volumeOptions : ['Not Applicable'],
           status: tb.status || 'completed',
-          hasExtractedText: true,
-          extractionStatus: tb.extraction_status || 'COMPLETED',
+          hasExtractedText: Boolean(tb.has_indexed_content),
+          extractionStatus: tb.extraction_status || (tb.has_indexed_content ? 'COMPLETED' : 'PENDING'),
           totalPages: tb.total_pages || tb.page_count || 0,
         });
       }
@@ -560,6 +602,103 @@ router.get('/volumes', async (req: Request, res: Response) => {
       message: error.message || 'Failed to fetch volumes',
       volumes: ['Not Applicable'],
       selected: 'Not Applicable',
+    });
+  }
+});
+
+/**
+ * GET /api/study-materials/topics?lessonTitle=&subjectId=&standardId=&unitId=&term=
+ * Returns canonical topic list for the selected lesson.
+ * Primary source: SYLLABUS_TOPIC_REGISTRY in topicAlignmentService (covers all mapped lessons).
+ * Fallback: study_notes DB DISTINCT topic column for the lesson.
+ */
+router.get('/topics', async (req: Request, res: Response) => {
+  try {
+    const lessonTitle = String(req.query.lessonTitle || '').trim();
+    const subjectId   = String(req.query.subjectId  || '').toLowerCase().trim();
+    const standardId  = parseInt(String(req.query.standardId || '0'), 10) || 0;
+    const unitId      = parseInt(String(req.query.unitId     || '0'), 10) || 0;
+    const term        = String(req.query.term || '').trim();
+
+    if (!lessonTitle) {
+      return res.status(400).json({ success: false, message: 'lessonTitle is required', topics: [] });
+    }
+
+    // 1. Try the built-in authoritative SYLLABUS_TOPIC_REGISTRY
+    const registryTopics = getRegisteredTopicsForLesson(lessonTitle);
+
+    if (registryTopics.length > 0) {
+      return res.status(200).json({
+        success: true,
+        lessonTitle,
+        source: 'registry',
+        count: registryTopics.length,
+        topics: registryTopics,
+      });
+    }
+
+    // 2. Fallback: query study_notes DB for distinct topics
+    let dbTopics: string[] = [];
+    try {
+      const params: any[] = [lessonTitle];
+      let query = `
+        SELECT DISTINCT topic
+        FROM study_notes
+        WHERE LOWER(TRIM(lesson_title)) = LOWER(TRIM($1))
+          AND topic IS NOT NULL AND TRIM(topic) <> ''
+      `;
+      if (standardId > 0) { params.push(standardId); query += ` AND class_id = $${params.length}`; }
+      if (unitId > 0)     { params.push(unitId);      query += ` AND unit_id  = $${params.length}`; }
+      if (term)           { params.push(`%${term}%`); query += ` AND term ILIKE $${params.length}`; }
+      query += ' ORDER BY topic ASC';
+
+      const dbRes = await pool.query(query, params);
+      dbTopics = dbRes.rows.map((r: { topic: string }) => r.topic).filter(Boolean);
+    } catch {
+      // DB fallback failed silently
+    }
+
+    if (dbTopics.length > 0) {
+      return res.status(200).json({
+        success: true,
+        lessonTitle,
+        source: 'study_notes',
+        count: dbTopics.length,
+        topics: dbTopics,
+      });
+    }
+
+    // 3. Final fallback: canonical lessons mappedSubject as one generic topic
+    if (subjectId && standardId && unitId) {
+      const canonicals = getCanonicalLessons(subjectId, standardId, unitId, term);
+      const canonical  = canonicals.find(
+        (c) => c.title.toLowerCase() === lessonTitle.toLowerCase()
+      );
+      if (canonical?.mappedSubject) {
+        return res.status(200).json({
+          success: true,
+          lessonTitle,
+          source: 'canonical',
+          count: 1,
+          topics: [canonical.mappedSubject],
+        });
+      }
+    }
+
+    // No topics found – return empty with success so the UI shows "All Topics" option
+    return res.status(200).json({
+      success: true,
+      lessonTitle,
+      source: 'none',
+      count: 0,
+      topics: [],
+    });
+  } catch (error: any) {
+    console.error('[Study Material Routes] Error fetching topics:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch topics',
+      topics: [],
     });
   }
 });
