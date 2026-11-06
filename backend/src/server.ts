@@ -166,6 +166,10 @@ app.get('/', (_req, res) => {
       textbooks: '/api/textbooks',
       ai: '/api/ai',
       drive: '/api/drive',
+      student: '/api/student',
+      analytics: '/api/analytics',
+      studyManagement: '/api/study-management',
+      syllabus: '/api/syllabus',
     },
   });
 });

@@ -159,7 +159,13 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
       setError(null);
 
       try {
-        const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        const activeToken =
+          token ||
+          localStorage.getItem('tnpsc_admin_token') ||
+          localStorage.getItem('adminToken') ||
+          localStorage.getItem('token') ||
+          '';
+        const authHeader: Record<string, string> = activeToken ? { Authorization: `Bearer ${activeToken}` } : {};
         const res = await apiFetch(`/api/analytics/overview?range=${range}`, {
           headers: authHeader,
         });

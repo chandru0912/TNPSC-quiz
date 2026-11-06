@@ -100,12 +100,13 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
 
   // Fetch all analytics datasets
   const fetchAllAnalytics = useCallback(async (isSilent = false) => {
-    if (!token) return;
+    const activeToken = token || localStorage.getItem('tnpsc_admin_token') || localStorage.getItem('adminToken') || localStorage.getItem('token') || '';
+    if (!activeToken) return;
     if (!isSilent) setIsLoading(true);
     else setIsRefreshing(true);
     setError(null);
 
-    const headers = { Authorization: `Bearer ${token}` };
+    const headers = { Authorization: `Bearer ${activeToken}` };
     const query = `range=${dateRange}${districtFilter !== 'all' ? `&district=${encodeURIComponent(districtFilter)}` : ''}`;
 
     try {
@@ -166,11 +167,12 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
 
   // Periodic polling for live monitor (every 10s if active on live tab, or every 45s generally)
   useEffect(() => {
+    const activeToken = token || localStorage.getItem('tnpsc_admin_token') || localStorage.getItem('adminToken') || localStorage.getItem('token') || '';
     const intervalMs = activeTab === 'live' ? 10000 : 45000;
     const timer = setInterval(() => {
-      if (token && document.visibilityState === 'visible') {
+      if (activeToken && document.visibilityState === 'visible') {
         // Fetch live monitor lightweight
-        apiFetch('/api/analytics/live', { headers: { Authorization: `Bearer ${token}` } })
+        apiFetch('/api/analytics/live', { headers: { Authorization: `Bearer ${activeToken}` } })
           .then((r) => r.json())
           .then((json) => {
             if (json.data) setLiveData(json.data);
