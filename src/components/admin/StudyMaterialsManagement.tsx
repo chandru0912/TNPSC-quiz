@@ -91,6 +91,8 @@ export interface ExtractedUnitDraft {
   unit_number: number;
   unit_code: string;
   title: string;
+  standard_number?: number;
+  term?: string;
   subject_slug?: string;
   subject_name?: string;
   standard_reference?: string;
@@ -223,6 +225,8 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   const [aiImportInputMode, setAiImportInputMode] = useState<'pdf' | 'text'>('pdf');
   const [aiImportExamId, setAiImportExamId] = useState<string>('group1');
   const [aiImportSubjectSlug, setAiImportSubjectSlug] = useState<string>('general-studies');
+  const [aiImportStandard, setAiImportStandard] = useState<'all' | number>('all');
+  const [aiReviewSelectedClass, setAiReviewSelectedClass] = useState<'all' | number>('all');
   const [aiImportFile, setAiImportFile] = useState<File | null>(null);
   const [aiImportPastedText, setAiImportPastedText] = useState<string>('');
   const [aiAnalysisResult, setAiAnalysisResult] = useState<SyllabusAnalysisResult | null>(null);
@@ -440,6 +444,7 @@ UNIT-II: CURRENT EVENTS
         formData.append('pdf', aiImportFile!);
         formData.append('examId', aiImportExamId);
         formData.append('subjectId', aiImportSubjectSlug);
+        formData.append('standard', String(aiImportStandard));
 
         res = await apiFetch('/api/study-management/ai-syllabus/upload', {
           method: 'POST',
@@ -459,6 +464,7 @@ UNIT-II: CURRENT EVENTS
             syllabusText: aiImportPastedText,
             examId: aiImportExamId,
             subjectId: aiImportSubjectSlug,
+            standard: aiImportStandard,
           }),
         });
       }
@@ -472,6 +478,10 @@ UNIT-II: CURRENT EVENTS
       setAiAnalysisResult(data);
       const units: ExtractedUnitDraft[] = (data.units || []).map((u: any) => ({
         ...u,
+        standard_number: typeof u.standard_number === 'number'
+          ? u.standard_number
+          : (typeof aiImportStandard === 'number' ? aiImportStandard : (aiImportExamId === 'group4' ? 10 : 11)),
+        term: u.term || 'Term 1',
         selected_for_publish: true,
       }));
       setEditableUnits(units);
@@ -3352,6 +3362,34 @@ UNIT-II: CURRENT EVENTS
                     </div>
                   </div>
 
+                  <div className="smm-modal-grid-2">
+                    <div>
+                      <label>Standard / Class Scope *</label>
+                      <select
+                        className="smm-modal-select"
+                        value={aiImportStandard}
+                        onChange={(e) =>
+                          setAiImportStandard(e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10))
+                        }
+                      >
+                        <option value="all">📚 All Standards (6th to 12th Auto-Organize)</option>
+                        <option value="6">6th Standard (Class 6)</option>
+                        <option value="7">7th Standard (Class 7)</option>
+                        <option value="8">8th Standard (Class 8)</option>
+                        <option value="9">9th Standard (Class 9)</option>
+                        <option value="10">10th Standard (SSLC / Class 10)</option>
+                        <option value="11">11th Standard (Higher Secondary / Class 11)</option>
+                        <option value="12">12th Standard (Higher Secondary / Class 12)</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.4 }}>
+                        ✨ <strong style={{ color: '#c084fc' }}>Dynamic Units:</strong> Generates distinct Unit sequences for each class. Standard 6 and Standard 10 will have their own independent Unit numbering without collision.
+                      </span>
+                    </div>
+                  </div>
+
                   {/* Mode Selector Tabs: PDF vs Text Paste */}
                   <div className="smm-ai-tab-group">
                     <button
@@ -3662,6 +3700,44 @@ UNIT-II: CURRENT EVENTS
                     </div>
                   </div>
 
+                  {/* Class-wise Filter Tabs */}
+                  {(() => {
+                    const presentClasses = Array.from(
+                      new Set(editableUnits.map((u) => u.standard_number || 10))
+                    ).sort((a, b) => a - b);
+
+                    if (presentClasses.length <= 1 && aiImportStandard !== 'all') {
+                      return null;
+                    }
+
+                    return (
+                      <div className="smm-ai-class-tabs">
+                        <button
+                          type="button"
+                          className={`smm-ai-class-tab ${aiReviewSelectedClass === 'all' ? 'active' : ''}`}
+                          onClick={() => setAiReviewSelectedClass('all')}
+                        >
+                          <span>All Classes</span>
+                          <span className="smm-ai-class-count">{editableUnits.length}</span>
+                        </button>
+                        {presentClasses.map((cls) => {
+                          const count = editableUnits.filter((u) => (u.standard_number || 10) === cls).length;
+                          return (
+                            <button
+                              key={cls}
+                              type="button"
+                              className={`smm-ai-class-tab ${aiReviewSelectedClass === cls ? 'active' : ''}`}
+                              onClick={() => setAiReviewSelectedClass(cls)}
+                            >
+                              <span>Class {cls}</span>
+                              <span className="smm-ai-class-count">{count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
                   <div className="smm-ai-table-header-row">
                     <div className="smm-ai-th-select" title="Toggle Selection">
                       <input
@@ -3679,6 +3755,9 @@ UNIT-II: CURRENT EVENTS
 
                   <div className="smm-ai-review-tree">
                     {editableUnits.map((u, uIdx) => {
+                      if (aiReviewSelectedClass !== 'all' && (u.standard_number || 10) !== aiReviewSelectedClass) {
+                        return null;
+                      }
                       const isExpanded = expandedReviewUnits.has(u.unit_number || uIdx + 1);
                       const isSelected = u.selected_for_publish !== false;
                       return (
@@ -3735,6 +3814,16 @@ UNIT-II: CURRENT EVENTS
                                   title="Edit Unit / Import Number"
                                 />
                               </div>
+
+                              {/* Class and Term Badges */}
+                              <span className="smm-ai-class-badge" title="Standard / Class">
+                                Class {u.standard_number || 10}
+                              </span>
+                              {u.term && (
+                                <span className="smm-ai-term-badge" title="School Term">
+                                  {u.term}
+                                </span>
+                              )}
 
                               <input
                                 type="text"

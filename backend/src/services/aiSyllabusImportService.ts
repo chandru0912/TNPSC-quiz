@@ -528,8 +528,9 @@ export class AISyllabusImportService {
     examId: string;
     subjectId?: string;
     fileName?: string;
+    standard?: number | 'all';
   }): Promise<SyllabusAnalysisResult> {
-    const { pdfBuffer, rawText, examId, subjectId, fileName } = params;
+    const { pdfBuffer, rawText, examId, subjectId, fileName, standard } = params;
     const rawExamId = examId.toLowerCase().trim();
     const cleanExamId = rawExamId === 'group2a' ? 'group2' : rawExamId;
 
@@ -644,7 +645,7 @@ ${textSample}
     // 4. Fallback to Structural Syllabus Parser if AI returned empty or failed
     if (rawUnits.length === 0) {
       console.log('[AISyllabus] Running Structural Syllabus Parser...');
-      const structural = this.parseSyllabusStructurally(syllabusText, cleanExamId, subjectId);
+      const structural = this.parseSyllabusStructurally(syllabusText, cleanExamId, subjectId, standard);
       detectedExamName = structural.examName;
       detectedSubSlug = structural.subjectSlug;
       detectedSubName = structural.subjectName;
@@ -674,6 +675,11 @@ ${textSample}
         duplicateUnits.push(`Unit ${unitNum}: "${existingUnitMap.get(unitNum)}"`);
       }
 
+      const unitStd = typeof u.standard_number === 'number' && u.standard_number >= 6 && u.standard_number <= 12
+        ? u.standard_number
+        : (typeof standard === 'number' && standard >= 6 && standard <= 12 ? standard : (cleanExamId === 'group4' ? 10 : 11));
+      const unitTerm = u.term || 'Term 1';
+
       const lessons: ExtractedLessonDraft[] = (u.lessons || []).map((l: any, lIdx: number) => {
         const rawTopics = Array.isArray(l.topics) ? l.topics : [];
         const formattedTopics: ExtractedTopicDraft[] = rawTopics.map((t: any, tIdx: number) => ({
@@ -685,11 +691,15 @@ ${textSample}
         totalTopics += formattedTopics.length;
         totalLessons++;
 
+        const lessonStd = typeof l.standard_number === 'number' && l.standard_number >= 6 && l.standard_number <= 12
+          ? l.standard_number
+          : unitStd;
+
         return {
           lesson_number: l.lesson_number || `${unitNum}.${lIdx + 1}`,
           title: l.title || `Lesson ${lIdx + 1}`,
-          standard_number: parseInt(l.standard_number, 10) || (cleanExamId === 'group4' ? 10 : 11),
-          term: l.term || 'Term 1',
+          standard_number: lessonStd,
+          term: l.term || unitTerm,
           description: l.description || '',
           topics: formattedTopics,
         };
@@ -699,9 +709,11 @@ ${textSample}
         unit_number: unitNum,
         unit_code: unitCode,
         title: u.title || `Unit ${unitNum}`,
+        standard_number: unitStd,
+        term: unitTerm,
         subject_slug: u.subject_slug || detectedSubSlug,
         subject_name: u.subject_name || detectedSubName,
-        standard_reference: u.standard_reference || (cleanExamId === 'group4' ? 'SSLC Standard' : 'Degree Standard'),
+        standard_reference: u.standard_reference || `Class ${unitStd} Standard`,
         description: u.description || '',
         question_count: parseInt(u.question_count, 10) || 15,
         is_existing: isExisting,
@@ -737,6 +749,7 @@ ${textSample}
     examId: string;
     subjectId?: string;
     fileName?: string;
+    standard?: number | 'all';
   }): Promise<SyllabusAnalysisResult> {
     return this.analyzeSyllabus(params);
   }
@@ -816,11 +829,17 @@ ${textSample}
           [unitSubPk, cleanExamId, unitSubSlug, unitSubName]
         );
 
-        // Find existing unit if any
+        // Find existing unit if any matching exam, subject, standard_number, and unit_number
+        const unitStd = typeof u.standard_number === 'number' && u.standard_number >= 6 && u.standard_number <= 12
+          ? u.standard_number
+          : (cleanExamId === 'group4' ? 10 : 11);
+
         const existingUnitRes = await client.query(
           `SELECT id FROM syllabus_units 
-           WHERE exam_id = $1 AND subject_id = $2 AND unit_number = $3`,
-          [cleanExamId, unitSubSlug, unitNum]
+           WHERE exam_id = $1 AND subject_id = $2 
+             AND (standard_number = $3 OR ($3::int IS NULL AND standard_number IS NULL))
+             AND unit_number = $4`,
+          [cleanExamId, unitSubSlug, unitStd, unitNum]
         );
 
         let unitDbId: number;
@@ -830,21 +849,22 @@ ${textSample}
           if (overwriteExisting) {
             await client.query(
               `UPDATE syllabus_units
-               SET title = $1, unit_code = $2, subject_name = $3, description = $4, question_count = $5, updated_at = CURRENT_TIMESTAMP
-               WHERE id = $6`,
-              [u.title, unitCode, unitSubName, u.description || '', u.question_count || 15, unitDbId]
+               SET title = $1, unit_code = $2, subject_name = $3, standard_number = $4, description = $5, question_count = $6, updated_at = CURRENT_TIMESTAMP
+               WHERE id = $7`,
+              [u.title, unitCode, unitSubName, unitStd, u.description || '', u.question_count || 15, unitDbId]
             );
           }
         } else {
           const insertUnitRes = await client.query(
             `INSERT INTO syllabus_units (
-              exam_id, subject_id, unit_number, unit_code, title, subject_name,
+              exam_id, subject_id, standard_number, unit_number, unit_code, title, subject_name,
               description, question_count, display_order, is_active
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
             RETURNING id`,
             [
               cleanExamId,
               unitSubSlug,
+              unitStd,
               unitNum,
               unitCode,
               u.title,
@@ -862,6 +882,9 @@ ${textSample}
         // 3. Iterate Lessons under Unit
         let lessonOrder = 1;
         for (const l of u.lessons) {
+          const lessonStd = typeof l.standard_number === 'number' && l.standard_number >= 6 && l.standard_number <= 12
+            ? l.standard_number
+            : unitStd;
           const safeLessonNum =
             (l.lesson_number || String(lessonOrder)).replace(/[^a-zA-Z0-9]/g, '') || String(lessonOrder);
           const rawSlug = l.title
@@ -870,7 +893,7 @@ ${textSample}
             .replace(/^-+|-+$/g, '')
             .slice(0, 40);
           const titleSlug = rawSlug || `lesson-${lessonOrder}`;
-          const lessonId = `${cleanExamId}-${unitSubSlug}-u${unitNum}-l${safeLessonNum}-${titleSlug}`;
+          const lessonId = `${cleanExamId}-${unitSubSlug}-std${lessonStd}-u${unitNum}-l${safeLessonNum}-${titleSlug}`;
 
           await client.query(
             `INSERT INTO syllabus_lessons (
@@ -878,6 +901,7 @@ ${textSample}
               title, term, description, status, display_order, is_active
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Available', $10, true)
             ON CONFLICT (id) DO UPDATE SET
+              unit_id = EXCLUDED.unit_id,
               title = EXCLUDED.title,
               standard_number = EXCLUDED.standard_number,
               term = EXCLUDED.term,
@@ -888,10 +912,10 @@ ${textSample}
               unitDbId,
               cleanExamId,
               unitSubSlug,
-              l.standard_number || 10,
+              lessonStd,
               l.lesson_number,
               l.title,
-              l.term || 'Term 1',
+              l.term || u.term || 'Term 1',
               l.description || '',
               lessonOrder++,
             ]

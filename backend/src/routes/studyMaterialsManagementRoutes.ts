@@ -433,6 +433,13 @@ router.post('/ai-syllabus/upload', requireAdminAuth, syllabusUpload.single('pdf'
     const subjectId = req.body.subjectId ? String(req.body.subjectId) : undefined;
     const syllabusText = typeof req.body.syllabusText === 'string' ? req.body.syllabusText : undefined;
     const fileName = req.file?.originalname || (syllabusText ? 'pasted-syllabus.txt' : 'syllabus.pdf');
+    const rawStandard = req.body.standard;
+    const standard: number | 'all' | undefined =
+      rawStandard === 'all'
+        ? 'all'
+        : (parseInt(String(rawStandard), 10) >= 6 && parseInt(String(rawStandard), 10) <= 12
+          ? parseInt(String(rawStandard), 10)
+          : undefined);
 
     if (!req.file?.buffer && (!syllabusText || syllabusText.trim().length < 30)) {
       return res.status(400).json({
@@ -447,6 +454,7 @@ router.post('/ai-syllabus/upload', requireAdminAuth, syllabusUpload.single('pdf'
       examId,
       subjectId,
       fileName,
+      standard,
     });
 
     return res.status(200).json({ success: true, ...analysis });
@@ -458,7 +466,7 @@ router.post('/ai-syllabus/upload', requireAdminAuth, syllabusUpload.single('pdf'
 
 router.post('/ai-syllabus/analyze-text', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const { syllabusText, examId, subjectId } = req.body;
+    const { syllabusText, examId, subjectId, standard: rawStandard } = req.body;
     if (!syllabusText || typeof syllabusText !== 'string' || syllabusText.trim().length < 30) {
       return res.status(400).json({
         success: false,
@@ -468,12 +476,19 @@ router.post('/ai-syllabus/analyze-text', requireAdminAuth, async (req: Request, 
 
     const cleanExamId = String(examId || 'group1');
     const cleanSubId = subjectId ? String(subjectId) : undefined;
+    const standard: number | 'all' | undefined =
+      rawStandard === 'all'
+        ? 'all'
+        : (parseInt(String(rawStandard), 10) >= 6 && parseInt(String(rawStandard), 10) <= 12
+          ? parseInt(String(rawStandard), 10)
+          : undefined);
 
     const analysis = await AISyllabusImportService.analyzeSyllabus({
       rawText: syllabusText,
       examId: cleanExamId,
       subjectId: cleanSubId,
       fileName: 'direct-text-paste.txt',
+      standard,
     });
 
     return res.status(200).json({ success: true, ...analysis });
