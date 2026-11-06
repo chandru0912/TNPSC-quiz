@@ -112,35 +112,86 @@ app.use(express.json({ limit: '10mb' }));
 
 // Safeguard: Normalize any accidental Vercel /dist/server.js prefix or edge rewrite routing
 app.use((req: Request, _res: Response, next: NextFunction) => {
+  const isServerJs = (p?: string | null): boolean =>
+    !p || p.startsWith('/dist/server.js') || p.startsWith('dist/server.js');
+
+  // 1. Check if rewrite forwarded path via query param __vpath (from backend/vercel.json)
+  if (req.url.includes('__vpath=')) {
+    try {
+      const u = new URL(req.url, 'http://localhost');
+      const vpath = u.searchParams.get('__vpath');
+      if (vpath && !isServerJs(vpath)) {
+        u.searchParams.delete('__vpath');
+        const qs = u.search ? u.search : '';
+        const normalized = vpath.startsWith('/') ? vpath : `/${vpath}`;
+        req.url = `${normalized}${qs}`;
+        req.originalUrl = req.url;
+        return next();
+      }
+    } catch {
+      // ignore URL parse errors
+    }
+  }
+
+  // 2. If req.url has a subpath after /dist/server.js (e.g. /dist/server.js/api/admin/login)
   if (req.url.startsWith('/dist/server.js')) {
     const subpath = req.url.slice('/dist/server.js'.length);
     if (subpath && subpath.startsWith('/') && !subpath.startsWith('/?')) {
       req.url = subpath;
       req.originalUrl = subpath;
-    } else {
-      const forwardedPath =
-        (req.headers['x-matched-path'] as string) ||
-        (req.headers['x-vercel-matched-path'] as string) ||
-        (req.headers['x-now-route-matches'] ? String(req.headers['x-now-route-matches']).replace(/^1=/, '/') : '') ||
-        (req.headers['x-forwarded-uri'] as string) ||
-        (req.headers['x-original-url'] as string) ||
-        (req.headers['x-rewrite-url'] as string) ||
-        (req.headers['x-invoke-path'] as string) ||
-        '';
-      if (forwardedPath && !forwardedPath.startsWith('/dist/server.js')) {
-        const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-        const normalized = forwardedPath.startsWith('/') ? forwardedPath : `/${forwardedPath}`;
-        req.url = normalized.includes('?') ? normalized : `${normalized}${queryStr}`;
-        req.originalUrl = req.url;
-      } else if (subpath && subpath.startsWith('?')) {
-        req.url = `/${subpath}`;
-        req.originalUrl = req.url;
-      } else {
-        req.url = '/';
-        req.originalUrl = '/';
+      return next();
+    }
+
+    // 3. Inspect headers for original path, strictly excluding any header that points to /dist/server.js
+    let resolvedPath = '';
+
+    // Check Vercel rewrite capture group regex matches (e.g. 1=api%2Fadmin%2Flogin)
+    const routeMatches = req.headers['x-now-route-matches'];
+    if (routeMatches && typeof routeMatches === 'string') {
+      const m = routeMatches.match(/(?:^|&)1=([^&]*)/);
+      if (m && m[1]) {
+        try {
+          const dec = decodeURIComponent(m[1]);
+          if (!isServerJs(dec)) {
+            resolvedPath = dec.startsWith('/') ? dec : `/${dec}`;
+          }
+        } catch {
+          // fallback
+        }
       }
     }
+
+    if (!resolvedPath) {
+      const headerCandidates = [
+        req.headers['x-invoke-path'] as string,
+        req.headers['x-forwarded-uri'] as string,
+        req.headers['x-original-url'] as string,
+        req.headers['x-rewrite-url'] as string,
+        req.headers['x-matched-path'] as string,
+        req.headers['x-vercel-matched-path'] as string,
+      ];
+
+      for (const candidate of headerCandidates) {
+        if (candidate && typeof candidate === 'string' && !isServerJs(candidate)) {
+          resolvedPath = candidate.startsWith('/') ? candidate : `/${candidate}`;
+          break;
+        }
+      }
+    }
+
+    if (resolvedPath && !isServerJs(resolvedPath)) {
+      const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      req.url = resolvedPath.includes('?') ? resolvedPath : `${resolvedPath}${queryStr}`;
+      req.originalUrl = req.url;
+    } else if (subpath && subpath.startsWith('?')) {
+      req.url = `/${subpath}`;
+      req.originalUrl = req.url;
+    } else {
+      req.url = '/';
+      req.originalUrl = '/';
+    }
   }
+
   next();
 });
 
@@ -158,8 +209,8 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Root info and health check handler for all HTTP methods (GET, POST, OPTIONS, HEAD)
-app.all(['/', '/api', '/api/'], (req: Request, res: Response) => {
+// Root info and health check handler for GET requests
+app.get(['/', '/api', '/api/'], (req: Request, res: Response) => {
   res.status(200).json({
     status: 'online',
     service: 'TNPSC Quiz Backend API',
@@ -196,13 +247,18 @@ app.get('/api/admin', (_req, res) => {
   });
 });
 
-app.get('/api/admin/login', (_req, res) => {
+app.get(['/api/admin/login', '/admin/login', '/api/api/admin/login'], (_req, res) => {
   res.status(200).json({
     status: 'online',
     service: 'Admin Auth API',
     message: 'Admin authentication endpoint is online. Submit admin credentials using POST /api/admin/login.',
     endpoint: 'POST /api/admin/login',
   });
+});
+
+// Primary admin authentication router entry point for production Vercel & local
+app.post(['/api/admin/login', '/admin/login', '/api/api/admin/login'], (req: Request, res: Response, next: NextFunction) => {
+  return authRouter(req, res, next);
 });
 
 // Fallback: If a browser visits /admin on the backend API server (e.g. after OAuth),

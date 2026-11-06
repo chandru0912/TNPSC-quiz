@@ -172,6 +172,13 @@ export class StudyManagementService {
         CREATE INDEX IF NOT EXISTS idx_syllabus_lessons_lookup ON syllabus_lessons (unit_id, exam_id, subject_id, standard_number);
         CREATE INDEX IF NOT EXISTS idx_syllabus_topics_lookup ON syllabus_topics (lesson_id, unit_id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_syllabus_topics_lesson_name ON syllabus_topics (lesson_id, topic_name);
+
+        -- Optional provenance columns for textbook PDF page tracking
+        ALTER TABLE syllabus_lessons ADD COLUMN IF NOT EXISTS textbook_id INT;
+        ALTER TABLE syllabus_lessons ADD COLUMN IF NOT EXISTS source_page_start INT;
+        ALTER TABLE syllabus_lessons ADD COLUMN IF NOT EXISTS source_page_end INT;
+        ALTER TABLE syllabus_lessons ADD COLUMN IF NOT EXISTS textbook_title TEXT;
+        ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS source_page_reference TEXT;
       `);
 
       // 2. Check if syllabus_exams already seeded

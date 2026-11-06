@@ -24,6 +24,7 @@ export interface ExtractedTopicDraft {
   topic_name: string;
   description?: string;
   display_order: number;
+  source_page_reference?: string;
 }
 
 export interface ExtractedLessonDraft {
@@ -32,6 +33,10 @@ export interface ExtractedLessonDraft {
   standard_number: number;
   term?: string;
   description?: string;
+  textbook_id?: number;
+  source_page_start?: number;
+  source_page_end?: number;
+  textbook_title?: string;
   topics: ExtractedTopicDraft[];
 }
 
@@ -60,7 +65,7 @@ export interface SyllabusAnalysisResult {
   total_lessons: number;
   total_topics: number;
   extracted_text_preview: string;
-  parsing_mode: 'ai_cloud' | 'structural_parser';
+  parsing_mode: 'ai_cloud' | 'structural_parser' | 'textbook_repository';
   units: ExtractedUnitDraft[];
   existing_comparison: {
     existing_units_count: number;

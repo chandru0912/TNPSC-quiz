@@ -3,6 +3,7 @@ import multer from 'multer';
 import { StudyManagementService } from '../services/studyManagementService';
 import { AISyllabusImportService } from '../services/aiSyllabusImportService';
 import { TextbookAiLessonService } from '../services/textbookAiLessonService';
+import { SharedTextbookRepositoryService } from '../services/sharedTextbookRepositoryService';
 import { requireAdminAuth } from '../middleware/auth';
 
 const router = Router();
@@ -425,8 +426,46 @@ router.post('/notes', requireAdminAuth, async (req: Request, res: Response) => {
 });
 
 // ===========================================================================
-// AI SYLLABUS IMPORT & GENERATION (PDF UPLOAD & DIRECT TEXT PASTE)
+// AI SYLLABUS IMPORT & GENERATION (SHARED TEXTBOOK REPOSITORY, PDF UPLOAD & DIRECT TEXT PASTE)
 // ===========================================================================
+
+router.get('/ai-syllabus/textbooks', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { standard, subject, term, medium, search } = req.query;
+    const textbooks = await SharedTextbookRepositoryService.listAvailableTextbooks({
+      standard: standard as any,
+      subject: subject ? String(subject) : undefined,
+      term: term ? String(term) : undefined,
+      medium: medium ? String(medium) : undefined,
+      search: search ? String(search) : undefined,
+    });
+    return res.status(200).json({ success: true, count: textbooks.length, textbooks });
+  } catch (err: any) {
+    console.error('[StudyManagement API] /ai-syllabus/textbooks error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/ai-syllabus/analyze-textbook', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { textbookId, examId, subjectId, standard, extractionMode } = req.body;
+    if (!textbookId) {
+      return res.status(400).json({ success: false, message: 'textbookId is required.' });
+    }
+    const analysis = await SharedTextbookRepositoryService.extractSyllabusFromTextbook({
+      textbookId: Number(textbookId),
+      examId: String(examId || 'group1'),
+      subjectId: subjectId ? String(subjectId) : undefined,
+      standard: standard ? Number(standard) : undefined,
+      extractionMode,
+    });
+    return res.status(200).json({ success: true, ...analysis });
+  } catch (err: any) {
+    console.error('[StudyManagement API] /ai-syllabus/analyze-textbook error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.post('/ai-syllabus/upload', requireAdminAuth, syllabusUpload.single('pdf'), async (req: Request, res: Response) => {
   try {
     const examId = String(req.body.examId || 'group1');

@@ -114,7 +114,7 @@ function getEnvAdmins(): EnvAdmin[] {
  * Validates admin credentials against database and .env, then issues a secure token
  * Environment variables take precedence to ensure production login works reliably
  */
-router.post('/login', async (req: Request, res: Response) => {
+router.post(['/login', '/', '/api/admin/login', '/admin/login'], async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   if (!username || !password) {

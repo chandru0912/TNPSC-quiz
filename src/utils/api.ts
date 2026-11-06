@@ -109,8 +109,17 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
       timeoutError.name = 'TimeoutError';
       throw timeoutError;
     }
-    if (err && err.message === 'Failed to fetch') {
-      const enhancedError = new Error('Could not connect to backend API server. Please ensure the backend server is running on http://localhost:5000.');
+    if (
+      err &&
+      (err.message === 'Failed to fetch' ||
+        err.message?.includes('Failed to fetch') ||
+        err.name === 'TypeError' ||
+        err.message?.includes('NetworkError') ||
+        err.message?.includes('Load failed'))
+    ) {
+      const enhancedError = new Error(
+        'Could not connect to backend API server. Please ensure the backend server is running on http://localhost:5000.'
+      );
       enhancedError.name = 'NetworkError';
       throw enhancedError;
     }

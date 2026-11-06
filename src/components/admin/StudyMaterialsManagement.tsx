@@ -69,6 +69,7 @@ export interface ExtractedTopicDraft {
   topic_name: string;
   description?: string;
   display_order: number;
+  source_page_reference?: string;
 }
 
 export interface ExtractedLessonDraft {
@@ -77,7 +78,29 @@ export interface ExtractedLessonDraft {
   standard_number: number;
   term?: string;
   description?: string;
+  textbook_id?: number;
+  source_page_start?: number;
+  source_page_end?: number;
+  textbook_title?: string;
   topics: ExtractedTopicDraft[];
+}
+
+export interface SharedTextbookRecord {
+  id: number;
+  bookName: string;
+  fileName: string;
+  standard: number;
+  standardDisplay: string;
+  subject: string;
+  term: string;
+  medium: string;
+  fileSize: number;
+  fileSizeFormatted: string;
+  totalPages: number;
+  hasExtractedToc: boolean;
+  hasExtractedPages: boolean;
+  extractionStatus: string;
+  storageRef: string;
 }
 
 export interface ExtractedUnitDraft {
@@ -105,7 +128,7 @@ export interface SyllabusAnalysisResult {
   total_lessons: number;
   total_topics: number;
   extracted_text_preview: string;
-  parsing_mode: 'ai_cloud' | 'structural_parser';
+  parsing_mode: 'ai_cloud' | 'structural_parser' | 'textbook_repository';
   units: ExtractedUnitDraft[];
   existing_comparison: {
     existing_units_count: number;
@@ -225,7 +248,7 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   // AI Syllabus Import State
   const [aiImportModalOpen, setAiImportModalOpen] = useState<boolean>(false);
   const [aiImportStep, setAiImportStep] = useState<'upload' | 'analyzing' | 'review'>('upload');
-  const [aiImportInputMode, setAiImportInputMode] = useState<'pdf' | 'text'>('pdf');
+  const [aiImportInputMode, setAiImportInputMode] = useState<'textbook' | 'pdf' | 'text'>('textbook');
   const [aiImportExamId, setAiImportExamId] = useState<string>('group1');
   const [aiImportSubjectSlug, setAiImportSubjectSlug] = useState<string>('general-studies');
   const [aiImportStandard, setAiImportStandard] = useState<'all' | number>('all');
@@ -238,6 +261,15 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [aiImportError, setAiImportError] = useState<string | null>(null);
   const [expandedReviewUnits, setExpandedReviewUnits] = useState<Set<string>>(new Set());
+
+  // Shared Textbook Repository State (from Textbook Management - 72 Samacheer Kalvi books)
+  const [aiRepoTextbooks, setAiRepoTextbooks] = useState<SharedTextbookRecord[]>([]);
+  const [isLoadingAiRepo, setIsLoadingAiRepo] = useState<boolean>(false);
+  const [selectedRepoBookId, setSelectedRepoBookId] = useState<number | null>(null);
+  const [selectedRepoBook, setSelectedRepoBook] = useState<SharedTextbookRecord | null>(null);
+  const [aiExtractionMode, setAiExtractionMode] = useState<'fast_toc' | 'deep_text' | 'ocr_fallback'>('fast_toc');
+  const [aiRepoMedium, setAiRepoMedium] = useState<string>('all');
+  const [aiRepoTerm, setAiRepoTerm] = useState<string>('all');
 
   // Helper to generate deterministic, unique keys per review unit
   const getReviewUnitKey = (u: ExtractedUnitDraft, idx: number): string =>
@@ -411,11 +443,68 @@ UNIT-II: CURRENT EVENTS
 (iv) Economics - Current socio-economic issues.
 (v) Science and Technology - Latest inventions in Science and Technology.`;
 
+  // Shared Textbook Repository Fetcher (Textbook Management 72 books)
+  const fetchAiRepoTextbooks = async () => {
+    try {
+      setIsLoadingAiRepo(true);
+      const params = new URLSearchParams();
+      if (aiImportStandard !== 'all') {
+        params.append('standard', String(aiImportStandard));
+      }
+      if (aiImportSubjectSlug && aiImportSubjectSlug !== 'all') {
+        params.append('subject', aiImportSubjectSlug);
+      }
+      if (aiRepoTerm && aiRepoTerm !== 'all') {
+        params.append('term', aiRepoTerm);
+      }
+      if (aiRepoMedium && aiRepoMedium !== 'all') {
+        params.append('medium', aiRepoMedium);
+      }
+
+      const res = await apiFetch(`/api/study-management/ai-syllabus/textbooks?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${activeToken}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && Array.isArray(data.textbooks)) {
+        setAiRepoTextbooks(data.textbooks);
+        if (data.textbooks.length > 0) {
+          setSelectedRepoBookId((prev) => {
+            const exists = data.textbooks.some((tb: SharedTextbookRecord) => tb.id === prev);
+            const chosen = exists ? prev : data.textbooks[0].id;
+            const fullRecord = data.textbooks.find((tb: SharedTextbookRecord) => tb.id === chosen) || data.textbooks[0];
+            setSelectedRepoBook(fullRecord);
+            return chosen;
+          });
+        } else {
+          setSelectedRepoBookId(null);
+          setSelectedRepoBook(null);
+        }
+      } else {
+        setAiRepoTextbooks([]);
+        setSelectedRepoBookId(null);
+        setSelectedRepoBook(null);
+      }
+    } catch (err: any) {
+      console.warn('[AISyllabus] Failed to load textbooks from repository:', err);
+      setAiRepoTextbooks([]);
+      setSelectedRepoBookId(null);
+      setSelectedRepoBook(null);
+    } finally {
+      setIsLoadingAiRepo(false);
+    }
+  };
+
+  useEffect(() => {
+    if (aiImportModalOpen && aiImportInputMode === 'textbook') {
+      fetchAiRepoTextbooks();
+    }
+  }, [aiImportModalOpen, aiImportInputMode, aiImportStandard, aiImportSubjectSlug, aiRepoTerm, aiRepoMedium]);
+
   // AI Syllabus Import Handlers
   const handleOpenAiImport = () => {
     setAiImportExamId(selectedExamId || 'group1');
     setAiImportSubjectSlug('all'); // Universal default - processes all units & subjects
-    setAiImportInputMode('pdf');
+    setAiImportInputMode('textbook');
     setAiImportFile(null);
     setAiImportPastedText('');
     setAiAnalysisResult(null);
@@ -427,7 +516,12 @@ UNIT-II: CURRENT EVENTS
   };
 
   const handleStartAnalysis = async () => {
-    if (aiImportInputMode === 'pdf') {
+    if (aiImportInputMode === 'textbook') {
+      if (!selectedRepoBookId) {
+        setAiImportError('Please select an uploaded Samacheer Kalvi textbook PDF from the repository.');
+        return;
+      }
+    } else if (aiImportInputMode === 'pdf') {
       if (!aiImportFile) {
         setAiImportError('Please select or drop a valid TNPSC syllabus PDF file.');
         return;
@@ -446,7 +540,23 @@ UNIT-II: CURRENT EVENTS
       const authToken = activeToken;
       let res: Response;
 
-      if (aiImportInputMode === 'pdf') {
+      if (aiImportInputMode === 'textbook') {
+        res = await apiFetch('/api/study-management/ai-syllabus/analyze-textbook', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            textbookId: selectedRepoBookId,
+            examId: aiImportExamId,
+            subjectId: aiImportSubjectSlug,
+            standard: aiImportStandard !== 'all' ? aiImportStandard : (selectedRepoBook?.standard || undefined),
+            extractionMode: aiExtractionMode,
+          }),
+          timeoutMs: 120000,
+        });
+      } else if (aiImportInputMode === 'pdf') {
         const formData = new FormData();
         formData.append('pdf', aiImportFile!);
         formData.append('examId', aiImportExamId);
@@ -459,6 +569,7 @@ UNIT-II: CURRENT EVENTS
             Authorization: `Bearer ${authToken}`,
           },
           body: formData,
+          timeoutMs: 120000,
         });
       } else {
         res = await apiFetch('/api/study-management/ai-syllabus/analyze-text', {
@@ -473,6 +584,7 @@ UNIT-II: CURRENT EVENTS
             subjectId: aiImportSubjectSlug,
             standard: aiImportStandard,
           }),
+          timeoutMs: 120000,
         });
       }
 
@@ -498,8 +610,10 @@ UNIT-II: CURRENT EVENTS
         ...u,
         standard_number: typeof u.standard_number === 'number'
           ? u.standard_number
-          : (typeof aiImportStandard === 'number' ? aiImportStandard : (aiImportExamId === 'group4' ? 10 : 11)),
-        term: u.term || 'Term 1',
+          : (typeof aiImportStandard === 'number'
+              ? aiImportStandard
+              : (selectedRepoBook?.standard || (aiImportExamId === 'group4' ? 10 : 11))),
+        term: u.term || selectedRepoBook?.term || 'Term 1',
         selected_for_publish: true,
       }));
       setEditableUnits(units);
@@ -518,7 +632,7 @@ UNIT-II: CURRENT EVENTS
       console.error('[AISyllabus] Analysis error:', err);
       let errMsg = err.message || 'Failed to analyze syllabus.';
       if (errMsg.includes('Failed to fetch') || err.name === 'TypeError') {
-        errMsg = 'Connection Error: Unable to reach backend server. Please ensure the backend server is running on http://localhost:5000.';
+        errMsg = 'Connection Error: Unable to reach backend server. Please verify the backend is running on http://localhost:5000.';
       }
       setAiImportError(errMsg);
       setAiImportStep('upload');
@@ -3373,13 +3487,29 @@ UNIT-II: CURRENT EVENTS
                   {aiImportError && (
                     <div
                       className="smm-ai-warning-box"
-                      style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                      style={{ background: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
                     >
-                      <div className="smm-ai-warning-header" style={{ color: '#f87171' }}>
-                        <AlertTriangle size={16} />
-                        <span>Analysis Error</span>
+                      <div className="smm-ai-warning-header" style={{ color: '#f87171', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                          <AlertTriangle size={16} />
+                          <span>Analysis Notice</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="smm-btn-ghost sm"
+                          style={{
+                            color: '#fca5a5',
+                            borderColor: 'rgba(239, 68, 68, 0.35)',
+                            padding: '0.2rem 0.6rem',
+                            fontSize: '0.72rem',
+                          }}
+                          onClick={handleStartAnalysis}
+                        >
+                          <RefreshCw size={11} />
+                          <span>Retry Analysis</span>
+                        </button>
                       </div>
-                      <div className="smm-ai-warning-sub">{aiImportError}</div>
+                      <div className="smm-ai-warning-sub" style={{ marginTop: '0.35rem' }}>{aiImportError}</div>
                     </div>
                   )}
 
@@ -3441,8 +3571,20 @@ UNIT-II: CURRENT EVENTS
                     </div>
                   </div>
 
-                  {/* Mode Selector Tabs: PDF vs Text Paste */}
+                  {/* Mode Selector Tabs: Textbook Repository vs PDF vs Text Paste */}
                   <div className="smm-ai-tab-group">
+                    <button
+                      type="button"
+                      className={`smm-ai-tab-btn ${aiImportInputMode === 'textbook' ? 'active' : ''}`}
+                      onClick={() => {
+                        setAiImportInputMode('textbook');
+                        setAiImportError(null);
+                        fetchAiRepoTextbooks();
+                      }}
+                    >
+                      <BookOpen size={15} />
+                      <span>Existing Textbook PDF</span>
+                    </button>
                     <button
                       type="button"
                       className={`smm-ai-tab-btn ${aiImportInputMode === 'pdf' ? 'active' : ''}`}
@@ -3467,7 +3609,165 @@ UNIT-II: CURRENT EVENTS
                     </button>
                   </div>
 
-                  {aiImportInputMode === 'pdf' ? (
+                  {aiImportInputMode === 'textbook' ? (
+                    <div className="smm-tb-repo-container">
+                      {/* Sub-Filters: Term & Medium */}
+                      <div className="smm-tb-repo-filter-row">
+                        <div>
+                          <label style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>School Term</label>
+                          <select
+                            className="smm-modal-select"
+                            value={aiRepoTerm}
+                            onChange={(e) => setAiRepoTerm(e.target.value)}
+                          >
+                            <option value="all">All Terms (Full Year / Term 1, 2, 3)</option>
+                            <option value="Term 1">Term 1</option>
+                            <option value="Term 2">Term 2</option>
+                            <option value="Term 3">Term 3</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Medium of Instruction</label>
+                          <select
+                            className="smm-modal-select"
+                            value={aiRepoMedium}
+                            onChange={(e) => setAiRepoMedium(e.target.value)}
+                          >
+                            <option value="all">All Mediums (English & Tamil)</option>
+                            <option value="English">English Medium</option>
+                            <option value="Tamil">Tamil Medium (தமிழ்)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Textbook Selector Dropdown */}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                          <label style={{ margin: 0, fontWeight: 600, color: '#f1f5f9' }}>
+                            Select Samacheer Kalvi Textbook PDF *
+                          </label>
+                          <span style={{ fontSize: '0.75rem', color: '#38bdf8' }}>
+                            {isLoadingAiRepo ? 'Scanning repository...' : `${aiRepoTextbooks.length} matching textbooks found`}
+                          </span>
+                        </div>
+                        <select
+                          className="smm-modal-select"
+                          value={selectedRepoBookId || ''}
+                          onChange={(e) => {
+                            const chosenId = Number(e.target.value);
+                            setSelectedRepoBookId(chosenId);
+                            const found = aiRepoTextbooks.find((b) => b.id === chosenId) || null;
+                            setSelectedRepoBook(found);
+                            setAiImportError(null);
+                          }}
+                          disabled={isLoadingAiRepo}
+                        >
+                          {isLoadingAiRepo ? (
+                            <option value="">Loading textbook repository...</option>
+                          ) : aiRepoTextbooks.length === 0 ? (
+                            <option value="">No textbooks found matching selected filters</option>
+                          ) : (
+                            aiRepoTextbooks.map((tb) => (
+                              <option key={tb.id} value={tb.id}>
+                                {tb.standardDisplay} – {tb.bookName} ({tb.medium} Medium • {tb.term})
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Selected Textbook Preview Card */}
+                      {selectedRepoBook && (
+                        <div className="smm-tb-repo-card">
+                          <div className="smm-tb-card-header">
+                            <span className="smm-tb-card-title">
+                              <BookOpen size={16} className="text-purple" />
+                              <span>{selectedRepoBook.bookName}</span>
+                            </span>
+                            <span className="smm-tb-badge drive" title="Google Drive Cloud Reference">
+                              <CheckCircle2 size={12} />
+                              <span>Google Drive Verified</span>
+                            </span>
+                          </div>
+
+                          <div className="smm-tb-badges-row">
+                            <span className="smm-tb-badge std">{selectedRepoBook.standardDisplay}</span>
+                            <span className="smm-tb-badge medium">{selectedRepoBook.medium} Medium</span>
+                            <span className="smm-tb-badge term">{selectedRepoBook.term}</span>
+                            <span className="smm-tb-badge pages">{selectedRepoBook.totalPages} Pages</span>
+                            <span className="smm-tb-badge pages">{selectedRepoBook.fileSizeFormatted}</span>
+                            {selectedRepoBook.hasExtractedToc && (
+                              <span className="smm-tb-badge drive" title="Table of Contents Pre-Indexed">
+                                ⚡ TOC Indexed
+                              </span>
+                            )}
+                            {selectedRepoBook.hasExtractedPages && (
+                              <span className="smm-tb-badge drive" title="Page-by-page text pre-extracted">
+                                📄 Full Text Cached
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Extraction Mode Radio Selector */}
+                          <div style={{ marginTop: '0.4rem' }}>
+                            <label style={{ fontSize: '0.78rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>
+                              Extraction & Analysis Mode
+                            </label>
+                            <div className="smm-tb-mode-group">
+                              <div
+                                className={`smm-tb-mode-card ${aiExtractionMode === 'fast_toc' ? 'selected' : ''}`}
+                                onClick={() => setAiExtractionMode('fast_toc')}
+                              >
+                                <div className="smm-tb-mode-content">
+                                  <div className="smm-tb-mode-title">⚡ Instant TOC Extraction</div>
+                                  <div className="smm-tb-mode-desc">
+                                    Instant extraction from official Table of Contents with page ranges. Recommended & fastest.
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div
+                                className={`smm-tb-mode-card ${aiExtractionMode === 'deep_text' ? 'selected' : ''}`}
+                                onClick={() => setAiExtractionMode('deep_text')}
+                              >
+                                <div className="smm-tb-mode-content">
+                                  <div className="smm-tb-mode-title">🧠 Deep Content Analysis</div>
+                                  <div className="smm-tb-mode-desc">
+                                    Analyzes pre-extracted full text pages to generate rich topics and subtopics for each lesson.
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div
+                                className={`smm-tb-mode-card ${aiExtractionMode === 'ocr_fallback' ? 'selected' : ''}`}
+                                onClick={() => setAiExtractionMode('ocr_fallback')}
+                              >
+                                <div className="smm-tb-mode-content">
+                                  <div className="smm-tb-mode-title">🔍 Full OCR / PDF Stream</div>
+                                  <div className="smm-tb-mode-desc">
+                                    Streams binary PDF directly from Google Drive for complete structural syllabus parsing.
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Zero matching books warning */}
+                      {!isLoadingAiRepo && aiRepoTextbooks.length === 0 && (
+                        <div className="smm-ai-warning-box">
+                          <div className="smm-ai-warning-header">
+                            <AlertTriangle size={15} />
+                            <span>No Matching Textbooks Found</span>
+                          </div>
+                          <div className="smm-ai-warning-sub">
+                            No uploaded textbooks match your current filter selection (Standard: {aiImportStandard === 'all' ? 'All' : `Class ${aiImportStandard}`}, Subject: {aiImportSubjectSlug}, Term: {aiRepoTerm}, Medium: {aiRepoMedium}). Try selecting "All Standards" or check Admin → Textbook Management to upload the textbook PDF.
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : aiImportInputMode === 'pdf' ? (
                     /* Drag & Drop File Upload Area */
                     <div>
                       <label>Official TNPSC Syllabus PDF File *</label>
