@@ -46,6 +46,7 @@ interface OverviewCardData {
 
 interface UnifiedOverviewData {
   overviewCards: OverviewCardData[];
+  kpiSummary?: any[];
   studentAnalytics: {
     totalStudents: number;
     activeStudents: number;
@@ -166,9 +167,24 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
           localStorage.getItem('token') ||
           '';
         const authHeader: Record<string, string> = activeToken ? { Authorization: `Bearer ${activeToken}` } : {};
-        const res = await apiFetch(`/api/analytics/overview?range=${range}`, {
+
+        let res = await apiFetch(`/api/analytics/overview?range=${range}`, {
           headers: authHeader,
         });
+
+        // Robust fallback: If 404, attempt reverse proxy route /api/admin/analytics/overview
+        if (res.status === 404) {
+          const fallbackRes = await apiFetch(`/api/admin/analytics/overview?range=${range}`, {
+            headers: authHeader,
+          });
+          if (fallbackRes.ok) {
+            res = fallbackRes;
+          }
+        }
+
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('Admin session expired. Please re-login to view analytics telemetry.');
+        }
 
         if (!res.ok) {
           throw new Error(`Failed to load analytics: HTTP ${res.status}`);
@@ -176,6 +192,11 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
 
         const json = await res.json();
         const payload: UnifiedOverviewData = json.data || json;
+
+        if (!payload || (!payload.overviewCards && !payload.studentAnalytics && !payload.kpiSummary)) {
+          throw new Error('Unexpected analytics response format from database.');
+        }
+
         setData(payload);
         setLastSyncTime(
           new Date().toLocaleTimeString('en-IN', {

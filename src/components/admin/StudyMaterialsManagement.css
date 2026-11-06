@@ -777,6 +777,215 @@
 }
 
 /* --------------------------------------------------------------------------
+   4b. Standard Tier Cards (Single Parent Unit - Multi Standard Hierarchy)
+   -------------------------------------------------------------------------- */
+.smm-standards-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.smm-standard-card {
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(99, 102, 241, 0.4);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.smm-standard-card:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  border-left-color: #a855f7;
+}
+
+.smm-standard-card.is-expanded {
+  border-color: rgba(168, 85, 247, 0.3);
+  border-left-color: #a855f7;
+  background: rgba(15, 23, 42, 0.85);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.smm-standard-card.is-empty {
+  opacity: 0.82;
+  border-left-color: rgba(148, 163, 184, 0.3);
+}
+
+.smm-standard-card.is-empty:hover {
+  opacity: 1;
+}
+
+.smm-standard-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  user-select: none;
+  gap: 1rem;
+  background: rgba(30, 41, 59, 0.25);
+  transition: background 0.15s ease;
+}
+
+.smm-standard-row:hover {
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.smm-standard-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.smm-standard-chevron-toggle {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.smm-standard-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(99, 102, 241, 0.16);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.32);
+}
+
+.smm-standard-badge-pill.std-6 {
+  background: rgba(56, 189, 248, 0.14);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.smm-standard-badge-pill.std-7 {
+  background: rgba(45, 212, 191, 0.14);
+  color: #2dd4bf;
+  border-color: rgba(45, 212, 191, 0.3);
+}
+
+.smm-standard-badge-pill.std-8 {
+  background: rgba(52, 211, 153, 0.14);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.smm-standard-badge-pill.std-9 {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.smm-standard-badge-pill.std-10 {
+  background: rgba(249, 115, 22, 0.14);
+  color: #fb923c;
+  border-color: rgba(249, 115, 22, 0.3);
+}
+
+.smm-standard-badge-pill.std-11 {
+  background: rgba(168, 85, 247, 0.16);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.32);
+}
+
+.smm-standard-badge-pill.std-12 {
+  background: rgba(236, 72, 153, 0.16);
+  color: #f472b6;
+  border-color: rgba(236, 72, 153, 0.32);
+}
+
+.smm-standard-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.smm-standard-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.smm-standard-context {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.smm-standard-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.smm-standard-stats-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.smm-standard-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.smm-standard-btn-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.smm-standard-btn-add:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #ffffff;
+}
+
+.smm-standard-content {
+  padding: 0.85rem 1rem 1rem;
+  background: rgba(10, 15, 30, 0.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.smm-standard-empty {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.84rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+/* --------------------------------------------------------------------------
    5. Lesson Card Design
    -------------------------------------------------------------------------- */
 .smm-lesson-card {
@@ -1394,11 +1603,31 @@
 }
 
 .smm-modal-card.ai-modal-large {
-  max-width: 980px;
-  width: 95%;
-  max-height: 90vh;
+  max-width: 1100px;
+  width: 96%;
+  height: 95vh;
+  max-height: 95vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: #0b1120;
+  border-radius: 16px;
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(168, 85, 247, 0.15);
+}
+
+.smm-modal-body.ai-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 1.35rem 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .smm-ai-header-badge {
@@ -1821,35 +2050,73 @@
   white-space: nowrap;
 }
 
+.smm-ai-review-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+  width: 100%;
+  overflow: visible;
+}
+
+.smm-ai-review-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.65rem 0.95rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
 .smm-ai-review-tree {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
-  max-height: 440px;
-  overflow-y: auto;
-  padding-right: 0.5rem;
+  gap: 1rem;
+  min-height: 0;
+  overflow: visible;
+  width: 100%;
 }
 
 .smm-ai-unit-accordion {
-  background: rgba(14, 22, 42, 0.8);
+  background: rgba(14, 22, 42, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 10px;
-  overflow: hidden;
-  transition: border-color 0.2s ease;
+  overflow: visible;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .smm-ai-unit-accordion:hover {
   border-color: rgba(168, 85, 247, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.smm-ai-unit-accordion.is-expanded {
+  border-color: rgba(192, 132, 252, 0.35);
 }
 
 .smm-ai-unit-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
-  background: rgba(255, 255, 255, 0.02);
+  padding: 0.8rem 1rem;
+  background: rgba(18, 28, 54, 0.96);
   cursor: pointer;
   gap: 0.85rem;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .smm-ai-unit-left {
@@ -1857,6 +2124,7 @@
   align-items: center;
   gap: 0.65rem;
   flex: 1;
+  min-width: 0;
 }
 
 .smm-ai-unit-num-badge {
@@ -1879,6 +2147,7 @@
   font-size: 0.85rem;
   font-weight: 600;
   flex: 1;
+  min-width: 140px;
   transition: all 0.2s ease;
 }
 
@@ -1889,27 +2158,32 @@
 }
 
 .smm-ai-unit-body {
-  padding: 0.85rem 1.15rem;
+  padding: 0.95rem 1.15rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
+  overflow: visible;
+  min-height: 0;
 }
 
 .smm-ai-lesson-card {
-  background: rgba(2, 6, 23, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(2, 6, 23, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 8px;
   padding: 0.75rem 0.95rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.55rem;
+  overflow: visible;
+  min-height: 0;
 }
 
 .smm-ai-lesson-head {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 .smm-ai-topics-list {
@@ -1917,18 +2191,20 @@
   flex-wrap: wrap;
   gap: 0.45rem;
   padding-left: 1.5rem;
+  overflow: visible;
 }
 
 .smm-ai-topic-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   padding: 0.25rem 0.55rem;
   font-size: 0.78rem;
   color: #cbd5e1;
+  max-width: 100%;
 }
 
 .smm-ai-topic-chip input {
@@ -1952,6 +2228,118 @@
 
 .smm-ai-topic-chip button:hover {
   color: #f43f5e;
+}
+
+/* --------------------------------------------------------------------------
+   Modern Dark-Theme Scrollbar (7px, rounded, purple/gold accent on hover)
+   -------------------------------------------------------------------------- */
+.smm-modal-body.ai-modal-body::-webkit-scrollbar,
+.smm-modal-body::-webkit-scrollbar,
+.smm-ai-class-tabs::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.smm-modal-body.ai-modal-body::-webkit-scrollbar-track,
+.smm-modal-body::-webkit-scrollbar-track,
+.smm-ai-class-tabs::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 999px;
+}
+
+.smm-modal-body.ai-modal-body::-webkit-scrollbar-thumb,
+.smm-modal-body::-webkit-scrollbar-thumb,
+.smm-ai-class-tabs::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.smm-modal-body.ai-modal-body::-webkit-scrollbar-thumb:hover,
+.smm-modal-body::-webkit-scrollbar-thumb:hover,
+.smm-ai-class-tabs::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #c084fc 0%, #ffd700 100%);
+  box-shadow: 0 0 10px rgba(192, 132, 252, 0.6);
+}
+
+.smm-modal-body.ai-modal-body,
+.smm-modal-body,
+.smm-ai-class-tabs {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) rgba(15, 23, 42, 0.5);
+}
+
+/* Modal Footer Fixed Separation */
+.smm-modal-card.ai-modal-large .smm-modal-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(11, 17, 32, 0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  position: relative;
+  z-index: 20;
+}
+
+/* Responsive Modal Layout */
+@media (max-width: 900px) {
+  .smm-modal-card.ai-modal-large {
+    width: 98%;
+    height: 96vh;
+    max-height: 96vh;
+  }
+  .smm-ai-table-header-row {
+    display: none;
+  }
+  .smm-modal-header,
+  .smm-modal-card.ai-modal-large .smm-modal-footer,
+  .smm-modal-body.ai-modal-body {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .smm-modal-overlay {
+    padding: 0.4rem;
+  }
+  .smm-modal-card.ai-modal-large {
+    width: 100%;
+    height: 98vh;
+    max-height: 98vh;
+    border-radius: 12px;
+  }
+  .smm-modal-card.ai-modal-large .smm-modal-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 0.6rem;
+    padding: 0.85rem 1rem;
+  }
+  .smm-modal-card.ai-modal-large .smm-modal-footer > div {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+  }
+  .smm-modal-card.ai-modal-large .smm-modal-footer button {
+    flex: 1;
+    justify-content: center;
+  }
+  .smm-ai-unit-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+  .smm-ai-unit-left {
+    flex-wrap: wrap;
+  }
+  .smm-ai-topics-list {
+    padding-left: 0.5rem;
+  }
 }
 
 /* --------------------------------------------------------------------------

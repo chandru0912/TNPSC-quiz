@@ -114,19 +114,27 @@ app.use(express.json({ limit: '10mb' }));
 app.use((req: Request, _res: Response, next: NextFunction) => {
   if (req.url.startsWith('/dist/server.js')) {
     const subpath = req.url.slice('/dist/server.js'.length);
-    if (subpath && subpath.startsWith('/')) {
+    if (subpath && subpath.startsWith('/') && !subpath.startsWith('/?')) {
       req.url = subpath;
       req.originalUrl = subpath;
     } else {
       const forwardedPath =
         (req.headers['x-matched-path'] as string) ||
+        (req.headers['x-vercel-matched-path'] as string) ||
+        (req.headers['x-now-route-matches'] ? String(req.headers['x-now-route-matches']).replace(/^1=/, '/') : '') ||
         (req.headers['x-forwarded-uri'] as string) ||
         (req.headers['x-original-url'] as string) ||
         (req.headers['x-rewrite-url'] as string) ||
+        (req.headers['x-invoke-path'] as string) ||
         '';
       if (forwardedPath && !forwardedPath.startsWith('/dist/server.js')) {
-        req.url = forwardedPath;
-        req.originalUrl = forwardedPath;
+        const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+        const normalized = forwardedPath.startsWith('/') ? forwardedPath : `/${forwardedPath}`;
+        req.url = normalized.includes('?') ? normalized : `${normalized}${queryStr}`;
+        req.originalUrl = req.url;
+      } else if (subpath && subpath.startsWith('?')) {
+        req.url = `/${subpath}`;
+        req.originalUrl = req.url;
       } else {
         req.url = '/';
         req.originalUrl = '/';
@@ -150,11 +158,12 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Routes
-app.get('/', (_req, res) => {
+// Root info and health check handler for all HTTP methods (GET, POST, OPTIONS, HEAD)
+app.all(['/', '/api', '/api/'], (req: Request, res: Response) => {
   res.status(200).json({
     status: 'online',
     service: 'TNPSC Quiz Backend API',
+    method: req.method,
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     endpoints: {
@@ -228,6 +237,9 @@ const requireSchemaMiddleware = async (_req: Request, _res: Response, next: Next
     next(err);
   }
 };
+
+app.use('/api/admin/analytics', requireSchemaMiddleware, analyticsRouter);
+app.use('/admin/analytics', requireSchemaMiddleware, analyticsRouter);
 
 app.use('/api/admin', authRouter);
 app.use('/admin', authRouter);
@@ -418,6 +430,14 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     status: 'error',
     message: err?.message || 'Internal server error',
   });
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.warn('[Server] Handled asynchronous promise rejection:', reason?.message || reason);
+});
+
+process.on('uncaughtException', (err: any) => {
+  console.error('[Server] Uncaught exception prevented from crashing process:', err?.message || err);
 });
 
 if (!process.env.VERCEL) {

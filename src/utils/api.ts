@@ -20,19 +20,17 @@ function resolveApiBaseUrl(): string {
   const isBrowserOnLocalhost =
     typeof window === 'undefined'
       ? Boolean(import.meta.env.DEV)
-      : /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+      : /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname);
 
-  // In production builds or when running on any non-localhost domain (e.g. Vercel),
-  // NEVER allow requests to go to localhost or relative frontend paths.
-  if (!import.meta.env.DEV || !isBrowserOnLocalhost) {
+  // On remote domains (e.g. deployed on Vercel), route to production backend
+  if (!isBrowserOnLocalhost) {
     if (rawEnvUrl && !isLocalhostUrl(rawEnvUrl)) {
       return rawEnvUrl.replace(/\/+$/, '');
     }
     return PRODUCTION_BACKEND_URL;
   }
 
-  // In local development, use the configured backend URL (if not accidentally set to Vite's port)
-  // or default directly to the local Express backend (http://localhost:5000).
+  // In local development or local preview on localhost, use configured backend
   if (rawEnvUrl && !isFrontendDevPortUrl(rawEnvUrl)) {
     return rawEnvUrl.replace(/\/+$/, '');
   }
@@ -43,11 +41,15 @@ function resolveApiBaseUrl(): string {
 export const API_BASE_URL = resolveApiBaseUrl();
 
 export function getApiUrl(path: string): string {
-  if (path.startsWith('http://') || path.startsWith('https://')) {
-    return path;
+  if (!path || typeof path !== 'string' || path.trim() === '') {
+    return API_BASE_URL ? `${API_BASE_URL.replace(/\/+$/, '')}/` : '/';
+  }
+  const cleanPath = path.trim();
+  if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+    return cleanPath;
   }
   let base = API_BASE_URL.replace(/\/+$/, '');
-  let normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  let normalizedPath = cleanPath.startsWith('/') ? cleanPath : `/${cleanPath}`;
 
   // Prevent accidental /api/api duplication if base already ends with /api
   if (base.endsWith('/api') && normalizedPath.startsWith('/api/')) {
@@ -66,35 +68,55 @@ export interface ApiFetchOptions extends RequestInit {
 
 export async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Response> {
   const { timeoutMs = 30000, cache = 'no-store', ...fetchOptions } = options;
-  const url = getApiUrl(path);
+  const primaryUrl = getApiUrl(path);
 
-  if (fetchOptions.signal || timeoutMs <= 0) {
-    return fetch(url, {
+  const executeFetch = async (targetUrl: string, signal?: AbortSignal): Promise<Response> => {
+    return await fetch(targetUrl, {
       ...fetchOptions,
       cache,
+      signal,
     });
-  }
+  };
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
+  const controller = !fetchOptions.signal && timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  const activeSignal = controller?.signal || fetchOptions.signal || undefined;
 
   try {
-    return await fetch(url, {
-      ...fetchOptions,
-      cache,
-      signal: controller.signal,
-    });
+    try {
+      return await executeFetch(primaryUrl, activeSignal);
+    } catch (err: any) {
+      // In dev mode, if direct localhost call fails with Failed to fetch, retry via Vite's dev proxy using relative path
+      const isRelativeCandidate =
+        typeof path === 'string' &&
+        path.startsWith('/') &&
+        (primaryUrl.startsWith('http://localhost:5000') || primaryUrl.startsWith('http://127.0.0.1:5000'));
+
+      if (isRelativeCandidate && err?.name !== 'AbortError' && !controller?.signal?.aborted) {
+        console.warn(`[apiFetch] Direct fetch to ${primaryUrl} failed. Retrying via Vite dev proxy: ${path}`);
+        try {
+          return await executeFetch(path, activeSignal);
+        } catch {
+          throw err;
+        }
+      }
+      throw err;
+    }
   } catch (err: any) {
-    if (err && (err.name === 'AbortError' || controller.signal.aborted)) {
+    if (err && (err.name === 'AbortError' || controller?.signal?.aborted)) {
       const timeoutError = new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
       timeoutError.name = 'TimeoutError';
       throw timeoutError;
     }
+    if (err && err.message === 'Failed to fetch') {
+      const enhancedError = new Error('Could not connect to backend API server. Please ensure the backend server is running on http://localhost:5000.');
+      enhancedError.name = 'NetworkError';
+      throw enhancedError;
+    }
     throw err;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }
 

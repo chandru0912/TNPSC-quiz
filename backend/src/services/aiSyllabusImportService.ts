@@ -18,6 +18,7 @@ import pool from '../db';
 import { getPdfParseClass, cleanText, isScannedText } from './pdfProcessor';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { AIProviderFactory } from './ai/ai-provider.factory';
+import { AIProviderConfigService } from './ai/ai-provider-config.service';
 
 export interface ExtractedTopicDraft {
   topic_name: string;
@@ -564,12 +565,17 @@ export class AISyllabusImportService {
     let detectedSubName = 'General Studies';
     let parsingMode: 'ai_cloud' | 'structural_parser' = 'ai_cloud';
 
-    // 3. Try AI Structured Extraction first
+    // 3. Try AI Structured Extraction first (only if active provider is configured and available)
     try {
       const aiProvider = await AIProviderFactory.getActiveProvider();
-      console.log(`[AISyllabus] Invoking AI Provider (${aiProvider.name}) for ${cleanExamId}...`);
+      const statusInfo = await AIProviderConfigService.getProviderStatus(aiProvider.name).catch(() => null);
 
-      const systemPrompt = `You are an authoritative TNPSC Examination Syllabus Architect.
+      if (statusInfo && (statusInfo.status === 'BILLING_REQUIRED' || statusInfo.status === 'OFFLINE' || statusInfo.status === 'MODEL_NOT_AVAILABLE')) {
+        console.log(`[AISyllabus] AI provider (${aiProvider.name}) status is "${statusInfo.status}". Using Authoritative Structural Syllabus Parser directly.`);
+      } else {
+        console.log(`[AISyllabus] Invoking AI Provider (${aiProvider.name}) for ${cleanExamId}...`);
+
+        const systemPrompt = `You are an authoritative TNPSC Examination Syllabus Architect.
 Parse official TNPSC syllabus documents into an exact structured JSON format.
 
 CRITICAL EXTRACTION REQUIREMENTS:
@@ -608,33 +614,45 @@ Return strictly JSON matching this schema:
   ]
 }`;
 
-      const textSample = syllabusText.slice(0, 45000);
-      const userPrompt = `Parse the following official TNPSC syllabus for "${cleanExamId}":
+        const textSample = syllabusText.slice(0, 45000);
+        const userPrompt = `Parse the following official TNPSC syllabus for "${cleanExamId}":
 Source: ${fileName || 'pasted_text_input'}
 
 --- SYLLABUS CONTENT ---
 ${textSample}
 --- END CONTENT ---`;
 
-      const aiPromise = aiProvider.generateJson<any>(
-        `${systemPrompt}\n\n${userPrompt}`,
-        {
-          responseFormat: 'json',
-          temperature: 0.1,
-          maxTokens: 8000,
-        }
-      );
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('AI provider call timed out (12s)')), 12000)
-      );
-      const aiParsed = await Promise.race([aiPromise, timeoutPromise]);
+        const rawPromise = aiProvider.generateJson<any>(
+          `${systemPrompt}\n\n${userPrompt}`,
+          {
+            responseFormat: 'json',
+            temperature: 0.1,
+            maxTokens: 8000,
+          }
+        );
 
-      if (aiParsed && Array.isArray(aiParsed.units) && aiParsed.units.length > 0) {
-        detectedExamName = aiParsed.exam_name || detectedExamName;
-        detectedSubSlug = aiParsed.subject_slug || detectedSubSlug;
-        detectedSubName = aiParsed.subject_name || detectedSubName;
-        rawUnits = aiParsed.units;
-        parsingMode = 'ai_cloud';
+        // Safeguard against unhandled rejection if timeout triggers first
+        const safeAiPromise = rawPromise.catch((err) => {
+          console.warn('[AISyllabus] Background AI provider error:', err?.message || err);
+          return null;
+        });
+
+        const timeoutPromise = new Promise<null>((resolve) =>
+          setTimeout(() => {
+            console.warn('[AISyllabus] AI provider call timed out (5s), switching to Authoritative Structural Parser');
+            resolve(null);
+          }, 5000)
+        );
+
+        const aiParsed = await Promise.race([safeAiPromise, timeoutPromise]);
+
+        if (aiParsed && Array.isArray(aiParsed.units) && aiParsed.units.length > 0) {
+          detectedExamName = aiParsed.exam_name || detectedExamName;
+          detectedSubSlug = aiParsed.subject_slug || detectedSubSlug;
+          detectedSubName = aiParsed.subject_name || detectedSubName;
+          rawUnits = aiParsed.units;
+          parsingMode = 'ai_cloud';
+        }
       }
     } catch (aiErr: any) {
       console.warn(
@@ -829,42 +847,57 @@ ${textSample}
           [unitSubPk, cleanExamId, unitSubSlug, unitSubName]
         );
 
-        // Find existing unit if any matching exam, subject, standard_number, and unit_number
+        // Find existing canonical TNPSC parent unit (identified strictly by exam, subject, and unit_number)
         const unitStd = typeof u.standard_number === 'number' && u.standard_number >= 6 && u.standard_number <= 12
           ? u.standard_number
           : (cleanExamId === 'group4' ? 10 : 11);
 
-        const existingUnitRes = await client.query(
+        let existingUnitRes = await client.query(
           `SELECT id FROM syllabus_units 
-           WHERE exam_id = $1 AND subject_id = $2 
-             AND (standard_number = $3 OR ($3::int IS NULL AND standard_number IS NULL))
-             AND unit_number = $4`,
-          [cleanExamId, unitSubSlug, unitStd, unitNum]
+           WHERE exam_id = $1 AND subject_id = $2 AND unit_number = $3 AND is_active = true`,
+          [cleanExamId, unitSubSlug, unitNum]
         );
+
+        if (existingUnitRes.rows.length === 0) {
+          existingUnitRes = await client.query(
+            `SELECT id FROM syllabus_units 
+             WHERE exam_id = $1 AND subject_id = $2 
+               AND (LOWER(unit_code) = LOWER($3) OR LOWER(title) = LOWER($4))
+               AND is_active = true
+             LIMIT 1`,
+            [cleanExamId, unitSubSlug, unitCode, u.title]
+          );
+        }
 
         let unitDbId: number;
 
         if (existingUnitRes.rows.length > 0) {
+          // REUSE THE SINGLE PARENT UNIT
           unitDbId = existingUnitRes.rows[0].id;
           if (overwriteExisting) {
             await client.query(
               `UPDATE syllabus_units
-               SET title = $1, unit_code = $2, subject_name = $3, standard_number = $4, description = $5, question_count = $6, updated_at = CURRENT_TIMESTAMP
-               WHERE id = $7`,
-              [u.title, unitCode, unitSubName, unitStd, u.description || '', u.question_count || 15, unitDbId]
+               SET title = $1, unit_code = $2, subject_name = $3, description = $4, question_count = $5, updated_at = CURRENT_TIMESTAMP
+               WHERE id = $6`,
+              [u.title, unitCode, unitSubName, u.description || '', u.question_count || 15, unitDbId]
             );
           }
         } else {
+          // Create the single parent unit (parent units hold all standards, standard_number = null)
           const insertUnitRes = await client.query(
             `INSERT INTO syllabus_units (
               exam_id, subject_id, standard_number, unit_number, unit_code, title, subject_name,
               description, question_count, display_order, is_active
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+            ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, true)
+            ON CONFLICT (exam_id, subject_id, unit_number) WHERE is_active = true
+            DO UPDATE SET
+              title = EXCLUDED.title,
+              unit_code = EXCLUDED.unit_code,
+              updated_at = CURRENT_TIMESTAMP
             RETURNING id`,
             [
               cleanExamId,
               unitSubSlug,
-              unitStd,
               unitNum,
               unitCode,
               u.title,

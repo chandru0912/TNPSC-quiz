@@ -1,13 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { dynamicSyllabusService } from '../../services/dynamicSyllabusService';
-import { getApiUrl } from '../../utils/api';
-
-const apiFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  if (typeof input === 'string') {
-    return fetch(getApiUrl(input), init);
-  }
-  return fetch(input, init);
-};
+import { apiFetch } from '../../utils/api';
 import {
   Layers,
   Plus,
@@ -199,6 +192,16 @@ interface Props {
 }
 
 export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
+  const activeToken = useMemo(() => {
+    return (
+      token ||
+      localStorage.getItem('tnpsc_admin_token') ||
+      localStorage.getItem('adminToken') ||
+      localStorage.getItem('token') ||
+      ''
+    );
+  }, [token]);
+
   // Navigation / Filter State
   const [exams, setExams] = useState<ExamItem[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('group1');
@@ -234,7 +237,11 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   const [overwriteExisting, setOverwriteExisting] = useState<boolean>(false);
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
   const [aiImportError, setAiImportError] = useState<string | null>(null);
-  const [expandedReviewUnits, setExpandedReviewUnits] = useState<Set<number>>(new Set());
+  const [expandedReviewUnits, setExpandedReviewUnits] = useState<Set<string>>(new Set());
+
+  // Helper to generate deterministic, unique keys per review unit
+  const getReviewUnitKey = (u: ExtractedUnitDraft, idx: number): string =>
+    `unit-rev-${u.standard_number || 10}-${u.unit_number || idx + 1}-${idx}`;
 
   // Modals
   const [examModal, setExamModal] = useState<{ open: boolean; mode: 'add' | 'edit'; data: Partial<ExamItem> }>({
@@ -436,7 +443,7 @@ UNIT-II: CURRENT EVENTS
     setAiImportError(null);
 
     try {
-      const authToken = token || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
+      const authToken = activeToken;
       let res: Response;
 
       if (aiImportInputMode === 'pdf') {
@@ -469,10 +476,21 @@ UNIT-II: CURRENT EVENTS
         });
       }
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || 'Failed to extract and analyze syllabus.');
+      if (!res.ok || !data?.success) {
+        const errorMsg =
+          data?.message ||
+          data?.error ||
+          (res.status === 404
+            ? 'AI Syllabus extraction endpoint not found (404). Please ensure the backend server is running.'
+            : `Failed to extract and analyze syllabus (HTTP ${res.status}).`);
+        throw new Error(errorMsg);
       }
 
       setAiAnalysisResult(data);
@@ -486,9 +504,9 @@ UNIT-II: CURRENT EVENTS
       }));
       setEditableUnits(units);
 
-      // Auto-expand all units in review
-      const allUnitNums = new Set<number>(units.map((u, idx) => u.unit_number || idx + 1));
-      setExpandedReviewUnits(allUnitNums);
+      // Auto-expand all units in review with distinct composite keys
+      const allUnitKeys = new Set<string>(units.map((u, idx) => getReviewUnitKey(u, idx)));
+      setExpandedReviewUnits(allUnitKeys);
 
       // If duplicate units exist, set default overwrite based on duplicates
       if (data.existing_comparison?.duplicate_units?.length > 0) {
@@ -519,7 +537,7 @@ UNIT-II: CURRENT EVENTS
 
     setIsPublishing(true);
     try {
-      const authToken = token || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
+      const authToken = activeToken;
       const res = await apiFetch('/api/study-management/ai-syllabus/publish', {
         method: 'POST',
         headers: {
@@ -596,20 +614,20 @@ UNIT-II: CURRENT EVENTS
   };
 
   const expandAllReview = () => {
-    const allNums = new Set<number>(editableUnits.map((u, idx) => u.unit_number || idx + 1));
-    setExpandedReviewUnits(allNums);
+    const allKeys = new Set<string>(editableUnits.map((u, idx) => getReviewUnitKey(u, idx)));
+    setExpandedReviewUnits(allKeys);
   };
 
   const collapseAllReview = () => {
     setExpandedReviewUnits(new Set());
   };
 
-  // Review tree editing helpers
-  const toggleReviewUnit = (unitNum: number) => {
+  // Review tree editing helpers - independent unit toggles
+  const toggleReviewUnit = (unitKey: string) => {
     setExpandedReviewUnits((prev) => {
       const next = new Set(prev);
-      if (next.has(unitNum)) next.delete(unitNum);
-      else next.add(unitNum);
+      if (next.has(unitKey)) next.delete(unitKey);
+      else next.add(unitKey);
       return next;
     });
   };
@@ -628,23 +646,42 @@ UNIT-II: CURRENT EVENTS
 
   const addUnitDraft = () => {
     const nextNum = editableUnits.length + 1;
-    setEditableUnits((prev) => [
-      ...prev,
-      {
-        unit_number: nextNum,
-        unit_code: `Unit ${nextNum}`,
-        title: `New Unit ${nextNum}`,
-        question_count: 15,
-        lessons: [
-          {
-            lesson_number: `${nextNum}.1`,
-            title: `Introductory Topics`,
-            standard_number: 10,
-            topics: [{ topic_name: 'Core Overview', display_order: 1 }],
-          },
-        ],
-      },
-    ]);
+    const stdNum = typeof aiReviewSelectedClass === 'number'
+      ? aiReviewSelectedClass
+      : (selectedExamId === 'group4' ? 10 : 11);
+
+    const newUnit: ExtractedUnitDraft = {
+      unit_number: nextNum,
+      unit_code: `Unit ${nextNum}`,
+      title: `New Unit ${nextNum}`,
+      standard_number: stdNum,
+      term: 'Term 1',
+      question_count: 15,
+      selected_for_publish: true,
+      lessons: [
+        {
+          lesson_number: `${nextNum}.1`,
+          title: `Introductory Topics`,
+          standard_number: stdNum,
+          topics: [{ topic_name: 'Core Overview', display_order: 1 }],
+        },
+      ],
+    };
+
+    setEditableUnits((prev) => {
+      const updated = [...prev, newUnit];
+      const newKey = getReviewUnitKey(newUnit, updated.length - 1);
+      setExpandedReviewUnits((prevKeys) => new Set([...prevKeys, newKey]));
+      return updated;
+    });
+
+    // Bring newly added unit into view smoothly
+    setTimeout(() => {
+      const scrollBox = document.querySelector('.smm-modal-body.ai-modal-body');
+      if (scrollBox) {
+        scrollBox.scrollTo({ top: scrollBox.scrollHeight, behavior: 'smooth' });
+      }
+    }, 120);
   };
 
   const updateLessonField = (uIdx: number, lIdx: number, field: keyof ExtractedLessonDraft, val: any) => {
@@ -793,6 +830,7 @@ UNIT-II: CURRENT EVENTS
     });
   };
 
+
   const toggleLesson = (lessonId: string) => {
     setExpandedLessons((prev) => {
       const next = new Set(prev);
@@ -840,20 +878,33 @@ UNIT-II: CURRENT EVENTS
     return { unitsCount, lessonsCount, topicsCount, notesCount };
   }, [tree]);
 
-  // Filtered Tree based on Search Term
+  // Filtered Tree based on Search Term (TNPSC Unit, Standard, Subject, Lesson, Topic)
   const filteredTree = useMemo(() => {
     if (!searchTerm.trim()) return tree;
     const term = searchTerm.toLowerCase();
 
     return tree
       .map((unit) => {
-        const unitMatch = unit.title.toLowerCase().includes(term) || unit.unit_code.toLowerCase().includes(term);
+        const unitMatch =
+          unit.title.toLowerCase().includes(term) ||
+          unit.unit_code.toLowerCase().includes(term) ||
+          (unit.subject_name && unit.subject_name.toLowerCase().includes(term)) ||
+          `unit ${unit.unit_number}`.includes(term);
+
         const filteredLessons = (unit.lessons || []).filter((lesson) => {
           const lessonMatch =
             lesson.title.toLowerCase().includes(term) ||
             lesson.lesson_number.toLowerCase().includes(term) ||
-            `class ${lesson.standard_number}`.includes(term);
-          const topicMatch = lesson.topics?.some((t) => t.topic_name.toLowerCase().includes(term));
+            `std ${lesson.standard_number}`.includes(term) ||
+            `standard ${lesson.standard_number}`.includes(term) ||
+            `class ${lesson.standard_number}`.includes(term) ||
+            `${lesson.standard_number}th`.includes(term);
+
+          const topicMatch = lesson.topics?.some(
+            (t) =>
+              t.topic_name.toLowerCase().includes(term) ||
+              (t.description && t.description.toLowerCase().includes(term))
+          );
           return lessonMatch || topicMatch;
         });
 
@@ -886,7 +937,7 @@ UNIT-II: CURRENT EVENTS
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
         body: JSON.stringify({ id, name, code, badge, description, display_order: display_order || 1 }),
       });
@@ -921,7 +972,7 @@ UNIT-II: CURRENT EVENTS
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
         body: JSON.stringify({
           exam_id: selectedExamId,
@@ -976,7 +1027,7 @@ UNIT-II: CURRENT EVENTS
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
         body: JSON.stringify({
           exam_id: selectedExamId,
@@ -1029,7 +1080,7 @@ UNIT-II: CURRENT EVENTS
     }
   };
 
-  const handleOpenAddLesson = (unitId: number) => {
+  const handleOpenAddLesson = (unitId: number, targetStandard?: number) => {
     const targetUnit = tree.find((u) => u.id === unitId);
     const uNum = targetUnit?.unit_number || 1;
     const uTitle = targetUnit?.title || '';
@@ -1060,7 +1111,7 @@ UNIT-II: CURRENT EVENTS
     setSelectedTextbookIds([]);
     setTbSearch('');
 
-    let defaultStd = selectedStandard || 10;
+    let defaultStd = targetStandard || selectedStandard || (selectedExamId === 'group4' ? 10 : 11);
     let defaultSubject = 'all';
     if (uTitleLower.includes('science')) {
       defaultSubject = 'Science';
@@ -1128,7 +1179,7 @@ UNIT-II: CURRENT EVENTS
       setAiMatchingStep('matching');
       setMatchingStatusMessage('Connecting to Google Drive textbook PDFs & extracting chapter index...');
 
-      const authToken = token || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
+      const authToken = activeToken;
       const res = await apiFetch('/api/study-management/match-textbook-lessons', {
         method: 'POST',
         headers: {
@@ -1183,7 +1234,7 @@ UNIT-II: CURRENT EVENTS
 
     try {
       setIsSavingMatchedLessons(true);
-      const authToken = token || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
+      const authToken = activeToken;
       const res = await apiFetch('/api/study-management/save-textbook-lessons', {
         method: 'POST',
         headers: {
@@ -1244,7 +1295,7 @@ UNIT-II: CURRENT EVENTS
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
         body: JSON.stringify({
           unit_id: unitId,
@@ -1302,7 +1353,7 @@ UNIT-II: CURRENT EVENTS
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
         body: JSON.stringify({
           lesson_id: lessonId,
@@ -1370,7 +1421,7 @@ UNIT-II: CURRENT EVENTS
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
         body: JSON.stringify({
           topic_id: noteModal.topicId,
@@ -1414,7 +1465,7 @@ UNIT-II: CURRENT EVENTS
     });
     try {
       const res = await apiFetch(`/api/study-management/units/${unit.id}/dependencies`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${activeToken}` },
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || 'Failed to load unit contents.');
@@ -1442,7 +1493,7 @@ UNIT-II: CURRENT EVENTS
 
       const res = await apiFetch(endpoint, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${activeToken}` },
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
@@ -3315,7 +3366,7 @@ UNIT-II: CURRENT EVENTS
             </div>
 
             {/* Modal Body: Switch between 'upload', 'analyzing', 'review' */}
-            <div className="smm-modal-body" style={{ overflowY: 'auto' }}>
+            <div className="smm-modal-body ai-modal-body">
               {/* STEP 1: UPLOAD & INPUT SCREEN */}
               {aiImportStep === 'upload' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -3550,7 +3601,7 @@ UNIT-II: CURRENT EVENTS
 
               {/* STEP 3: ADMIN REVIEW BEFORE PUBLISHING */}
               {aiImportStep === 'review' && (
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <div className="smm-ai-review-container">
                   {/* Summary Bar */}
                   <div className="smm-ai-summary-bar">
                     <div className="smm-ai-stat-chip">
@@ -3620,19 +3671,8 @@ UNIT-II: CURRENT EVENTS
                       </div>
                     )}
 
-                  {/* Editable Units & Topics Tree with Bulk & Individual Selection */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      marginBottom: '0.6rem',
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      padding: '0.55rem 0.85rem',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(255, 255, 255, 0.07)',
-                    }}
-                  >
+                  {/* Editable Units & Topics Tree with Bulk & Individual Selection Toolbar */}
+                  <div className="smm-ai-review-toolbar">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       <label
                         style={{
@@ -3758,12 +3798,14 @@ UNIT-II: CURRENT EVENTS
                       if (aiReviewSelectedClass !== 'all' && (u.standard_number || 10) !== aiReviewSelectedClass) {
                         return null;
                       }
-                      const isExpanded = expandedReviewUnits.has(u.unit_number || uIdx + 1);
+                      const unitKey = getReviewUnitKey(u, uIdx);
+                      const isExpanded = expandedReviewUnits.has(unitKey);
                       const isSelected = u.selected_for_publish !== false;
                       return (
                         <div
-                          key={uIdx}
-                          className="smm-ai-unit-accordion"
+                          key={unitKey}
+                          id={unitKey}
+                          className={`smm-ai-unit-accordion ${isExpanded ? 'is-expanded' : ''}`}
                           style={{
                             opacity: isSelected ? 1 : 0.65,
                             borderLeft: isSelected
@@ -3773,7 +3815,7 @@ UNIT-II: CURRENT EVENTS
                         >
                           <div
                             className="smm-ai-unit-head"
-                            onClick={() => toggleReviewUnit(u.unit_number || uIdx + 1)}
+                            onClick={() => toggleReviewUnit(unitKey)}
                           >
                             <div className="smm-ai-unit-left" onClick={(e) => e.stopPropagation()}>
                               <input
@@ -3791,7 +3833,7 @@ UNIT-II: CURRENT EVENTS
                               <button
                                 type="button"
                                 className="smm-accordion-chevron"
-                                onClick={() => toggleReviewUnit(u.unit_number || uIdx + 1)}
+                                onClick={() => toggleReviewUnit(unitKey)}
                                 title={isExpanded ? 'Collapse Unit' : 'Expand Unit'}
                               >
                                 {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}

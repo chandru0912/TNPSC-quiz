@@ -167,7 +167,8 @@ export class StudyManagementService {
         );
 
         CREATE INDEX IF NOT EXISTS idx_syllabus_subjects_exam ON syllabus_subjects (exam_id);
-        CREATE INDEX IF NOT EXISTS idx_syllabus_units_lookup ON syllabus_units (exam_id, subject_id, standard_number, unit_number);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_syllabus_units_exam_subject_unit ON syllabus_units (exam_id, subject_id, unit_number) WHERE is_active = true;
+        CREATE INDEX IF NOT EXISTS idx_syllabus_units_lookup ON syllabus_units (exam_id, subject_id, unit_number);
         CREATE INDEX IF NOT EXISTS idx_syllabus_lessons_lookup ON syllabus_lessons (unit_id, exam_id, subject_id, standard_number);
         CREATE INDEX IF NOT EXISTS idx_syllabus_topics_lookup ON syllabus_topics (lesson_id, unit_id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_syllabus_topics_lesson_name ON syllabus_topics (lesson_id, topic_name);
@@ -458,16 +459,49 @@ export class StudyManagementService {
     display_order?: number;
   }): Promise<UnitRecord> {
     const code = data.unit_code?.trim() || `Unit ${data.unit_number}`;
+    const cleanExam = data.exam_id.toLowerCase().trim();
+    const cleanSub = data.subject_id.toLowerCase().trim();
+
+    // Check if parent unit already exists
+    const existing = await pool.query(
+      `SELECT * FROM syllabus_units 
+       WHERE exam_id = $1 AND subject_id = $2 AND unit_number = $3 AND is_active = true`,
+      [cleanExam, cleanSub, data.unit_number]
+    );
+    if (existing.rows.length > 0) {
+      // Update existing parent unit rather than creating duplicate
+      const upd = await pool.query(
+        `UPDATE syllabus_units
+         SET title = $1, unit_code = $2, subject_name = $3, description = COALESCE($4, description),
+             question_count = COALESCE($5, question_count), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $6
+         RETURNING *`,
+        [
+          data.title.trim(),
+          code,
+          data.subject_name?.trim() || data.title.trim(),
+          data.description?.trim() || null,
+          data.question_count,
+          existing.rows[0].id,
+        ]
+      );
+      return upd.rows[0];
+    }
+
     const res = await pool.query(
       `INSERT INTO syllabus_units (
         exam_id, subject_id, standard_number, unit_number, unit_code, title,
         subject_name, description, question_count, display_order
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (exam_id, subject_id, unit_number) WHERE is_active = true
+      DO UPDATE SET
+        title = EXCLUDED.title,
+        unit_code = EXCLUDED.unit_code,
+        updated_at = CURRENT_TIMESTAMP
       RETURNING *`,
       [
-        data.exam_id.toLowerCase().trim(),
-        data.subject_id.toLowerCase().trim(),
-        data.standard_number || null,
+        cleanExam,
+        cleanSub,
         data.unit_number,
         code,
         data.title.trim(),

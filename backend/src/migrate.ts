@@ -986,7 +986,9 @@ export async function runMigration() {
     try {
       const { StudyManagementService } = require('./services/studyManagementService');
       await StudyManagementService.initSchema();
-      console.log('[Migration] Dynamic Study Materials Management schema initialized.');
+      const { ensureSyllabusMappingSchema } = require('./services/syllabusMappingSchema');
+      await ensureSyllabusMappingSchema();
+      console.log('[Migration] Dynamic Study Materials Management & Syllabus Mapping schema initialized.');
     } catch (smErr: any) {
       console.warn('[Migration] Non-fatal warning during Study Materials schema init:', smErr?.message);
     }
