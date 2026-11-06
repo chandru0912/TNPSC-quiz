@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -39,6 +40,46 @@ const unitIcons: Record<number, any> = {
 const Group1GeneralStudies = () => {
   const navigate = useNavigate()
   const { isTamil } = useLanguage()
+  const [units, setUnits] = useState(group1GeneralStudiesUnits)
+
+  // Dynamically merge units from Study Materials Management database
+  useEffect(() => {
+    fetch('/api/study-management/units?examId=group1&subjectId=general-studies')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.units) && data.units.length > 0) {
+          setUnits((prev) => {
+            const staticMap = new Map(prev.map((u) => [u.id, u]))
+            return data.units.map((u: any) => {
+              const existing = staticMap.get(u.unit_number)
+              if (existing) {
+                return {
+                  ...existing,
+                  title: u.title || existing.title,
+                  tamilTitle: u.subject_name || existing.tamilTitle,
+                  questionCount: u.question_count || existing.questionCount,
+                  unitNumber: u.unit_code || existing.unitNumber,
+                  officialSyllabusTopics: u.description ? [u.description] : existing.officialSyllabusTopics,
+                }
+              }
+              return {
+                id: u.unit_number,
+                unitNumber: u.unit_code || `Unit ${u.unit_number}`,
+                title: u.title,
+                tamilTitle: u.subject_name || u.title,
+                questionCount: u.question_count || 20,
+                standard: 'Degree Standard',
+                color: '#3b82f6',
+                officialSyllabusTopics: u.description ? [u.description] : [`Syllabus outline for ${u.title}`],
+                chapters: [],
+              }
+            })
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const totalQuestions = getTotalGSQuestions() // 175
   const totalChapters = getTotalGSChapters()
 
@@ -107,7 +148,7 @@ const Group1GeneralStudies = () => {
               <Layers size={22} />
             </div>
             <div className="gs-hud-info">
-              <span className="gs-hud-value">{group1GeneralStudiesUnits.length} Units</span>
+              <span className="gs-hud-value">{units.length} Units</span>
               <span className="gs-hud-label">Syllabus Units</span>
             </div>
           </div>
@@ -133,12 +174,7 @@ const Group1GeneralStudies = () => {
           </div>
         </div>
 
-        {/* ============================================================== */}
-        {/* REQUIREMENT: At the top of the General Studies page, add a     */}
-        {/* heading: "Classes: 6th to 12th Standard". Below that heading,  */}
-        {/* show seven separate clickable class cards: 6th Standard, 7th,  */}
-        {/* 8th, 9th, 10th, 11th, 12th.                                   */}
-        {/* ============================================================== */}
+        {/* Classes Top Section */}
         <section className="classes-top-section glass">
           <div className="classes-section-header">
             <div className="classes-heading-group">
@@ -188,7 +224,7 @@ const Group1GeneralStudies = () => {
           </div>
         </section>
 
-        {/* Section Heading for the 6 General Studies Units */}
+        {/* Section Heading for Units */}
         <div className="units-section-header">
           <div className="units-header-left">
             <h2 className="units-section-title">General Studies Units (Degree Standard)</h2>
@@ -196,12 +232,12 @@ const Group1GeneralStudies = () => {
               Each unit maps all 7 standards (6th to 12th) plus the comprehensive syllabus outline.
             </p>
           </div>
-          <span className="units-total-badge">6 Official Units</span>
+          <span className="units-total-badge">{units.length} Official Units</span>
         </div>
 
-        {/* Six Unit Cards Responsive Grid with Standard Selectors */}
+        {/* Unit Cards Responsive Grid with Standard Selectors */}
         <div className="units-grid">
-          {group1GeneralStudiesUnits.map((unit, index) => {
+          {units.map((unit, index) => {
             const Icon = unitIcons[unit.id] || BookOpen
             const chapterCount = getUnitChapterCount(unit)
             const lessonCount = getUnitLessonCount(unit)
@@ -253,12 +289,6 @@ const Group1GeneralStudies = () => {
                   </div>
                 </div>
 
-                {/* ============================================================== */}
-                {/* REQUIREMENT: Each Unit must allow selecting one of the seven   */}
-                {/* classes. When a user clicks 6th Standard under Unit 1, open a  */}
-                {/* separate page for Unit 1 – 6th Standard. Same for 7th to 12th  */}
-                {/* across all units.                                              */}
-                {/* ============================================================== */}
                 <div
                   className="unit-class-selector"
                   onClick={(e) => e.stopPropagation()}

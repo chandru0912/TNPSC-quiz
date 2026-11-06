@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
 import { GraduationCap } from 'lucide-react'
 import ScrollToTop from './components/ScrollToTop'
 import Navbar from './components/Navbar'
@@ -29,116 +29,113 @@ import PreviousPapers from './pages/PreviousPapers'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Admin from './pages/Admin'
+import StudentPreviewBanner from './components/StudentPreviewBanner'
 import { LanguageProvider } from './context/LanguageContext'
+import { StudentAuthProvider } from './context/StudentAuthContext'
 import './App.css'
 
-function App() {
-  // Initialize interactive 3D spatial tilt & dynamic glare tracking across all website logos
-  useEffect(() => {
-    const destroyTilt = initSpatialTilt()
-    return () => {
-      destroyTilt()
-    }
-  }, [])
+function AppShell() {
+  const location = useLocation()
+  const isAdmin = location.pathname.startsWith('/admin')
 
   return (
-    <Router>
-      <LanguageProvider>
-        <ScrollToTop />
-        <div className="app">
-        {/* Global SVG Definitions for 3D Volumetric Extrusion, Bevel & Gold Gradient */}
-        <svg
-          className="spatial-svg-defs"
-          aria-hidden="true"
-          style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }}
-        >
-          <defs>
-            {/* Luminous Gold Linear Gradient for SVG strokes */}
-            <linearGradient id="spatial-gold-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#ffffff" />
-              <stop offset="25%" stopColor="#fff59d" />
-              <stop offset="55%" stopColor="#ffd700" />
-              <stop offset="85%" stopColor="#f59e0b" />
-              <stop offset="100%" stopColor="#b45309" />
-            </linearGradient>
+    <div className={`app ${isAdmin ? 'admin-app-mode' : ''}`}>
+      {/* Global SVG Definitions for 3D Volumetric Extrusion, Bevel & Gold Gradient */}
+      <svg
+        className="spatial-svg-defs"
+        aria-hidden="true"
+        style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }}
+      >
+        <defs>
+          {/* Luminous Gold Linear Gradient for SVG strokes */}
+          <linearGradient id="spatial-gold-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="25%" stopColor="#fff59d" />
+            <stop offset="55%" stopColor="#ffd700" />
+            <stop offset="85%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#b45309" />
+          </linearGradient>
 
-            {/* 3D Extruded Bevel & Volumetric Directional Lighting */}
-            <filter id="spatial-extruded-3d" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="0" dy="1" stdDeviation="0.6" floodColor="#000000" floodOpacity="0.85" result="drop1" />
-              <feDropShadow dx="0" dy="3" stdDeviation="2" floodColor="#000000" floodOpacity="0.6" result="drop2" />
-              <feDropShadow dx="0" dy="6" stdDeviation="4" floodColor="#000000" floodOpacity="0.45" result="drop3" />
-              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#ffd700" floodOpacity="0.35" result="glow" />
-              <feGaussianBlur in="SourceAlpha" stdDeviation="0.9" result="blur" />
-              <feSpecularLighting
-                in="blur"
-                surfaceScale="2.8"
-                specularConstant="1.2"
-                specularExponent="20"
-                lightingColor="#ffffff"
-                result="specular"
-              >
-                <fePointLight x="-25" y="-45" z="70" />
-              </feSpecularLighting>
-              <feComposite in="specular" in2="SourceAlpha" operator="in" result="specularCut" />
-              <feMerge>
-                <feMergeNode in="glow" />
-                <feMergeNode in="drop3" />
-                <feMergeNode in="drop2" />
-                <feMergeNode in="drop1" />
-                <feMergeNode in="SourceGraphic" />
-                <feMergeNode in="specularCut" />
-              </feMerge>
-            </filter>
-          </defs>
-        </svg>
+          {/* 3D Extruded Bevel & Volumetric Directional Lighting */}
+          <filter id="spatial-extruded-3d" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="1" stdDeviation="0.6" floodColor="#000000" floodOpacity="0.85" result="drop1" />
+            <feDropShadow dx="0" dy="3" stdDeviation="2" floodColor="#000000" floodOpacity="0.6" result="drop2" />
+            <feDropShadow dx="0" dy="6" stdDeviation="4" floodColor="#000000" floodOpacity="0.45" result="drop3" />
+            <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#ffd700" floodOpacity="0.35" result="glow" />
+            <feGaussianBlur in="SourceAlpha" stdDeviation="0.9" result="blur" />
+            <feSpecularLighting
+              in="blur"
+              surfaceScale="2.8"
+              specularConstant="1.2"
+              specularExponent="20"
+              lightingColor="#ffffff"
+              result="specular"
+            >
+              <fePointLight x="-25" y="-45" z="70" />
+            </feSpecularLighting>
+            <feComposite in="specular" in2="SourceAlpha" operator="in" result="specularCut" />
+            <feMerge>
+              <feMergeNode in="glow" />
+              <feMergeNode in="drop3" />
+              <feMergeNode in="drop2" />
+              <feMergeNode in="drop1" />
+              <feMergeNode in="SourceGraphic" />
+              <feMergeNode in="specularCut" />
+            </feMerge>
+          </filter>
+        </defs>
+      </svg>
 
-        {/* Ambient Glassmorphic Background Orbs & Mesh */}
-        <div className="ambient-glass-backdrop" aria-hidden="true">
-          <div className="ambient-orb orb-warm-lamp" />
-          <div className="ambient-orb orb-gold" />
-          <div className="ambient-orb orb-indigo" />
-          <div className="ambient-orb orb-cyan" />
-          <div className="ambient-grid-mesh" />
-        </div>
+      {/* Ambient Glassmorphic Background Orbs & Mesh */}
+      <div className="ambient-glass-backdrop" aria-hidden="true">
+        <div className="ambient-orb orb-warm-lamp" />
+        <div className="ambient-orb orb-gold" />
+        <div className="ambient-orb orb-indigo" />
+        <div className="ambient-orb orb-cyan" />
+        <div className="ambient-grid-mesh" />
+      </div>
 
-        <Navbar />
+      {!isAdmin && <StudentPreviewBanner />}
+      <Navbar />
 
-        <main className="main-content">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/materials" element={<StudyMaterials />} />
-            <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
-            <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
-            <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
-            <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
-            <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
-            <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
-            <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
-            <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
-            <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
-            <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
-            <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
-            <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
-            <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
-            <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
-            <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
-            <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
-            <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-            <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-            <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-            <Route path="/school-materials" element={<SchoolMaterials />} />
-            <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
-            <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
-            <Route path="/practice" element={<MCQPractice />} />
-            <Route path="/mock-tests" element={<MockTests />} />
-            <Route path="/previous-papers" element={<PreviousPapers />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/admin" element={<Admin />} />
-          </Routes>
-        </main>
+      <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''}`}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/materials" element={<StudyMaterials />} />
+          <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
+          <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
+          <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
+          <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+          <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
+          <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
+          <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
+          <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+          <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+          <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+          <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
+          <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
+          <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
+          <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
+          <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
+          <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
+          <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+          <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+          <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+          <Route path="/school-materials" element={<SchoolMaterials />} />
+          <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
+          <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
+          <Route path="/practice" element={<MCQPractice />} />
+          <Route path="/mock-tests" element={<MockTests />} />
+          <Route path="/previous-papers" element={<PreviousPapers />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/admin" element={<Admin />} />
+          <Route path="/admin/*" element={<Admin />} />
+        </Routes>
+      </main>
 
+      {!isAdmin && (
         <footer className="footer glass">
           <div className="footer-content">
             <div className="footer-brand">
@@ -154,8 +151,28 @@ function App() {
             <p className="footer-note">⚡ Real-time analytics, mock tests, school syllabus notes & lesson-wise practice modules</p>
           </div>
         </footer>
-      </div>
-      </LanguageProvider>
+      )}
+    </div>
+  )
+}
+
+function App() {
+  // Initialize interactive 3D spatial tilt & dynamic glare tracking across all website logos
+  useEffect(() => {
+    const destroyTilt = initSpatialTilt()
+    return () => {
+      destroyTilt()
+    }
+  }, [])
+
+  return (
+    <Router>
+      <StudentAuthProvider>
+        <LanguageProvider>
+          <ScrollToTop />
+          <AppShell />
+        </LanguageProvider>
+      </StudentAuthProvider>
     </Router>
   )
 }

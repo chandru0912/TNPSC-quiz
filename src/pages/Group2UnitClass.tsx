@@ -71,8 +71,28 @@ const Group2UnitClass = () => {
   const subject = getGroup2SubjectById(activeSubjectId)
   const data = getGroup2UnitClassData(activeSubjectId, parsedUnitId, parsedClassId)
   const Icon = unitIcons[parsedUnitId] || BookOpen
-  const lessons = data.lessons || []
+  const [dynamicLessons, setDynamicLessons] = useState<Group2SchoolLesson[] | null>(null)
+  const lessons = dynamicLessons || data.lessons || []
   const hasLessons = lessons.length > 0
+
+  useEffect(() => {
+    fetch(`/api/study-management/lessons?examId=group2&subjectId=${activeSubjectId}&unitNumber=${parsedUnitId}&standardId=${parsedClassId}`)
+      .then((res) => res.json())
+      .then((resData) => {
+        if (resData.success && Array.isArray(resData.lessons)) {
+          const mapped: Group2SchoolLesson[] = resData.lessons.map((l: any) => ({
+            id: l.id,
+            lessonNumber: l.lesson_number,
+            title: l.title,
+            term: l.term || 'Term 1',
+            description: l.description || '',
+            status: l.status === 'Coming Soon' ? 'Coming Soon' : 'Available',
+          }))
+          setDynamicLessons(mapped)
+        }
+      })
+      .catch(() => {})
+  }, [activeSubjectId, parsedUnitId, parsedClassId])
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' })

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
   BookOpen,
@@ -22,6 +22,7 @@ import {
 import { useLanguage } from '../context/LanguageContext'
 import LanguageSwitch from '../components/LanguageSwitch'
 import { UI_TRANSLATIONS } from '../utils/languageData'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import './StudyMaterials.css'
 
 type GroupId = 'group1' | 'group2_2a' | 'group4_vao'
@@ -68,7 +69,7 @@ const StudyMaterials = () => {
 
   const groups = [
     { id: 'group1' as const, name: isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1' },
-    { id: 'group2_2a' as const, name: isTamil ? 'TNPSC குரூப் 2 & 2A' : 'TNPSC Group 2 & 2A' },
+    { id: 'group2_2a' as const, name: isTamil ? 'TNPSC குரூப் 2, 2A' : 'TNPSC Group 2, 2A' },
     { id: 'group4_vao' as const, name: isTamil ? 'TNPSC குரூப் 4 & VAO' : 'TNPSC Group 4' },
   ]
 
@@ -85,6 +86,66 @@ const StudyMaterials = () => {
   const gsTotalChapters = getTotalGSChapters() // 28
   const gsTotalLessons = getTotalGSLessons() // 109
   const aptTotalQuestions = group1AptitudeUnits.reduce((acc, u) => acc + u.questionCount, 0) // 25
+
+  const [unitCounts, setUnitCounts] = useState<Record<string, number>>({
+    'g1-gs': 6,
+    'g1-apt': 2,
+    'g2-gs': 6,
+    'g2-apt': 2,
+    'g2-en': 7,
+    'g2-ta': 7,
+    'g4-gs': 6,
+    'g4-apt': 2,
+    'g4-ta': 7,
+    'g4-en': 7,
+  })
+
+  const refreshUnitCounts = () => {
+    Promise.all([
+      fetch('/api/study-management/units?examId=group1').then((r) => r.json()).catch(() => null),
+      fetch('/api/study-management/units?examId=group2').then((r) => r.json()).catch(() => null),
+      fetch('/api/study-management/units?examId=group4').then((r) => r.json()).catch(() => null),
+    ]).then(([g1, g2, g4]) => {
+      setUnitCounts((prev) => {
+        const next = { ...prev }
+        if (g1?.success && Array.isArray(g1.units)) {
+          const gs = g1.units.filter((u: any) => u.subject_id === 'general-studies' || u.subject_id === 'group1-general-studies').length
+          const apt = g1.units.filter((u: any) => u.subject_id === 'aptitude' || u.subject_id === 'group1-aptitude').length
+          if (gs > 0) next['g1-gs'] = gs
+          if (apt > 0) next['g1-apt'] = apt
+        }
+        if (g2?.success && Array.isArray(g2.units)) {
+          const gs = g2.units.filter((u: any) => u.subject_id === 'general-studies' || u.subject_id === 'group2-general-studies').length
+          const apt = g2.units.filter((u: any) => u.subject_id === 'aptitude' || u.subject_id === 'group2-aptitude').length
+          const en = g2.units.filter((u: any) => u.subject_id === 'general-english' || u.subject_id === 'group2-general-english').length
+          const ta = g2.units.filter((u: any) => u.subject_id === 'general-tamil' || u.subject_id === 'group2-general-tamil').length
+          if (gs > 0) next['g2-gs'] = gs
+          if (apt > 0) next['g2-apt'] = apt
+          if (en > 0) next['g2-en'] = en
+          if (ta > 0) next['g2-ta'] = ta
+        }
+        if (g4?.success && Array.isArray(g4.units)) {
+          const gs = g4.units.filter((u: any) => u.subject_id === 'general-studies' || u.subject_id === 'group4-general-studies').length
+          const apt = g4.units.filter((u: any) => u.subject_id === 'aptitude' || u.subject_id === 'group4-aptitude').length
+          const ta = g4.units.filter((u: any) => u.subject_id === 'general-tamil' || u.subject_id === 'group4-general-tamil').length
+          const en = g4.units.filter((u: any) => u.subject_id === 'general-english' || u.subject_id === 'group4-general-english').length
+          if (gs > 0) next['g4-gs'] = gs
+          if (apt > 0) next['g4-apt'] = apt
+          if (ta > 0) next['g4-ta'] = ta
+          if (en > 0) next['g4-en'] = en
+        }
+        return next
+      })
+    })
+  }
+
+  useEffect(() => {
+    refreshUnitCounts()
+    const unsub = dynamicSyllabusService.subscribe(() => {
+      refreshUnitCounts()
+    })
+    return unsub
+  }, [])
 
   return (
     <div className="materials">
@@ -163,7 +224,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-title-group">
                   <h2 className="group1-card-title">{isTamil ? 'பொது அறிவு (General Studies)' : 'General Studies'}</h2>
                   <span className="group1-card-sub">
-                    {group1GeneralStudiesUnits.length} {isTamil ? 'பாடத்திட்ட அலகுகள்' : 'Distinct Syllabus Units'}
+                    {unitCounts['g1-gs'] || group1GeneralStudiesUnits.length} {isTamil ? 'பாடத்திட்ட அலகுகள்' : 'Distinct Syllabus Units'}
                   </span>
                 </div>
               </div>
@@ -178,7 +239,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{group1GeneralStudiesUnits.length}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{unitCounts['g1-gs'] || group1GeneralStudiesUnits.length}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -196,7 +257,7 @@ const StudyMaterials = () => {
               </div>
 
               <div className="group1-card-action">
-                <span>{isTamil ? 'பொது அறிவு அலகுகளை ஆராய்க (6 அலகுகள்)' : 'Explore General Studies (6 Units)'}</span>
+                <span>{isTamil ? `பொது அறிவு அலகுகளை ஆராய்க (${unitCounts['g1-gs'] || 6} அலகுகள்)` : `Explore General Studies (${unitCounts['g1-gs'] || 6} Units)`}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -308,7 +369,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '6 அலகுகள்' : '6 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g2-gs'] || 6} அலகுகள்` : `${unitCounts['g2-gs'] || 6} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -326,7 +387,7 @@ const StudyMaterials = () => {
               </div>
 
               <div className="group1-card-action">
-                <span>{isTamil ? 'பொது அறிவு அலகுகளை ஆராய்க (6 அலகுகள்)' : 'Explore General Studies (6 Units & Classes)'}</span>
+                <span>{isTamil ? `பொது அறிவு அலகுகளை ஆராய்க (${unitCounts['g2-gs'] || 6} அலகுகள்)` : `Explore General Studies (${unitCounts['g2-gs'] || 6} Units & Classes)`}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -351,7 +412,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-title-group">
                   <h2 className="group1-card-title">{isTamil ? 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்' : 'Aptitude and Mental Ability'}</h2>
                   <span className="group1-card-sub">
-                    {isTamil ? '2 அலகுகள் (பத்தாம் வகுப்புத் தரம்)' : '2 Units (Aptitude & Mental Ability • SSLC Standard)'}
+                    {isTamil ? `${unitCounts['g2-apt'] || 2} அலகுகள் (பத்தாம் வகுப்புத் தரம்)` : `${unitCounts['g2-apt'] || 2} Units (Aptitude & Mental Ability • SSLC Standard)`}
                   </span>
                 </div>
               </div>
@@ -366,7 +427,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '2 அலகுகள்' : '2 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g2-apt'] || 2} அலகுகள்` : `${unitCounts['g2-apt'] || 2} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -409,7 +470,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-title-group">
                   <h2 className="group1-card-title">{isTamil ? 'பொது ஆங்கிலம் (General English)' : 'General English'}</h2>
                   <span className="group1-card-sub">
-                    {isTamil ? '7 அலகுகள் (இலக்கணம், சொற்களஞ்சியம் & இலக்கியம்)' : '7 Units (Grammar, Vocabulary & Literature • SSLC Standard)'}
+                    {isTamil ? `${unitCounts['g2-en'] || 7} அலகுகள் (இலக்கணம், சொற்களஞ்சியம் & இலக்கியம்)` : `${unitCounts['g2-en'] || 7} Units (Grammar, Vocabulary & Literature • SSLC Standard)`}
                   </span>
                 </div>
               </div>
@@ -424,7 +485,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g2-en'] || 7} அலகுகள்` : `${unitCounts['g2-en'] || 7} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -442,7 +503,7 @@ const StudyMaterials = () => {
               </div>
 
               <div className="group1-card-action">
-                <span>{isTamil ? 'பொது ஆங்கிலத்தை ஆராய்க (7 அலகுகள்)' : 'Explore General English (7 Units & Classes)'}</span>
+                <span>{isTamil ? `பொது ஆங்கிலத்தை ஆராய்க (${unitCounts['g2-en'] || 7} அலகுகள்)` : `Explore General English (${unitCounts['g2-en'] || 7} Units & Classes)`}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -467,7 +528,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-title-group">
                   <h2 className="group1-card-title">{isTamil ? 'பொதுத் தமிழ்' : 'General Tamil (பொதுத் தமிழ்)'}</h2>
                   <span className="group1-card-sub">
-                    {isTamil ? '7 அலகுகள் (இலக்கணம், இலக்கியம், தமிழ் அறிஞர்கள்)' : '7 Units (இலக்கணம், இலக்கியம், தமிழ் அறிஞர்கள் • SSLC Standard)'}
+                    {isTamil ? `${unitCounts['g2-ta'] || 7} அலகுகள் (இலக்கணம், இலக்கியம், தமிழ் அறிஞர்கள்)` : `${unitCounts['g2-ta'] || 7} Units (இலக்கணம், இலக்கியம், தமிழ் அறிஞர்கள் • SSLC Standard)`}
                   </span>
                 </div>
               </div>
@@ -482,7 +543,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g2-ta'] || 7} அலகுகள்` : `${unitCounts['g2-ta'] || 7} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -500,7 +561,7 @@ const StudyMaterials = () => {
               </div>
 
               <div className="group1-card-action">
-                <span>{isTamil ? 'பொதுத் தமிழை ஆராய்க (7 அலகுகள்)' : 'Explore General Tamil (7 Units & Classes)'}</span>
+                <span>{isTamil ? `பொதுத் தமிழை ஆராய்க (${unitCounts['g2-ta'] || 7} அலகுகள்)` : `Explore General Tamil (${unitCounts['g2-ta'] || 7} Units & Classes)`}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -554,7 +615,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '6 அலகுகள்' : '6 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g4-gs'] || 6} அலகுகள்` : `${unitCounts['g4-gs'] || 6} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -572,7 +633,7 @@ const StudyMaterials = () => {
               </div>
 
               <div className="group1-card-action">
-                <span>{isTamil ? 'பொது அறிவு அலகுகளை ஆராய்க (6 அலகுகள்)' : 'Explore General Studies (6 Units & Classes)'}</span>
+                <span>{isTamil ? `பொது அறிவு அலகுகளை ஆராய்க (${unitCounts['g4-gs'] || 6} அலகுகள்)` : `Explore General Studies (${unitCounts['g4-gs'] || 6} Units & Classes)`}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -597,7 +658,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-title-group">
                   <h2 className="group1-card-title">{isTamil ? 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்' : 'Aptitude and Mental Ability'}</h2>
                   <span className="group1-card-sub">
-                    {isTamil ? '2 அலகுகள் (பத்தாம் வகுப்புத் தரம்)' : '2 Units (Aptitude & Reasoning • SSLC Standard)'}
+                    {isTamil ? `${unitCounts['g4-apt'] || 2} அலகுகள் (பத்தாம் வகுப்புத் தரம்)` : `${unitCounts['g4-apt'] || 2} Units (Aptitude & Reasoning • SSLC Standard)`}
                   </span>
                 </div>
               </div>
@@ -612,7 +673,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '2 அலகுகள்' : '2 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g4-apt'] || 2} அலகுகள்` : `${unitCounts['g4-apt'] || 2} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -655,7 +716,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-title-group">
                   <h2 className="group1-card-title">{isTamil ? 'பொதுத் தமிழ்' : 'General Tamil (பொதுத் தமிழ்)'}</h2>
                   <span className="group1-card-sub">
-                    {isTamil ? '7 அலகுகள் (தமிழ் தகுதி மற்றும் மதிப்பீட்டுத் தேர்வு)' : '7 Units (Tamil Eligibility & Scoring Test)'}
+                    {isTamil ? `${unitCounts['g4-ta'] || 7} அலகுகள் (தமிழ் தகுதி மற்றும் மதிப்பீட்டுத் தேர்வு)` : `${unitCounts['g4-ta'] || 7} Units (Tamil Eligibility & Scoring Test)`}
                   </span>
                 </div>
               </div>
@@ -670,7 +731,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g4-ta'] || 7} அலகுகள்` : `${unitCounts['g4-ta'] || 7} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -688,7 +749,7 @@ const StudyMaterials = () => {
               </div>
 
               <div className="group1-card-action">
-                <span>{isTamil ? 'பொதுத் தமிழை ஆராய்க (7 அலகுகள்)' : 'Explore General Tamil (7 Units & Classes)'}</span>
+                <span>{isTamil ? `பொதுத் தமிழை ஆராய்க (${unitCounts['g4-ta'] || 7} அலகுகள்)` : `Explore General Tamil (${unitCounts['g4-ta'] || 7} Units & Classes)`}</span>
                 <ChevronRight size={18} />
               </div>
             </div>
@@ -713,7 +774,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-title-group">
                   <h2 className="group1-card-title">{isTamil ? 'பொது ஆங்கிலம் (General English)' : 'General English'}</h2>
                   <span className="group1-card-sub">
-                    {isTamil ? '7 அலகுகள் (இலக்கணம், சொற்களஞ்சியம் & இலக்கியம்)' : '7 Units (Grammar, Vocabulary & Literature • SSLC Standard)'}
+                    {isTamil ? `${unitCounts['g4-en'] || 7} அலகுகள் (இலக்கணம், சொற்களஞ்சியம் & இலக்கியம்)` : `${unitCounts['g4-en'] || 7} Units (Grammar, Vocabulary & Literature • SSLC Standard)`}
                   </span>
                 </div>
               </div>
@@ -728,7 +789,7 @@ const StudyMaterials = () => {
                 <div className="group1-card-stat">
                   <Layers size={16} />
                   <span>
-                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? '7 அலகுகள்' : '7 Units'}</strong>
+                    {isTamil ? 'அலகுகள்:' : 'Units:'} <strong>{isTamil ? `${unitCounts['g4-en'] || 7} அலகுகள்` : `${unitCounts['g4-en'] || 7} Units`}</strong>
                   </span>
                 </div>
                 <div className="group1-card-stat">
@@ -746,7 +807,7 @@ const StudyMaterials = () => {
               </div>
 
               <div className="group1-card-action">
-                <span>{isTamil ? 'பொது ஆங்கிலத்தை ஆராய்க (7 அலகுகள்)' : 'Explore General English (7 Units & Classes)'}</span>
+                <span>{isTamil ? `பொது ஆங்கிலத்தை ஆராய்க (${unitCounts['g4-en'] || 7} அலகுகள்)` : `Explore General English (${unitCounts['g4-en'] || 7} Units & Classes)`}</span>
                 <ChevronRight size={18} />
               </div>
             </div>

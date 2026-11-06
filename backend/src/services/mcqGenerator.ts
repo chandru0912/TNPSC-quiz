@@ -76,7 +76,7 @@ export interface GeneratedMcqItem {
   lessonNumber?: string | null;
   status: 'staging' | 'published';
   targetSystem: 'study_materials';
-  aiProvider?: 'claude' | 'gemini';
+  aiProvider?: 'claude' | 'gemini' | 'openai';
 }
 
 export interface McqGenerationResult {
@@ -428,7 +428,12 @@ Respond strictly in JSON:
       optionD: randomized.options.D,
       correctAnswer: randomized.shuffledIndex,
       correctAnswerText: randomized.options[randomized.correctAnswer],
-      aiProvider: (req.provider || 'claude').toLowerCase() === 'gemini' ? 'gemini' : 'claude',
+      aiProvider:
+        (req.provider || 'claude').toLowerCase() === 'gemini'
+          ? 'gemini'
+          : (req.provider || 'claude').toLowerCase() === 'openai'
+          ? 'openai'
+          : 'claude',
     });
   }
 

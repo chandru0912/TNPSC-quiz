@@ -1,16 +1,22 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { UserPlus, ArrowRight, Eye, EyeOff, } from 'lucide-react'
+import { UserPlus, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { useStudentAuth } from '../context/StudentAuthContext'
+import { apiFetch } from '../utils/api'
 import './Auth.css'
 
 const Register = () => {
+  const navigate = useNavigate()
+  const { login } = useStudentAuth()
+
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
     mobile: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    targetGroup: 'group4',
   })
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -21,6 +27,8 @@ const Register = () => {
     password?: string
     confirmPassword?: string
   }>({})
+  const [serverError, setServerError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -32,8 +40,9 @@ const Register = () => {
     return mobileRegex.test(mobile)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setServerError(null)
     const newErrors: typeof errors = {}
 
     if (!formData.fullName.trim()) {
@@ -67,28 +76,56 @@ const Register = () => {
     setErrors(newErrors)
 
     if (Object.keys(newErrors).length === 0) {
-      alert('Registration form validated successfully (frontend only)')
+      setIsSubmitting(true)
+      try {
+        const res = await apiFetch('/api/student/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fullName: formData.fullName.trim(),
+            email: formData.email.trim(),
+            mobile: formData.mobile.trim(),
+            password: formData.password,
+            targetGroup: formData.targetGroup,
+          }),
+        })
+        const json = await res.json()
+
+        if (res.ok && json.status === 'success' && json.token && json.student) {
+          login(json.token, json.student)
+          navigate('/dashboard')
+        } else {
+          setServerError(json.message || 'Registration failed. Please try again.')
+        }
+      } catch (err: any) {
+        setServerError(err.message || 'Unable to connect to the server. Please try again.')
+      } finally {
+        setIsSubmitting(false)
+      }
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData({
       ...formData,
-      [name]: value
+      [name]: value,
     })
     if (errors[name as keyof typeof errors]) {
       setErrors({
         ...errors,
-        [name]: undefined
+        [name]: undefined,
       })
+    }
+    if (serverError) {
+      setServerError(null)
     }
   }
 
   return (
     <div className="auth">
       <div className="auth-container">
-        <motion.div 
+        <motion.div
           className="auth-card glass"
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -102,6 +139,22 @@ const Register = () => {
             <p className="auth-subtitle">Join TNPSC Study Hub to start your preparation</p>
           </div>
 
+          {serverError && (
+            <div
+              style={{
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                borderRadius: '8px',
+                padding: '0.75rem 1rem',
+                marginBottom: '1.25rem',
+                color: '#fca5a5',
+                fontSize: '0.85rem',
+              }}
+            >
+              {serverError}
+            </div>
+          )}
+
           <form className="auth-form" onSubmit={handleSubmit} noValidate>
             <div className="form-group">
               <label className="form-label">Full Name</label>
@@ -112,6 +165,7 @@ const Register = () => {
                 placeholder="Enter your full name"
                 value={formData.fullName}
                 onChange={handleChange}
+                disabled={isSubmitting}
               />
               {errors.fullName && <span className="error-text">{errors.fullName}</span>}
             </div>
@@ -125,6 +179,7 @@ const Register = () => {
                 placeholder="Enter your email"
                 value={formData.email}
                 onChange={handleChange}
+                disabled={isSubmitting}
               />
               {errors.email && <span className="error-text">{errors.email}</span>}
             </div>
@@ -140,9 +195,26 @@ const Register = () => {
                   value={formData.mobile}
                   onChange={handleChange}
                   maxLength={10}
+                  disabled={isSubmitting}
                 />
               </div>
               {errors.mobile && <span className="error-text">{errors.mobile}</span>}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Target Exam Group</label>
+              <select
+                name="targetGroup"
+                className="form-input"
+                value={formData.targetGroup}
+                onChange={handleChange}
+                disabled={isSubmitting}
+                style={{ background: 'rgba(15, 23, 42, 0.8)', color: '#ffffff' }}
+              >
+                <option value="group4">TNPSC Group 4 & VAO</option>
+                <option value="group2">TNPSC Group 2 & 2A</option>
+                <option value="group1">TNPSC Group 1</option>
+              </select>
             </div>
 
             <div className="form-group">
@@ -152,9 +224,10 @@ const Register = () => {
                   type={showPassword ? 'text' : 'password'}
                   name="password"
                   className={`form-input ${errors.password ? 'error' : ''}`}
-                  placeholder="Create a password"
+                  placeholder="Create a password (min 6 characters)"
                   value={formData.password}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                 />
                 <button
                   type="button"
@@ -178,6 +251,7 @@ const Register = () => {
                   placeholder="Confirm your password"
                   value={formData.confirmPassword}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                 />
                 <button
                   type="button"
@@ -191,9 +265,18 @@ const Register = () => {
               {errors.confirmPassword && <span className="error-text">{errors.confirmPassword}</span>}
             </div>
 
-            <button type="submit" className="btn btn-primary auth-btn">
-              <span>Register</span>
-              <ArrowRight size={18} />
+            <button type="submit" className="btn btn-primary auth-btn" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={18} className="spinning" />
+                  <span>Creating Account...</span>
+                </>
+              ) : (
+                <>
+                  <span>Register</span>
+                  <ArrowRight size={18} />
+                </>
+              )}
             </button>
           </form>
 

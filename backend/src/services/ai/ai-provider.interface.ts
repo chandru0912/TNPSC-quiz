@@ -3,7 +3,7 @@
  * TNPSC Study Hub - Independent Claude AI & Google Gemini AI Integration
  */
 
-export type AIProviderName = 'claude' | 'gemini';
+export type AIProviderName = 'claude' | 'gemini' | 'openai';
 
 export type AIPromptType =
   | 'notes_system'
@@ -26,7 +26,7 @@ export interface AIProviderConfigInfo {
 export interface AIConnectionTestResult {
   success: boolean;
   status: 'CONNECTED' | 'FAILED';
-  provider: 'Anthropic' | 'Google Gemini';
+  provider: 'Anthropic' | 'Google Gemini' | 'OpenAI';
   model: string;
   message: string;
   reply?: string;

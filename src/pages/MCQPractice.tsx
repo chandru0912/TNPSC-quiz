@@ -22,6 +22,7 @@ import { apiFetch } from '../utils/api'
 import { useLanguage } from '../context/LanguageContext'
 import LanguageSwitch from '../components/LanguageSwitch'
 import { translateQuestionItem } from '../utils/languageData'
+import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import './MCQPractice.css'
 
 interface QuestionItem {
@@ -44,6 +45,7 @@ interface QuestionItem {
 }
 
 const MCQPractice = () => {
+  useStudyTimeTracker()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { language, isTamil } = useLanguage()
@@ -283,6 +285,33 @@ const MCQPractice = () => {
       ...prev,
       [activeQuestionIndex]: { selected: selectedAnswer, isCorrect },
     }))
+
+    // Real-Time Student Activity Tracking in PostgreSQL
+    const studentToken = localStorage.getItem('tnpsc_student_token')
+    if (studentToken) {
+      apiFetch('/api/student/question-attempt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${studentToken}`,
+        },
+        body: JSON.stringify({
+          questionId: typeof rawQuestion?.id === 'number' ? rawQuestion.id : null,
+          category: selectedGroup,
+          subject: rawQuestion?.subject || urlSubjectId || 'General Studies',
+          classId: rawQuestion?.classId || urlClassId,
+          unitId: rawQuestion?.unitId || urlUnitId,
+          lessonId: rawQuestion?.lessonId || urlLessonId,
+          lessonTitle: rawQuestion?.lessonTitle || urlLesson || 'General Practice',
+          topic: rawQuestion?.topic || urlTopic,
+          selectedOption: selectedAnswer,
+          correctAnswer: questionItem.correctAnswer,
+          isCorrect,
+          sourceSystem: searchParams.get('title') ? 'mock_test' : 'mcq_practice',
+          timeSpentSeconds: 15,
+        }),
+      }).catch((err) => console.warn('[StudentTrack] Failed to log question attempt:', err))
+    }
   }
 
   const handleNext = () => {
@@ -318,6 +347,31 @@ const MCQPractice = () => {
   const handleFinishQuiz = () => {
     setIsQuizCompleted(true)
     setIsReviewMode(false)
+
+    // If this was a mock test (title query param exists), record mock test submission!
+    const testTitle = searchParams.get('title')
+    const studentToken = localStorage.getItem('tnpsc_student_token')
+    if (studentToken && testTitle) {
+      const totalQ = filteredQuestions.length
+      apiFetch('/api/student/mock-test/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${studentToken}`,
+        },
+        body: JSON.stringify({
+          testTitle,
+          category: selectedGroup,
+          totalQuestions: totalQ,
+          attemptedQuestions: answeredQuestions,
+          correctAnswers: score,
+          incorrectAnswers: Math.max(0, answeredQuestions - score),
+          score: score,
+          maxScore: totalQ,
+          timeSpentSeconds: 600,
+        }),
+      }).catch((err) => console.warn('[StudentTrack] Failed to log mock test completion:', err))
+    }
   }
 
   const handleStartReview = () => {

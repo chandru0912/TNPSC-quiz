@@ -521,7 +521,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           lessonTitle: currentLessonTitle,
           lessonId: selectedLessonObj?.id,
           lessonNumber: selectedLessonObj?.lessonNumber || '1.1',
-          topic: currentLessonTitle,
+          topic: (aiSyllabusCascade.topic && aiSyllabusCascade.topic !== 'all') ? aiSyllabusCascade.topic : currentLessonTitle,
           language: notesLanguage,
           mode: 'notes',
           notesFormat,
@@ -639,7 +639,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
           lessonTitle: currentLessonTitle,
           lessonId: selectedLessonObj?.id,
           lessonNumber: selectedLessonObj?.lessonNumber || '1.1',
-          topic: currentLessonTitle,
+          topic: (aiSyllabusCascade.topic && aiSyllabusCascade.topic !== 'all') ? aiSyllabusCascade.topic : currentLessonTitle,
           language: notesLanguage,
           noteFormat: activePreviewFormat,
           title: currentNoteToSave.title,
@@ -850,7 +850,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
               <div className="ai-section-box">
                 <h3 className="ai-section-title">
                   <Sparkles size={16} style={{ color: '#c084fc' }} />
-                  <span>Syllabus Study Notes Configuration (1 to 5)</span>
+                  <span>Syllabus Study Notes Configuration (Exam to Topic)</span>
                 </h3>
 
                 {/* Shared 5-Dropdown Syllabus Cascade Selector */}
@@ -858,6 +858,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                   cascade={aiSyllabusCascade}
                   allowAll={false}
                   variant="generator"
+                  showTopic={true}
                 />
 
                 {/* Lesson Details Card */}

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -26,7 +27,42 @@ const Group1Lessons = () => {
   const navigate = useNavigate()
   const { language, isTamil } = useLanguage()
   const parsedId = parseInt(unitId || '1', 10)
-  const unit = getUnitById(parsedId)
+  const staticUnit = getUnitById(parsedId)
+  const [unit, setUnit] = useState(staticUnit || null)
+
+  useEffect(() => {
+    fetch('/api/study-management/units?examId=group1&subjectId=general-studies')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && Array.isArray(d.units)) {
+          const match = d.units.find((u: any) => u.unit_number === parsedId)
+          if (match) {
+            setUnit((prev: any) => {
+              if (prev) {
+                return {
+                  ...prev,
+                  title: match.title || prev.title,
+                  tamilTitle: match.subject_name || prev.tamilTitle,
+                  questionCount: match.question_count || prev.questionCount,
+                  unitNumber: match.unit_code || prev.unitNumber,
+                }
+              }
+              return {
+                id: match.unit_number,
+                unitNumber: match.unit_code || `Unit ${match.unit_number}`,
+                title: match.title,
+                tamilTitle: match.subject_name || match.title,
+                questionCount: match.question_count || 20,
+                standard: 'Degree Standard',
+                color: '#3b82f6',
+                chapters: [],
+              }
+            })
+          }
+        }
+      })
+      .catch(() => {})
+  }, [parsedId])
 
   if (!unit) {
     return (

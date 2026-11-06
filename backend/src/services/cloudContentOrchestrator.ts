@@ -122,13 +122,20 @@ export class CloudContentOrchestrator {
         ? 'gemini'
         : req.provider === 'claude'
         ? 'claude'
+        : req.provider === 'openai'
+        ? 'openai'
         : activeDefault.provider;
 
     const providerStatus = await AIProviderConfigService.getProviderStatus(targetProviderName);
     const aiProvider = AIProviderFactory.getProvider(targetProviderName);
     report(`Connecting to ${providerStatus.name} & Checking Provider Readiness`, 10);
     if (!providerStatus.configured) {
-      const keyName = targetProviderName === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
+      const keyName =
+        targetProviderName === 'gemini'
+          ? 'GEMINI_API_KEY'
+          : targetProviderName === 'openai'
+          ? 'OPENAI_API_KEY'
+          : 'ANTHROPIC_API_KEY';
       throw new Error(
         `${providerStatus.name} is not configured. Set ${keyName} in backend environment or Admin Panel.`
       );

@@ -30,6 +30,13 @@ import {
   maskClaudeApiKey,
   persistClaudeEnv,
 } from './providers/claude/claude.config';
+import {
+  getOpenAiApiKey,
+  getOpenAiModel,
+  maskOpenAiApiKey,
+  persistOpenAiEnv,
+  resolveOpenAIModel,
+} from './providers/openai/openai.config';
 
 export interface ProviderConfigRecord {
   provider: AIProviderName;
@@ -51,12 +58,13 @@ export class AIProviderConfigService {
    * Retrieves full configuration record from the database merged with environment credentials.
    */
   static async getProviderConfig(provider: AIProviderName): Promise<ProviderConfigRecord> {
-    const cleanProvider = (provider === 'gemini' ? 'gemini' : 'claude') as AIProviderName;
+    const cleanProvider = provider === 'gemini' ? 'gemini' : provider === 'openai' ? 'openai' : 'claude';
     const isGemini = cleanProvider === 'gemini';
+    const isOpenAI = cleanProvider === 'openai';
 
     // 1. Check environment variables
-    const envKey = isGemini ? getGeminiApiKey() : getClaudeApiKey();
-    const envModel = isGemini ? getGeminiModel() : getClaudeModel();
+    const envKey = isGemini ? getGeminiApiKey() : isOpenAI ? getOpenAiApiKey() : getClaudeApiKey();
+    const envModel = isGemini ? getGeminiModel() : isOpenAI ? getOpenAiModel() : getClaudeModel();
 
     // 2. Fetch database record
     let dbRow: any = null;
@@ -74,8 +82,12 @@ export class AIProviderConfigService {
 
     const effectiveKey = (dbRow?.api_key || envKey || '').trim();
     const isConfigured = effectiveKey.length > 5;
-    const maskedKey = isGemini ? maskGeminiApiKey(effectiveKey) : maskClaudeApiKey(effectiveKey);
-    const model = dbRow?.model || envModel || (isGemini ? 'gemini-1.5-flash' : 'claude-3-5-sonnet-20241022');
+    const maskedKey = isGemini
+      ? maskGeminiApiKey(effectiveKey)
+      : isOpenAI
+      ? maskOpenAiApiKey(effectiveKey)
+      : maskClaudeApiKey(effectiveKey);
+    const model = dbRow?.model || envModel || (isGemini ? 'gemini-1.5-flash' : isOpenAI ? 'gpt-4o-mini' : 'claude-3-5-sonnet-20241022');
     const temperature = Number(dbRow?.temperature ?? 0.7);
     const maxTokens = Number(dbRow?.max_tokens ?? 4096);
     const isActive = Boolean(dbRow?.is_active);
@@ -85,7 +97,7 @@ export class AIProviderConfigService {
 
     return {
       provider: cleanProvider,
-      name: isGemini ? 'Google Gemini AI' : 'Anthropic Claude AI',
+      name: isGemini ? 'Google Gemini AI' : isOpenAI ? 'OpenAI' : 'Anthropic Claude AI',
       model,
       temperature,
       maxTokens,
@@ -134,7 +146,7 @@ export class AIProviderConfigService {
     provider: AIProviderName,
     options?: { apiKey?: string; model?: string }
   ): Promise<AIConnectionTestResult> {
-    const cleanProvider = (provider === 'gemini' ? 'gemini' : 'claude') as AIProviderName;
+    const cleanProvider = provider === 'gemini' ? 'gemini' : provider === 'openai' ? 'openai' : 'claude';
     const providerInstance = AIProviderFactory.getProvider(cleanProvider);
 
     // If options override is not provided, fetch stored key from config
@@ -145,6 +157,8 @@ export class AIProviderConfigService {
       const cfg = await this.getProviderConfig(cleanProvider);
       if (cleanProvider === 'gemini') {
         apiKey = getGeminiApiKey();
+      } else if (cleanProvider === 'openai') {
+        apiKey = getOpenAiApiKey();
       } else {
         apiKey = getClaudeApiKey();
       }
@@ -221,14 +235,18 @@ export class AIProviderConfigService {
       isActive?: boolean;
     }
   ): Promise<ProviderConfigRecord> {
-    const cleanProvider = (provider === 'gemini' ? 'gemini' : 'claude') as AIProviderName;
+    const cleanProvider = provider === 'gemini' ? 'gemini' : provider === 'openai' ? 'openai' : 'claude';
     const isGemini = cleanProvider === 'gemini';
+    const isOpenAI = cleanProvider === 'openai';
 
     // 1. Persist credentials to .env if provided
     if (config.apiKey !== undefined && config.apiKey.trim()) {
       if (isGemini) {
         process.env.GEMINI_API_KEY = config.apiKey.trim();
         persistGeminiEnv(config.apiKey.trim(), config.model);
+      } else if (isOpenAI) {
+        process.env.OPENAI_API_KEY = config.apiKey.trim();
+        persistOpenAiEnv(config.apiKey.trim(), config.model);
       } else {
         process.env.ANTHROPIC_API_KEY = config.apiKey.trim();
         persistClaudeEnv(config.apiKey.trim(), config.model);
@@ -236,10 +254,13 @@ export class AIProviderConfigService {
     }
 
     if (config.model !== undefined && config.model.trim()) {
-      const cleanModel = isGemini ? resolveGeminiModel(config.model.trim()) : config.model.trim();
+      const cleanModel = isGemini ? resolveGeminiModel(config.model.trim()) : isOpenAI ? resolveOpenAIModel(config.model.trim()) : config.model.trim();
       if (isGemini) {
         process.env.GEMINI_MODEL = cleanModel;
         persistGeminiEnv(undefined, cleanModel);
+      } else if (isOpenAI) {
+        process.env.OPENAI_MODEL = cleanModel;
+        persistOpenAiEnv(undefined, cleanModel);
       } else {
         process.env.CLAUDE_MODEL = cleanModel;
         persistClaudeEnv(undefined, cleanModel);
@@ -259,8 +280,8 @@ export class AIProviderConfigService {
       );
 
       const targetModel = config.model?.trim()
-        ? (isGemini ? resolveGeminiModel(config.model.trim()) : config.model.trim())
-        : (existingRes.rows[0]?.model || (isGemini ? getGeminiModel() : getClaudeModel()));
+        ? (isGemini ? resolveGeminiModel(config.model.trim()) : isOpenAI ? resolveOpenAIModel(config.model.trim()) : config.model.trim())
+        : (existingRes.rows[0]?.model || (isGemini ? getGeminiModel() : isOpenAI ? getOpenAiModel() : getClaudeModel()));
 
       const targetTemp = config.temperature ?? Number(existingRes.rows[0]?.temperature ?? 0.7);
       const targetTokens = config.maxTokens ?? Number(existingRes.rows[0]?.max_tokens ?? 4096);
@@ -291,11 +312,12 @@ export class AIProviderConfigService {
    * Returns aggregated status for all providers.
    */
   static async getAllStatuses(): Promise<any[]> {
-    const [claudeStatus, geminiStatus] = await Promise.all([
+    const [claudeStatus, geminiStatus, openaiStatus] = await Promise.all([
       this.getProviderStatus('claude'),
       this.getProviderStatus('gemini'),
+      this.getProviderStatus('openai'),
     ]);
-    return [claudeStatus, geminiStatus];
+    return [claudeStatus, geminiStatus, openaiStatus];
   }
 }
 

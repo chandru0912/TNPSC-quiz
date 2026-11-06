@@ -27,7 +27,7 @@
 .nav-container {
   max-width: 1560px;
   margin: 0 auto;
-  padding: 0.75rem 1.5rem;
+  padding: 0.38rem 1.25rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -60,8 +60,8 @@
 
 /* 3D Glass & Metallic Medallion */
 .nav-logo-icon-3d {
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   border-radius: 12px;
   display: grid;
   place-items: center;
@@ -184,7 +184,7 @@
   list-style: none;
   flex-wrap: nowrap;
   margin: 0 auto;
-  padding: 0.35rem 0.5rem;
+  padding: 0.2rem 0.45rem;
   background: rgba(12, 18, 36, 0.48);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 9999px;
@@ -205,7 +205,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.52rem 0.95rem;
+  padding: 0.38rem 0.75rem;
   color: var(--text-secondary);
   font-size: 0.8125rem;
   font-weight: 550;
@@ -333,7 +333,7 @@
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.5rem 0.95rem;
+  padding: 0.38rem 0.75rem;
   border-radius: 9999px;
   font-size: 0.8125rem;
   font-weight: 600;

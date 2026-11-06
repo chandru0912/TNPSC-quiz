@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   apiFetch,
@@ -47,6 +48,16 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import './Admin.css'
+import { AdvancedAnalyticsDashboard } from '../components/analytics/AdvancedAnalyticsDashboard'
+import { AdminSidebar, type AdminSectionType, type AnalyticsTabType } from '../components/admin/AdminSidebar'
+import { AdminTopHeader } from '../components/admin/AdminTopHeader'
+import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
+import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
+import { NewStudentPage } from '../components/admin/pages/NewStudentPage'
+import { RestoreStudentPage } from '../components/admin/pages/RestoreStudentPage'
+import { StudentPerformancePage } from '../components/admin/pages/StudentPerformancePage'
+import { SubscriptionOverviewPage } from '../components/admin/pages/SubscriptionOverviewPage'
+import { useStudentAuth } from '../context/StudentAuthContext'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import { ExtractedPagesModal } from '../components/ExtractedPagesModal'
 import { BulkPdfUploadModal } from '../components/BulkPdfUploadModal'
@@ -57,6 +68,7 @@ import {
   SyllabusCascadeSelector,
   useSyllabusCascade,
 } from '../components/SyllabusCascadeSelector'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import {
   TNPSC_GROUPS,
   STANDARDS,
@@ -159,6 +171,62 @@ interface AdminUserItem {
 }
 
 const Admin = () => {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const mainContentRef = useRef<HTMLDivElement>(null)
+  const { startStudentPreview } = useStudentAuth()
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
+  const rawPath = location.pathname.toLowerCase().replace(/\/+$/, '') || '/admin'
+
+  const isControlCenter = rawPath === '/admin' || rawPath === '/admin/control-center'
+  const isDashboard = rawPath === '/admin/dashboard'
+  const isAnalyticsOverview = rawPath === '/admin/analytics/overview'
+  const isTamilNaduMap = rawPath === '/admin/analytics/tamil-nadu-map'
+  const isLiveMonitor = rawPath === '/admin/analytics/live-monitor'
+  const isTraffic = rawPath === '/admin/analytics/traffic'
+  const isSubscriptions = rawPath === '/admin/analytics/subscriptions'
+  const isNewStudent = rawPath === '/admin/analytics/new-student'
+  const isRestoreStudent = rawPath === '/admin/analytics/restore-student'
+  const isPerformance = rawPath === '/admin/analytics/student-performance'
+  const isActiveReport = rawPath === '/admin/analytics/active-report'
+  const isQuestions = rawPath === '/admin/question-bank'
+  const isTextbooks = rawPath === '/admin/textbook-management'
+  const isNotes = rawPath === '/admin/study-notes'
+  const isStudyMaterialsManagement = rawPath === '/admin/study-materials-management'
+  const isGdrive = rawPath === '/admin/google-drive'
+  const isClaude = rawPath === '/admin/ai-private-hub'
+  const isDashboardView = rawPath === '/admin/dashboard-view'
+
+  const resolvedSection: AdminSectionType =
+    isStudyMaterialsManagement ? 'study-materials-management' :
+    isQuestions ? 'questions' :
+    isTextbooks ? 'textbooks' :
+    isNotes ? 'notes' :
+    isGdrive ? 'gdrive' :
+    isClaude ? 'claude' :
+    isDashboardView ? 'dashboard-view' :
+    isControlCenter ? 'control-center' :
+    isDashboard ? 'dashboard' : 'analytics'
+
+  const resolvedAnalyticsTab: AnalyticsTabType =
+    isTamilNaduMap ? 'geographic' :
+    isLiveMonitor ? 'live' :
+    isTraffic ? 'traffic' :
+    isSubscriptions ? 'subscriptions' :
+    isNewStudent ? 'new-student' :
+    isRestoreStudent ? 'restore-student' :
+    isPerformance ? 'performance' :
+    isActiveReport ? 'reports' : 'overview'
+
+  // Scroll main viewport to top on path change without affecting left sidebar
+  useEffect(() => {
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTo({ top: 0, behavior: 'instant' })
+    }
+  }, [rawPath])
+
+
   // Auth state
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('tnpsc_admin_token'))
   const [adminUser, setAdminUser] = useState<{ id?: number; username: string; name?: string; role?: string } | null>(() => {
@@ -378,6 +446,8 @@ const Admin = () => {
   const [textbookSubjectFilter, setTextbookSubjectFilter] = useState('all')
   const [textbookMediumFilter, setTextbookMediumFilter] = useState('all')
   const [textbookStatusFilter, setTextbookStatusFilter] = useState('all')
+  const [textbookPage, setTextbookPage] = useState(1)
+  const textbookPageSize = 25
 
   // Textbook Modals & Actions
   const [isUploadTextbookModalOpen, setIsUploadTextbookModalOpen] = useState(false)
@@ -539,6 +609,24 @@ const Admin = () => {
     textbookSearch,
   ])
 
+  useEffect(() => {
+    setTextbookPage(1)
+  }, [
+    textbookGroupFilter,
+    textbookStandardFilter,
+    textbookSubjectFilter,
+    textbookMediumFilter,
+    textbookStatusFilter,
+    textbookSearch,
+  ])
+
+  const textbookTotalPages = Math.max(1, Math.ceil(filteredTextbooks.length / textbookPageSize))
+  const pagedTextbooks = useMemo(() => {
+    const currentPage = Math.min(textbookPage, textbookTotalPages)
+    const start = (currentPage - 1) * textbookPageSize
+    return filteredTextbooks.slice(start, start + textbookPageSize)
+  }, [filteredTextbooks, textbookPage, textbookTotalPages])
+
   // Multi-selection handlers for Textbooks
   const handleToggleSelectTextbook = (id: number) => {
     setSelectedTextbookIds((prev) => {
@@ -633,6 +721,112 @@ const Admin = () => {
   // Claude AI Generator Modal state
   const [isCloudAiModalOpen, setIsCloudAiModalOpen] = useState(false)
   const [cloudAiModalMode, setCloudAiModalMode] = useState<CloudAiMode>('notes')
+
+  // Dynamic syllabus state for Question Edit Modal (Single Source of Truth)
+  const [qbModalUnits, setQbModalUnits] = useState<any[]>([])
+  const [qbModalLessons, setQbModalLessons] = useState<any[]>([])
+  const [qbModalTopics, setQbModalTopics] = useState<any[]>([])
+
+  // Dynamic syllabus state for Study Notes Edit Modal (Single Source of Truth)
+  const [notesModalUnits, setNotesModalUnits] = useState<any[]>([])
+  const [notesModalLessons, setNotesModalLessons] = useState<any[]>([])
+  const [notesModalTopics, setNotesModalTopics] = useState<any[]>([])
+
+  // Fetch PostgreSQL dynamic syllabus items when Question Edit modal is open
+  useEffect(() => {
+    if (!isEditModalOpen || !editingQuestion) return
+    let mounted = true
+    const cat = editingQuestion.category || 'group1'
+    const currentSubj = editingQuestion.subject || 'General Studies'
+    const subjects = getSubjectsForGroup(cat as any)
+    const matched = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
+    const subSlug = matched?.id || 'general-studies'
+    const std = editingQuestion.classId || 6
+
+    dynamicSyllabusService.getUnits(cat, subSlug, std).then((units) => {
+      if (!mounted) return
+      setQbModalUnits(units)
+    })
+
+    dynamicSyllabusService.getLessons({
+      examId: cat,
+      subjectId: subSlug,
+      standardNumber: std,
+      unitNumber: editingQuestion.unitId || 1,
+      unitId: editingQuestion.unitId || 1,
+    }).then((lessons) => {
+      if (!mounted) return
+      setQbModalLessons(lessons)
+    })
+
+    if (editingQuestion.lessonId) {
+      dynamicSyllabusService.getTopics(editingQuestion.lessonId).then((topics) => {
+        if (!mounted) return
+        setQbModalTopics(topics)
+      })
+    } else {
+      setQbModalTopics([])
+    }
+
+    return () => {
+      mounted = false
+    }
+  }, [
+    isEditModalOpen,
+    editingQuestion?.category,
+    editingQuestion?.subject,
+    editingQuestion?.classId,
+    editingQuestion?.unitId,
+    editingQuestion?.lessonId,
+  ])
+
+  // Fetch PostgreSQL dynamic syllabus items when Study Notes Edit modal is open
+  useEffect(() => {
+    if (!isNotesEditModalOpen || !editingNote) return
+    let mounted = true
+    const cat = editingNote.category || 'group2'
+    const currentSubj = editingNote.subject || 'General Studies'
+    const subjects = getSubjectsForGroup(cat as any)
+    const matched = subjects.find((s: any) => s.name === currentSubj || s.id === currentSubj) || subjects[0]
+    const subSlug = matched?.id || 'general-studies'
+    const std = editingNote.classId || 6
+
+    dynamicSyllabusService.getUnits(cat, subSlug, std).then((units) => {
+      if (!mounted) return
+      setNotesModalUnits(units)
+    })
+
+    dynamicSyllabusService.getLessons({
+      examId: cat,
+      subjectId: subSlug,
+      standardNumber: std,
+      unitNumber: editingNote.unitId || 1,
+      unitId: editingNote.unitId || 1,
+    }).then((lessons) => {
+      if (!mounted) return
+      setNotesModalLessons(lessons)
+    })
+
+    if (editingNote.lessonId) {
+      dynamicSyllabusService.getTopics(editingNote.lessonId).then((topics) => {
+        if (!mounted) return
+        setNotesModalTopics(topics)
+      })
+    } else {
+      setNotesModalTopics([])
+    }
+
+    return () => {
+      mounted = false
+    }
+  }, [
+    isNotesEditModalOpen,
+    editingNote?.category,
+    editingNote?.subject,
+    editingNote?.classId,
+    editingNote?.unitId,
+    editingNote?.lessonId,
+  ])
 
   const handleOpenCloudAiGenerator = (mode: CloudAiMode) => {
     setCloudAiModalMode(mode)
@@ -2110,10 +2304,52 @@ const Admin = () => {
     }
   }, [token, targetSystemFilter])
 
+  const handleOpenStudentPreview = useCallback(() => {
+    startStudentPreview('preview_admin_token', {
+      id: 999999,
+      fullName: adminUser?.name || 'Administrator',
+      email: adminUser?.username ? `${adminUser.username}@admin.local` : 'admin@tnpsc.local',
+      targetGroup: 'group4',
+      isPreview: true,
+    })
+    navigate('/dashboard')
+  }, [startStudentPreview, adminUser, navigate])
+
+  // Trigger data fetching on route navigation
+  useEffect(() => {
+    if (token) {
+      if (rawPath === '/admin/textbook-management') {
+        fetchTextbooks()
+      } else if (rawPath === '/admin/study-notes') {
+        fetchNotes()
+      } else if (rawPath === '/admin/google-drive') {
+        fetchDriveMaterials()
+        checkDriveStatus()
+      } else if (rawPath === '/admin/ai-private-hub') {
+        fetchAiProvidersStatus()
+        fetchPromptsForProvider(promptProvider, selectedPromptType)
+        fetchAiHistory(historyProviderFilter)
+      }
+    }
+  }, [rawPath, token, fetchTextbooks, fetchNotes, fetchDriveMaterials, checkDriveStatus, fetchAiProvidersStatus, fetchPromptsForProvider, promptProvider, selectedPromptType, fetchAiHistory, historyProviderFilter])
+
+  // Master Syllabus Automatic Synchronization across all modules
+  useEffect(() => {
+    const unsub = dynamicSyllabusService.subscribe(() => {
+      fetchAllMetrics()
+      if (rawPath === '/admin/study-notes') {
+        fetchNotes()
+      } else if (rawPath === '/admin/question-bank') {
+        fetchQuestions()
+      }
+    })
+    return unsub
+  }, [fetchAllMetrics, fetchNotes, fetchQuestions, rawPath])
+
   useEffect(() => {
     if (token) {
       fetchAllMetrics()
-      if (adminSection === 'claude') {
+      if (isClaude) {
         fetchAiProvidersStatus()
         fetchPromptsForProvider(promptProvider, selectedPromptType)
         fetchAiHistory(historyProviderFilter)
@@ -3005,7 +3241,7 @@ const Admin = () => {
     const defaultGroup = 'group1'
     const defaultClassId = 6
     const subjects = getSubjectsForGroup(defaultGroup)
-    const defaultSubjectId = subjects[0]?.id || 'general_science'
+    const defaultSubjectId = subjects[0]?.id || 'general-studies'
     const units = getUnitsForSubjectStandard(defaultGroup, defaultSubjectId, defaultClassId)
     const defaultUnitId = units[0]?.id || 1
     const lessons = getLessonsForSelection(defaultGroup, defaultSubjectId, defaultClassId, defaultUnitId)
@@ -3308,8 +3544,37 @@ const Admin = () => {
   const totalPages = Math.max(1, Math.ceil(filteredTotal / pageSize))
 
   return (
-    <div className="admin-page">
-      <div className="admin-container">
+    <div className="admin-enterprise-page-layout">
+      {/* 1. Dark Navy Fixed Left Sidebar (Independently scrollable) */}
+      <AdminSidebar
+        adminUser={adminUser}
+        counts={{
+          questions: metrics.totalQuestions,
+          textbooks: textbookMetrics.totalTextbooks,
+          notes: notesMetrics.totalNotes,
+        }}
+        onOpenAdminAccounts={() => {
+          setIsUsersModalOpen(true)
+          fetchAdminUsers()
+        }}
+        onLogout={handleLogout}
+        isOpenMobile={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+      />
+
+      {/* 2. Main Enterprise Viewport (Independently scrollable) */}
+      <div className="admin-enterprise-main-viewport" ref={mainContentRef}>
+        <AdminTopHeader
+          currentSection={resolvedSection}
+          currentAnalyticsTab={resolvedAnalyticsTab}
+          onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
+          onOpenStudentPreview={handleOpenStudentPreview}
+          onLogout={handleLogout}
+        />
+
+        <div className="admin-enterprise-body-content">
+          <div className="admin-page" style={{ padding: 0 }}>
+            <div className="admin-container" style={{ maxWidth: '100%' }}>
         {/* Toast Notification */}
         {actionMessage && (
           <motion.div
@@ -3331,236 +3596,198 @@ const Admin = () => {
           </motion.div>
         )}
 
-        {/* Top Header */}
-        <div className="admin-header">
-          <div className="admin-header-main">
-            <div className="admin-badge-row">
-              <span className="admin-badge">
-                <Sparkles size={13} />
-                TNPSC Control Center
-              </span>
-              <span className="admin-user-pill admin-db-pill">
-                <Database size={13} />
-                PostgreSQL Connected
-              </span>
-              <button
-                type="button"
-                className={`admin-user-pill ${driveStatus.connected ? 'admin-gdrive-connected-pill' : 'admin-gdrive-disconnected-pill'}`}
-                onClick={() => {
-                  setAdminSection('gdrive')
-                  fetchDriveMaterials()
-                  checkDriveStatus()
-                }}
-                title="Google Drive Integration Status (click to manage)"
-                style={{
-                  cursor: 'pointer',
-                  border: driveStatus.connected
-                    ? '1px solid rgba(16, 185, 129, 0.4)'
-                    : isConnectingDrive
-                    ? '1px solid rgba(245, 158, 11, 0.4)'
-                    : driveConnectionError
-                    ? '1px solid rgba(239, 68, 68, 0.4)'
-                    : '1px solid rgba(255, 215, 0, 0.35)',
-                  background: driveStatus.connected
-                    ? 'rgba(16, 185, 129, 0.12)'
-                    : isConnectingDrive
-                    ? 'rgba(245, 158, 11, 0.12)'
-                    : driveConnectionError
-                    ? 'rgba(239, 68, 68, 0.12)'
-                    : 'rgba(255, 215, 0, 0.08)',
-                  color: driveStatus.connected
-                    ? '#34d399'
-                    : isConnectingDrive
-                    ? '#fbbf24'
-                    : driveConnectionError
-                    ? '#f87171'
-                    : '#ffd700',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  padding: '0.3rem 0.75rem',
-                  borderRadius: '9999px',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <Cloud size={13} className={isConnectingDrive ? 'spinning' : ''} />
-                {isConnectingDrive ? (
-                  <span>Google Drive: Connecting...</span>
-                ) : driveStatus.connected ? (
-                  <span>Google Drive: Connected ({driveStatus.email || 'Ready'})</span>
-                ) : driveConnectionError ? (
-                  <span>Google Drive: Error (Click to Retry)</span>
-                ) : (
-                  <span>Google Drive: Not Connected</span>
-                )}
-              </button>
+        {/* 1. Premium Consolidated Enterprise Analytics Dashboard Overview (Zero Duplicate Horizontal Tabs) */}
+        {(isControlCenter || isDashboard || isAnalyticsOverview) && (
+          <UnifiedDashboardOverview
+            token={token}
+            adminUser={adminUser}
+            onOpenNewStudent={() => navigate('/admin/analytics/new-student')}
+            onOpenRestoreStudent={() => navigate('/admin/analytics/restore-student')}
+            onOpenStudentPreview={handleOpenStudentPreview}
+          />
+        )}
 
-              {/* AI Provider Hub Status Pill */}
-              <button
-                type="button"
-                onClick={() => {
-                  setAdminSection('claude')
-                  fetchAiProvidersStatus()
-                  fetchPromptsForProvider(promptProvider, selectedPromptType)
-                  fetchAiHistory(historyProviderFilter)
-                }}
-                title={`AI Provider Hub: ${activeAiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} Active (Click to configure)`}
+        {/* 2. Analytics Sub-Pages */}
+        {isTamilNaduMap && (
+          <AdvancedAnalyticsDashboard
+            token={token}
+            activeTab="geographic"
+            hideInternalTabs={true}
+          />
+        )}
+
+        {isLiveMonitor && (
+          <AdvancedAnalyticsDashboard
+            token={token}
+            activeTab="live"
+            hideInternalTabs={true}
+          />
+        )}
+
+        {isTraffic && (
+          <AdvancedAnalyticsDashboard
+            token={token}
+            activeTab="traffic"
+            hideInternalTabs={true}
+          />
+        )}
+
+        {isSubscriptions && (
+          <SubscriptionOverviewPage token={token} />
+        )}
+
+        {isNewStudent && (
+          <NewStudentPage token={token} onSuccess={fetchAdminUsers} />
+        )}
+
+        {isRestoreStudent && (
+          <RestoreStudentPage token={token} />
+        )}
+
+        {isPerformance && (
+          <StudentPerformancePage token={token} />
+        )}
+
+        {isActiveReport && (
+          <AdvancedAnalyticsDashboard
+            token={token}
+            activeTab="reports"
+            hideInternalTabs={true}
+          />
+        )}
+
+        {/* 4. Student View Simulation Page */}
+        {isDashboardView && (
+          <div className="admin-subpage-root">
+            <div className="subpage-header-row">
+              <div className="subpage-titles">
+                <h1 className="subpage-title">Live Student Portal View</h1>
+                <p className="subpage-subtitle">
+                  Simulate the student learner dashboard, syllabus materials, mock tests, and practice workflows in real time.
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="glass"
+              style={{
+                padding: '2.5rem 2rem',
+                borderRadius: '16px',
+                border: '1px solid rgba(255, 215, 0, 0.25)',
+                background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
+                textAlign: 'center',
+                maxWidth: '680px',
+                margin: '2rem auto',
+              }}
+            >
+              <div
                 style={{
-                  cursor: 'pointer',
-                  border: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
-                    ? '1px solid rgba(16, 185, 129, 0.45)'
-                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
-                    ? '1px solid rgba(192, 132, 252, 0.4)'
-                    : '1px solid rgba(239, 68, 68, 0.35)',
-                  background: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
-                    ? 'rgba(16, 185, 129, 0.12)'
-                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
-                    ? 'rgba(192, 132, 252, 0.12)'
-                    : 'rgba(239, 68, 68, 0.1)',
-                  color: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
-                    ? '#34d399'
-                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
-                    ? '#c084fc'
-                    : '#f87171',
-                  display: 'inline-flex',
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  display: 'flex',
                   alignItems: 'center',
-                  gap: '0.4rem',
-                  padding: '0.3rem 0.75rem',
-                  borderRadius: '9999px',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  transition: 'all 0.2s ease',
+                  justifyContent: 'center',
+                  margin: '0 auto 1.25rem',
+                  color: '#fbbf24',
                 }}
               >
-                <Cpu size={13} />
-                <span>
-                  AI: {activeAiProvider === 'claude' ? 'Claude' : 'Gemini'} (
-                  {(activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
-                    ? 'Connected'
-                    : (activeAiProvider === 'claude' ? claudeStatus.configured : geminiStatus.configured)
-                    ? 'Ready'
-                    : 'Offline'}
-                  )
-                </span>
+                <Eye size={32} />
+              </div>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
+                Interactive Student Experience Simulation
+              </h2>
+              <p style={{ color: '#94a3b8', fontSize: '0.92rem', lineHeight: 1.6, marginBottom: '1.75rem' }}>
+                Preview how students navigate through Samacheer Kalvi syllabus trees, attempt topic-wise MCQs, view study notes, and track mock test scores. A floating banner will allow you to return to Admin at any time.
+              </p>
+              <button
+                type="button"
+                className="enroll-submit-btn"
+                style={{ margin: '0 auto', fontSize: '1rem', padding: '0.75rem 2rem' }}
+                onClick={handleOpenStudentPreview}
+              >
+                <Eye size={18} />
+                <span>Launch Student Dashboard Preview</span>
               </button>
             </div>
-            <h1 className="admin-title">
-              {adminSection === 'questions' && 'Question Bank Management'}
-              {adminSection === 'textbooks' && 'Textbook Management'}
-              {adminSection === 'notes' && 'Study Notes Management'}
-              {adminSection === 'gdrive' && 'Google Drive PDF Materials'}
-              {adminSection === 'claude' && 'AI Provider Hub (Claude & Gemini)'}
-            </h1>
-            <p className="admin-subtitle">
-              {adminSection === 'questions' && 'Review, edit, stage, and publish verified Samacheer Kalvi topic-wise MCQs directly into the database.'}
-              {adminSection === 'textbooks' && 'Upload, index, and organize Samacheer Kalvi PDF textbooks for AI study notes and MCQ generation.'}
-              {adminSection === 'notes' && 'Review, edit, stage, and publish comprehensive TNPSC Complete Study Notes directly into the database.'}
-              {adminSection === 'gdrive' && 'Connect your personal Google Drive account to store and stream official PDF textbooks and study materials with zero serverless size limits.'}
-              {adminSection === 'claude' && 'Configure Anthropic Claude AI and Google Gemini AI as two completely independent providers with separate keys, models, prompts, and generation logs.'}
-            </p>
           </div>
+        )}
 
-          <div className="admin-profile-group">
-            <span className="admin-user-pill">
-              <Shield size={14} style={{ color: 'var(--gold-primary)' }} />
-              <span>{adminUser?.name || adminUser?.username || 'Admin'}</span>
-              {adminUser?.role && (
-                <span className="admin-pill-role-tag">{adminUser.role.replace('_', ' ')}</span>
-              )}
-            </span>
-            <button
-              className="admin-users-mgmt-btn"
-              onClick={() => {
-                setIsUsersModalOpen(true)
-                fetchAdminUsers()
-              }}
-              title="Manage Multiple Admin Accounts"
-            >
-              <Users size={14} />
-              <span>Admin Accounts</span>
-            </button>
-            <button className="admin-logout-btn" onClick={handleLogout} title="Log out of Admin Portal">
-              <LogOut size={14} />
-              <span>Sign Out</span>
-            </button>
+        {/* 5. Header for Content Management & Integration Pages (Zero Horizontal Tabs) */}
+        {(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isGdrive || isClaude) && (
+          <div className="admin-header">
+            <div className="admin-header-main">
+              <div className="admin-badge-row">
+                <span className="admin-badge">
+                  <Sparkles size={13} />
+                  {isQuestions ? 'Question Bank' : isTextbooks ? 'Textbook Management' : isNotes ? 'Study Notes' : isStudyMaterialsManagement ? 'Study Materials Management' : isGdrive ? 'Google Drive' : 'AI Provider Hub'}
+                </span>
+                <span className="admin-user-pill admin-db-pill">
+                  <Database size={13} />
+                  PostgreSQL Connected
+                </span>
+                {isGdrive && (
+                  <span className="admin-user-pill" style={{ color: driveStatus.connected ? '#34d399' : '#f87171' }}>
+                    <Cloud size={13} />
+                    {driveStatus.connected ? 'Drive Connected' : 'Drive Offline'}
+                  </span>
+                )}
+                {isClaude && (
+                  <span className="admin-user-pill" style={{ color: '#c084fc' }}>
+                    <Cpu size={13} />
+                    AI: {activeAiProvider === 'claude' ? 'Claude' : 'Gemini'} Active
+                  </span>
+                )}
+              </div>
+              <h1 className="admin-title">
+                {isQuestions && 'Question Bank Management'}
+                {isTextbooks && 'Textbook Management'}
+                {isNotes && 'Study Notes Management'}
+                {isStudyMaterialsManagement && 'Study Materials Management'}
+                {isGdrive && 'Google Drive PDF Materials'}
+                {isClaude && 'AI Provider Hub (Claude & Gemini)'}
+              </h1>
+              <p className="admin-subtitle">
+                {isQuestions && 'Review, edit, stage, and publish verified Samacheer Kalvi topic-wise MCQs directly into the database.'}
+                {isTextbooks && 'Upload, index, and organize Samacheer Kalvi PDF textbooks for AI study notes and MCQ generation.'}
+                {isNotes && 'Review, edit, stage, and publish comprehensive TNPSC Complete Study Notes directly into the database.'}
+                {isStudyMaterialsManagement && 'Manage syllabus hierarchy dynamically across Exam, Subject, Standard (6th–12th), Units, Lessons, Topics, and Study Notes.'}
+                {isGdrive && 'Connect your personal Google Drive account to store and stream official PDF textbooks and study materials with zero serverless size limits.'}
+                {isClaude && 'Configure Anthropic Claude AI and Google Gemini AI as two completely independent providers with separate keys, models, prompts, and generation logs.'}
+              </p>
+            </div>
+
+            <div className="admin-profile-group">
+              <span className="admin-user-pill">
+                <Shield size={14} style={{ color: 'var(--gold-primary)' }} />
+                <span>{adminUser?.name || adminUser?.username || 'Admin'}</span>
+                {adminUser?.role && (
+                  <span className="admin-pill-role-tag">{adminUser.role.replace('_', ' ')}</span>
+                )}
+              </span>
+              <button
+                className="admin-users-mgmt-btn"
+                onClick={() => {
+                  setIsUsersModalOpen(true)
+                  fetchAdminUsers()
+                }}
+                title="Manage Multiple Admin Accounts"
+              >
+                <Users size={14} />
+                <span>Admin Accounts</span>
+              </button>
+              <button className="admin-logout-btn" onClick={handleLogout} title="Log out of Admin Portal">
+                <LogOut size={14} />
+                <span>Sign Out</span>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Navigation Section Tabs */}
-        <div className="admin-section-nav">
-          <button
-            className={`admin-section-tab ${adminSection === 'questions' ? 'active' : ''}`}
-            onClick={() => setAdminSection('questions')}
-          >
-            <Database size={16} />
-            <span>Question Bank</span>
-            <span className="admin-section-tab-count">{metrics.totalQuestions}</span>
-          </button>
-          <button
-            className={`admin-section-tab ${adminSection === 'textbooks' ? 'active' : ''}`}
-            onClick={() => {
-              setAdminSection('textbooks')
-              fetchTextbooks()
-            }}
-          >
-            <BookOpen size={16} />
-            <span>Textbook Management</span>
-            <span className="admin-section-tab-count">{textbookMetrics.totalTextbooks}</span>
-          </button>
-          <button
-            className={`admin-section-tab ${adminSection === 'notes' ? 'active' : ''}`}
-            onClick={() => {
-              setAdminSection('notes')
-              fetchNotes()
-            }}
-          >
-            <FileText size={16} />
-            <span>Study Notes</span>
-            <span className="admin-section-tab-count">{notesMetrics.totalNotes}</span>
-          </button>
-          <button
-            className={`admin-section-tab ${adminSection === 'gdrive' ? 'active' : ''}`}
-            onClick={() => {
-              setAdminSection('gdrive')
-              fetchDriveMaterials()
-              checkDriveStatus()
-            }}
-          >
-            <Cloud size={16} />
-            <span>Google Drive</span>
-            <span className="admin-section-tab-count">{driveMaterials.length}</span>
-          </button>
-          <button
-            className={`admin-section-tab ${adminSection === 'claude' ? 'active' : ''}`}
-            onClick={() => {
-              setAdminSection('claude')
-              fetchAiProvidersStatus()
-              fetchPromptsForProvider(promptProvider, selectedPromptType)
-              fetchAiHistory(historyProviderFilter)
-            }}
-          >
-            <Cpu size={16} />
-            <span>AI Provider Hub</span>
-            <span
-              className="admin-section-tab-count"
-              style={{
-                background: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
-                  ? 'rgba(16, 185, 129, 0.25)'
-                  : 'rgba(192, 132, 252, 0.25)',
-                color: (activeAiProvider === 'claude' ? claudeStatus.connected : geminiStatus.connected)
-                  ? '#34d399'
-                  : '#c084fc',
-              }}
-            >
-              {activeAiProvider.toUpperCase()} ACTIVE
-            </span>
-          </button>
-        </div>
-
-        {/* Dynamic 4 Dashboard Statistics Cards HUD for Active Management Tab */}
-        {adminSection === 'questions' && (
+                {/* Dynamic 4 Dashboard Statistics Cards HUD for Active Management Tab */}
+        {isQuestions && (
           <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-gold">
@@ -3604,7 +3831,7 @@ const Admin = () => {
           </div>
         )}
 
-        {adminSection === 'textbooks' && (
+        {isTextbooks && (
           <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-gold">
@@ -3650,7 +3877,7 @@ const Admin = () => {
           </div>
         )}
 
-        {adminSection === 'notes' && (
+        {isNotes && (
           <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-gold">
@@ -3696,7 +3923,7 @@ const Admin = () => {
           </div>
         )}
 
-        {adminSection === 'gdrive' && (
+        {isGdrive && (
           <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-gold">
@@ -3754,7 +3981,7 @@ const Admin = () => {
           </div>
         )}
 
-        {adminSection === 'claude' && (
+        {isClaude && (
           <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
             <div className="admin-metric-card glass">
               <div className="metric-icon-box" style={{ background: activeAiProvider === 'claude' ? 'rgba(192, 132, 252, 0.15)' : 'rgba(56, 189, 248, 0.15)', color: activeAiProvider === 'claude' ? '#c084fc' : '#38bdf8' }}>
@@ -3839,7 +4066,7 @@ const Admin = () => {
         )}
 
         {/* Section 1: Question Bank Management */}
-        {adminSection === 'questions' && (
+        {isQuestions && (
           <>
             {/* PDF Processing Dashboard (Page-by-Page Extraction Status & Overview) */}
             <div
@@ -4438,7 +4665,7 @@ const Admin = () => {
         )}
 
         {/* Section 2: Textbook Management */}
-        {adminSection === 'textbooks' && (
+        {isTextbooks && (
           <div className="admin-textbooks-section">
             <div className="admin-section-header">
               <div>
@@ -4734,7 +4961,7 @@ const Admin = () => {
                       </td>
                     </tr>
                   ) : (
-                    filteredTextbooks.map((tb) => {
+                    pagedTextbooks.map((tb) => {
                       const isSelected = selectedTextbookIds.has(tb.id)
                       return (
                         <tr
@@ -4846,12 +5073,36 @@ const Admin = () => {
                   )}
                 </tbody>
               </table>
+
+              {textbookTotalPages > 1 && (
+                <div className="admin-pagination">
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    Page {Math.min(textbookPage, textbookTotalPages)} of {textbookTotalPages} ({filteredTextbooks.length} textbooks)
+                  </span>
+                  <div className="pagination-controls">
+                    <button
+                      className="table-action-btn"
+                      disabled={textbookPage <= 1}
+                      onClick={() => setTextbookPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button
+                      className="table-action-btn"
+                      disabled={textbookPage >= textbookTotalPages}
+                      onClick={() => setTextbookPage((p) => Math.min(textbookTotalPages, p + 1))}
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* Section 3: Study Notes Management */}
-        {adminSection === 'notes' && (
+        {isNotes && (
           <>
             {/* Toolbar & Filters (matches Question Bank layout exactly) */}
             <div className="admin-toolbar glass">
@@ -5179,8 +5430,15 @@ const Admin = () => {
           </>
         )}
 
+        {/* Dynamic Study Materials Management System */}
+        {isStudyMaterialsManagement && (
+          <div className="admin-study-materials-mgmt-section" style={{ width: '100%' }}>
+            <StudyMaterialsManagement token={token} />
+          </div>
+        )}
+
         {/* Section 4: Google Drive PDF Materials Management */}
-        {adminSection === 'gdrive' && (
+        {isGdrive && (
           <div className="admin-gdrive-section">
             {/* Google Drive Status Banner Card */}
             <div className="gdrive-status-card" style={{ marginBottom: '1.5rem' }}>
@@ -6138,7 +6396,7 @@ const Admin = () => {
         )}
 
         {/* Section 5: AI Provider Hub (Independent Claude AI & Google Gemini AI) */}
-        {adminSection === 'claude' && (
+        {isClaude && (
           <div className="admin-claude-section" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
             {/* 1. Dual Independent Provider Overview Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.25rem' }}>
@@ -7036,6 +7294,9 @@ const Admin = () => {
             </div>
           </div>
         )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Add / Edit Question Modal */}
@@ -7071,7 +7332,7 @@ const Admin = () => {
                           const newCat = e.target.value as any
                           const currentClassId = editingQuestion.classId || 6
                           const subjects = getSubjectsForGroup(newCat)
-                          const defaultSubjectId = subjects[0]?.id || 'general_science'
+                          const defaultSubjectId = subjects[0]?.id || 'general-studies'
                           const units = getUnitsForSubjectStandard(newCat, defaultSubjectId, currentClassId)
                           const defaultUnitId = units[0]?.id || 1
                           const lessons = getLessonsForSelection(newCat, defaultSubjectId, currentClassId, defaultUnitId)
@@ -7090,7 +7351,7 @@ const Admin = () => {
                       >
                         {TNPSC_GROUPS.map((g) => (
                           <option key={g.id} value={g.id}>
-                            {g.name} ({g.code})
+                            {g.name}
                           </option>
                         ))}
                       </select>
@@ -7114,11 +7375,13 @@ const Admin = () => {
                           const currentClassId = editingQuestion.classId || 6
                           const subjects = getSubjectsForGroup(currentCat)
                           const subj = subjects.find((s: any) => s.name === selectedSubjectName) || subjects[0]
-                          const subjId = subj?.id || 'general_science'
+                          const subjId = subj?.id || 'general-studies'
                           const units = getUnitsForSubjectStandard(currentCat, subjId, currentClassId)
                           const defaultUnitId = units[0]?.id || 1
                           const lessons = getLessonsForSelection(currentCat, subjId, currentClassId, defaultUnitId)
                           const topics = lessons[0] ? getTopicsForSelection(currentCat, subjId, currentClassId, defaultUnitId, lessons[0].title) : []
+                          setQbModalLessons([])
+                          setQbModalTopics([])
                           setEditingQuestion({
                             ...editingQuestion,
                             subject: selectedSubjectName,
@@ -7158,9 +7421,11 @@ const Admin = () => {
                           const currentSubj = editingQuestion.subject || ''
                           const subjects = getSubjectsForGroup(currentCat)
                           const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
-                          const subjId = subj?.id || 'general_science'
+                          const subjId = subj?.id || 'general-studies'
                           const lessons = getLessonsForSelection(currentCat, subjId, newClassId, currentUnitId)
                           const topics = lessons[0] ? getTopicsForSelection(currentCat, subjId, newClassId, currentUnitId, lessons[0].title) : []
+                          setQbModalLessons([])
+                          setQbModalTopics([])
                           setEditingQuestion({
                             ...editingQuestion,
                             classId: newClassId,
@@ -7184,7 +7449,7 @@ const Admin = () => {
                   {/* Row 2: Unit & Lesson Title */}
                   <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
                     <div className="form-field">
-                      <label>4. Unit (1 to 6) *</label>
+                      <label>4. Unit *</label>
                       <select
                         className="filter-select"
                         style={{ width: '100%', padding: '0.65rem' }}
@@ -7196,11 +7461,13 @@ const Admin = () => {
                           const currentSubj = editingQuestion.subject || ''
                           const subjects = getSubjectsForGroup(currentCat)
                           const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
-                          const subjId = subj?.id || 'general_science'
+                          const subjId = subj?.id || 'general-studies'
                           const units = getUnitsForSubjectStandard(currentCat, subjId, currentClassId)
                           const unitObj = units.find((u: any) => u.id === newUnitId)
                           const lessons = getLessonsForSelection(currentCat, subjId, currentClassId, newUnitId)
                           const topics = lessons[0] ? getTopicsForSelection(currentCat, subjId, currentClassId, newUnitId, lessons[0].title) : []
+                          setQbModalLessons([])
+                          setQbModalTopics([])
                           setEditingQuestion({
                             ...editingQuestion,
                             unitId: newUnitId,
@@ -7218,9 +7485,19 @@ const Admin = () => {
                           const currentSubj = editingQuestion.subject || ''
                           const subjects = getSubjectsForGroup(currentCat)
                           const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
-                          const subjId = subj?.id || 'general_science'
-                          const units = getUnitsForSubjectStandard(currentCat, subjId, currentClassId)
-                          return units.map((u: any) => (
+                          const subjId = subj?.id || 'general-studies'
+                          const canonicalUnits = getUnitsForSubjectStandard(currentCat, subjId, currentClassId)
+                          const mergedUnits = qbModalUnits.length > 0
+                            ? [
+                                ...qbModalUnits.map((u: any) => ({
+                                  id: u.unit_number || u.id,
+                                  unitNumber: u.unit_code || u.unitNumber || `Unit ${u.unit_number || u.id}`,
+                                  title: u.title,
+                                })),
+                                ...canonicalUnits.filter((c: any) => !qbModalUnits.some((u: any) => (u.unit_number || u.id) === c.id)),
+                              ]
+                            : canonicalUnits
+                          return mergedUnits.map((u: any) => (
                             <option key={u.id} value={u.id}>
                               {u.unitNumber ? `${u.unitNumber}: ` : ''}{u.title}
                             </option>
@@ -7238,8 +7515,15 @@ const Admin = () => {
                         const currentSubj = editingQuestion.subject || ''
                         const subjects = getSubjectsForGroup(currentCat)
                         const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
-                        const subjId = subj?.id || 'general_science'
-                        const availableEditLessons = getLessonsForSelection(currentCat, subjId, currentClassId, currentUnitId)
+                        const subjId = subj?.id || 'general-studies'
+                        const canonicalLessons = getLessonsForSelection(currentCat, subjId, currentClassId, currentUnitId)
+                        const availableEditLessons = qbModalLessons.length > 0
+                          ? qbModalLessons.map((l: any) => ({
+                              id: l.id,
+                              lessonNumber: l.lesson_number || l.lessonNumber,
+                              title: l.title,
+                            }))
+                          : canonicalLessons
                         return (
                           <select
                             className="filter-select"
@@ -7286,14 +7570,20 @@ const Admin = () => {
                       const currentSubj = editingQuestion.subject || ''
                       const subjects = getSubjectsForGroup(currentCat)
                       const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
-                      const subjId = subj?.id || 'general_science'
-                      const availableEditTopics = getTopicsForSelection(
+                      const subjId = subj?.id || 'general-studies'
+                      const canonicalTopics = getTopicsForSelection(
                         currentCat,
                         subjId,
                         currentClassId,
                         currentUnitId,
                         editingQuestion.lessonTitle || ''
                       )
+                      const availableEditTopics = qbModalTopics.length > 0
+                        ? qbModalTopics.map((t: any) => ({
+                            id: t.id,
+                            name: t.topic_name || t.name,
+                          }))
+                        : canonicalTopics
                       if (availableEditTopics.length > 0) {
                         return (
                           <select
@@ -8676,7 +8966,6 @@ const Admin = () => {
                   const units = getUnitsForSubjectStandard(currentCat, currentSubjId, currentClassId)
                   const currentUnitObj = units.find((u: any) => u.id === editingNote.unitId) || units[0]
                   const currentUnitId = currentUnitObj?.id || 1
-                  const lessons = getLessonsForSelection(currentCat, currentSubjId, currentClassId, currentUnitId)
 
                   return (
                     <>
@@ -8707,7 +8996,7 @@ const Admin = () => {
                           >
                             {TNPSC_GROUPS.map((g) => (
                               <option key={g.id} value={g.id}>
-                                {g.name} ({g.code})
+                                {g.name}
                               </option>
                             ))}
                           </select>
@@ -8779,6 +9068,8 @@ const Admin = () => {
                             value={currentUnitId}
                             onChange={(e) => {
                               const newUnitId = Number(e.target.value) || 1
+                              setNotesModalLessons([])
+                              setNotesModalTopics([])
                               const newLessons = getLessonsForSelection(currentCat, currentSubjId, currentClassId, newUnitId)
                               const newLesson = newLessons[0]
                               setEditingNote({
@@ -8787,45 +9078,75 @@ const Admin = () => {
                                 lessonId: newLesson?.id || '',
                                 lessonNumber: newLesson?.lessonNumber || '',
                                 lessonTitle: newLesson?.title || '',
+                                topic: '',
+                                topicId: null,
                               })
                             }}
                           >
-                            {units.map((u: any) => (
-                              <option key={u.id} value={u.id}>
-                                {u.unitNumber ? `Unit ${u.unitNumber}: ` : ''}{u.title}
-                              </option>
-                            ))}
+                            {(() => {
+                              const canonicalUnits = getUnitsForSubjectStandard(currentCat, currentSubjId, currentClassId)
+                              const mergedUnits = notesModalUnits.length > 0
+                                ? [
+                                    ...notesModalUnits.map((u: any) => ({
+                                      id: u.unit_number || u.id,
+                                      unitNumber: u.unit_code || u.unitNumber || `Unit ${u.unit_number || u.id}`,
+                                      title: u.title,
+                                    })),
+                                    ...canonicalUnits.filter((c: any) => !notesModalUnits.some((u: any) => (u.unit_number || u.id) === c.id)),
+                                  ]
+                                : canonicalUnits
+                              return mergedUnits.map((u: any) => (
+                                <option key={u.id} value={u.id}>
+                                  {u.unitNumber ? `Unit ${u.unitNumber}: ` : ''}{u.title}
+                                </option>
+                              ))
+                            })()}
                           </select>
                         </div>
 
                         <div className="ai-field">
                           <label>5. Lesson Selection (Exact Lesson) *</label>
-                          <select
-                            className="ai-select"
-                            value={editingNote.lessonId || editingNote.lessonTitle || ''}
-                            onChange={(e) => {
-                              const chosen = e.target.value
-                              const matched = lessons.find((l: any) => l.id === chosen) || lessons.find((l: any) => l.title === chosen)
-                              setEditingNote({
-                                ...editingNote,
-                                lessonId: matched?.id || (chosen.startsWith('gt-') || chosen.startsWith('gs-') ? chosen : ''),
-                                lessonNumber: matched?.lessonNumber || '',
-                                lessonTitle: matched?.title || chosen,
-                              })
-                            }}
-                          >
-                            <option value="" disabled>-- Select Lesson ({lessons.length} available) --</option>
-                            {lessons.map((l: any) => (
-                              <option key={l.id} value={l.id}>
-                                {l.lessonNumber ? `Lesson ${l.lessonNumber} – ` : ''}{l.title}
-                              </option>
-                            ))}
-                            {editingNote.lessonTitle && !lessons.some((l: any) => l.id === editingNote.lessonId || l.title === editingNote.lessonTitle) && (
-                              <option value={editingNote.lessonTitle}>
-                                {editingNote.lessonNumber ? `Lesson ${editingNote.lessonNumber} – ` : ''}{editingNote.lessonTitle}
-                              </option>
-                            )}
-                          </select>
+                          {(() => {
+                            const canonicalLessons = getLessonsForSelection(currentCat, currentSubjId, currentClassId, currentUnitId)
+                            const activeLessons = notesModalLessons.length > 0
+                              ? notesModalLessons.map((l: any) => ({
+                                  id: l.id,
+                                  lessonNumber: l.lesson_number || l.lessonNumber,
+                                  title: l.title,
+                                }))
+                              : canonicalLessons
+                            return (
+                              <select
+                                className="ai-select"
+                                value={editingNote.lessonId || editingNote.lessonTitle || ''}
+                                onChange={(e) => {
+                                  const chosen = e.target.value
+                                  const matched = activeLessons.find((l: any) => l.id === chosen) || activeLessons.find((l: any) => l.title === chosen)
+                                  setNotesModalTopics([])
+                                  setEditingNote({
+                                    ...editingNote,
+                                    lessonId: matched?.id || (chosen.startsWith('gt-') || chosen.startsWith('gs-') ? chosen : ''),
+                                    lessonNumber: matched?.lessonNumber || '',
+                                    lessonTitle: matched?.title || chosen,
+                                    topic: '',
+                                    topicId: null,
+                                  })
+                                }}
+                              >
+                                <option value="" disabled>-- Select Lesson ({activeLessons.length} available) --</option>
+                                {activeLessons.map((l: any) => (
+                                  <option key={l.id} value={l.id}>
+                                    {l.lessonNumber ? `Lesson ${l.lessonNumber} – ` : ''}{l.title}
+                                  </option>
+                                ))}
+                                {editingNote.lessonTitle && !activeLessons.some((l: any) => l.id === editingNote.lessonId || l.title === editingNote.lessonTitle) && (
+                                  <option value={editingNote.lessonTitle}>
+                                    {editingNote.lessonNumber ? `Lesson ${editingNote.lessonNumber} – ` : ''}{editingNote.lessonTitle}
+                                  </option>
+                                )}
+                              </select>
+                            )
+                          })()}
                         </div>
 
                         <div className="ai-field">
@@ -8840,6 +9161,34 @@ const Admin = () => {
                           </select>
                         </div>
                       </div>
+
+                      {/* 6. Specific Syllabus Topic (when available) */}
+                      {notesModalTopics && notesModalTopics.length > 0 && (
+                        <div className="ai-field" style={{ marginBottom: '0.75rem' }}>
+                          <label>6. Specific Topic Selection</label>
+                          <select
+                            className="ai-select"
+                            value={editingNote.topic || ''}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              const matchedTopic = notesModalTopics.find((t: any) => t.topic_name === val)
+                              setEditingNote({
+                                ...editingNote,
+                                topic: val,
+                                topicId: matchedTopic?.id || null,
+                                title: editingNote.title || val,
+                              })
+                            }}
+                          >
+                            <option value="">Entire Lesson / All Topics</option>
+                            {notesModalTopics.map((t: any) => (
+                              <option key={t.id} value={t.topic_name}>
+                                {t.topic_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </>
                   )
                 })()}

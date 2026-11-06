@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import {
   AlertTriangle,
   BookOpen,
@@ -20,6 +20,7 @@ import {
   getLessonsForSelection,
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 
 export type GroupId = 'group1' | 'group2' | 'group2a' | 'group4'
 export type Language = 'tamil' | 'english'
@@ -130,6 +131,24 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   // (The exact single source of truth used by Study Notes Generation)
   // =========================================================================
 
+  const [dynamicUnits, setDynamicUnits] = useState<any[]>([])
+  const [dynamicLessons, setDynamicLessons] = useState<any[]>([])
+  const [syncVersion, setSyncVersion] = useState(0)
+
+  // Request sequence guards to avoid race conditions
+  const lessonReqSeq = useRef(0)
+  const topicReqSeq = useRef(0)
+  void lessonReqSeq
+  void topicReqSeq
+
+  // Auto-subscribe to Master Syllabus updates from Study Materials Management
+  useEffect(() => {
+    const unsub = dynamicSyllabusService.subscribe(() => {
+      setSyncVersion((v) => v + 1)
+    })
+    return unsub
+  }, [])
+
   const effectiveGroupId: 'group1' | 'group2' | 'group4' =
     groupId === 'group2a' ? 'group2' : groupId
 
@@ -151,22 +170,131 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
     [standard]
   )
 
+  // Fetch PostgreSQL dynamic units
+  useEffect(() => {
+    let mounted = true
+    dynamicSyllabusService
+      .getUnits(effectiveGroupId, subjectId, standard)
+      .then((units) => {
+        if (!mounted || !units || units.length === 0) return
+        setDynamicUnits(
+          units.map((u) => ({
+            id: u.unit_number || u.id,
+            unitNumber: u.unit_code || u.unitNumber || `Unit ${u.unit_number || u.id}`,
+            title: u.title,
+            subjectName: u.subject_name || u.subjectName || 'General Studies',
+          }))
+        )
+      })
+      .catch(() => {})
+    return () => {
+      mounted = false
+    }
+  }, [effectiveGroupId, subjectId, standard, syncVersion])
+
   // 4. Available units for selected Group, Subject, Standard & Term
-  const availableUnits = useMemo(
-    () => getUnitsForSubjectStandardAndTerm(effectiveGroupId, subjectId, standard, term),
-    [effectiveGroupId, subjectId, standard, term]
-  )
+  const availableUnits = useMemo(() => {
+    const canonical = getUnitsForSubjectStandardAndTerm(effectiveGroupId, subjectId, standard, term)
+    if (dynamicUnits.length === 0) return canonical
+
+    const seenIds = new Set(dynamicUnits.map((u) => u.id))
+    const combined = [...dynamicUnits]
+    canonical.forEach((c) => {
+      if (!seenIds.has(c.id)) combined.push(c)
+    })
+    return combined.sort((a, b) => a.id - b.id)
+  }, [dynamicUnits, effectiveGroupId, subjectId, standard, term])
+
+  // Fetch PostgreSQL dynamic lessons strictly for selected Unit
+  useEffect(() => {
+    let mounted = true
+    const seq = ++lessonReqSeq.current
+    setDynamicLessons([])
+
+    dynamicSyllabusService
+      .getLessons({
+        examId: effectiveGroupId,
+        subjectId,
+        standardNumber: standard,
+        unitNumber: Number(unitId),
+        unitId: Number(unitId),
+      })
+      .then((lessons) => {
+        if (!mounted || seq !== lessonReqSeq.current) return
+        if (lessons && lessons.length > 0) {
+          const mapped = lessons.map((l) => ({
+            id: l.id,
+            lessonNumber: l.lesson_number,
+            title: l.title,
+            description: l.description,
+            term: l.term || 'Term 1',
+            classId: l.standard_number,
+            topicsCount: l.topics_count || 0,
+            topics: [],
+          }))
+          setDynamicLessons(mapped)
+
+          // If current lesson doesn't belong to this unit's lessons, auto-apply the first lesson
+          if (!mapped.some((m) => m.title === selectedLessonTitle)) {
+            applySelectedLesson(mapped[0], groupId, subjectId, standard, Number(unitId), term)
+          }
+        } else {
+          setDynamicLessons([])
+        }
+      })
+      .catch(() => {
+        if (mounted && seq === lessonReqSeq.current) {
+          setDynamicLessons([])
+        }
+      })
+    return () => {
+      mounted = false
+    }
+  }, [effectiveGroupId, subjectId, standard, unitId, syncVersion])
 
   // 5. Available lesson titles strictly from Study Notes Generation structure
-  const availableLessons = useMemo(
-    () => getLessonsForSelection(effectiveGroupId, subjectId, standard, Number(unitId), term),
-    [effectiveGroupId, subjectId, standard, unitId, term]
-  )
+  const availableLessons = useMemo(() => {
+    if (dynamicLessons.length > 0) {
+      return dynamicLessons
+    }
+    return getLessonsForSelection(effectiveGroupId, subjectId, standard, Number(unitId), term)
+  }, [dynamicLessons, effectiveGroupId, subjectId, standard, unitId, term])
 
   // 6. Currently selected Lesson object
   const selectedLessonObj: LessonItem | undefined = useMemo(() => {
     return availableLessons.find((l) => l.title === selectedLessonTitle) || availableLessons[0]
   }, [availableLessons, selectedLessonTitle])
+
+  // Fetch PostgreSQL dynamic topics strictly for selected Lesson
+  useEffect(() => {
+    let mounted = true
+    const seq = ++topicReqSeq.current
+    if (selectedLessonObj?.id || selectedLessonObj?.title) {
+      dynamicSyllabusService
+        .getTopics(selectedLessonObj.id || '', {
+          lessonTitle: selectedLessonObj.title,
+          unitId: Number(unitId) || undefined,
+        })
+        .then((tList) => {
+        if (!mounted || seq !== topicReqSeq.current) return
+        if (tList.length > 0) {
+          const names = tList.map((t) => t.topic_name)
+          setAvailableTopics(names)
+          setSelectedTopics(names)
+        } else {
+          const staticTopics = (selectedLessonObj.topics || []).map((t: any) => typeof t === 'string' ? t : t.name)
+          setAvailableTopics(staticTopics)
+          setSelectedTopics(staticTopics)
+        }
+      })
+    } else {
+      setAvailableTopics([])
+      setSelectedTopics([])
+    }
+    return () => {
+      mounted = false
+    }
+  }, [selectedLessonObj?.id, selectedLessonObj?.title, syncVersion])
 
   const selectedTextbook = useMemo(() => {
     return textbooksList.find((t) => t.key === selectedTextbookKey) || null
@@ -320,9 +448,12 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
     applySelectedLesson(nextLesson, groupId, subjectId, standard, validUnit, newTerm)
   }
 
-  // 5. Unit Change -> filters Lesson Titles, resets downstream
+  // 5. Unit Change -> strictly filters Lesson Titles to this unit only, resets downstream
   const handleUnitChange = (newUnitId: number) => {
     setUnitId(newUnitId)
+    setDynamicLessons([])
+    setAvailableTopics([])
+    setSelectedTopics([])
     const nextLessons = getLessonsForSelection(effectiveGroupId, subjectId, standard, newUnitId, term)
     const nextLesson = nextLessons[0]
     applySelectedLesson(nextLesson, groupId, subjectId, standard, newUnitId, term)

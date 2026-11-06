@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -52,6 +53,45 @@ const Group4SubjectDetail = () => {
 
   const activeSubjectId = (subjectId as 'general-studies' | 'aptitude' | 'general-tamil' | 'general-english') || 'general-studies'
   const subject = getGroup4SubjectById(activeSubjectId)
+  const [units, setUnits] = useState<Group4Unit[]>(subject ? subject.units : [])
+
+  useEffect(() => {
+    if (!subject) return
+    setUnits(subject.units)
+    fetch(`/api/study-management/units?examId=group4&subjectId=${activeSubjectId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.units) && data.units.length > 0) {
+          setUnits((prev) => {
+            const staticMap = new Map(prev.map((u) => [u.id, u]))
+            return data.units.map((u: any) => {
+              const existing = staticMap.get(u.unit_number)
+              if (existing) {
+                return {
+                  ...existing,
+                  title: u.title || existing.title,
+                  tamilTitle: u.subject_name || existing.tamilTitle,
+                  questionCount: u.question_count || existing.questionCount,
+                  unitNumber: u.unit_code || existing.unitNumber,
+                  officialTopics: u.description ? [u.description] : existing.officialTopics,
+                }
+              }
+              return {
+                id: u.unit_number,
+                unitNumber: u.unit_code || `Unit ${u.unit_number}`,
+                title: u.title,
+                tamilTitle: u.subject_name || u.title,
+                questionCount: u.question_count || 10,
+                standard: 'SSLC Standard',
+                officialTopics: u.description ? [u.description] : [`Syllabus outline for ${u.title}`],
+                chapters: [],
+              }
+            })
+          })
+        }
+      })
+      .catch(() => {})
+  }, [activeSubjectId, subject])
 
   if (!subject) {
     return (
@@ -130,7 +170,7 @@ const Group4SubjectDetail = () => {
             {subject.partTag}: {subject.title} <span className="gradient-text">({totalQuestions} Questions)</span>
           </h1>
           <p className="gs-subtitle">
-            Authoritative syllabus structure from the official TNPSC notification (Code: 496). Explore all {subject.units.length} distinct
+            Authoritative syllabus structure from the official TNPSC notification (Code: 496). Explore all {units.length} distinct
             curated Units, master core chapters, and track lesson-wise progress.
           </p>
         </motion.div>
@@ -152,7 +192,7 @@ const Group4SubjectDetail = () => {
               <Layers size={22} />
             </div>
             <div className="gs-hud-info">
-              <span className="gs-hud-value">{subject.units.length} Units</span>
+              <span className="gs-hud-value">{units.length} Units</span>
               <span className="gs-hud-label">Syllabus Units</span>
             </div>
           </div>
@@ -216,7 +256,7 @@ const Group4SubjectDetail = () => {
                     <GraduationCap size={22} />
                   </div>
                   <h3 className="class-card-title">{cls.label}</h3>
-                  <p className="class-card-desc">Units 1 to {subject.units.length} mapped textbook lessons</p>
+                  <p className="class-card-desc">Units 1 to {units.length} mapped textbook lessons</p>
                 </div>
 
                 <div className="class-card-cta">
@@ -236,12 +276,12 @@ const Group4SubjectDetail = () => {
               Each unit maps school textbook standards (6th to 12th) plus the comprehensive syllabus outline.
             </p>
           </div>
-          <span className="units-total-badge">{subject.units.length} Official Units</span>
+          <span className="units-total-badge">{units.length} Official Units</span>
         </div>
 
         {/* Unit Cards Responsive Grid with Standard Selectors */}
         <div className="units-grid">
-          {subject.units.map((unit: Group4Unit, index: number) => {
+          {units.map((unit: Group4Unit, index: number) => {
             const Icon = unitIcons[unit.id] || BookOpen
             const chapterCount = getGroup4UnitChapterCount(unit)
             const lessonCount = getGroup4UnitLessonCount(unit)

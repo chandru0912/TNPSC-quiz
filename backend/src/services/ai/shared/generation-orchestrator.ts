@@ -14,8 +14,10 @@ import { randomizeBatchOptions } from './option-randomizer';
 import { filterDuplicates, BatchDuplicateFilterResult } from './duplicate-detector';
 import { ClaudeService } from '../providers/claude/claude.service';
 import { GeminiService } from '../providers/gemini/gemini.service';
+import { OpenAIService } from '../providers/openai/openai.service';
 import { getClaudeModel } from '../providers/claude/claude.config';
 import { getGeminiModel } from '../providers/gemini/gemini.config';
+import { getOpenAiModel } from '../providers/openai/openai.config';
 import { CLAUDE_DEFAULT_PROMPTS } from '../providers/claude/claude.prompts';
 import { GEMINI_DEFAULT_PROMPTS } from '../providers/gemini/gemini.prompts';
 import { AILogsService } from '../ai-logs.service';
@@ -79,7 +81,7 @@ export class GenerationOrchestrator {
       // Fallback to coded default
     }
 
-    const defMap = provider === 'claude' ? CLAUDE_DEFAULT_PROMPTS : GEMINI_DEFAULT_PROMPTS;
+    const defMap = provider === 'claude' ? CLAUDE_DEFAULT_PROMPTS : provider === 'openai' ? CLAUDE_DEFAULT_PROMPTS : GEMINI_DEFAULT_PROMPTS;
     return defMap[promptType].content;
   }
 
@@ -90,8 +92,13 @@ export class GenerationOrchestrator {
     const startTime = Date.now();
 
     // 1. Resolve Provider (Strict Isolation)
-    let selectedProvider: AIProviderName = (input.provider || 'claude').toLowerCase() === 'gemini' ? 'gemini' : 'claude';
-    let selectedModel = input.model || (selectedProvider === 'claude' ? getClaudeModel() : getGeminiModel());
+    let selectedProvider: AIProviderName =
+      (input.provider || 'claude').toLowerCase() === 'gemini'
+        ? 'gemini'
+        : (input.provider || 'claude').toLowerCase() === 'openai'
+        ? 'openai'
+        : 'claude';
+    let selectedModel = input.model || (selectedProvider === 'claude' ? getClaudeModel() : selectedProvider === 'openai' ? getOpenAiModel() : getGeminiModel());
 
     // 2. Resolve Syllabus Context
     const syllabus = SyllabusContextService.resolveContext({
@@ -162,6 +169,12 @@ export class GenerationOrchestrator {
     try {
       if (selectedProvider === 'claude') {
         rawItems = await ClaudeService.generateJson<any[]>(userPrompt, {
+          systemPrompt: systemPromptTemplate,
+          maxTokens: Math.min(8192, Math.max(2048, requestedCount * 400)),
+          temperature: 0.3,
+        });
+      } else if (selectedProvider === 'openai') {
+        rawItems = await OpenAIService.generateJson<any[]>(userPrompt, {
           systemPrompt: systemPromptTemplate,
           maxTokens: Math.min(8192, Math.max(2048, requestedCount * 400)),
           temperature: 0.3,

@@ -63,9 +63,10 @@ const Group4Lessons = () => {
     const fetchDynamicContent = async () => {
       if (!baseUnit) return
       try {
-        const [questionsRes, notesRes] = await Promise.allSettled([
+        const [questionsRes, notesRes, unitsRes] = await Promise.allSettled([
           apiFetch(`/api/study-materials/questions?group=group4&subjectId=${activeSubjectId}&unitId=${parsedUnitId}&limit=500`),
           apiFetch(`/api/notes?category=group4_vao&unitId=${parsedUnitId}&limit=500`),
+          apiFetch(`/api/study-management/units?examId=group4&subjectId=${activeSubjectId}`),
         ])
 
         const dbQuestions: any[] = []
@@ -101,6 +102,18 @@ const Group4Lessons = () => {
         }
 
         const clonedUnit: any = JSON.parse(JSON.stringify(baseUnit))
+        if (unitsRes.status === 'fulfilled' && unitsRes.value.ok) {
+          const udata = await unitsRes.value.json()
+          if (udata.success && Array.isArray(udata.units)) {
+            const match = udata.units.find((u: any) => u.unit_number === parsedUnitId)
+            if (match) {
+              clonedUnit.title = match.title || clonedUnit.title
+              clonedUnit.tamilTitle = match.subject_name || clonedUnit.tamilTitle
+              clonedUnit.unitNumber = match.unit_code || clonedUnit.unitNumber
+              clonedUnit.questionCount = match.question_count || clonedUnit.questionCount
+            }
+          }
+        }
         clonedUnit.chapters?.forEach((chapter: any) => {
           chapter.lessons?.forEach((lesson: any) => {
             const matchingDbQs = dbQuestions.filter((dq) => 

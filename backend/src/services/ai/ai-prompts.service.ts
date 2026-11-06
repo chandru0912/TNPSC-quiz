@@ -13,11 +13,11 @@ export class AIPromptsService {
    * Initializes default prompts in the database if empty.
    */
   static async seedDefaultsIfEmpty(): Promise<void> {
-    const providers: AIProviderName[] = ['claude', 'gemini'];
+    const providers: AIProviderName[] = ['claude', 'gemini', 'openai'];
     const types: AIPromptType[] = ['notes_system', 'notes_template', 'mcq_system', 'mcq_template'];
 
     for (const provider of providers) {
-      const defMap = provider === 'claude' ? CLAUDE_DEFAULT_PROMPTS : GEMINI_DEFAULT_PROMPTS;
+      const defMap = provider === 'claude' ? CLAUDE_DEFAULT_PROMPTS : provider === 'openai' ? CLAUDE_DEFAULT_PROMPTS : GEMINI_DEFAULT_PROMPTS;
       for (const type of types) {
         const def = (defMap as any)[type];
         if (!def) continue;
@@ -77,7 +77,7 @@ export class AIPromptsService {
       // Fallback to static defaults
     }
 
-    const defMap = provider === 'claude' ? CLAUDE_DEFAULT_PROMPTS : GEMINI_DEFAULT_PROMPTS;
+    const defMap = provider === 'claude' ? CLAUDE_DEFAULT_PROMPTS : provider === 'openai' ? CLAUDE_DEFAULT_PROMPTS : GEMINI_DEFAULT_PROMPTS;
     return (defMap as any)[promptType]?.content || '';
   }
 

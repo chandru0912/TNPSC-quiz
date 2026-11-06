@@ -11,6 +11,7 @@
 import { IAIProvider, AIProviderName, AIProviderConfigInfo } from './ai-provider.interface';
 import { ClaudeService } from './providers/claude/claude.service';
 import { GeminiService } from './providers/gemini/gemini.service';
+import { OpenAIService } from './providers/openai/openai.service';
 import pool from '../../db';
 
 export class AIProviderFactory {
@@ -26,7 +27,10 @@ export class AIProviderFactory {
     if (cleanName === 'claude' || cleanName === 'anthropic') {
       return ClaudeService;
     }
-    throw new Error(`Unsupported AI Provider "${name}". Supported providers are 'claude' and 'gemini'.`);
+    if (cleanName === 'openai' || cleanName === 'oai' || cleanName === 'open_ai') {
+      return OpenAIService;
+    }
+    throw new Error(`Unsupported AI Provider "${name}". Supported providers are 'claude', 'gemini', and 'openai'.`);
   }
 
   /**
@@ -48,7 +52,7 @@ export class AIProviderFactory {
   }
 
   /**
-   * Returns the name of the system active provider ('claude' | 'gemini').
+   * Returns the name of the system active provider ('claude' | 'gemini' | 'openai').
    */
   static async getActiveProviderName(): Promise<AIProviderName> {
     const prov = await this.getActiveProvider();
@@ -59,7 +63,7 @@ export class AIProviderFactory {
    * Switches the active provider in the database.
    */
   static async setActiveProvider(providerName: AIProviderName): Promise<void> {
-    const cleanName = providerName === 'gemini' ? 'gemini' : 'claude';
+    const cleanName = providerName === 'gemini' ? 'gemini' : providerName === 'openai' ? 'openai' : 'claude';
     await pool.query('BEGIN');
     try {
       await pool.query('UPDATE ai_provider_configs SET is_active = false');
@@ -67,7 +71,14 @@ export class AIProviderFactory {
         `INSERT INTO ai_provider_configs (provider, model, is_active, updated_at)
          VALUES ($1, $2, true, CURRENT_TIMESTAMP)
          ON CONFLICT (provider) DO UPDATE SET is_active = true, updated_at = CURRENT_TIMESTAMP`,
-        [cleanName, cleanName === 'gemini' ? 'gemini-3.8-flash' : 'claude-3-5-sonnet-20241022']
+        [
+          cleanName,
+          cleanName === 'gemini'
+            ? 'gemini-3.8-flash'
+            : cleanName === 'openai'
+            ? 'gpt-4o-mini'
+            : 'claude-3-5-sonnet-20241022',
+        ]
       );
       await pool.query('COMMIT');
     } catch (e) {
@@ -80,11 +91,12 @@ export class AIProviderFactory {
    * Returns status for all supported providers.
    */
   static async getAllStatuses(): Promise<AIProviderConfigInfo[]> {
-    const [claudeStatus, geminiStatus] = await Promise.all([
+    const [claudeStatus, geminiStatus, openaiStatus] = await Promise.all([
       ClaudeService.getStatus(),
       GeminiService.getStatus(),
+      OpenAIService.getStatus(),
     ]);
 
-    return [claudeStatus, geminiStatus];
+    return [claudeStatus, geminiStatus, openaiStatus];
   }
 }

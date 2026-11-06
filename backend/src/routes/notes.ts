@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db';
-import { requireAdminAuth } from '../middleware/auth';
+import { requireAdminAuth, verifyAdminToken } from '../middleware/auth';
 import { cleanTamilUnicodeText } from '../services/tamilUnicodeCleaner';
 import {
   computeContentHash,
@@ -213,8 +213,16 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
-    // Default status: published preferred, but allow staging if no published
-    if (status && typeof status === 'string' && status !== 'all') {
+    // Strict Publishing Visibility (Requirements 6 & 11):
+    // Non-admin (students) can ONLY see 'published' content.
+    // Draft, staging, and unpublished content are strictly hidden from students.
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const isAdmin = token ? !!verifyAdminToken(token) : false;
+
+    if (!isAdmin) {
+      queryConditions.push("status = 'published'");
+    } else if (status && typeof status === 'string' && status !== 'all') {
       queryConditions.push(`status = $${paramIndex++}`);
       values.push(status);
     } else if (!status) {

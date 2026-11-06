@@ -1,5 +1,4 @@
 import pool from './db';
-import { migrateAllExistingStudyMaterials } from './services/topicAlignmentService';
 
 export async function runMigration() {
   const client = await pool.connect();
@@ -128,29 +127,19 @@ export async function runMigration() {
       WHERE lesson_code IS NULL OR lesson_code = '';
     `);
 
-    // Safe backfill for existing Study Notes missing lesson_id or syllabus IDs
+    // Safe backfill for existing Study Notes missing lesson_id or syllabus IDs.
+    // Status is intentionally left untouched: notes are only published by an explicit admin action.
     await client.query(`
       UPDATE study_notes
       SET 
         lesson_id = 'gt-1-6-t1-l1',
         lesson_number = '1.1',
-        lesson_title = '6-ஆம் வகுப்பு (பருவம் 1): எழுத்து இலக்கணம், வகை, தொகை & மாத்திரை அளவுகள்',
-        status = 'published'
+        lesson_title = '6-ஆம் வகுப்பு (பருவம் 1): எழுத்து இலக்கணம், வகை, தொகை & மாத்திரை அளவுகள்'
       WHERE 
         unit_id = 1 
         AND (class_id = 6 OR class_id IS NULL)
         AND (LOWER(subject) LIKE '%tamil%' OR LOWER(category) LIKE '%group2%')
         AND (lesson_title LIKE '%எழுத்து இலக்கணம்%' OR lesson_title LIKE '%1.1%' OR lesson_id = 'gt-1-6-t1-l1' OR lesson_number = '1.1');
-    `);
-
-    // Ensure all completed textbook-generated study notes with sufficient content are published
-    await client.query(`
-      UPDATE study_notes
-      SET status = 'published'
-      WHERE status = 'staging'
-        AND LENGTH(content) > 100
-        AND class_id IS NOT NULL
-        AND unit_id IS NOT NULL;
     `);
 
     // 4. Create textbooks table
@@ -664,61 +653,326 @@ export async function runMigration() {
       ON CONFLICT (provider) DO NOTHING;
     `);
 
-    await client.query('COMMIT');
-    console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, jobs, google_drive_materials, and ai_providers verified.');
+    // 12. Student Performance Tracking System Tables
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS students (
+        id SERIAL PRIMARY KEY,
+        full_name VARCHAR(150) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        mobile VARCHAR(20),
+        password_hash VARCHAR(255) NOT NULL,
+        target_group VARCHAR(50) NOT NULL DEFAULT 'group4',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_students_email ON students (email);
+      CREATE INDEX IF NOT EXISTS idx_students_target_group ON students (target_group);
 
-    // Automatically align and separate all existing Study Materials topic-wise
-    try {
-      await migrateAllExistingStudyMaterials(pool);
-    } catch (migErr) {
-      console.warn('[Migration] Non-fatal warning during existing study notes topic alignment:', migErr);
-    }
+      CREATE TABLE IF NOT EXISTS study_sessions (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        session_token VARCHAR(64) NOT NULL,
+        page_path VARCHAR(255) NOT NULL DEFAULT '/dashboard',
+        duration_seconds INT NOT NULL DEFAULT 0,
+        started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        last_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        ended_at TIMESTAMP WITH TIME ZONE,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        CONSTRAINT unique_student_session UNIQUE (student_id, session_token)
+      );
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'unique_student_session'
+        ) THEN
+          ALTER TABLE study_sessions ADD CONSTRAINT unique_student_session UNIQUE (student_id, session_token);
+        END IF;
+      END $$;
+      CREATE INDEX IF NOT EXISTS idx_study_sessions_student_id ON study_sessions (student_id);
+      CREATE INDEX IF NOT EXISTS idx_study_sessions_token ON study_sessions (session_token);
+      CREATE INDEX IF NOT EXISTS idx_study_sessions_started_at ON study_sessions (started_at);
+      CREATE INDEX IF NOT EXISTS idx_study_sessions_active ON study_sessions (student_id, is_active);
 
-    // Automatically synchronize Google Drive materials classification and mirror to textbooks table
+      CREATE TABLE IF NOT EXISTS question_attempts (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        question_id INT,
+        category VARCHAR(50),
+        subject VARCHAR(100),
+        class_id INT,
+        unit_id INT,
+        lesson_id TEXT,
+        lesson_title TEXT,
+        topic TEXT,
+        selected_option INT NOT NULL,
+        correct_answer INT NOT NULL,
+        is_correct BOOLEAN NOT NULL,
+        source_system VARCHAR(50) NOT NULL DEFAULT 'mcq_practice',
+        time_spent_seconds INT DEFAULT 0,
+        attempted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_question_attempts_student ON question_attempts (student_id);
+      CREATE INDEX IF NOT EXISTS idx_question_attempts_correct ON question_attempts (student_id, is_correct);
+      CREATE INDEX IF NOT EXISTS idx_question_attempts_subject ON question_attempts (student_id, subject);
+      CREATE INDEX IF NOT EXISTS idx_question_attempts_source ON question_attempts (student_id, source_system);
+      CREATE INDEX IF NOT EXISTS idx_question_attempts_date ON question_attempts (attempted_at);
+
+      CREATE TABLE IF NOT EXISTS mock_test_attempts (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        test_id VARCHAR(100),
+        test_title VARCHAR(255) NOT NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'group1',
+        total_questions INT NOT NULL DEFAULT 0,
+        attempted_questions INT NOT NULL DEFAULT 0,
+        correct_answers INT NOT NULL DEFAULT 0,
+        incorrect_answers INT NOT NULL DEFAULT 0,
+        score NUMERIC(6, 2) NOT NULL DEFAULT 0,
+        max_score NUMERIC(6, 2) NOT NULL DEFAULT 100,
+        percentage NUMERIC(5, 2) NOT NULL DEFAULT 0,
+        time_spent_seconds INT NOT NULL DEFAULT 0,
+        completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_student ON mock_test_attempts (student_id);
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_category ON mock_test_attempts (category);
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_date ON mock_test_attempts (completed_at);
+
+      CREATE TABLE IF NOT EXISTS study_material_progress (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        material_type VARCHAR(50) NOT NULL DEFAULT 'note',
+        standard INT,
+        subject VARCHAR(100),
+        term VARCHAR(50),
+        unit_id INT,
+        lesson_id TEXT,
+        lesson_title TEXT NOT NULL,
+        reading_time_seconds INT NOT NULL DEFAULT 0,
+        is_completed BOOLEAN NOT NULL DEFAULT FALSE,
+        last_accessed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_student_material_progress UNIQUE (student_id, material_type, subject, standard, unit_id, lesson_title)
+      );
+      CREATE INDEX IF NOT EXISTS idx_material_progress_student ON study_material_progress (student_id);
+      CREATE INDEX IF NOT EXISTS idx_material_progress_completed ON study_material_progress (student_id, is_completed);
+      CREATE INDEX IF NOT EXISTS idx_material_progress_subject ON study_material_progress (student_id, subject);
+
+      CREATE TABLE IF NOT EXISTS student_activity (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        activity_type VARCHAR(50) NOT NULL,
+        reference_id VARCHAR(100),
+        reference_title TEXT NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_student_activity_student ON student_activity (student_id);
+      CREATE INDEX IF NOT EXISTS idx_student_activity_type ON student_activity (activity_type);
+      CREATE INDEX IF NOT EXISTS idx_student_activity_date ON student_activity (created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS daily_streaks (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        activity_date DATE NOT NULL,
+        questions_count INT NOT NULL DEFAULT 0,
+        study_seconds INT NOT NULL DEFAULT 0,
+        mock_tests_count INT NOT NULL DEFAULT 0,
+        notes_count INT NOT NULL DEFAULT 0,
+        CONSTRAINT unique_student_activity_date UNIQUE (student_id, activity_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_daily_streaks_student_date ON daily_streaks (student_id, activity_date DESC);
+
+      -- 13. Advanced SaaS Analytics & Live Tracking Tables
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS district VARCHAR(100);
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS city VARCHAR(100);
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(50) DEFAULT 'free';
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(50) DEFAULT 'active';
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+      CREATE INDEX IF NOT EXISTS idx_students_district ON students (district);
+      CREATE INDEX IF NOT EXISTS idx_students_sub_tier ON students (subscription_tier);
+      CREATE INDEX IF NOT EXISTS idx_students_last_login ON students (last_login_at);
+      CREATE INDEX IF NOT EXISTS idx_students_is_active ON students (is_active);
+
+      CREATE TABLE IF NOT EXISTS visitor_sessions (
+        id SERIAL PRIMARY KEY,
+        session_id VARCHAR(64) UNIQUE NOT NULL,
+        visitor_id VARCHAR(64) NOT NULL,
+        student_id INT REFERENCES students(id) ON DELETE SET NULL,
+        district VARCHAR(100) NOT NULL DEFAULT 'Chennai',
+        city VARCHAR(100) DEFAULT 'Anna Nagar',
+        device_category VARCHAR(50) NOT NULL DEFAULT 'desktop',
+        browser VARCHAR(50) NOT NULL DEFAULT 'Chrome',
+        os VARCHAR(50) NOT NULL DEFAULT 'Windows',
+        referrer TEXT,
+        entry_path VARCHAR(255) NOT NULL DEFAULT '/',
+        current_path VARCHAR(255) NOT NULL DEFAULT '/',
+        is_returning BOOLEAN NOT NULL DEFAULT false,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        last_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_visitor_sessions_id ON visitor_sessions (session_id);
+      CREATE INDEX IF NOT EXISTS idx_visitor_sessions_visitor ON visitor_sessions (visitor_id);
+      CREATE INDEX IF NOT EXISTS idx_visitor_sessions_student ON visitor_sessions (student_id);
+      CREATE INDEX IF NOT EXISTS idx_visitor_sessions_district ON visitor_sessions (district);
+      CREATE INDEX IF NOT EXISTS idx_visitor_sessions_started ON visitor_sessions (started_at);
+      CREATE INDEX IF NOT EXISTS idx_visitor_sessions_heartbeat ON visitor_sessions (last_heartbeat);
+      CREATE INDEX IF NOT EXISTS idx_visitor_sessions_active ON visitor_sessions (is_active);
+
+      CREATE TABLE IF NOT EXISTS page_views (
+        id SERIAL PRIMARY KEY,
+        session_id VARCHAR(64) NOT NULL,
+        visitor_id VARCHAR(64) NOT NULL,
+        student_id INT REFERENCES students(id) ON DELETE SET NULL,
+        page_path VARCHAR(255) NOT NULL,
+        page_title VARCHAR(255),
+        district VARCHAR(100) NOT NULL DEFAULT 'Chennai',
+        city VARCHAR(100) DEFAULT 'Anna Nagar',
+        device_category VARCHAR(50) NOT NULL DEFAULT 'desktop',
+        viewed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_page_views_session ON page_views (session_id);
+      CREATE INDEX IF NOT EXISTS idx_page_views_visitor ON page_views (visitor_id);
+      CREATE INDEX IF NOT EXISTS idx_page_views_path ON page_views (page_path);
+      CREATE INDEX IF NOT EXISTS idx_page_views_district ON page_views (district);
+      CREATE INDEX IF NOT EXISTS idx_page_views_viewed_at ON page_views (viewed_at);
+
+      CREATE TABLE IF NOT EXISTS student_subscriptions (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        plan_id VARCHAR(50) NOT NULL,
+        plan_name VARCHAR(100) NOT NULL,
+        amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+        status VARCHAR(50) NOT NULL DEFAULT 'active',
+        payment_method VARCHAR(50) NOT NULL DEFAULT 'UPI',
+        district VARCHAR(100) NOT NULL DEFAULT 'Chennai',
+        city VARCHAR(100) DEFAULT 'Anna Nagar',
+        starts_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP WITH TIME ZONE,
+        transaction_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_student_subscriptions_student ON student_subscriptions (student_id);
+      CREATE INDEX IF NOT EXISTS idx_student_subscriptions_district ON student_subscriptions (district);
+      CREATE INDEX IF NOT EXISTS idx_student_subscriptions_status ON student_subscriptions (status);
+      CREATE INDEX IF NOT EXISTS idx_student_subscriptions_date ON student_subscriptions (transaction_date);
+    `);
+
+    // Assign districts to existing students if null and seed starter analytics baseline if empty
     try {
-      const { classifyPdf } = require('./services/bulkClassificationService');
-      const mats = await pool.query('SELECT id, file_name, standard, subject, term, medium FROM google_drive_materials');
-      for (const row of mats.rows) {
-        if (!row.standard || !row.subject || (row.subject === 'General Tamil' && !row.file_name.toLowerCase().includes('tamil'))) {
-          const c = classifyPdf({ fileName: row.file_name, fileSize: 1000 });
-          if (c && c.standardNumber) {
-            const applicableGroups = c.subject === 'English' ? ['group2', 'group4'] : c.applicableGroups;
-            await pool.query(
-              `UPDATE google_drive_materials SET
-                standard = $1,
-                subject = $2,
-                term = $3,
-                medium = $4,
-                applicable_groups = $5::jsonb
-               WHERE id = $6`,
-              [c.standardNumber, c.subject, c.term || 'Term 1', c.medium, JSON.stringify(applicableGroups), row.id]
-            );
-          }
+      const studentRows = await client.query('SELECT id, full_name FROM students WHERE district IS NULL');
+      const distPool = [
+        { district: 'Chennai', city: 'Anna Nagar' },
+        { district: 'Coimbatore', city: 'Gandhipuram' },
+        { district: 'Madurai', city: 'Goripalayam' },
+        { district: 'Tiruchirappalli', city: 'Thillai Nagar' },
+        { district: 'Salem', city: 'Fairlands' },
+        { district: 'Tirunelveli', city: 'Palayamkottai' },
+        { district: 'Vellore', city: 'Katpadi' },
+        { district: 'Erode', city: 'Perundurai' },
+        { district: 'Thanjavur', city: 'Kumbakonam' },
+        { district: 'Dindigul', city: 'Palani' },
+      ];
+      for (let i = 0; i < studentRows.rows.length; i++) {
+        const d = distPool[i % distPool.length];
+        const isPaid = i % 2 === 0;
+        await client.query(
+          `UPDATE students SET
+            district = $1,
+            city = $2,
+            subscription_tier = $3,
+            subscription_status = 'active',
+            last_login_at = CURRENT_TIMESTAMP - (INTERVAL '1 hour' * $4)
+           WHERE id = $5`,
+          [d.district, d.city, isPaid ? 'pro' : 'free', i * 3, studentRows.rows[i].id]
+        );
+      }
+
+      // Check if student_subscriptions needs diverse subscription tiers (Monthly, Quarterly, Half-Yearly, Yearly, Expired)
+      const subPlanCheck = await client.query("SELECT COUNT(DISTINCT plan_id) as distinct_plans FROM student_subscriptions");
+      if (parseInt(subPlanCheck.rows[0].distinct_plans, 10) <= 1) {
+        const proStudents = await client.query("SELECT id, district, city FROM students ORDER BY id ASC");
+        const samplePlans = [
+          { planId: 'tnpsc_pro_monthly', planName: 'TNPSC Pro Monthly Pass', amount: 199.00, status: 'active', daysAgo: 5, expiresDays: 25 },
+          { planId: 'tnpsc_pro_quarterly', planName: 'TNPSC Pro Quarterly Pass', amount: 499.00, status: 'active', daysAgo: 20, expiresDays: 70 },
+          { planId: 'tnpsc_pro_half_yearly', planName: 'TNPSC Pro Half-Yearly Pass', amount: 899.00, status: 'active', daysAgo: 45, expiresDays: 135 },
+          { planId: 'tnpsc_pro_yearly', planName: 'TNPSC Pro Annual Pass', amount: 1499.00, status: 'active', daysAgo: 10, expiresDays: 355 },
+          { planId: 'tnpsc_pro_monthly_expired', planName: 'TNPSC Pro Monthly Pass (Expired)', amount: 199.00, status: 'expired', daysAgo: 40, expiresDays: -10 },
+        ];
+
+        for (let i = 0; i < proStudents.rows.length; i++) {
+          const st = proStudents.rows[i];
+          const plan = samplePlans[i % samplePlans.length];
+          await client.query(
+            `INSERT INTO student_subscriptions (student_id, plan_id, plan_name, amount, currency, status, payment_method, district, city, starts_at, expires_at, transaction_date)
+             VALUES ($1, $2, $3, $4, 'INR', $5, 'UPI', $6, $7,
+                     CURRENT_TIMESTAMP - (INTERVAL '1 day' * $8),
+                     CURRENT_TIMESTAMP + (INTERVAL '1 day' * $9),
+                     CURRENT_TIMESTAMP - (INTERVAL '1 day' * $8))
+             ON CONFLICT DO NOTHING`,
+            [st.id, plan.planId, plan.planName, plan.amount, plan.status, st.district || 'Chennai', st.city || 'Anna Nagar', plan.daysAgo, plan.expiresDays]
+          );
         }
       }
 
-      await pool.query(`
-        INSERT INTO textbooks (group_id, standard, subject, medium, term, volume, book_name, file_path, status, extraction_status, total_pages, page_count)
-        SELECT
-          LOWER(COALESCE(tnpsc_group, 'group4')),
-          standard,
-          subject,
-          COALESCE(medium, 'Tamil'),
-          COALESCE(term, 'Term 1'),
-          volume,
-          file_name,
-          'gdrive://' || google_drive_file_id,
-          'completed',
-          COALESCE(extraction_status, 'COMPLETED'),
-          COALESCE(total_pages, page_count, 100),
-          COALESCE(total_pages, page_count, 100)
-        FROM google_drive_materials
-        WHERE standard IS NOT NULL AND google_drive_file_id IS NOT NULL
-        ON CONFLICT (group_id, standard, subject, medium, term, book_name) DO NOTHING
-      `);
-    } catch (syncErr: any) {
-      console.warn('[Migration] Non-fatal warning during Google Drive materials sync:', syncErr?.message);
+      // Seed baseline traffic data if visitor_sessions is empty
+      const sessCheck = await client.query('SELECT COUNT(*) as count FROM visitor_sessions');
+      if (parseInt(sessCheck.rows[0].count, 10) === 0) {
+        const districtsList = [
+          'Chennai', 'Coimbatore', 'Madurai', 'Tiruchirappalli', 'Salem', 'Tirunelveli',
+          'Vellore', 'Erode', 'Tiruppur', 'Dindigul', 'Thanjavur', 'Kanyakumari',
+          'Cuddalore', 'Kanchipuram', 'Chengalpattu', 'Tiruvallur', 'Tiruvannamalai',
+          'Viluppuram', 'Kallakurichi', 'Dharmapuri', 'Krishnagiri', 'Ranipet', 'Tirupathur',
+          'Namakkal', 'Karur', 'Nilgiris', 'Perambalur', 'Ariyalur', 'Pudukkottai',
+          'Sivaganga', 'Ramanathapuram', 'Virudhunagar', 'Theni', 'Tenkasi', 'Thoothukudi',
+          'Nagapattinam', 'Mayiladuthurai', 'Tiruvarur'
+        ];
+        const devices = ['desktop', 'mobile', 'tablet'];
+        const browsers = ['Chrome', 'Firefox', 'Safari', 'Edge'];
+        const pages = ['/', '/practice', '/mock-test', '/study-materials', '/dashboard'];
+
+        for (let i = 0; i < 60; i++) {
+          const dist = districtsList[i % districtsList.length];
+          const dev = devices[i % devices.length];
+          const br = browsers[i % browsers.length];
+          const pg = pages[i % pages.length];
+          const daysAgo = Math.floor(i / 2);
+          const isReturning = i % 3 === 0;
+          const sessId = `seed_sess_${i}_${Date.now()}`;
+          const visId = `seed_vis_${i % 25}_${Date.now()}`;
+          const isRecent = i < 5; // 5 active in last 5 minutes
+
+          await client.query(
+            `INSERT INTO visitor_sessions (
+              session_id, visitor_id, district, city, device_category, browser, os,
+              referrer, entry_path, current_path, is_returning, is_active, started_at, last_heartbeat
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, 'Windows',
+              'https://google.com', '/', $7, $8, $9,
+              CURRENT_TIMESTAMP - (INTERVAL '1 day' * $10) - (INTERVAL '15 minute' * ($11 % 10)),
+              CURRENT_TIMESTAMP - (CASE WHEN $9 THEN INTERVAL '1 minute' * ($11 % 4) ELSE (INTERVAL '1 day' * $10) END)
+            )`,
+            [sessId, visId, dist, dist + ' Central', dev, br, pg, isReturning, isRecent, daysAgo, i]
+          );
+
+          await client.query(
+            `INSERT INTO page_views (
+              session_id, visitor_id, page_path, page_title, district, city, device_category, viewed_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7,
+              CURRENT_TIMESTAMP - (INTERVAL '1 day' * $8) - (INTERVAL '15 minute' * ($9 % 10))
+            )`,
+            [sessId, visId, pg, 'TNPSC Study Hub - ' + pg, dist, dist + ' Central', dev, daysAgo, i]
+          );
+        }
+      }
+    } catch (baselineErr: any) {
+      console.warn('[Migration] Non-fatal notice during baseline analytics seeding:', baselineErr?.message);
     }
+
+    await client.query('COMMIT');
+    console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, jobs, google_drive_materials, and ai_providers verified.');
 
     // Seed default independent AI prompts for Claude and Gemini if empty
     try {
@@ -726,6 +980,15 @@ export async function runMigration() {
       await AIPromptsService.seedDefaultsIfEmpty();
     } catch (promptErr: any) {
       console.warn('[Migration] Non-fatal warning during AI prompt seeding:', promptErr?.message);
+    }
+
+    // Initialize and seed dynamic Study Materials Management schema
+    try {
+      const { StudyManagementService } = require('./services/studyManagementService');
+      await StudyManagementService.initSchema();
+      console.log('[Migration] Dynamic Study Materials Management schema initialized.');
+    } catch (smErr: any) {
+      console.warn('[Migration] Non-fatal warning during Study Materials schema init:', smErr?.message);
     }
   } catch (error: any) {
     await client.query('ROLLBACK');

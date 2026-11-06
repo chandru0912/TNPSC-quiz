@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import {
   TNPSC_GROUPS,
   getSubjectsForGroup,
@@ -9,6 +9,7 @@ import {
   type SyllabusUnitOption,
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
+import { dynamicSyllabusService, type DynamicTopic } from '../services/dynamicSyllabusService'
 
 export type GroupFilterValue = 'all' | 'group1' | 'group2' | 'group4'
 
@@ -19,6 +20,7 @@ export interface UseSyllabusCascadeOptions {
   initialClassId?: number | 'all'
   initialUnitId?: number | 'all'
   initialLessonTitle?: string
+  initialTopic?: string
   onChange?: () => void
 }
 
@@ -28,6 +30,7 @@ export interface SyllabusCascadeState {
   classId: number | 'all'
   unitId: number | 'all'
   lessonTitle: string
+  topic: string
   effectiveGroupId: 'group1' | 'group2' | 'group4'
   currentSubjectId: string
   currentClassId: number
@@ -37,6 +40,7 @@ export interface SyllabusCascadeState {
   availableStandards: { id: number; label: string; shortLabel: string }[]
   availableUnits: SyllabusUnitOption[]
   availableLessons: LessonItem[]
+  availableTopics: DynamicTopic[]
   selectedSubjectObj: SyllabusSubjectConfig | undefined
   selectedStandardObj: { id: number; label: string; shortLabel: string } | undefined
   currentUnit: SyllabusUnitOption | undefined
@@ -46,12 +50,14 @@ export interface SyllabusCascadeState {
   handleStandardChange: (newClassId: number | 'all') => void
   handleUnitChange: (newUnitId: number | 'all') => void
   handleLessonChange: (newLessonTitle: string) => void
+  handleTopicChange: (newTopic: string) => void
   syncSelection: (selection: {
     groupId: GroupFilterValue
     subjectId: string
     classId: number | 'all'
     unitId: number | 'all'
     lessonTitle: string
+    topic?: string
   }) => void
   resetFilters: () => void
 }
@@ -79,6 +85,23 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
   const [classId, setClassId] = useState<number | 'all'>(initialClassId)
   const [unitId, setUnitId] = useState<number | 'all'>(initialUnitId)
   const [lessonTitle, setLessonTitle] = useState<string>(initialLessonTitle)
+  const [topic, setTopic] = useState<string>(options.initialTopic || (allowAll ? 'all' : ''))
+  const [dynamicUnits, setDynamicUnits] = useState<SyllabusUnitOption[]>([])
+  const [dynamicLessons, setDynamicLessons] = useState<LessonItem[]>([])
+  const [dynamicTopics, setDynamicTopics] = useState<DynamicTopic[]>([])
+  const [syncVersion, setSyncVersion] = useState(0)
+
+  // Request sequence guards to prevent race conditions from overwriting newer selections
+  const lessonReqSeq = useRef(0)
+  const topicReqSeq = useRef(0)
+
+  // Auto-subscribe to Master Syllabus updates from Study Materials Management
+  useEffect(() => {
+    const unsub = dynamicSyllabusService.subscribe(() => {
+      setSyncVersion((v) => v + 1)
+    })
+    return unsub
+  }, [])
 
   // Effective group for computing available syllabus options
   // When 'all' is selected in filter mode, 'group2' exposes all 4 subjects (General Studies, Aptitude, General English, General Tamil)
@@ -125,12 +148,48 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       : selectedStandardObj?.id || 6
     : selectedStandardObj?.id || 6
 
+  // Fetch PostgreSQL dynamic units from Master Syllabus API
+  useEffect(() => {
+    let mounted = true
+    dynamicSyllabusService
+      .getUnits(
+        effectiveGroupId,
+        effectiveSubjectIdForCascade,
+        allowAll && classId === 'all' ? undefined : currentClassId
+      )
+      .then((units) => {
+        if (!mounted || !units || units.length === 0) return
+        setDynamicUnits(
+          units.map((u) => ({
+            id: u.unit_number || u.id,
+            unitNumber: u.unit_code || u.unitNumber || `Unit ${u.unit_number || u.id}`,
+            title: u.title,
+            subjectName: u.subject_name || u.subjectName || 'General Studies',
+          }))
+        )
+      })
+      .catch(() => {})
+    return () => {
+      mounted = false
+    }
+  }, [effectiveGroupId, effectiveSubjectIdForCascade, currentClassId, classId, allowAll, syncVersion])
+
   // 3. Available units for selected Group, Subject, and Standard
   const availableUnits = useMemo(() => {
     const stdForUnits =
       allowAll && classId === 'all' ? 10 : currentClassId
-    return getUnitsForSubjectStandard(effectiveGroupId, effectiveSubjectIdForCascade, stdForUnits)
-  }, [allowAll, classId, currentClassId, effectiveGroupId, effectiveSubjectIdForCascade])
+    const canonical = getUnitsForSubjectStandard(effectiveGroupId, effectiveSubjectIdForCascade, stdForUnits)
+    if (dynamicUnits.length === 0) return canonical
+
+    const seenIds = new Set(dynamicUnits.map((u) => u.id))
+    const combined = [...dynamicUnits]
+    canonical.forEach((c) => {
+      if (!seenIds.has(c.id)) {
+        combined.push(c)
+      }
+    })
+    return combined.sort((a, b) => a.id - b.id)
+  }, [allowAll, classId, currentClassId, dynamicUnits, effectiveGroupId, effectiveSubjectIdForCascade])
 
   const currentUnit = useMemo(() => {
     if (allowAll && unitId === 'all') return undefined
@@ -144,8 +203,64 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       : currentUnit?.id || 1
     : currentUnit?.id || 1
 
+  // Fetch PostgreSQL dynamic lessons from Master Syllabus API
+  useEffect(() => {
+    let mounted = true
+    const seq = ++lessonReqSeq.current
+    const stdNum = allowAll && classId === 'all' ? undefined : currentClassId
+    const uNum = allowAll && unitId === 'all' ? undefined : currentUnitId
+
+    // Clear dynamic lessons immediately on criteria change to prevent stale cross-unit display
+    setDynamicLessons([])
+
+    dynamicSyllabusService
+      .getLessons({
+        examId: effectiveGroupId,
+        subjectId: effectiveSubjectIdForCascade,
+        standardNumber: stdNum,
+        unitNumber: uNum,
+        unitId: typeof unitId === 'number' ? unitId : undefined,
+      })
+      .then((lessons) => {
+        if (!mounted || seq !== lessonReqSeq.current) return
+        if (lessons && lessons.length > 0) {
+          const mapped = lessons.map((l) => ({
+            id: l.id,
+            lessonNumber: l.lesson_number,
+            title: l.title,
+            description: l.description,
+            term: l.term || 'Term 1',
+            classId: l.standard_number,
+            topicsCount: l.topics_count || 0,
+            topics: [],
+          }))
+          setDynamicLessons(mapped)
+
+          if (!allowAll) {
+            setLessonTitle((prev) => {
+              if (prev && mapped.some((m) => m.title === prev)) return prev
+              return mapped[0]?.title || ''
+            })
+          }
+        } else {
+          setDynamicLessons([])
+        }
+      })
+      .catch(() => {
+        if (mounted && seq === lessonReqSeq.current) {
+          setDynamicLessons([])
+        }
+      })
+    return () => {
+      mounted = false
+    }
+  }, [effectiveGroupId, effectiveSubjectIdForCascade, currentClassId, currentUnitId, classId, unitId, allowAll, syncVersion])
+
   // 4. Available lessons for selected Group, Subject, Standard, and Unit
   const availableLessons = useMemo(() => {
+    if (dynamicLessons.length > 0) {
+      return dynamicLessons
+    }
     if (!allowAll) {
       return getLessonsForSelection(
         effectiveGroupId,
@@ -156,7 +271,6 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
     }
 
     // In filter mode (allowAll = true):
-    // If specific Standard and Unit are selected, return exact lessons for that combination
     if (classId !== 'all' && unitId !== 'all') {
       return getLessonsForSelection(
         effectiveGroupId,
@@ -166,7 +280,6 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       )
     }
 
-    // If Standard is selected and Unit is 'all', aggregate lessons across available units for that Standard
     if (classId !== 'all' && unitId === 'all') {
       const seen = new Set<string>()
       const collected: LessonItem[] = []
@@ -187,7 +300,6 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       return collected
     }
 
-    // If Unit is selected and Standard is 'all', aggregate lessons across available standards for that Unit
     if (classId === 'all' && unitId !== 'all') {
       const seen = new Set<string>()
       const collected: LessonItem[] = []
@@ -208,7 +320,6 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       return collected
     }
 
-    // If both Standard and Unit are 'all', return lessons for default first Standard & Unit of the active Subject
     return getLessonsForSelection(
       effectiveGroupId,
       effectiveSubjectIdForCascade,
@@ -222,6 +333,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
     classId,
     currentClassId,
     currentUnitId,
+    dynamicLessons,
     effectiveGroupId,
     effectiveSubjectIdForCascade,
     unitId,
@@ -241,13 +353,45 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       : selectedLessonObj?.title || lessonTitle || 'all'
     : selectedLessonObj?.title || ''
 
+  // Fetch PostgreSQL dynamic topics when selectedLessonObj changes
+  useEffect(() => {
+    let mounted = true
+    const seq = ++topicReqSeq.current
+    if (selectedLessonObj?.id || selectedLessonObj?.title) {
+      dynamicSyllabusService
+        .getTopics(selectedLessonObj.id || '', {
+          lessonTitle: selectedLessonObj.title,
+          unitId: typeof currentUnitId === 'number' ? currentUnitId : undefined,
+        })
+        .then((tList) => {
+          if (!mounted || seq !== topicReqSeq.current) return
+          setDynamicTopics(tList)
+          if (!allowAll && tList.length > 0) {
+            setTopic((prev) => {
+              if (prev && tList.some((t) => t.topic_name === prev)) return prev
+              return tList[0]?.topic_name || ''
+            })
+          }
+        })
+    } else {
+      setDynamicTopics([])
+      if (!allowAll) setTopic('')
+    }
+    return () => {
+      mounted = false
+    }
+  }, [selectedLessonObj?.id, selectedLessonObj?.title, currentUnitId, syncVersion, allowAll])
+
   // ---------------------------------------------------------------------------
   // EXPLICIT DOWNSTREAM RESET HANDLERS
   // ---------------------------------------------------------------------------
 
-  // 1. When Group changes: resets Subject, Standard, Unit, Lesson
+  // 1. When Group changes: resets Subject, Standard, Unit, Lesson, Topic
   const handleGroupChange = (newGroupId: GroupFilterValue) => {
     setGroupId(newGroupId)
+    setDynamicLessons([])
+    setDynamicTopics([])
+    setTopic(allowAll ? 'all' : '')
     if (allowAll) {
       if (newGroupId === 'all') {
         setSubjectId('all')
@@ -282,13 +426,17 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       const nextLessons = getLessonsForSelection(strictGroup, nextSubj, nextStd, nextUnit)
       const nextLesson = nextLessons[0]?.title || ''
       setLessonTitle(nextLesson)
+      setTopic(nextLessons[0]?.topics?.[0]?.name || '')
     }
     onChange?.()
   }
 
-  // 2. When Subject changes: resets Standard, Unit, Lesson
+  // 2. When Subject changes: resets Standard, Unit, Lesson, Topic
   const handleSubjectChange = (newSubj: string) => {
     setSubjectId(newSubj)
+    setDynamicLessons([])
+    setDynamicTopics([])
+    setTopic(allowAll ? 'all' : '')
     if (allowAll) {
       const nextStandards = getStandardsForSubject(
         effectiveGroupId,
@@ -311,13 +459,17 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       const nextLessons = getLessonsForSelection(effectiveGroupId, newSubj, nextStd, nextUnit)
       const nextLesson = nextLessons[0]?.title || ''
       setLessonTitle(nextLesson)
+      setTopic(nextLessons[0]?.topics?.[0]?.name || '')
     }
     onChange?.()
   }
 
-  // 3. When Standard changes: resets Unit, Lesson
+  // 3. When Standard changes: resets Unit, Lesson, Topic
   const handleStandardChange = (newStd: number | 'all') => {
     setClassId(newStd)
+    setDynamicLessons([])
+    setDynamicTopics([])
+    setTopic(allowAll ? 'all' : '')
     if (allowAll) {
       if (newStd !== 'all' && unitId !== 'all') {
         const nextUnits = getUnitsForSubjectStandard(
@@ -348,13 +500,17 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       )
       const nextLesson = nextLessons[0]?.title || ''
       setLessonTitle(nextLesson)
+      setTopic(nextLessons[0]?.topics?.[0]?.name || '')
     }
     onChange?.()
   }
 
-  // 4. When Unit changes: resets Lesson
+  // 4. When Unit changes: resets Lesson and Topic strictly to only this unit's items
   const handleUnitChange = (newUnit: number | 'all') => {
     setUnitId(newUnit)
+    setDynamicLessons([])
+    setDynamicTopics([])
+    setTopic(allowAll ? 'all' : '')
     if (allowAll) {
       setLessonTitle('all')
     } else {
@@ -367,13 +523,22 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       )
       const nextLesson = nextLessons[0]?.title || ''
       setLessonTitle(nextLesson)
+      setTopic(nextLessons[0]?.topics?.[0]?.name || '')
     }
     onChange?.()
   }
 
-  // 5. When Lesson changes
+  // 5. When Lesson changes: resets Topic strictly to this lesson's topics
   const handleLessonChange = (newLesson: string) => {
     setLessonTitle(newLesson)
+    setDynamicTopics([])
+    setTopic(allowAll ? 'all' : '')
+    onChange?.()
+  }
+
+  // 6. When Topic changes
+  const handleTopicChange = (newTopic: string) => {
+    setTopic(newTopic)
     onChange?.()
   }
 
@@ -384,12 +549,16 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
     classId: number | 'all'
     unitId: number | 'all'
     lessonTitle: string
+    topic?: string
   }) => {
     setGroupId(selection.groupId)
     setSubjectId(selection.subjectId)
     setClassId(selection.classId)
     setUnitId(selection.unitId)
     setLessonTitle(selection.lessonTitle)
+    if (selection.topic !== undefined) {
+      setTopic(selection.topic)
+    }
     onChange?.()
   }
 
@@ -400,6 +569,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
       setClassId('all')
       setUnitId('all')
       setLessonTitle('all')
+      setTopic('all')
     } else {
       handleGroupChange('group1')
     }
@@ -425,37 +595,23 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
 
   useEffect(() => {
     if (allowAll) return
-    const units = getUnitsForSubjectStandard(
-      effectiveGroupId,
-      effectiveSubjectIdForCascade,
-      currentClassId
-    )
-    if (!units.some((u) => u.id === unitId)) {
-      setUnitId(units[0]?.id || 1)
+    if (availableUnits.length > 0 && !availableUnits.some((u) => u.id === unitId)) {
+      setUnitId(availableUnits[0].id)
     }
-  }, [allowAll, effectiveGroupId, effectiveSubjectIdForCascade, currentClassId, unitId])
+  }, [allowAll, availableUnits, unitId])
 
   useEffect(() => {
     if (allowAll) return
-    const lessons = getLessonsForSelection(
-      effectiveGroupId,
-      effectiveSubjectIdForCascade,
-      currentClassId,
-      currentUnitId
-    )
-    if (lessons.length > 0) {
-      if (!lessons.some((l) => l.title === lessonTitle)) {
-        setLessonTitle(lessons[0].title)
+    if (availableLessons.length > 0) {
+      if (!availableLessons.some((l) => l.title === lessonTitle)) {
+        setLessonTitle(availableLessons[0].title)
       }
     } else if (lessonTitle) {
       setLessonTitle('')
     }
   }, [
     allowAll,
-    effectiveGroupId,
-    effectiveSubjectIdForCascade,
-    currentClassId,
-    currentUnitId,
+    availableLessons,
     lessonTitle,
   ])
 
@@ -465,6 +621,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
     classId,
     unitId,
     lessonTitle,
+    topic,
     effectiveGroupId,
     currentSubjectId,
     currentClassId,
@@ -474,6 +631,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
     availableStandards,
     availableUnits,
     availableLessons,
+    availableTopics: dynamicTopics,
     selectedSubjectObj,
     selectedStandardObj,
     currentUnit,
@@ -483,6 +641,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
     handleStandardChange,
     handleUnitChange,
     handleLessonChange,
+    handleTopicChange,
     syncSelection,
     resetFilters,
   }
@@ -492,6 +651,7 @@ export interface SyllabusCascadeSelectorProps {
   cascade: SyllabusCascadeState
   allowAll?: boolean
   variant?: 'generator' | 'filter'
+  showTopic?: boolean
   extraFilters?: React.ReactNode
 }
 
@@ -508,6 +668,7 @@ export const SyllabusCascadeSelector: React.FC<SyllabusCascadeSelectorProps> = (
   cascade,
   allowAll = false,
   variant = 'generator',
+  showTopic = false,
   extraFilters,
 }) => {
   const {
@@ -516,6 +677,7 @@ export const SyllabusCascadeSelector: React.FC<SyllabusCascadeSelectorProps> = (
     classId,
     unitId,
     lessonTitle,
+    topic,
     currentSubjectId,
     currentClassId,
     currentUnitId,
@@ -524,11 +686,13 @@ export const SyllabusCascadeSelector: React.FC<SyllabusCascadeSelectorProps> = (
     availableStandards,
     availableUnits,
     availableLessons,
+    availableTopics,
     handleGroupChange,
     handleSubjectChange,
     handleStandardChange,
     handleUnitChange,
     handleLessonChange,
+    handleTopicChange,
   } = cascade
 
   const selectClassName = variant === 'filter' ? 'ai-select qb-syllabus-select' : 'ai-select'
@@ -667,6 +831,35 @@ export const SyllabusCascadeSelector: React.FC<SyllabusCascadeSelectorProps> = (
             )}
           </select>
         </div>
+
+        {/* 6. Specific Topic (When available or showTopic requested) */}
+        {(showTopic || (availableTopics && availableTopics.length > 0)) && (
+          <div className="ai-field">
+            <label>
+              6. Specific Topic ({availableTopics?.length || 0} Topics)
+            </label>
+            <select
+              className={selectClassName}
+              aria-label="6. Specific Topic"
+              value={topic}
+              onChange={(e) => handleTopicChange(e.target.value)}
+            >
+              {allowAll && <option value="all">All Topics ({availableTopics?.length || 0})</option>}
+              {!availableTopics || availableTopics.length === 0 ? (
+                <option value="">Entire Lesson / All Topics</option>
+              ) : (
+                <>
+                  <option value="">Entire Lesson / All Topics</option>
+                  {availableTopics.map((t) => (
+                    <option key={t.id} value={t.topic_name}>
+                      {t.topic_name}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+          </div>
+        )}
 
         {extraFilters}
       </div>

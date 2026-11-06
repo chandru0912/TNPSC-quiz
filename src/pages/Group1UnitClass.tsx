@@ -65,7 +65,27 @@ const Group1UnitClass = () => {
 
   const data = getUnitClassData(parsedUnitId, parsedClassId)
   const Icon = unitIcons[parsedUnitId] || BookOpen
-  const lessons = data.lessons || []
+  const [dynamicLessons, setDynamicLessons] = useState<SchoolLesson[] | null>(null)
+  const lessons = dynamicLessons || data.lessons || []
+
+  useEffect(() => {
+    fetch(`/api/study-management/lessons?unitNumber=${parsedUnitId}&standardId=${parsedClassId}&examId=group1&subjectId=general-studies`)
+      .then((res) => res.json())
+      .then((resData) => {
+        if (resData.success && Array.isArray(resData.lessons)) {
+          const mapped: SchoolLesson[] = resData.lessons.map((l: any) => ({
+            id: l.id,
+            lessonNumber: l.lesson_number,
+            title: l.title,
+            term: l.term || 'Term 1',
+            description: l.description || '',
+            status: l.status === 'Coming Soon' ? 'Coming Soon' : 'Available',
+          }))
+          setDynamicLessons(mapped)
+        }
+      })
+      .catch(() => {})
+  }, [parsedUnitId, parsedClassId])
   const hasLessons = lessons.length > 0
 
   // Interactive Study Notes Modal State

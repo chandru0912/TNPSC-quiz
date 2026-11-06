@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -15,6 +16,39 @@ import './Group1GeneralStudies.css'
 
 const Group1Aptitude = () => {
   const navigate = useNavigate()
+  const [units, setUnits] = useState(group1AptitudeUnits)
+
+  useEffect(() => {
+    fetch('/api/study-management/units?examId=group1&subjectId=aptitude')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.units) && data.units.length > 0) {
+          setUnits((prev) => {
+            const staticMap = new Map(prev.map((u) => [u.id, u]))
+            return data.units.map((u: any) => {
+              const existing = staticMap.get(u.unit_number)
+              if (existing) {
+                return {
+                  ...existing,
+                  title: u.title || existing.title,
+                  unitNumber: u.unit_code || existing.unitNumber,
+                  questionCount: u.question_count || existing.questionCount,
+                  topics: u.description ? [u.description] : existing.topics,
+                }
+              }
+              return {
+                id: u.unit_number,
+                unitNumber: u.unit_code || `Unit ${u.unit_number}`,
+                title: u.title,
+                questionCount: u.question_count || 10,
+                topics: u.description ? [u.description] : [`Aptitude outline for ${u.title}`],
+              }
+            })
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   return (
     <div className="gs-page">
@@ -63,7 +97,7 @@ const Group1Aptitude = () => {
 
         {/* Units Grid */}
         <div className="units-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-          {group1AptitudeUnits.map((unit, index) => {
+          {units.map((unit, index) => {
             const Icon = unit.id === 1 ? Calculator : Brain
 
             return (

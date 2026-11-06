@@ -220,7 +220,9 @@ router.get('/lessons', async (req: Request, res: Response) => {
       `SELECT id, file_name, tnpsc_group, standard, subject, term, volume, medium,
               unit, lesson, lesson_id, classification_meta, extracted_toc, extracted_text
        FROM google_drive_materials
-       WHERE standard = $1
+       WHERE mime_type = 'application/pdf'
+         AND upload_status = 'completed'
+         AND standard = $1
          AND (applicable_groups IS NULL OR applicable_groups::text ILIKE '%' || $2 || '%' OR LOWER(tnpsc_group) = LOWER($2))`,
       [standardId, groupId]
     );
@@ -424,7 +426,9 @@ router.get('/textbooks', async (req: Request, res: Response) => {
       `SELECT id, file_name, google_drive_file_id, standard, subject, medium,
               term, volume, page_count, total_pages, extraction_status, extracted_text, classification_meta, extracted_toc
        FROM google_drive_materials
-       WHERE standard = $1
+       WHERE mime_type = 'application/pdf'
+         AND upload_status = 'completed'
+         AND standard = $1
          AND (applicable_groups IS NULL OR applicable_groups::text ILIKE '%' || $2 || '%' OR LOWER(tnpsc_group) = LOWER($2))`,
       [standardId, groupId]
     );
@@ -441,7 +445,7 @@ router.get('/textbooks', async (req: Request, res: Response) => {
     );
 
     const candidates: TextbookOption[] = [];
-    const seenSignatures = new Set<string>();
+    const seenKeys = new Set<string>();
 
     // Process google_drive_materials
     for (const m of gdmRes.rows) {
@@ -457,9 +461,9 @@ router.get('/textbooks', async (req: Request, res: Response) => {
         }
       }
 
-      const sig = `${m.file_name}-${m.standard}-${m.medium}-${candTerm}`.toLowerCase();
-      if (!seenSignatures.has(sig)) {
-        seenSignatures.add(sig);
+      const key = m.google_drive_file_id ? `drive:${m.google_drive_file_id}` : `gdm:${m.id}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
         candidates.push({
           id: m.id,
           key: `drive:${m.id}`,
@@ -497,12 +501,14 @@ router.get('/textbooks', async (req: Request, res: Response) => {
         }
       }
 
-      const sig = `${tb.book_name}-${tb.standard}-${tb.medium}-${candTerm}`.toLowerCase();
-      if (!seenSignatures.has(sig)) {
-        seenSignatures.add(sig);
-        const gdriveId = tb.file_path && tb.file_path.startsWith('gdrive://')
-          ? tb.file_path.replace('gdrive://', '')
-          : null;
+      const gdriveId = tb.file_path && tb.file_path.startsWith('gdrive://')
+        ? tb.file_path.replace('gdrive://', '')
+        : null;
+      const key = gdriveId
+        ? `drive:${gdriveId}`
+        : `tb:${tb.book_name}-${tb.standard}-${tb.medium}-${candTerm}`.toLowerCase();
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
         candidates.push({
           id: tb.id,
           key: `textbook:${tb.id}`,

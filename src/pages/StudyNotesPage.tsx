@@ -17,10 +17,12 @@ import {
 import { useLanguage } from '../context/LanguageContext'
 import { apiFetch } from '../utils/api'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonsForSelection } from '../data/unifiedSyllabusRegistry'
 import { buildCanonicalLessonCode } from '../utils/lessonMapping'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import { TamilStudyNotesRenderer } from '../components/TamilStudyNotesRenderer'
+import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import './StudyNotesPage.css'
 
 interface StudyNoteRecord {
@@ -286,6 +288,7 @@ function parseNoteSections(content: string): {
 }
 
 const StudyNotesPage: React.FC = () => {
+  useStudyTimeTracker()
   const { group, unitId, subjectId, lessonTitle, classId: paramClassId } = useParams<{
     group: string
     unitId?: string
@@ -318,6 +321,36 @@ const StudyNotesPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [driveMaterial, setDriveMaterial] = useState<GoogleDriveMaterialItem | null>(null)
   const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false)
+
+  // Real-Time Reading Progress Logging
+  useEffect(() => {
+    const studentToken = localStorage.getItem('tnpsc_student_token')
+    if (!studentToken || !decodedLessonTitle) return
+
+    // After 45 seconds of staying on this lesson, mark progress as completed
+    const completionTimer = setTimeout(() => {
+      apiFetch('/api/student/material-progress', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${studentToken}`,
+        },
+        body: JSON.stringify({
+          materialType: 'note',
+          standard: effectiveClassId ? Number(effectiveClassId) : 6,
+          subject: subjectId || 'General Studies',
+          term: queryTerm || 'Term 1',
+          unitId: unitId ? Number(unitId) : 1,
+          lessonId: queryLessonId || null,
+          lessonTitle: decodedLessonTitle,
+          readingTimeSeconds: 45,
+          isCompleted: true,
+        }),
+      }).catch((err) => console.warn('[StudentTrack] Material progress log failed:', err))
+    }, 45_000)
+
+    return () => clearTimeout(completionTimer)
+  }, [decodedLessonTitle, effectiveClassId, subjectId, queryTerm, unitId, queryLessonId])
 
   // Normalize category
   const normalizedCategory = useMemo(() => {
@@ -446,6 +479,14 @@ const StudyNotesPage: React.FC = () => {
     fetchNotes()
   }, [normalizedCategory, unitId, effectiveClassId, effectiveSubject, decodedLessonTitle, canonicalLessonId, canonicalLessonNumber, canonicalLessonCode, queryTerm, selectedLang])
 
+  // Master Syllabus real-time subscription: refresh notes when updated in Admin
+  useEffect(() => {
+    const unsub = dynamicSyllabusService.subscribe(() => {
+      fetchNotes()
+    })
+    return unsub
+  }, [])
+
   // Fetch associated Google Drive PDF material for this lesson
   useEffect(() => {
     let isCancelled = false
@@ -520,7 +561,7 @@ const StudyNotesPage: React.FC = () => {
   const groupDisplayName = useMemo(() => {
     if (normalizedCategory === 'group1') return isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1'
     if (normalizedCategory === 'group4_vao') return isTamil ? 'TNPSC குரூப் 4 & VAO' : 'TNPSC Group 4 & VAO'
-    return isTamil ? 'TNPSC குரூப் 2 & 2A' : 'TNPSC Group 2 & 2A'
+    return isTamil ? 'TNPSC குரூப் 2, 2A' : 'TNPSC Group 2, 2A'
   }, [normalizedCategory, isTamil])
 
   const subjectDisplayName = useMemo(() => {
@@ -806,11 +847,11 @@ const StudyNotesPage: React.FC = () => {
         ) : displayTopics.length === 0 ? (
           <div className="study-state-card glass">
             <BookOpen size={50} style={{ opacity: 0.45, margin: '0 auto 1.25rem', color: '#ffd700' }} />
-            <h2 className="study-state-title">{isTamil ? 'பாடக் குறிப்புகள் இன்னும் சேர்க்கப்படவில்லை' : 'No Study Notes Available'}</h2>
+            <h2 className="study-state-title">{isTamil ? 'பாடக் குறிப்புகள் கிடைக்கவில்லை' : 'No Study Notes Available'}</h2>
             <p className="study-state-desc">
               {isTamil
-                ? `இந்த பாடத்திற்கான (${decodedLessonTitle}) பாடக் குறிப்புகள் நிர்வாகி ஒப்புதலுக்குப் பின் வெளியிடப்படும்.`
-                : `Official study notes for this lesson (${decodedLessonTitle}) are currently being curated and published by subject experts.`}
+                ? `இந்த பாடத்திற்கான (${decodedLessonTitle}) பாடக் குறிப்புகள் கிடைக்கவில்லை. கையேடு குறிப்புகளை உருவாக்கவும்.`
+                : `No Study Notes Available. Please generate notes manually for "${decodedLessonTitle}".`}
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button className="study-btn study-btn-secondary" onClick={handleBack}>

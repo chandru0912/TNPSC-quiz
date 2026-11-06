@@ -93,7 +93,7 @@
   width: 100%;
   position: relative;
   z-index: 1;
-  padding-top: var(--navbar-height, 80px);
+  padding-top: var(--navbar-height, 56px);
 }
 
 @media (max-width: 640px) {
@@ -272,4 +272,28 @@
   color: var(--gold-primary);
   font-size: 0.8125rem;
   opacity: 0.9;
+}
+
+
+/* Admin App Mode - Full Viewport Two-Pane Layout with Strict Independent Scrolling */
+.app.admin-app-mode {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content.admin-main-mode {
+  margin-top: var(--navbar-height, 56px);
+  height: calc(100dvh - var(--navbar-height, 56px));
+  max-height: calc(100dvh - var(--navbar-height, 56px));
+  min-height: 0;
+  padding-top: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
 }

@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { User, UserPlus, Eye, EyeOff, ArrowRight, X } from 'lucide-react'
 import { useScrollLock } from '../hooks/useScrollLock'
+import { useStudentAuth } from '../context/StudentAuthContext'
+import { apiFetch } from '../utils/api'
 import './MobileAuthSlide.css'
 
 export type AuthSlideType = 'none' | 'login' | 'register'
@@ -23,6 +26,11 @@ const MobileAuthSlide = ({
   // Lock background page scroll strictly while the auth slide/drawer is open
   useScrollLock(activeSlide !== 'none')
 
+  const navigate = useNavigate()
+  const { login } = useStudentAuth()
+  const [serverError, setServerError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
   // Login form state
   const [loginData, setLoginData] = useState({ email: '', password: '' })
   const [loginShowPassword, setLoginShowPassword] = useState(false)
@@ -36,6 +44,7 @@ const MobileAuthSlide = ({
     mobile: '',
     password: '',
     confirmPassword: '',
+    targetGroup: 'group4',
   })
   const [regShowPassword, setRegShowPassword] = useState(false)
   const [regShowConfirmPassword, setRegShowConfirmPassword] = useState(false)
@@ -63,12 +72,12 @@ const MobileAuthSlide = ({
     }
   }, [activeSlide, onClose])
 
-
   const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   const validateMobile = (mobile: string) => /^[6-9]\d{9}$/.test(mobile)
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setServerError(null)
     const errors: { email?: string; password?: string } = {}
 
     if (!loginData.email.trim()) {
@@ -83,13 +92,36 @@ const MobileAuthSlide = ({
 
     setLoginErrors(errors)
     if (Object.keys(errors).length === 0) {
-      alert('Login validated successfully (frontend demo)')
-      onClose()
+      setIsSubmitting(true)
+      try {
+        const res = await apiFetch('/api/student/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: loginData.email.trim(),
+            password: loginData.password,
+          }),
+        })
+        const json = await res.json()
+
+        if (res.ok && json.status === 'success' && json.token && json.student) {
+          login(json.token, json.student)
+          onClose()
+          navigate('/dashboard')
+        } else {
+          setServerError(json.message || 'Login failed. Please check your credentials.')
+        }
+      } catch (err: any) {
+        setServerError(err.message || 'Unable to connect to server.')
+      } finally {
+        setIsSubmitting(false)
+      }
     }
   }
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setServerError(null)
     const errors: typeof registerErrors = {}
 
     if (!registerData.fullName.trim()) {
@@ -122,8 +154,33 @@ const MobileAuthSlide = ({
 
     setRegisterErrors(errors)
     if (Object.keys(errors).length === 0) {
-      alert('Registration validated successfully (frontend demo)')
-      onClose()
+      setIsSubmitting(true)
+      try {
+        const res = await apiFetch('/api/student/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fullName: registerData.fullName.trim(),
+            email: registerData.email.trim(),
+            mobile: registerData.mobile.trim(),
+            password: registerData.password,
+            targetGroup: registerData.targetGroup,
+          }),
+        })
+        const json = await res.json()
+
+        if (res.ok && json.status === 'success' && json.token && json.student) {
+          login(json.token, json.student)
+          onClose()
+          navigate('/dashboard')
+        } else {
+          setServerError(json.message || 'Registration failed.')
+        }
+      } catch (err: any) {
+        setServerError(err.message || 'Unable to connect to server.')
+      } finally {
+        setIsSubmitting(false)
+      }
     }
   }
 
@@ -194,6 +251,12 @@ const MobileAuthSlide = ({
                 </button>
               </div>
 
+              {serverError && (
+                <div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: '6px', padding: '0.5rem 0.75rem', marginBottom: '1rem', color: '#fca5a5', fontSize: '0.82rem' }}>
+                  {serverError}
+                </div>
+              )}
+
               {/* Login Form */}
               <form className="mobile-auth-form" onSubmit={handleLoginSubmit} noValidate>
                 <div className="mobile-form-group">
@@ -253,8 +316,8 @@ const MobileAuthSlide = ({
                   </a>
                 </div>
 
-                <button type="submit" className="mobile-auth-submit-btn">
-                  <span>Login</span>
+                <button type="submit" className="mobile-auth-submit-btn" disabled={isSubmitting}>
+                  <span>{isSubmitting ? 'Logging in...' : 'Login'}</span>
                   <ArrowRight size={16} />
                 </button>
               </form>
@@ -428,8 +491,8 @@ const MobileAuthSlide = ({
                   )}
                 </div>
 
-                <button type="submit" className="mobile-auth-submit-btn">
-                  <span>Register Now</span>
+                <button type="submit" className="mobile-auth-submit-btn" disabled={isSubmitting}>
+                  <span>{isSubmitting ? 'Registering...' : 'Register Now'}</span>
                   <ArrowRight size={16} />
                 </button>
               </form>

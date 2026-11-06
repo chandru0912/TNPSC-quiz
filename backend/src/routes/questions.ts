@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { PoolClient } from 'pg';
 import pool from '../db';
-import { requireAdminAuth } from '../middleware/auth';
+import { requireAdminAuth, verifyAdminToken } from '../middleware/auth';
 import {
   isSemanticallyDuplicate,
   isValidQuestionText,
@@ -157,16 +157,24 @@ router.get('/', async (req: Request, res: Response) => {
       values.push(cleanLesson);
     }
 
-    // Strict Topic Filtering (when passed explicitly without full lesson):
-    if (topic && typeof topic === 'string' && topic.trim().length > 0 && topic.toLowerCase() !== 'all' && !lesson) {
+    // Strict Topic Filtering:
+    if (topic && typeof topic === 'string' && topic.trim().length > 0 && topic.toLowerCase() !== 'all') {
       queryConditions.push(`(LOWER(topic) = $${paramIndex} OR LOWER(topic) LIKE $${paramIndex + 1})`);
       values.push(topic.trim().toLowerCase());
       values.push(`%${topic.trim().toLowerCase()}%`);
       paramIndex += 2;
     }
 
-    // Status: allow staging & published for student practice bank
-    if (status && typeof status === 'string' && status !== 'all') {
+    // Strict Publishing Visibility (Requirements 6 & 11):
+    // Non-admin (students) can ONLY see 'published' content.
+    // Draft, staging, and unpublished content are strictly hidden from students.
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const isAdmin = token ? !!verifyAdminToken(token) : false;
+
+    if (!isAdmin) {
+      queryConditions.push("status = 'published'");
+    } else if (status && typeof status === 'string' && status !== 'all') {
       queryConditions.push(`status = $${paramIndex++}`);
       values.push(status);
     } else if (!status) {
@@ -552,8 +560,8 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
     if (!lessonTitle || typeof lessonTitle !== 'string') {
       return res.status(400).json({ status: 'error', message: 'Lesson title is required' });
     }
-    if (isNaN(unitId) || unitId < 1 || unitId > 20) {
-      return res.status(400).json({ status: 'error', message: 'Valid unitId (1-20) is required' });
+    if (isNaN(unitId) || unitId < 1) {
+      return res.status(400).json({ status: 'error', message: 'Valid unitId is required' });
     }
     if (options.length !== 4 || options.some((opt: string) => !opt)) {
       return res.status(400).json({ status: 'error', message: 'Options must be an array of exactly 4 non-empty strings' });
@@ -583,7 +591,7 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       });
     }
     const difficulty = ['Easy', 'Medium', 'Hard'].includes(q.difficulty) ? q.difficulty : 'Medium';
-    const groupName = cleanCategory === 'group1' ? 'Group 1' : cleanCategory === 'group2' ? 'Group 2' : cleanCategory === 'group2a' ? 'Group 2A' : cleanCategory === 'group4' ? 'Group 4' : 'VAO';
+    const groupName = cleanCategory === 'group1' ? 'Group 1' : (cleanCategory === 'group2' || cleanCategory === 'group2a' || cleanCategory === 'group2_2a') ? 'Group 2, 2A' : cleanCategory === 'group4' ? 'Group 4' : 'VAO';
     const tag = q.tag || `TNPSC ${groupName} • Unit ${unitId}: ${subject}`;
     const explanation = (q.explanation || 'No explanation provided.').trim();
     const sourceReference = q.sourceReference || q.source_reference || null;
@@ -1014,7 +1022,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
         return;
       }
 
-      const groupName = rawCategory === 'group1' ? 'Group 1' : rawCategory === 'group2' ? 'Group 2' : rawCategory === 'group2a' ? 'Group 2A' : rawCategory === 'group4' ? 'Group 4' : 'VAO';
+      const groupName = rawCategory === 'group1' ? 'Group 1' : (rawCategory === 'group2' || rawCategory === 'group2a' || rawCategory === 'group2_2a') ? 'Group 2, 2A' : rawCategory === 'group4' ? 'Group 4' : 'VAO';
       const topic = (q.topic || lessonTitle || '').trim();
       if (!topic) {
         validationErrors.push({ index: index + 1, reason: 'Topic is mandatory and cannot be empty' });
@@ -1270,7 +1278,7 @@ router.post('/batch', requireAdminAuth, async (req: Request, res: Response) => {
         return;
       }
 
-      const groupName = rawCategory === 'group1' ? 'Group 1' : rawCategory === 'group2' ? 'Group 2' : rawCategory === 'group2a' ? 'Group 2A' : rawCategory === 'group4' ? 'Group 4' : 'VAO';
+      const groupName = rawCategory === 'group1' ? 'Group 1' : (rawCategory === 'group2' || rawCategory === 'group2a' || rawCategory === 'group2_2a') ? 'Group 2, 2A' : rawCategory === 'group4' ? 'Group 4' : 'VAO';
       const topic = (q.topic || '').trim() || lessonTitle.trim();
 
       const resolvedLessonId = (q.lessonId || q.lesson_id || req.body?.lessonId || '').trim() || null;

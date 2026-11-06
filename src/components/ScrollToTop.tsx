@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect } from 'react'
 import { useLocation } from 'react-router-dom'
+import { startVisitorTracking, trackPageView } from '../utils/visitorTracker'
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
 
@@ -11,6 +12,12 @@ const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffec
  */
 const ScrollToTop = () => {
   const { pathname, search, hash } = useLocation()
+
+  // Track page views and initialize visitor tracking heartbeat
+  useEffect(() => {
+    startVisitorTracking()
+    trackPageView(pathname)
+  }, [pathname])
 
   useIsomorphicLayoutEffect(() => {
     // Disable browser's default scroll restoration to prevent it from keeping old scroll offsets

@@ -1,25 +1,33 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { User, ArrowRight, Eye, EyeOff } from 'lucide-react'
+import { User, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { useStudentAuth } from '../context/StudentAuthContext'
+import { apiFetch } from '../utils/api'
 import './Auth.css'
 
 const Login = () => {
+  const navigate = useNavigate()
+  const { login } = useStudentAuth()
+
   const [formData, setFormData] = useState({
     email: '',
-    password: ''
+    password: '',
   })
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
+  const [serverError, setServerError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     return emailRegex.test(email)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setServerError(null)
     const newErrors: { email?: string; password?: string } = {}
 
     if (!formData.email.trim()) {
@@ -35,7 +43,29 @@ const Login = () => {
     setErrors(newErrors)
 
     if (Object.keys(newErrors).length === 0) {
-      alert('Login form validated successfully (frontend only)')
+      setIsSubmitting(true)
+      try {
+        const res = await apiFetch('/api/student/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: formData.email.trim(),
+            password: formData.password,
+          }),
+        })
+        const json = await res.json()
+
+        if (res.ok && json.status === 'success' && json.token && json.student) {
+          login(json.token, json.student)
+          navigate('/dashboard')
+        } else {
+          setServerError(json.message || 'Login failed. Please check your credentials.')
+        }
+      } catch (err: any) {
+        setServerError(err.message || 'Unable to connect to the server. Please try again.')
+      } finally {
+        setIsSubmitting(false)
+      }
     }
   }
 
@@ -43,20 +73,23 @@ const Login = () => {
     const { name, value } = e.target
     setFormData({
       ...formData,
-      [name]: value
+      [name]: value,
     })
     if (errors[name as keyof typeof errors]) {
       setErrors({
         ...errors,
-        [name]: undefined
+        [name]: undefined,
       })
+    }
+    if (serverError) {
+      setServerError(null)
     }
   }
 
   return (
     <div className="auth">
       <div className="auth-container">
-        <motion.div 
+        <motion.div
           className="auth-card glass"
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -70,6 +103,22 @@ const Login = () => {
             <p className="auth-subtitle">Login to access your TNPSC Study Hub dashboard</p>
           </div>
 
+          {serverError && (
+            <div
+              style={{
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                borderRadius: '8px',
+                padding: '0.75rem 1rem',
+                marginBottom: '1.25rem',
+                color: '#fca5a5',
+                fontSize: '0.85rem',
+              }}
+            >
+              {serverError}
+            </div>
+          )}
+
           <form className="auth-form" onSubmit={handleSubmit} noValidate>
             <div className="form-group">
               <label className="form-label">Email Address</label>
@@ -81,6 +130,7 @@ const Login = () => {
                   placeholder="Enter your email"
                   value={formData.email}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                 />
               </div>
               {errors.email && <span className="error-text">{errors.email}</span>}
@@ -96,6 +146,7 @@ const Login = () => {
                   placeholder="Enter your password"
                   value={formData.password}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                 />
                 <button
                   type="button"
@@ -118,16 +169,27 @@ const Login = () => {
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
                 />
-                <label htmlFor="rememberMe" className="checkbox-label">Remember me</label>
+                <label htmlFor="rememberMe" className="checkbox-label">
+                  Remember me
+                </label>
               </div>
               <Link to="#" className="forgot-link" onClick={(e) => e.preventDefault()}>
                 Forgot Password?
               </Link>
             </div>
 
-            <button type="submit" className="btn btn-primary auth-btn">
-              <span>Login</span>
-              <ArrowRight size={18} />
+            <button type="submit" className="btn btn-primary auth-btn" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={18} className="spinning" />
+                  <span>Logging in...</span>
+                </>
+              ) : (
+                <>
+                  <span>Login</span>
+                  <ArrowRight size={18} />
+                </>
+              )}
             </button>
           </form>
 

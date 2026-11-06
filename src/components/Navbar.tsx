@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus, Shield } from 'lucide-react'
+import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus, Shield, LogOut } from 'lucide-react'
 import MobileAuthSlide, { type AuthSlideType } from './MobileAuthSlide'
 import { useScrollLock } from '../hooks/useScrollLock'
+import { useStudentAuth } from '../context/StudentAuthContext'
 import './Navbar.css'
 
 const Navbar = () => {
+  const { student, isAuthenticated, logout, isPreviewMode, exitStudentPreview } = useStudentAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [activeAuthSlide, setActiveAuthSlide] = useState<AuthSlideType>('none')
   const location = useLocation()
@@ -108,35 +110,133 @@ const Navbar = () => {
         </ul>
 
         <div className="nav-actions">
-          <Link
-            to="/admin"
-            className="nav-auth-btn nav-admin-btn"
-            title="Admin Portal"
-            onClick={closeMenu}
-          >
-            <Shield size={16} />
-            <span className="nav-auth-label">Admin</span>
-          </Link>
-          <Link
-            to="/login"
-            className={`nav-auth-btn nav-login ${activeAuthSlide === 'login' ? 'active-toggle' : ''}`}
-            onClick={handleLoginClick}
-            aria-expanded={activeAuthSlide === 'login'}
-            aria-label="Toggle login slide"
-          >
-            <User size={18} />
-            <span className="nav-auth-label">Login</span>
-          </Link>
-          <Link
-            to="/register"
-            className={`nav-auth-btn nav-register ${activeAuthSlide === 'register' ? 'active-toggle' : ''}`}
-            onClick={handleRegisterClick}
-            aria-expanded={activeAuthSlide === 'register'}
-            aria-label="Toggle register slide"
-          >
-            <UserPlus size={18} />
-            <span>Register</span>
-          </Link>
+          {/* Admin Button / Preview Exit Button (Strictly hidden for logged-in students) */}
+          {isPreviewMode ? (
+            <button
+              type="button"
+              className="nav-auth-btn"
+              onClick={() => {
+                exitStudentPreview()
+                closeMenu()
+              }}
+              title="Exit Student Preview and return to Admin Dashboard"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                background: 'linear-gradient(135deg, #f59e0b 0%, #ffd700 100%)',
+                color: '#0f172a',
+                border: 'none',
+                fontWeight: 700,
+                padding: '0.35rem 0.85rem',
+                borderRadius: '8px',
+                cursor: 'pointer',
+              }}
+            >
+              <LogOut size={15} />
+              <span className="nav-auth-label">Exit Preview</span>
+            </button>
+          ) : !isAuthenticated || !student ? (
+            <Link
+              to="/admin"
+              className="nav-auth-btn nav-admin-btn"
+              title="Admin Portal"
+              onClick={closeMenu}
+            >
+              <Shield size={16} />
+              <span className="nav-auth-label">Admin</span>
+            </Link>
+          ) : null}
+
+          {isAuthenticated && student ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Link
+                to="/dashboard"
+                className="nav-auth-btn"
+                title={`Student Profile: ${student.fullName} (${student.email})`}
+                onClick={closeMenu}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  background: 'rgba(255, 215, 0, 0.12)',
+                  border: '1px solid rgba(255, 215, 0, 0.35)',
+                  color: '#ffd700',
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '9999px',
+                  textDecoration: 'none',
+                }}
+              >
+                <div
+                  style={{
+                    width: '22px',
+                    height: '22px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #ffd700, #f59e0b)',
+                    color: '#0f172a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  {student.fullName ? student.fullName.charAt(0).toUpperCase() : 'S'}
+                </div>
+                <span className="nav-auth-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                  {student.fullName.split(' ')[0]}
+                </span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  logout()
+                  closeMenu()
+                }}
+                className="nav-auth-btn"
+                title="Logout"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  color: '#f87171',
+                  padding: '0.35rem 0.65rem',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                }}
+              >
+                <LogOut size={14} />
+                <span className="nav-auth-label">Logout</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <Link
+                to="/login"
+                className={`nav-auth-btn nav-login ${activeAuthSlide === 'login' ? 'active-toggle' : ''}`}
+                onClick={handleLoginClick}
+                aria-expanded={activeAuthSlide === 'login'}
+                aria-label="Toggle login slide"
+              >
+                <User size={18} />
+                <span className="nav-auth-label">Login</span>
+              </Link>
+              <Link
+                to="/register"
+                className={`nav-auth-btn nav-register ${activeAuthSlide === 'register' ? 'active-toggle' : ''}`}
+                onClick={handleRegisterClick}
+                aria-expanded={activeAuthSlide === 'register'}
+                aria-label="Toggle register slide"
+              >
+                <UserPlus size={18} />
+                <span>Register</span>
+              </Link>
+            </>
+          )}
+
           <button
             type="button"
             className={`nav-toggle ${isOpen ? 'active' : ''}`}

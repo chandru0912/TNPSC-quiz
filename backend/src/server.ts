@@ -10,7 +10,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') }); // fallb
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { CorsOptions } from 'cors';
-import pool from './db';
+import pool, { isProductionOrCloud } from './db';
 import { ensureDatabaseSchema } from './migrate';
 import questionsRouter from './routes/questions';
 import authRouter, { getConfiguredAdminCount } from './routes/auth';
@@ -24,6 +24,9 @@ import aiGenerationRouter from './routes/aiGeneration';
 import claudeRouter from './routes/claudeRoutes';
 import geminiRouter from './routes/geminiRoutes';
 import driveRouter from './routes/drive';
+import studentRouter from './routes/student';
+import analyticsRouter from './routes/analyticsRoutes';
+import studyManagementRouter from './routes/studyMaterialsManagementRoutes';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -266,6 +269,18 @@ app.use('/api/drive', requireSchemaMiddleware, driveRouter);
 app.use('/drive', requireSchemaMiddleware, driveRouter);
 app.use('/api/api/drive', requireSchemaMiddleware, driveRouter);
 
+app.use('/api/student', requireSchemaMiddleware, studentRouter);
+app.use('/student', requireSchemaMiddleware, studentRouter);
+app.use('/api/api/student', requireSchemaMiddleware, studentRouter);
+
+app.use('/api/analytics', requireSchemaMiddleware, analyticsRouter);
+app.use('/analytics', requireSchemaMiddleware, analyticsRouter);
+app.use('/api/api/analytics', requireSchemaMiddleware, analyticsRouter);
+
+app.use('/api/study-management', requireSchemaMiddleware, studyManagementRouter);
+app.use('/study-management', requireSchemaMiddleware, studyManagementRouter);
+app.use('/api/api/study-management', requireSchemaMiddleware, studyManagementRouter);
+
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {
   const startDb = Date.now();
@@ -317,15 +332,52 @@ app.get('/api/health', async (_req: Request, res: Response) => {
   });
 });
 
-// Database health check endpoint running SELECT 1
+// Database health check endpoint running SELECT NOW() and connection inspection
 app.get('/api/db-health', async (_req: Request, res: Response) => {
   try {
-    const result = await pool.query('SELECT 1 AS result');
+    const start = Date.now();
+    const queryResult = await pool.query(`
+      SELECT 
+        NOW() AS current_time,
+        current_database() AS current_db,
+        current_user AS current_user_name,
+        version() AS pg_version
+    `);
+    const latencyMs = Date.now() - start;
+    const row = queryResult.rows[0];
+
+    // Safely verify the 5 environment variables without exposing credentials
+    const envStatus = {
+      PGHOST: process.env.PGHOST ? 'configured' : 'missing',
+      PGPORT: process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432,
+      PGDATABASE: process.env.PGDATABASE ? 'configured' : 'missing',
+      PGUSER: process.env.PGUSER ? 'configured' : 'missing',
+      PGPASSWORD: process.env.PGPASSWORD ? 'configured (protected)' : 'missing',
+    };
+
+    const hostName = process.env.PGHOST || 'localhost';
+    const isNeon = Boolean(
+      hostName.toLowerCase().includes('neon.tech') ||
+      (row.pg_version && row.pg_version.toLowerCase().includes('neon')) ||
+      row.current_db === 'neondb'
+    );
+
     res.status(200).json({
       status: 'connected',
-      message: 'PostgreSQL database connection is healthy',
-      database: process.env.PGDATABASE || 'tnpsc_study_hub',
-      result: result.rows[0].result,
+      message: 'PostgreSQL database connection is healthy and verified',
+      connectionTest: {
+        query: 'SELECT NOW()',
+        serverTime: row.current_time,
+        latencyMs,
+      },
+      databaseInfo: {
+        databaseName: row.current_db,
+        connectedUser: row.current_user_name,
+        isNeonDatabase: isNeon,
+        serverVersion: (row.pg_version || '').split(' on ')[0] || row.pg_version,
+      },
+      environmentVariables: envStatus,
+      sslActive: isProductionOrCloud,
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
@@ -334,6 +386,13 @@ app.get('/api/db-health', async (_req: Request, res: Response) => {
       dbStatus: 'disconnected',
       message: 'Failed to connect to PostgreSQL database',
       error: error.message || 'Database connection error',
+      environmentVariables: {
+        PGHOST: process.env.PGHOST ? 'configured' : 'missing',
+        PGPORT: process.env.PGPORT ? 'configured' : 'missing',
+        PGDATABASE: process.env.PGDATABASE ? 'configured' : 'missing',
+        PGUSER: process.env.PGUSER ? 'configured' : 'missing',
+        PGPASSWORD: process.env.PGPASSWORD ? 'configured (protected)' : 'missing',
+      },
       timestamp: new Date().toISOString(),
     });
   }

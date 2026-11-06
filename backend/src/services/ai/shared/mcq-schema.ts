@@ -46,7 +46,7 @@ export interface StandardizedMcqItem {
   language: 'Tamil' | 'English';
   sourceTextbook?: string;
   sourcePage?: number;
-  aiProvider?: 'claude' | 'gemini';
+  aiProvider?: 'claude' | 'gemini' | 'openai';
   modelUsed?: string;
   fingerprint?: string;
 }
@@ -70,7 +70,7 @@ export interface DatabaseQuestionPayload {
   source_page?: number | null;
   source_pdf?: string | null;
   language: 'tamil' | 'english';
-  ai_provider: 'claude' | 'gemini';
+  ai_provider: 'claude' | 'gemini' | 'openai';
   option_a: string;
   option_b: string;
   option_c: string;

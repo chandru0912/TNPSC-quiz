@@ -1,0 +1,231 @@
+/* Student Performance Card */
+.student-performance-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  height: 100%;
+}
+
+.perf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 12px;
+}
+
+.perf-title-cluster {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.perf-title-icon {
+  color: #3b82f6;
+}
+
+.perf-title {
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.perf-accuracy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.perf-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.perf-metric-block {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metric-label {
+  font-size: 0.74rem;
+  color: #94a3b8;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.metric-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.metric-score-val {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.metric-sublabel {
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.animated-progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.animated-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gradient-blue {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+}
+
+.gradient-purple {
+  background: linear-gradient(90deg, #8b5cf6, #c084fc);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+
+.gradient-green {
+  background: linear-gradient(90deg, #10b981, #34d399);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+/* Cohort Distribution */
+.perf-cohort-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.cohort-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cohort-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.cohort-total-badge {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.cohort-stacked-bar {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.cohort-segment {
+  height: 100%;
+  transition: width 0.8s ease;
+}
+
+.segment-high {
+  background: #10b981;
+}
+
+.segment-avg {
+  background: #f59e0b;
+}
+
+.segment-support {
+  background: #f43f5e;
+}
+
+.cohort-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cohort-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: #cbd5e1;
+}
+
+.pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-green {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.dot-amber {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
+.dot-rose {
+  background: #f43f5e;
+  box-shadow: 0 0 6px #f43f5e;
+}
+
+.pill-num {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.pill-pct {
+  color: #64748b;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .perf-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

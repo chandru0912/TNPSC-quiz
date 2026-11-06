@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -23,6 +24,9 @@ import {
   getGroup4UnitById,
   getGroup4UnitChapterCount,
   getGroup4UnitLessonCount,
+  type Group4Unit,
+  type Group4Chapter,
+  type Group4Lesson,
 } from '../data/group4SyllabusData'
 import { standardClasses } from '../data/group4ClassSyllabusData'
 import { useLanguage } from '../context/LanguageContext'
@@ -55,7 +59,43 @@ const Group4UnitDetail = () => {
   const parsedUnitId = parseInt(unitId || '1', 10)
 
   const subject = getGroup4SubjectById(activeSubjectId)
-  const unit = getGroup4UnitById(activeSubjectId, parsedUnitId)
+  const staticUnit = getGroup4UnitById(activeSubjectId, parsedUnitId)
+  const [unit, setUnit] = useState<Group4Unit | null>(staticUnit || null)
+
+  useEffect(() => {
+    fetch(`/api/study-management/units?examId=group4&subjectId=${activeSubjectId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && Array.isArray(d.units)) {
+          const match = d.units.find((u: any) => u.unit_number === parsedUnitId)
+          if (match) {
+            setUnit((prev: Group4Unit | null) => {
+              if (prev) {
+                return {
+                  ...prev,
+                  title: match.title || prev.title,
+                  tamilTitle: match.subject_name || prev.tamilTitle,
+                  questionCount: match.question_count || prev.questionCount,
+                  unitNumber: match.unit_code || prev.unitNumber,
+                  officialTopics: match.description ? [match.description] : prev.officialTopics,
+                }
+              }
+              return {
+                id: match.unit_number,
+                unitNumber: match.unit_code || `Unit ${match.unit_number}`,
+                title: match.title,
+                tamilTitle: match.subject_name || match.title,
+                questionCount: match.question_count || 10,
+                standard: 'SSLC Standard',
+                officialTopics: match.description ? [match.description] : [`Syllabus outline for ${match.title}`],
+                chapters: [],
+              }
+            })
+          }
+        }
+      })
+      .catch(() => {})
+  }, [activeSubjectId, parsedUnitId])
 
   if (!subject || !unit) {
     return (
@@ -179,7 +219,7 @@ const Group4UnitDetail = () => {
           </div>
 
           <div className="syllabus-topics-list">
-            {unit.officialTopics.map((topic, index) => (
+            {unit.officialTopics.map((topic: string, index: number) => (
               <div key={index} className="syllabus-topic-item">
                 <span className="topic-bullet">§{index + 1}</span>
                 <p>{translateTopic(topic, language)}</p>
@@ -229,7 +269,7 @@ const Group4UnitDetail = () => {
           </div>
 
           <div className="chapters-grid">
-            {unit.chapters.map((chapter, index) => (
+            {unit.chapters.map((chapter: Group4Chapter, index: number) => (
               <motion.div
                 key={chapter.id}
                 className="chapter-card glass"
@@ -254,7 +294,7 @@ const Group4UnitDetail = () => {
                 )}
 
                 <div className="chapter-lessons-list">
-                  {chapter.lessons.map((lesson) => (
+                  {chapter.lessons.map((lesson: Group4Lesson) => (
                     <div
                       key={lesson.id}
                       className="chapter-lesson-row"

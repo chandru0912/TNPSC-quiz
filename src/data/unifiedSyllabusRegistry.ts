@@ -42,9 +42,9 @@ export interface GroupSyllabus {
 }
 
 export const TNPSC_GROUPS: { id: 'group1' | 'group2' | 'group4'; name: string; code: string; badge: string }[] = [
-  { id: 'group1', name: 'TNPSC Group 1', code: 'Code: 497', badge: 'Degree Standard • Prelims' },
-  { id: 'group2', name: 'TNPSC Group 2 & 2A', code: 'Code: 495', badge: 'Degree Standard • Prelims & Non-Interview' },
-  { id: 'group4', name: 'TNPSC Group 4', code: 'Code: 496', badge: 'SSLC Standard • Single Paper' },
+  { id: 'group1', name: 'TNPSC Group 1', code: '', badge: '' },
+  { id: 'group2', name: 'TNPSC Group 2, 2A', code: '', badge: '' },
+  { id: 'group4', name: 'TNPSC Group 4', code: '', badge: '' },
 ]
 
 // ----------------------------------------------------------------------------

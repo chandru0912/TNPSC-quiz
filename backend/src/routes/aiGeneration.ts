@@ -27,7 +27,7 @@ router.get('/', (_req: Request, res: Response) => {
   return res.status(200).json({
     status: 'online',
     service: 'TNPSC Study Hub AI Generation Engine',
-    providers: ['claude', 'gemini'],
+    providers: ['claude', 'gemini', 'openai'],
     endpoints: {
       providers: 'GET /api/ai/providers',
       setActiveProvider: 'POST /api/ai/providers/active',
@@ -69,10 +69,10 @@ router.get('/providers', async (_req: Request, res: Response) => {
 router.post('/providers/active', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const { provider } = req.body || {};
-    if (!provider || (provider !== 'claude' && provider !== 'gemini')) {
+    if (!provider || (provider !== 'claude' && provider !== 'gemini' && provider !== 'openai')) {
       return res.status(400).json({
         status: 'error',
-        message: 'Invalid provider. Must be either "claude" or "gemini".',
+        message: 'Invalid provider. Must be one of "claude", "gemini", or "openai".',
       });
     }
 
@@ -95,7 +95,8 @@ router.post('/providers/active', requireAdminAuth, async (req: Request, res: Res
  */
 router.get('/prompts', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const provider = (String(req.query.provider || 'claude').toLowerCase() === 'gemini' ? 'gemini' : 'claude') as AIProviderName;
+    const rawProvider = String(req.query.provider || 'claude').toLowerCase();
+    const provider = (rawProvider === 'gemini' ? 'gemini' : rawProvider === 'openai' ? 'openai' : 'claude') as AIProviderName;
     const promptType = req.query.promptType as AIPromptType | undefined;
     const history = req.query.history === 'true';
 
@@ -119,8 +120,8 @@ router.post('/prompts', requireAdminAuth, async (req: Request, res: Response) =>
   try {
     const { provider, promptType, title, content } = req.body || {};
 
-    if (!provider || (provider !== 'claude' && provider !== 'gemini')) {
-      return res.status(400).json({ status: 'error', message: 'provider must be "claude" or "gemini".' });
+    if (!provider || (provider !== 'claude' && provider !== 'gemini' && provider !== 'openai')) {
+      return res.status(400).json({ status: 'error', message: 'provider must be "claude", "gemini", or "openai".' });
     }
     if (!promptType || typeof promptType !== 'string') {
       return res.status(400).json({ status: 'error', message: 'promptType is required.' });
@@ -154,8 +155,8 @@ router.post('/prompts/restore', requireAdminAuth, async (req: Request, res: Resp
   try {
     const { provider, promptType, version } = req.body || {};
 
-    if (!provider || (provider !== 'claude' && provider !== 'gemini')) {
-      return res.status(400).json({ status: 'error', message: 'provider must be "claude" or "gemini".' });
+    if (!provider || (provider !== 'claude' && provider !== 'gemini' && provider !== 'openai')) {
+      return res.status(400).json({ status: 'error', message: 'provider must be "claude", "gemini", or "openai".' });
     }
     if (!promptType || !version) {
       return res.status(400).json({ status: 'error', message: 'promptType and version are required.' });
@@ -358,7 +359,7 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
     }
 
     const payload: UnifiedGenerationRequest = {
-      provider: provider === 'gemini' ? 'gemini' : (provider === 'claude' ? 'claude' : undefined),
+      provider: provider === 'gemini' ? 'gemini' : (provider === 'claude' ? 'claude' : (provider === 'openai' ? 'openai' : undefined)),
       category: String(category).toLowerCase(),
       standard: Number(standard) || 6,
       subject: String(subject),
@@ -410,7 +411,7 @@ router.post('/generate', requireAdminAuth, async (req: Request, res: Response) =
 
     // Log the failed attempt independently
     await AILogsService.logGeneration({
-      provider: provider === 'gemini' ? 'gemini' : 'claude',
+      provider: provider === 'gemini' ? 'gemini' : provider === 'openai' ? 'openai' : 'claude',
       model: 'unknown',
       generationType: mode,
       groupId: category,

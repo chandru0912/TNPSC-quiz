@@ -24,6 +24,7 @@ import {
   getLessonsForSelection,
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
+import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import './StudyMaterialsPractice.css'
 
 interface StudyMaterialQuestionItem {
@@ -52,6 +53,7 @@ interface StudyMaterialQuestionItem {
 }
 
 export const StudyMaterialsPractice: React.FC = () => {
+  useStudyTimeTracker()
   const navigate = useNavigate()
   const routeParams = useParams<{
     group?: string
@@ -240,6 +242,32 @@ export const StudyMaterialsPractice: React.FC = () => {
         isCorrect,
       },
     }))
+
+    // Real-Time Student Activity Tracking in PostgreSQL
+    const studentToken = localStorage.getItem('tnpsc_student_token')
+    if (studentToken) {
+      apiFetch('/api/student/question-attempt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${studentToken}`,
+        },
+        body: JSON.stringify({
+          questionId: activeQuestion.id,
+          category: normalizedGroup,
+          subject: resolvedSubject?.name || activeQuestion.subject || subjectId,
+          classId,
+          unitId,
+          lessonId: activeQuestion.lessonId || lessonIdParam,
+          lessonTitle: activeQuestion.lessonTitle || lessonTitleParam || 'Lesson Practice',
+          selectedOption,
+          correctAnswer: activeQuestion.correctAnswer,
+          isCorrect,
+          sourceSystem: 'study_materials',
+          timeSpentSeconds: 15,
+        }),
+      }).catch((err) => console.warn('[StudentTrack] Failed to log lesson question attempt:', err))
+    }
   }
 
   // Next Question
