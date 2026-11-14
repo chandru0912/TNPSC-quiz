@@ -87,6 +87,7 @@ async function listDriveFolderPdfsRecursive(
  * without duplicating existing textbook records.
  */
 async function ensureTextbookRecord(params: {
+  googleDriveFileId?: string;
   bookName: string;
   groupId: string;
   standard: number;
@@ -95,21 +96,38 @@ async function ensureTextbookRecord(params: {
   term: string;
   fileSize: number;
 }): Promise<boolean> {
+  if (params.googleDriveFileId) {
+    const byDriveId = await pool.query(
+      `SELECT id FROM textbooks WHERE google_drive_file_id = $1 LIMIT 1`,
+      [params.googleDriveFileId]
+    );
+    if (byDriveId.rows.length > 0) {
+      return false;
+    }
+  }
+
   const existing = await pool.query(
-    `SELECT id FROM textbooks
+    `SELECT id, google_drive_file_id FROM textbooks
      WHERE LOWER(book_name) = LOWER($1)
         OR (standard = $2 AND LOWER(subject) = LOWER($3) AND LOWER(COALESCE(medium, 'Tamil')) = LOWER($4) AND LOWER(COALESCE(term, 'Full Year')) = LOWER($5))
+     ORDER BY id ASC
      LIMIT 1`,
     [params.bookName, params.standard, params.subject, params.medium, params.term]
   );
 
   if (existing.rows.length > 0) {
+    if (params.googleDriveFileId && !existing.rows[0].google_drive_file_id) {
+      await pool.query(
+        `UPDATE textbooks SET google_drive_file_id = $1 WHERE id = $2 AND google_drive_file_id IS NULL`,
+        [params.googleDriveFileId, existing.rows[0].id]
+      );
+    }
     return false;
   }
 
   await pool.query(
-    `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_size, status, extraction_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', 'PENDING')`,
+    `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_size, google_drive_file_id, status, extraction_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'completed', 'PENDING')`,
     [
       params.groupId,
       params.standard,
@@ -118,6 +136,7 @@ async function ensureTextbookRecord(params: {
       params.term,
       params.bookName,
       params.fileSize,
+      params.googleDriveFileId || null,
     ]
   );
   return true;
@@ -223,6 +242,7 @@ export async function syncGoogleDriveToDatabase(): Promise<DriveSyncSummary> {
 
         if (row.standard && row.subject) {
           const addedTb = await ensureTextbookRecord({
+            googleDriveFileId: file.id,
             bookName: row.file_name || file.name,
             groupId: row.tnpsc_group || 'group4',
             standard: Number(row.standard),
@@ -275,6 +295,7 @@ export async function syncGoogleDriveToDatabase(): Promise<DriveSyncSummary> {
         insertedCount++;
 
         const addedTb = await ensureTextbookRecord({
+          googleDriveFileId: file.id,
           bookName: classified.bookName ? `${classified.bookName}.pdf` : file.name,
           groupId: classified.primaryGroup || 'group4',
           standard: classified.standardNumber || 6,

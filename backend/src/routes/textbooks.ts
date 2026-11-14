@@ -476,7 +476,7 @@ router.get('/', async (req: Request, res: Response) => {
     const query = `
       SELECT id, group_id, standard, subject, medium, term, book_name, file_size, page_count, status, error_message,
              pdf_type, total_pages, native_pages, ocr_pages, failed_pages, completion_percentage,
-             extraction_status, extraction_method, extracted_at, created_at, updated_at
+             extraction_status, extraction_method, extracted_at, google_drive_file_id, created_at, updated_at
       FROM textbooks
       ${whereClause}
       ORDER BY standard ASC, subject ASC, id DESC
@@ -526,6 +526,7 @@ router.get('/', async (req: Request, res: Response) => {
         extractionStatus: r.extraction_status || (r.status === 'completed' && (r.total_pages > 0 || r.page_count > 0) ? 'COMPLETED' : 'PENDING'),
         extractionMethod: r.extraction_method,
         extractedAt: r.extracted_at,
+        googleDriveFileId: r.google_drive_file_id || null,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
       })),

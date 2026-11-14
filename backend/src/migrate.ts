@@ -445,6 +445,10 @@ export async function runMigration() {
       ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS total_pages INT DEFAULT 0;
       ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extraction_error TEXT;
       ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extracted_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS google_drive_file_id VARCHAR(255);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_textbooks_google_drive_file_id
+        ON textbooks (google_drive_file_id)
+        WHERE google_drive_file_id IS NOT NULL;
 
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS pdf_type VARCHAR(30) DEFAULT 'UNKNOWN';
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS native_pages INT DEFAULT 0;

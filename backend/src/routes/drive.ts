@@ -41,6 +41,10 @@ import {
   syncGoogleDriveToDatabase,
   getLatestDriveSyncStatus,
 } from '../services/googleDriveSyncService';
+import {
+  reconcileTextbooksWithDrive,
+  compareTextbooks55And8,
+} from '../services/textbookReconciliationService';
 
 const router = Router();
 
@@ -687,6 +691,41 @@ router.get('/sync/status', requireAdminAuth, async (_req: Request, res: Response
     return res.status(200).json({ status: 'success', data: latest });
   } catch (err: any) {
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to get sync status.' });
+  }
+});
+
+/**
+ * POST /api/drive/reconcile-textbooks
+ * Admin only: Runs dry-run or live reconciliation linking textbooks to google_drive_file_id
+ * and fixing the 27 verified English Medium PDFs.
+ */
+router.post('/reconcile-textbooks', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
+    const result = await reconcileTextbooksWithDrive({ dryRun });
+    return res.status(200).json({
+      status: 'success',
+      message: dryRun
+        ? 'Dry-run reconciliation completed (no changes committed).'
+        : `Reconciliation completed: ${result.uniqueMappedTextbooks} textbooks linked by Google Drive File ID.`,
+      data: result,
+    });
+  } catch (err: any) {
+    console.error('[ReconcileTextbooks] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to reconcile textbooks.' });
+  }
+});
+
+/**
+ * GET /api/drive/reconcile-textbooks/compare-55-8
+ * Admin only: Read-only comparison between Textbook #55 and Textbook #8.
+ */
+router.get('/reconcile-textbooks/compare-55-8', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const comparison = await compareTextbooks55And8();
+    return res.status(200).json({ status: 'success', data: comparison });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to compare textbooks.' });
   }
 });
 
