@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   BookOpen,
@@ -16,13 +16,16 @@ import {
   Scale,
   TrendingUp,
   ScrollText,
+  GraduationCap,
 } from 'lucide-react'
 import {
   getUnitById,
   getUnitChapterCount,
   getUnitLessonCount,
+  group1AptitudeUnits,
   type SyllabusUnit,
 } from '../data/group1SyllabusData'
+import { standardClasses } from '../data/group1ClassSyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { compareLessons } from '../utils/naturalSort'
 import { useLanguage } from '../context/LanguageContext'
@@ -47,9 +50,37 @@ const unitIcons: Record<number, any> = {
 const Group1UnitDetail = () => {
   const { unitId } = useParams<{ unitId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const { language, isTamil } = useLanguage()
   const parsedId = parseInt(unitId || '1', 10)
-  const staticUnit = getUnitById(parsedId)
+  const isAptitude = location.pathname.includes('/materials/group1/aptitude')
+  const activeSubjectId = isAptitude ? 'aptitude' : 'general-studies'
+  const subjectHomePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1/general-studies'
+  const subjectBasePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1'
+  const subjectLabel = isAptitude
+    ? isTamil
+      ? 'திறனறிவும் மனக்கணக்கும்'
+      : 'Aptitude & Mental Ability'
+    : isTamil
+    ? 'பொது அறிவு'
+    : 'General Studies'
+
+  const staticAptUnit = isAptitude ? group1AptitudeUnits.find((u) => u.id === parsedId) : undefined
+  const staticUnit: SyllabusUnit | undefined = isAptitude
+    ? staticAptUnit
+      ? {
+          id: staticAptUnit.id,
+          unitNumber: staticAptUnit.unitNumber,
+          title: staticAptUnit.title,
+          tamilTitle: staticAptUnit.title,
+          questionCount: staticAptUnit.questionCount,
+          standard: staticAptUnit.standard,
+          color: '#fbbf24',
+          officialSyllabusTopics: staticAptUnit.topics,
+          chapters: [],
+        }
+      : undefined
+    : getUnitById(parsedId)
   const [unit, setUnit] = useState<SyllabusUnit | null>(staticUnit || null)
 
   useEffect(() => {
@@ -58,8 +89,8 @@ const Group1UnitDetail = () => {
     const loadUnitAndLessons = async () => {
       try {
         const [uRes, lRes] = await Promise.all([
-          fetch('/api/study-management/units?examId=group1&subjectId=general-studies'),
-          fetch(`/api/study-management/lessons?examId=group1&subjectId=general-studies&unitNumber=${parsedId}`),
+          fetch(`/api/study-management/units?examId=group1&subjectId=${activeSubjectId}`),
+          fetch(`/api/study-management/lessons?examId=group1&subjectId=${activeSubjectId}&unitNumber=${parsedId}`),
         ])
         const uData = await uRes.json()
         const lData = await lRes.json()
@@ -148,7 +179,7 @@ const Group1UnitDetail = () => {
       isCancelled = true
       unsubscribe()
     }
-  }, [parsedId, staticUnit])
+  }, [parsedId, activeSubjectId])
 
   if (!unit) {
     return (
@@ -157,9 +188,9 @@ const Group1UnitDetail = () => {
           <div className="empty-state glass">
             <h2>{isTamil ? 'அலகு கிடைக்கவில்லை' : 'Unit Not Found'}</h2>
             <p>{isTamil ? 'கோரப்பட்ட டிஎன்பிஎஸ்சி குரூப் 1 பாடத்திட்ட அலகு இல்லை.' : 'The requested TNPSC Group 1 syllabus unit does not exist.'}</p>
-            <Link to="/materials/group1/general-studies" className="btn btn-primary" style={{ marginTop: '1rem' }}>
+            <Link to={subjectHomePath} className="btn btn-primary" style={{ marginTop: '1rem' }}>
               <ArrowLeft size={16} />
-              <span>{isTamil ? 'பொது அறிவுக்குத் திரும்பு' : 'Back to General Studies'}</span>
+              <span>{isTamil ? `${subjectLabel} பகுதிக்குத் திரும்பு` : `Back to ${subjectLabel}`}</span>
             </Link>
           </div>
         </div>
@@ -180,16 +211,16 @@ const Group1UnitDetail = () => {
           <ChevronRight size={14} />
           <Link to="/materials">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials/group1/general-studies">{isTamil ? 'பொது அறிவு' : 'General Studies'}</Link>
+          <Link to={subjectHomePath}>{subjectLabel}</Link>
           <ChevronRight size={14} />
           <span className="active">{translateUnitNumber(unit.unitNumber, language)}: {isTamil ? (unit.tamilTitle || unit.title) : unit.title}</span>
         </div>
 
         {/* Back Link & Language Switch */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-          <Link to="/materials/group1/general-studies" className="back-btn glass">
+          <Link to={subjectHomePath} className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? 'அனைத்து அலகுகளுக்கும் திரும்பு' : 'Back to General Studies Units'}</span>
+            <span>{isTamil ? 'அனைத்து அலகுகளுக்கும் திரும்பு' : `Back to ${subjectLabel} Units`}</span>
           </Link>
 
           <LanguageSwitch />
@@ -244,7 +275,7 @@ const Group1UnitDetail = () => {
             <div className="unit-hero-cta">
               <button
                 className="btn btn-primary"
-                onClick={() => navigate(`/materials/group1/unit/${unit.id}/lessons`)}
+                onClick={() => navigate(`${subjectBasePath}/unit/${unit.id}/lessons`)}
               >
                 <BookOpen size={18} />
                 <span>{isTamil ? 'பாடங்கள் & குறிப்புகளைக் காண்க' : 'View Lessons & Notes'}</span>
@@ -278,6 +309,38 @@ const Group1UnitDetail = () => {
             ))}
           </div>
         </motion.div>
+
+        {/* Standard-Wise Breakdown Section */}
+        <div className="unit-class-breakdown-section glass" style={{ marginTop: '1.5rem', padding: '1.5rem 1.75rem', borderRadius: 'var(--border-radius)', border: '1px solid var(--border-color)', background: 'var(--surface-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+            <GraduationCap size={22} style={{ color: 'var(--gold-primary)' }} />
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                {isTamil ? 'பள்ளிப் பாடநூல் வகுப்புகள் (6 முதல் 12 வரை)' : 'School Textbook Standards (6th to 12th)'}
+              </h3>
+              <p style={{ margin: '0.2rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                {isTamil
+                  ? `வகுப்பு வாரியாக ${translateUnitNumber(unit.unitNumber, language)} பாடக் குறிப்புகள் மற்றும் வினாக்களைப் பயில்க:`
+                  : `Explore school textbook notes and MCQs for ${unit.unitNumber} by class standard:`}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
+            {standardClasses.map((cls) => (
+              <button
+                key={cls.id}
+                type="button"
+                className="btn glass"
+                style={{ padding: '0.65rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.825rem', fontWeight: 600, color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-sm)', cursor: 'pointer' }}
+                onClick={() => navigate(`${subjectBasePath}/unit/${unit.id}/class/${cls.id}`)}
+              >
+                <span>{cls.label}</span>
+                <ChevronRight size={14} style={{ color: 'var(--gold-primary)' }} />
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Chapter Cards Section */}
         <div className="chapters-section">
@@ -337,13 +400,13 @@ const Group1UnitDetail = () => {
           <div className="action-strip-buttons">
             <button
               className="btn btn-primary"
-              onClick={() => navigate(`/materials/group1/unit/${unit.id}/lessons`)}
+              onClick={() => navigate(`${subjectBasePath}/unit/${unit.id}/lessons`)}
             >
               <FileText size={18} />
               <span>{isTamil ? 'பாடங்கள் & குறிப்புகளைக் காண்க' : 'View Lessons & Notes'}</span>
             </button>
             <Link
-              to={`/practice?group=group1&unitId=${unit.id}&unitTitle=${encodeURIComponent(unit.title)}`}
+              to={`/practice?group=group1&subjectId=${activeSubjectId}&unitId=${unit.id}&unitTitle=${encodeURIComponent(unit.title)}`}
               className="btn btn-secondary"
             >
               <span>{isTamil ? 'அலகு வினாக்களைப் பயிற்சி செய்' : 'Practice Unit MCQs'}</span>

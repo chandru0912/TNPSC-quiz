@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   ChevronRight,
@@ -11,6 +11,7 @@ import {
   getUnitById,
   getUnitChapterCount,
   getUnitLessonCount,
+  group1AptitudeUnits,
   type SyllabusUnit,
 } from '../data/group1SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
@@ -28,9 +29,37 @@ import './Group1Lessons.css'
 const Group1Lessons = () => {
   const { unitId } = useParams<{ unitId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const { language, isTamil } = useLanguage()
   const parsedId = parseInt(unitId || '1', 10)
-  const staticUnit = getUnitById(parsedId)
+  const isAptitude = location.pathname.includes('/materials/group1/aptitude')
+  const activeSubjectId = isAptitude ? 'aptitude' : 'general-studies'
+  const subjectHomePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1/general-studies'
+  const subjectBasePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1'
+  const subjectLabel = isAptitude
+    ? isTamil
+      ? 'திறனறிவும் மனக்கணக்கும்'
+      : 'Aptitude & Mental Ability'
+    : isTamil
+    ? 'பொது அறிவு'
+    : 'General Studies'
+
+  const staticAptUnit = isAptitude ? group1AptitudeUnits.find((u) => u.id === parsedId) : undefined
+  const staticUnit: SyllabusUnit | undefined = isAptitude
+    ? staticAptUnit
+      ? {
+          id: staticAptUnit.id,
+          unitNumber: staticAptUnit.unitNumber,
+          title: staticAptUnit.title,
+          tamilTitle: staticAptUnit.title,
+          questionCount: staticAptUnit.questionCount,
+          standard: staticAptUnit.standard,
+          color: '#fbbf24',
+          officialSyllabusTopics: staticAptUnit.topics,
+          chapters: [],
+        }
+      : undefined
+    : getUnitById(parsedId)
   const [unit, setUnit] = useState<SyllabusUnit | null>(staticUnit || null)
 
   useEffect(() => {
@@ -39,8 +68,8 @@ const Group1Lessons = () => {
     const loadUnitAndLessons = async () => {
       try {
         const [uRes, lRes] = await Promise.all([
-          fetch('/api/study-management/units?examId=group1&subjectId=general-studies'),
-          fetch(`/api/study-management/lessons?examId=group1&subjectId=general-studies&unitNumber=${parsedId}`),
+          fetch(`/api/study-management/units?examId=group1&subjectId=${activeSubjectId}`),
+          fetch(`/api/study-management/lessons?examId=group1&subjectId=${activeSubjectId}&unitNumber=${parsedId}`),
         ])
         const uData = await uRes.json()
         const lData = await lRes.json()
@@ -124,7 +153,7 @@ const Group1Lessons = () => {
       isCancelled = true
       unsubscribe()
     }
-  }, [parsedId, staticUnit])
+  }, [parsedId, activeSubjectId])
 
   if (!unit) {
     return (
@@ -133,9 +162,9 @@ const Group1Lessons = () => {
           <div className="empty-state glass">
             <h2>{isTamil ? 'அலகு கிடைக்கவில்லை' : 'Unit Not Found'}</h2>
             <p>{isTamil ? 'கோரப்பட்ட டிஎன்பிஎஸ்சி குரூப் 1 பாடத்திட்ட அலகு இல்லை.' : 'The requested TNPSC Group 1 syllabus unit does not exist.'}</p>
-            <Link to="/materials/group1/general-studies" className="btn btn-primary" style={{ marginTop: '1rem' }}>
+            <Link to={subjectHomePath} className="btn btn-primary" style={{ marginTop: '1rem' }}>
               <ArrowLeft size={16} />
-              <span>{isTamil ? 'பொது அறிவுக்குத் திரும்பு' : 'Back to General Studies'}</span>
+              <span>{isTamil ? `${subjectLabel} பகுதிக்குத் திரும்பு` : `Back to ${subjectLabel}`}</span>
             </Link>
           </div>
         </div>
@@ -155,16 +184,16 @@ const Group1Lessons = () => {
           <ChevronRight size={14} />
           <Link to="/materials">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials/group1/general-studies">{isTamil ? 'பொது அறிவு' : 'General Studies'}</Link>
+          <Link to={subjectHomePath}>{subjectLabel}</Link>
           <ChevronRight size={14} />
-          <Link to={`/materials/group1/unit/${unit.id}`}>{translateUnitNumber(unit.unitNumber, language)}</Link>
+          <Link to={`${subjectBasePath}/unit/${unit.id}`}>{translateUnitNumber(unit.unitNumber, language)}</Link>
           <ChevronRight size={14} />
           <span className="active">{isTamil ? 'பாடங்கள் & குறிப்புகள்' : 'Lessons & Notes'}</span>
         </div>
 
         {/* Back Link & Language Switch */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-          <Link to={`/materials/group1/unit/${unit.id}`} className="back-btn glass">
+          <Link to={`${subjectBasePath}/unit/${unit.id}`} className="back-btn glass">
             <ArrowLeft size={16} />
             <span>{isTamil ? `பாடத்திட்டத்திற்குத் திரும்பு (${translateUnitNumber(unit.unitNumber, language)})` : `Back to ${unit.unitNumber} Syllabus`}</span>
           </Link>
@@ -237,7 +266,7 @@ const Group1Lessons = () => {
                       <button
                         className="view-lesson-btn"
                         onClick={() =>
-                          navigate(`/study-notes/group1/subject/general-studies/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${(lesson as any).term ? `&term=${encodeURIComponent((lesson as any).term)}` : ''}`)
+                          navigate(`/study-notes/group1/subject/${activeSubjectId}/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${(lesson as any).term ? `&term=${encodeURIComponent((lesson as any).term)}` : ''}`)
                         }
                       >
                         <span>{isTamil ? 'பாடக் குறிப்புகள் படிக்க' : 'Read Study Notes'}</span>
@@ -247,7 +276,7 @@ const Group1Lessons = () => {
                         className="view-lesson-btn"
                         style={{ marginLeft: '0.4rem', background: 'linear-gradient(135deg, rgba(255,215,0,0.18), rgba(245,158,11,0.28))', borderColor: 'rgba(255,215,0,0.5)', color: '#ffd700' }}
                         onClick={() =>
-                          navigate(`/study-materials/practice/group1/general-studies/all/${unit.id}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`)
+                          navigate(`/study-materials/practice/group1/${activeSubjectId}/all/${unit.id}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`)
                         }
                       >
                         <span>{isTamil ? 'பயிற்சி வினாக்கள்' : 'Practice MCQs'}</span>

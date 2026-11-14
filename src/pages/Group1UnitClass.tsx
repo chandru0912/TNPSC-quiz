@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useScrollLock } from '../hooks/useScrollLock'
 
@@ -32,7 +32,7 @@ import {
 } from '../data/group1ClassSyllabusData'
 import { compareLessons } from '../utils/naturalSort'
 import { normalizeMatchedTopics } from '../utils/syllabusNormalize'
-import { group1GeneralStudiesUnits } from '../data/group1SyllabusData'
+import { group1GeneralStudiesUnits, group1AptitudeUnits } from '../data/group1SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
 import { useLanguage } from '../context/LanguageContext'
@@ -61,12 +61,40 @@ const unitIcons: Record<number, any> = {
 const Group1UnitClass = () => {
   const { unitId, classId } = useParams<{ unitId: string; classId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const { language, isTamil } = useLanguage()
 
   const parsedUnitId = parseInt(unitId || '1', 10)
   const parsedClassId = parseInt(classId || '6', 10)
 
-  const data = getUnitClassData(parsedUnitId, parsedClassId)
+  const isAptitude = location.pathname.includes('/materials/group1/aptitude')
+  const activeSubjectId = isAptitude ? 'aptitude' : 'general-studies'
+  const subjectHomePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1/general-studies'
+  const subjectBasePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1'
+  const subjectLabel = isAptitude
+    ? isTamil
+      ? 'திறனறிவும் மனக்கணக்கும்'
+      : 'Aptitude & Mental Ability'
+    : isTamil
+    ? 'பொது அறிவு'
+    : 'General Studies'
+
+  const gsData = getUnitClassData(parsedUnitId, parsedClassId)
+  const aptStaticUnit = isAptitude ? group1AptitudeUnits.find((u) => u.id === parsedUnitId) : undefined
+  const data = isAptitude
+    ? {
+        ...gsData,
+        unitId: parsedUnitId,
+        classId: parsedClassId,
+        unitTitle: aptStaticUnit?.title || `Unit ${parsedUnitId}`,
+        unitNumber: aptStaticUnit?.unitNumber || `Unit ${parsedUnitId}`,
+        classTitle: `${parsedClassId}th Standard`,
+        standardNumber: parsedClassId,
+        subjectName: 'Mathematics / Aptitude (Samacheer Kalvi)',
+        topics: aptStaticUnit?.topics || [],
+        lessons: [],
+      }
+    : gsData
   const Icon = unitIcons[parsedUnitId] || BookOpen
   const [dynamicUnits, setDynamicUnits] = useState<Array<{
     id: number
@@ -84,7 +112,7 @@ const Group1UnitClass = () => {
     const loadUnitsAndLessons = () => {
       setDynamicLessons([])
 
-      fetch('/api/study-management/units?examId=group1&subjectId=general-studies')
+      fetch(`/api/study-management/units?examId=group1&subjectId=${activeSubjectId}`)
         .then((res) => res.json())
         .then((resData) => {
           if (isCancelled) return
@@ -104,7 +132,7 @@ const Group1UnitClass = () => {
         })
         .catch(() => {})
 
-      fetch(`/api/study-management/lessons?unitNumber=${parsedUnitId}&standardId=${parsedClassId}&examId=group1&subjectId=general-studies`)
+      fetch(`/api/study-management/lessons?unitNumber=${parsedUnitId}&standardId=${parsedClassId}&examId=group1&subjectId=${activeSubjectId}`)
         .then((res) => res.json())
         .then((resData) => {
           if (isCancelled) return
@@ -149,12 +177,13 @@ const Group1UnitClass = () => {
       isCancelled = true
       unsubscribe()
     }
-  }, [parsedUnitId, parsedClassId])
+  }, [parsedUnitId, parsedClassId, activeSubjectId])
 
+  const fallbackUnits = isAptitude ? group1AptitudeUnits : group1GeneralStudiesUnits
   const availableUnits =
     dynamicUnits && dynamicUnits.length > 0
       ? dynamicUnits
-      : group1GeneralStudiesUnits.map((u) => ({
+      : fallbackUnits.map((u) => ({
           id: u.id,
           dbId: u.id,
           unitNumber: u.unitNumber,
@@ -309,7 +338,7 @@ const Group1UnitClass = () => {
           <ChevronRight size={14} />
           <Link to="/materials">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials/group1/general-studies">{isTamil ? 'பொது அறிவு' : 'General Studies'}</Link>
+          <Link to={subjectHomePath}>{subjectLabel}</Link>
           <ChevronRight size={14} />
           <span className="active">
             {displayUnitNumber} – {displayUnitTitle} ({isTamil ? translateClassTitle(data.classId, language) : data.classTitle})
@@ -318,14 +347,14 @@ const Group1UnitClass = () => {
 
         {/* Top Back Navigation Bar */}
         <div className="unit-class-top-bar">
-          <Link to="/materials/group1/general-studies" className="back-btn glass">
+          <Link to={subjectHomePath} className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? 'பொது அறிவுக்குத் திரும்பு' : 'Back to General Studies'}</span>
+            <span>{isTamil ? `${subjectLabel} பகுதிக்குத் திரும்பு` : `Back to ${subjectLabel}`}</span>
           </Link>
 
           <LanguageSwitch variant="inline" forceVisible={true} />
 
-          <Link to={`/materials/group1/unit/${parsedUnitId}`} className="back-btn glass">
+          <Link to={`${subjectBasePath}/unit/${parsedUnitId}`} className="back-btn glass">
             <BookOpen size={16} />
             <span>
               {isTamil
@@ -345,7 +374,7 @@ const Group1UnitClass = () => {
           <div className="unit-class-hero-badges">
             <span className="hero-badge hero-badge-gold">
               <Sparkles size={13} />
-              {isTamil ? 'TNPSC குரூப் 1 பொது அறிவு' : 'TNPSC Group 1 General Studies'}
+              {isTamil ? `TNPSC குரூப் 1 ${subjectLabel}` : `TNPSC Group 1 ${subjectLabel}`}
             </span>
             <span className="hero-badge hero-badge-cyan">
               {displayUnitNumber}
@@ -390,7 +419,7 @@ const Group1UnitClass = () => {
                     <button
                       key={cls.id}
                       className={`switcher-pill ${isActive ? 'active' : ''}`}
-                      onClick={() => navigate(`/materials/group1/unit/${parsedUnitId}/class/${cls.id}`)}
+                      onClick={() => navigate(`${subjectBasePath}/unit/${parsedUnitId}/class/${cls.id}`)}
                     >
                       {isTamil ? translateClassTitle(cls.id, language) : cls.label}
                     </button>
@@ -410,7 +439,7 @@ const Group1UnitClass = () => {
                     <button
                       key={u.id}
                       className={`switcher-pill unit-pill ${isActive ? 'active' : ''}`}
-                      onClick={() => navigate(`/materials/group1/unit/${u.id}/class/${parsedClassId}`)}
+                      onClick={() => navigate(`${subjectBasePath}/unit/${u.id}/class/${parsedClassId}`)}
                       title={buttonLabel}
                     >
                       {buttonLabel}
@@ -490,7 +519,7 @@ const Group1UnitClass = () => {
             <div className="lessons-grid">
               {lessons.map((lesson: any, index: number) => {
                 const translated = translateLesson(lesson, language)
-                const practiceUrl = `/study-materials/practice/group1/general-studies/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
+                const practiceUrl = `/study-materials/practice/group1/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
                 const lessonTopics: Array<{ topic_name: string }> = Array.isArray(lesson.topics) ? lesson.topics : []
 
                 return (
@@ -553,7 +582,7 @@ const Group1UnitClass = () => {
                         className="lesson-read-btn"
                         onClick={() => {
                           const lessonTitle = translated?.title || lesson.title
-                          navigate(`/study-notes/group1/subject/general-studies/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${lesson.term ? `&term=${encodeURIComponent(lesson.term)}` : ''}`)
+                          navigate(`/study-notes/group1/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${lesson.term ? `&term=${encodeURIComponent(lesson.term)}` : ''}`)
                         }}
                         title={isTamil ? 'பாடக் குறிப்புகளைப் படிக்க' : 'Read Study Notes'}
                       >
@@ -597,13 +626,13 @@ const Group1UnitClass = () => {
               </p>
               <div className="empty-actions">
                 <Link
-                  to={`/practice?group=group1&unitId=${data.unitId}&unitTitle=${encodeURIComponent(data.unitTitle)}&classId=${data.classId}`}
+                  to={`/practice?group=group1&subjectId=${activeSubjectId}&unitId=${data.unitId}&unitTitle=${encodeURIComponent(displayUnitTitle)}&classId=${data.classId}`}
                   className="btn btn-primary"
                 >
                   <FileQuestion size={16} />
-                  <span>{isTamil ? 'பொது அறிவு வினாக்களைப் பயிற்சி செய்க' : 'Practice General Studies MCQs'}</span>
+                  <span>{isTamil ? `${subjectLabel} வினாக்களைப் பயிற்சி செய்க` : `Practice ${subjectLabel} MCQs`}</span>
                 </Link>
-                <Link to="/materials/group1/general-studies" className="btn btn-secondary">
+                <Link to={subjectHomePath} className="btn btn-secondary">
                   <ArrowLeft size={16} />
                   <span>{isTamil ? 'வேறொரு வகுப்பைத் தேர்ந்தெடுக்க' : 'Choose Another Standard'}</span>
                 </Link>
@@ -614,9 +643,9 @@ const Group1UnitClass = () => {
 
         {/* Back navigation footer */}
         <div className="unit-class-footer-nav">
-          <Link to="/materials/group1/general-studies" className="back-btn glass">
+          <Link to={subjectHomePath} className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? 'பொது அறிவு முதன்மைப் பக்கத்திற்குத் திரும்பு' : 'Back to General Studies Main Page'}</span>
+            <span>{isTamil ? `${subjectLabel} முதன்மைப் பக்கத்திற்குத் திரும்பு` : `Back to ${subjectLabel} Main Page`}</span>
           </Link>
         </div>
       </div>
@@ -795,7 +824,7 @@ const Group1UnitClass = () => {
                       onClick={() => {
                         closeLessonNotes()
                         navigate(
-                          `/study-materials/practice/group1/general-studies/${data.classId}/${data.unitId}/${encodeURIComponent(activeReadingLesson.id || '')}?lessonTitle=${encodeURIComponent(activeReadingLesson.title)}`
+                          `/study-materials/practice/group1/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(activeReadingLesson.id || '')}?lessonTitle=${encodeURIComponent(activeReadingLesson.title)}`
                         )
                       }}
                     >

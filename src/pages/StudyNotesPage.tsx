@@ -582,7 +582,8 @@ const StudyNotesPage: React.FC = () => {
       navigate(-1)
     } else {
       if (normalizedCategory === 'group1') {
-        navigate(`/materials/group1/unit/${unitId || 1}/class/${effectiveClassId || 6}`)
+        const g1Base = effectiveSubject === 'aptitude' ? '/materials/group1/aptitude' : '/materials/group1'
+        navigate(`${g1Base}/unit/${unitId || 1}/class/${effectiveClassId || 6}`)
       } else if (normalizedCategory === 'group4_vao') {
         navigate(`/materials/group4/${effectiveSubject}/unit/${unitId || 1}/class/${effectiveClassId || 6}`)
       } else {

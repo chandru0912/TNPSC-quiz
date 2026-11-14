@@ -141,7 +141,8 @@ export const StudyMaterialsPractice: React.FC = () => {
     } else if (normalizedGroup === 'group4') {
       navigate(`/materials/group4/${resolvedSubject.id}/unit/${unitId}/class/${classId}`)
     } else {
-      navigate(`/materials/group1/unit/${unitId}/class/${classId}`)
+      const g1Base = resolvedSubject.id === 'aptitude' ? '/materials/group1/aptitude' : '/materials/group1'
+      navigate(`${g1Base}/unit/${unitId}/class/${classId}`)
     }
   }
 
@@ -151,7 +152,7 @@ export const StudyMaterialsPractice: React.FC = () => {
     } else if (normalizedGroup === 'group4') {
       navigate(`/materials/group4/${resolvedSubject.id}`)
     } else {
-      navigate(`/materials/group1/general-studies`)
+      navigate(resolvedSubject.id === 'aptitude' ? '/materials/group1/aptitude' : '/materials/group1/general-studies')
     }
   }
 

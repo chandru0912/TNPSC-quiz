@@ -88,14 +88,16 @@ const MCQPractice = () => {
       }
     } else {
       // Group 1
+      const isApt = urlSubjectId === 'aptitude'
+      const g1Base = isApt ? '/materials/group1/aptitude' : '/materials/group1'
       if (urlUnitId && urlClassId) {
-        navigate(`/materials/group1/unit/${urlUnitId}/class/${urlClassId}`)
+        navigate(`${g1Base}/unit/${urlUnitId}/class/${urlClassId}`)
       } else if (urlClassId) {
-        navigate(`/materials/group1/class/${urlClassId}`)
+        navigate(`${g1Base}/class/${urlClassId}`)
       } else if (urlUnitId) {
-        navigate(`/materials/group1/unit/${urlUnitId}`)
+        navigate(`${g1Base}/unit/${urlUnitId}`)
       } else {
-        navigate('/materials/group1/general-studies')
+        navigate(isApt ? '/materials/group1/aptitude' : '/materials/group1/general-studies')
       }
     }
   }

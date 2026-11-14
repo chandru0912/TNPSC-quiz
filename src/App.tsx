@@ -179,6 +179,10 @@ function AppShell() {
             <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
             <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
             <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
+            <Route path="/materials/group1/aptitude/unit/:unitId" element={<Group1UnitDetail />} />
+            <Route path="/materials/group1/aptitude/unit/:unitId/lessons" element={<Group1Lessons />} />
+            <Route path="/materials/group1/aptitude/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+            <Route path="/materials/group1/aptitude/class/:classId" element={<Group1UnitClass />} />
             <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
             <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
             <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
