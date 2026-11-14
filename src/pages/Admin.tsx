@@ -423,6 +423,8 @@ const Admin = () => {
   } | null>(null)
   const [isExtractingAllPending, setIsExtractingAllPending] = useState(false)
   const [extractingMaterialId, setExtractingMaterialId] = useState<number | null>(null)
+  const [isSyncingDrive, setIsSyncingDrive] = useState(false)
+  const [driveTotalCount, setDriveTotalCount] = useState<number>(0)
 
   // Google Drive PDF Bulk Delete & Multi-selection states
   const [selectedDriveMaterialIds, setSelectedDriveMaterialIds] = useState<Set<number>>(new Set())
@@ -1445,6 +1447,7 @@ const Admin = () => {
     setDriveLoading(true)
     try {
       const params = new URLSearchParams()
+      params.set('limit', '500')
       if (driveGroupFilter !== 'all') params.set('group', driveGroupFilter)
       if (driveStandardFilter !== 'all') params.set('standard', driveStandardFilter)
       if (driveSubjectFilter !== 'all') params.set('subject', driveSubjectFilter)
@@ -1455,8 +1458,10 @@ const Admin = () => {
       const json = await res.json()
       if (res.ok && json.status === 'success' && Array.isArray(json.data)) {
         setDriveMaterials(json.data)
+        setDriveTotalCount(typeof json.total === 'number' ? json.total : json.data.length)
       } else {
         setDriveMaterials([])
+        setDriveTotalCount(0)
       }
       fetchExtractionOverview()
     } catch (err: any) {
@@ -1494,24 +1499,58 @@ const Admin = () => {
     }
   }
 
-  // Extract all pending PDF materials
-  const handleExtractAllPendingMaterials = async () => {
-    setIsExtractingAllPending(true)
+  // Sync live Google Drive folder into PostgreSQL
+  const handleSyncGoogleDrive = async () => {
+    setIsSyncingDrive(true)
     try {
       const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
-      showToast('success', 'Starting batch extraction for pending PDF textbooks...')
-      const res = await apiFetch('/api/drive/extract-all-pending', {
+      const res = await apiFetch('/api/drive/sync', {
         method: 'POST',
         headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
       })
       const json = await res.json()
       if (res.ok && json.status === 'success') {
-        showToast('success', json.message || 'Batch PDF extraction completed!')
+        showToast('success', json.message || 'Google Drive synchronized successfully!')
+        fetchDriveMaterials()
+        fetchExtractionOverview()
       } else {
-        showToast('error', json.message || 'Batch extraction encountered issues.')
+        showToast('error', json.message || 'Google Drive sync failed.')
       }
-      fetchDriveMaterials()
-      fetchExtractionOverview()
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to synchronize Google Drive.')
+    } finally {
+      setIsSyncingDrive(false)
+    }
+  }
+
+  // Extract all pending PDF materials (resumable chunked loop for Vercel & Localhost)
+  const handleExtractAllPendingMaterials = async () => {
+    setIsExtractingAllPending(true)
+    try {
+      const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+      showToast('success', 'Starting resumable batch extraction for pending PDF textbooks...')
+      let hasMore = true
+      let iterations = 0
+      let totalSucceeded = 0
+      while (hasMore && iterations < 200) {
+        iterations++
+        const res = await apiFetch('/api/drive/extract-all-pending?chunked=true&limit=1', {
+          method: 'POST',
+          headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+        })
+        const json = await res.json()
+        if (!res.ok || json.status !== 'success') {
+          showToast('error', json.message || 'Batch extraction encountered issues.')
+          break
+        }
+        totalSucceeded += Number(json.data?.succeeded || 0)
+        hasMore = Boolean(json.data?.hasMore)
+        fetchDriveMaterials()
+        fetchExtractionOverview()
+        if (!hasMore) {
+          showToast('success', `Batch PDF extraction completed (${totalSucceeded} processed)!`)
+        }
+      }
     } catch (err: any) {
       showToast('error', err.message || 'Batch extraction failed.')
     } finally {
@@ -4153,6 +4192,29 @@ const Admin = () => {
 
                   <button
                     type="button"
+                    onClick={handleSyncGoogleDrive}
+                    disabled={isSyncingDrive || !driveStatus.connected}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.16)',
+                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                      color: '#7dd3fc',
+                      borderRadius: '8px',
+                      padding: '0.45rem 0.75rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      cursor: isSyncingDrive ? 'wait' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                    title="Sync live Google Drive folder with PostgreSQL"
+                  >
+                    <RefreshCw size={13} className={isSyncingDrive ? 'spinning' : ''} />
+                    <span>{isSyncingDrive ? 'Syncing Drive...' : 'Sync Drive'}</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => {
                       fetchDriveMaterials()
                       fetchExtractionOverview()
@@ -5681,6 +5743,29 @@ const Admin = () => {
 
                   <button
                     type="button"
+                    onClick={handleSyncGoogleDrive}
+                    disabled={isSyncingDrive || !driveStatus.connected}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.16)',
+                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                      color: '#7dd3fc',
+                      borderRadius: '8px',
+                      padding: '0.45rem 0.75rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      cursor: isSyncingDrive ? 'wait' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                    title="Sync live Google Drive folder with PostgreSQL"
+                  >
+                    <RefreshCw size={13} className={isSyncingDrive ? 'spinning' : ''} />
+                    <span>{isSyncingDrive ? 'Syncing Drive...' : 'Sync Drive'}</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => {
                       fetchDriveMaterials()
                       fetchExtractionOverview()
@@ -5873,7 +5958,7 @@ const Admin = () => {
                     )}
                   </div>
                   <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {driveMaterials.length} PDF file{driveMaterials.length === 1 ? '' : 's'} indexed
+                    {driveTotalCount || driveMaterials.length} PDF file{(driveTotalCount || driveMaterials.length) === 1 ? '' : 's'} indexed
                   </span>
                 </div>
 

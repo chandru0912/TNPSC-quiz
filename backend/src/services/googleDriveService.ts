@@ -906,7 +906,11 @@ export async function listGoogleDrivePdfs(options: {
   standard?: number;
   syncFromDrive?: boolean;
 } = {}): Promise<any[]> {
-  const conditions: string[] = ["mime_type = 'application/pdf'", "upload_status = 'completed'"];
+  const conditions: string[] = [
+    "mime_type = 'application/pdf'",
+    "upload_status = 'completed'",
+    "COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'",
+  ];
   const vals: any[] = [];
   let pIdx = 1;
 

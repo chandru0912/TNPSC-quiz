@@ -450,6 +450,23 @@ export async function runMigration() {
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS native_pages INT DEFAULT 0;
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS ocr_pages INT DEFAULT 0;
       ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS completion_percentage INT DEFAULT 0;
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS sync_status VARCHAR(30) DEFAULT 'ACTIVE';
+      ALTER TABLE google_drive_materials ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP WITH TIME ZONE;
+      CREATE INDEX IF NOT EXISTS idx_gdrive_materials_sync_status ON google_drive_materials (sync_status);
+
+      CREATE TABLE IF NOT EXISTS google_drive_sync_logs (
+        id SERIAL PRIMARY KEY,
+        folder_id TEXT NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'RUNNING',
+        total_drive_files INT DEFAULT 0,
+        inserted_count INT DEFAULT 0,
+        updated_count INT DEFAULT 0,
+        missing_count INT DEFAULT 0,
+        duplicate_drive_names INT DEFAULT 0,
+        error_message TEXT,
+        started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP WITH TIME ZONE
+      );
 
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(30) DEFAULT 'native';
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS ocr_confidence NUMERIC(5,2) DEFAULT NULL;

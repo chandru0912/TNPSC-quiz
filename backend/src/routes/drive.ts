@@ -37,6 +37,10 @@ import {
   ensureExtractionJobForMaterial,
   getOverallExtractionOverview,
 } from '../services/pdfExtractionService';
+import {
+  syncGoogleDriveToDatabase,
+  getLatestDriveSyncStatus,
+} from '../services/googleDriveSyncService';
 
 const router = Router();
 
@@ -653,15 +657,57 @@ router.post(['/extract/:id/retry-failed', '/materials/:id/retry-failed'], requir
 });
 
 /**
- * POST /api/drive/extract-all-pending
- * Admin only: Scans for all textbooks/materials without extracted text and processes them.
+ * POST /api/drive/sync
+ * Admin only: Synchronizes live Google Drive folder contents into PostgreSQL safely via UPSERT.
  */
-router.post('/extract-all-pending', requireAdminAuth, async (_req: Request, res: Response) => {
+router.post('/sync', requireAdminAuth, async (_req: Request, res: Response) => {
   try {
-    const summary = await extractAllPendingMaterials();
+    const summary = await syncGoogleDriveToDatabase();
     return res.status(200).json({
       status: 'success',
-      message: `Extracted ${summary.succeeded}/${summary.processed} pending PDF materials.`,
+      message: `Synced ${summary.totalDriveFiles} Google Drive PDFs (${summary.insertedCount} added, ${summary.updatedCount} updated, ${summary.missingCount} marked missing on Drive).`,
+      data: summary,
+    });
+  } catch (err: any) {
+    console.error('[DriveSync] Error:', err.message);
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to synchronize Google Drive with database.',
+    });
+  }
+});
+
+/**
+ * GET /api/drive/sync/status
+ * Admin only: Returns the latest Google Drive synchronization log.
+ */
+router.get('/sync/status', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const latest = await getLatestDriveSyncStatus();
+    return res.status(200).json({ status: 'success', data: latest });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to get sync status.' });
+  }
+});
+
+/**
+ * POST /api/drive/extract-all-pending
+ * Admin only: Scans for all active textbooks/materials without completed text extraction and processes them.
+ * Supports ?chunked=true&limit=1 for Vercel serverless timeout safety.
+ */
+router.post('/extract-all-pending', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const chunked = req.query.chunked === 'true' || req.body?.chunked === true || Boolean(process.env.VERCEL);
+    const limitParam = parseInt(String(req.query.limit || req.body?.limit || ''), 10);
+    const summary = await extractAllPendingMaterials({
+      chunked,
+      limit: !isNaN(limitParam) && limitParam > 0 ? limitParam : undefined,
+    });
+    return res.status(200).json({
+      status: 'success',
+      message: summary.hasMore
+        ? `Processed ${summary.processed} PDF slice (${summary.remaining} remaining).`
+        : `Extracted ${summary.succeeded}/${summary.processed} pending PDF materials.`,
       data: summary,
     });
   } catch (err: any) {
@@ -971,13 +1017,18 @@ router.get('/materials', async (req: Request, res: Response) => {
       lesson,
       search,
       status = 'completed',
-      limit = '50',
+      includeMissing = 'false',
+      limit = '500',
       offset = '0',
     } = req.query;
 
     const conditions: string[] = [];
     const values: any[] = [];
     let idx = 1;
+
+    if (includeMissing !== 'true') {
+      conditions.push(`COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'`);
+    }
 
     if (status && status !== 'all') {
       conditions.push(`upload_status = $${idx++}`);

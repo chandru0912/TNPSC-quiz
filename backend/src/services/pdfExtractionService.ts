@@ -1375,6 +1375,7 @@ export async function getOverallExtractionOverview(): Promise<{
       COUNT(*) FILTER (WHERE extraction_status IN ('PENDING') OR extraction_status IS NULL)::int AS count_pending,
       COUNT(*) FILTER (WHERE extraction_status = 'FAILED')::int AS count_failed
     FROM google_drive_materials
+    WHERE COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'
   `);
 
   const row = res.rows[0] || {};
@@ -1407,19 +1408,36 @@ export async function getOverallExtractionOverview(): Promise<{
  */
 export async function extractAllPendingMaterials(options?: {
   limit?: number;
+  chunked?: boolean;
   onProgress?: (processed: number, total: number, currentItem: string) => void;
 }): Promise<{
   processed: number;
   succeeded: number;
   failed: number;
+  remaining: number;
+  hasMore: boolean;
   materials: any[];
 }> {
-  const limit = options?.limit || 100;
+  const limit = options?.limit || (options?.chunked ? 1 : 100);
+  const countRes = await pool.query(
+    `SELECT COUNT(*)::int AS cnt
+     FROM google_drive_materials
+     WHERE COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'
+       AND (
+         extracted_text IS NULL
+         OR extraction_status IN ('PENDING', 'FAILED', 'PARTIALLY_COMPLETED', 'PROCESSING')
+       )`
+  );
+  const totalRemainingBefore = Number(countRes.rows[0]?.cnt || 0);
+
   const pendingRes = await pool.query(
     `SELECT id, file_name, google_drive_file_id
      FROM google_drive_materials
-     WHERE extracted_text IS NULL
-        OR extraction_status IN ('PENDING', 'FAILED', 'PARTIALLY_COMPLETED')
+     WHERE COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'
+       AND (
+         extracted_text IS NULL
+         OR extraction_status IN ('PENDING', 'FAILED', 'PARTIALLY_COMPLETED', 'PROCESSING')
+       )
      ORDER BY id ASC
      LIMIT $1`,
     [limit]
@@ -1437,14 +1455,20 @@ export async function extractAllPendingMaterials(options?: {
       options?.onProgress?.(idx + 1, total, item.file_name);
       const res = await processAutomaticPdfExtraction({
         materialId: item.id,
-        processAllPages: true,
+        processAllPages: !options?.chunked,
       });
       if (res.success) {
         succeeded++;
       } else {
         failed++;
       }
-      materials.push({ id: item.id, fileName: item.file_name, success: res.success, status: res.status });
+      materials.push({
+        id: item.id,
+        fileName: item.file_name,
+        success: res.success,
+        status: res.status,
+        inProgress: Boolean(res.inProgress),
+      });
     } catch (err: any) {
       failed++;
       console.error(`[BatchExtract] Error processing material #${item.id}:`, err.message);
@@ -1452,10 +1476,25 @@ export async function extractAllPendingMaterials(options?: {
     }
   }
 
+  const remainingAfterRes = await pool.query(
+    `SELECT COUNT(*)::int AS cnt
+     FROM google_drive_materials
+     WHERE COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'
+       AND (
+         extracted_text IS NULL
+         OR extraction_status IN ('PENDING', 'FAILED', 'PARTIALLY_COMPLETED', 'PROCESSING')
+       )`
+  );
+  const remaining = Number(remainingAfterRes.rows[0]?.cnt || 0);
+  const anyInProgress = materials.some((m) => m.inProgress);
+  const hasMore = remaining > 0 && (anyInProgress || totalRemainingBefore > total);
+
   return {
     processed: total,
     succeeded,
     failed,
+    remaining,
+    hasMore,
     materials,
   };
 }
