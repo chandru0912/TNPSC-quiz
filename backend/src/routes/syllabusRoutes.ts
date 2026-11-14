@@ -1,9 +1,22 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import pool from '../db';
 import { StudyManagementService } from '../services/studyManagementService';
 import { requireAdminAuth } from '../middleware/auth';
+import { getCached, setCached, invalidateCachePrefix } from '../utils/cache';
 
 const router = Router();
+
+// Automatically invalidate syllabus cache on any mutating request
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => {
+      if (res.statusCode < 400) {
+        invalidateCachePrefix('syllabus:');
+      }
+    });
+  }
+  next();
+});
 
 export interface GroupOption {
   id: string;
@@ -160,7 +173,13 @@ router.get('/', async (req: Request, res: Response) => {
  */
 router.get('/exams', async (_req: Request, res: Response) => {
   try {
-    const exams = await StudyManagementService.getExams();
+    const cacheKey = 'syllabus:exams';
+    let exams = getCached<any[]>(cacheKey);
+    if (!exams) {
+      exams = await StudyManagementService.getExams();
+      setCached(cacheKey, exams, 60_000);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     return res.status(200).json({ success: true, exams, groups: exams });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message, exams: TNPSC_GROUPS, groups: TNPSC_GROUPS });
@@ -173,7 +192,13 @@ router.get('/exams', async (_req: Request, res: Response) => {
  */
 router.get('/groups', async (_req: Request, res: Response) => {
   try {
-    const exams = await StudyManagementService.getExams();
+    const cacheKey = 'syllabus:exams';
+    let exams = getCached<any[]>(cacheKey);
+    if (!exams) {
+      exams = await StudyManagementService.getExams();
+      setCached(cacheKey, exams, 60_000);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     return res.status(200).json({ success: true, groups: exams, exams });
   } catch (err: any) {
     return res.status(200).json({ success: true, groups: TNPSC_GROUPS, exams: TNPSC_GROUPS });
@@ -188,17 +213,26 @@ router.get('/groups', async (_req: Request, res: Response) => {
 router.get('/subjects', async (req: Request, res: Response) => {
   let rawGroup = String(req.query.groupId || 'group4').toLowerCase().trim();
   const groupId = rawGroup === 'group-2a' ? 'group2a' : rawGroup === 'group2_2a' || rawGroup === 'group-2' ? 'group2' : rawGroup;
+  const cacheKey = `syllabus:subjects:${groupId}`;
+  const cached = getCached<any[]>(cacheKey);
+  if (cached) {
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    return res.status(200).json({ success: true, groupId, subjects: cached });
+  }
   try {
     const dbSubjects = await StudyManagementService.getSubjects(groupId);
     if (dbSubjects.length > 0) {
+      const mapped = dbSubjects.map((s) => ({
+        id: s.subject_slug,
+        name: s.name,
+        description: s.description || '',
+      }));
+      setCached(cacheKey, mapped, 60_000);
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
       return res.status(200).json({
         success: true,
         groupId,
-        subjects: dbSubjects.map((s) => ({
-          id: s.subject_slug,
-          name: s.name,
-          description: s.description || '',
-        })),
+        subjects: mapped,
       });
     }
   } catch (err: any) {

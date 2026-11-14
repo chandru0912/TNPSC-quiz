@@ -1028,7 +1028,28 @@ let schemaInitPromise: Promise<void> | null = null;
 
 export function ensureDatabaseSchema(): Promise<void> {
   if (!schemaInitPromise) {
-    schemaInitPromise = runMigration().catch((err) => {
+    schemaInitPromise = (async () => {
+      if (process.env.FORCE_MIGRATION !== 'true') {
+        // Fast-path check: avoid running 50+ DDL & seed statements on every Vercel serverless cold start
+        try {
+          const check = await pool.query(`
+            SELECT
+              to_regclass('public.questions') AS t_questions,
+              to_regclass('public.study_notes') AS t_notes,
+              to_regclass('public.students') AS t_students,
+              to_regclass('public.syllabus_lessons') AS t_lessons,
+              to_regclass('public.syllabus_topics') AS t_topics
+          `);
+          const row = check.rows[0];
+          if (row?.t_questions && row?.t_notes && row?.t_students && row?.t_lessons && row?.t_topics) {
+            return;
+          }
+        } catch {
+          // Fall through to full migration if quick check fails
+        }
+      }
+      await runMigration();
+    })().catch((err) => {
       schemaInitPromise = null;
       throw err;
     });

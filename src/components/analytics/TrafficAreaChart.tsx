@@ -24,9 +24,9 @@ export const TrafficAreaChart: React.FC<TrafficAreaChartProps> = ({
   allowAnimations = true,
 }) => {
   // Format dates for display
-  const formattedData = data.map((d) => ({
+  const formattedData = (Array.isArray(data) ? data : []).map((d) => ({
     ...d,
-    displayDate: d.date.split('-').slice(1).join('/'),
+    displayDate: typeof d?.date === 'string' ? d.date.split('-').slice(1).join('/') : '',
   }));
 
   return (

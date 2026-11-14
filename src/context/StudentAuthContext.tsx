@@ -125,7 +125,8 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Refresh profile from server
   const refreshProfile = useCallback(async () => {
     const curToken = localStorage.getItem(TOKEN_KEY)
-    if (!curToken) {
+    const isPreviewActive = localStorage.getItem(PREVIEW_KEY) === 'true'
+    if (!curToken || (isPreviewActive && curToken === 'preview_admin_token')) {
       setIsLoading(false)
       return
     }

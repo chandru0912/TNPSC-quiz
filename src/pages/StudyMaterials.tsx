@@ -23,6 +23,7 @@ import { useLanguage } from '../context/LanguageContext'
 import LanguageSwitch from '../components/LanguageSwitch'
 import { UI_TRANSLATIONS } from '../utils/languageData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
+import { apiFetch } from '../utils/api'
 import './StudyMaterials.css'
 
 type GroupId = 'group1' | 'group2_2a' | 'group4_vao'
@@ -102,9 +103,9 @@ const StudyMaterials = () => {
 
   const refreshUnitCounts = () => {
     Promise.all([
-      fetch('/api/study-management/units?examId=group1').then((r) => r.json()).catch(() => null),
-      fetch('/api/study-management/units?examId=group2').then((r) => r.json()).catch(() => null),
-      fetch('/api/study-management/units?examId=group4').then((r) => r.json()).catch(() => null),
+      apiFetch('/api/study-management/units?examId=group1').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      apiFetch('/api/study-management/units?examId=group2').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      apiFetch('/api/study-management/units?examId=group4').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]).then(([g1, g2, g4]) => {
       setUnitCounts((prev) => {
         const next = { ...prev }

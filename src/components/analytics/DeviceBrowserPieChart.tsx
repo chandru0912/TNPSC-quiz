@@ -19,10 +19,13 @@ export const DeviceBrowserPieChart: React.FC<DeviceBrowserPieChartProps> = ({
   devices,
   allowAnimations = true,
 }) => {
-  const chartData = devices.map((d) => ({
-    name: d.name.charAt(0).toUpperCase() + d.name.slice(1),
-    value: d.count,
-  }));
+  const chartData = (Array.isArray(devices) ? devices : []).map((d) => {
+    const rawName = String(d?.name || 'Unknown');
+    return {
+      name: rawName.charAt(0).toUpperCase() + rawName.slice(1),
+      value: Number(d?.count) || 0,
+    };
+  });
 
   const total = chartData.reduce((acc, curr) => acc + curr.value, 0);
 

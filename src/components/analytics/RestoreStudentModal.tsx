@@ -99,11 +99,11 @@ export const RestoreStudentModal: React.FC<RestoreStudentModalProps> = ({
     }
   };
 
-  const filtered = students.filter(
+  const filtered = (Array.isArray(students) ? students : []).filter(
     (s) =>
-      s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.district.toLowerCase().includes(searchTerm.toLowerCase())
+      (s.fullName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.district || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (

@@ -148,6 +148,7 @@ const Dashboard = () => {
 
   const [data, setData] = useState<DashboardData>(defaultDashboardData)
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false)
+  const [dashboardError, setDashboardError] = useState<string | null>(null)
   const [isCloudAiOpen, setIsCloudAiOpen] = useState(false)
   const [adminToken] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -158,11 +159,13 @@ const Dashboard = () => {
 
   // Fetch live dashboard statistics from PostgreSQL backend
   const fetchDashboardStats = useCallback(async (silent = false) => {
-    if (!token) {
+    if (!token || token === 'preview_admin_token') {
+      setDashboardError(null)
       return
     }
 
     if (!silent) setIsRefreshing(true)
+    if (!silent) setDashboardError(null)
 
     try {
       const res = await apiFetch('/api/student/dashboard', {
@@ -170,13 +173,47 @@ const Dashboard = () => {
           Authorization: `Bearer ${token}`,
         },
       })
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
 
-      if (res.ok && json.status === 'success' && json.data) {
-        setData(json.data)
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          setDashboardError('Your student session has expired. Please sign in again to sync live progress.')
+        } else {
+          setDashboardError(json?.message || `Unable to load dashboard telemetry (HTTP ${res.status}).`)
+        }
+        return
+      }
+
+      if (json.status === 'success' && json.data && typeof json.data === 'object') {
+        const incoming = json.data
+        setData({
+          student: {
+            ...defaultDashboardData.student,
+            ...(incoming.student && typeof incoming.student === 'object' ? incoming.student : {}),
+          },
+          metrics: {
+            ...defaultDashboardData.metrics,
+            ...(incoming.metrics && typeof incoming.metrics === 'object' ? incoming.metrics : {}),
+          },
+          progressStats: Array.isArray(incoming.progressStats)
+            ? incoming.progressStats
+            : defaultDashboardData.progressStats,
+          weeklyProgress: Array.isArray(incoming.weeklyProgress)
+            ? incoming.weeklyProgress
+            : defaultDashboardData.weeklyProgress,
+          recentActivity: Array.isArray(incoming.recentActivity) ? incoming.recentActivity : [],
+          weakAreas: Array.isArray(incoming.weakAreas) ? incoming.weakAreas : [],
+          upcomingGoals: Array.isArray(incoming.upcomingGoals)
+            ? incoming.upcomingGoals
+            : defaultDashboardData.upcomingGoals,
+        })
+        setDashboardError(null)
       }
     } catch (err: any) {
-      console.warn('[Dashboard] Could not fetch real-time student stats:', err.message)
+      console.warn('[Dashboard] Could not fetch real-time student stats:', err?.message)
+      if (!silent) {
+        setDashboardError(err?.message || 'Unable to connect to the backend server.')
+      }
     } finally {
       setIsRefreshing(false)
     }
@@ -309,6 +346,47 @@ const Dashboard = () => {
           </div>
         </motion.header>
 
+        {dashboardError && (
+          <div
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              padding: '0.85rem 1.15rem',
+              marginBottom: '1rem',
+              borderRadius: '12px',
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(248, 113, 113, 0.35)',
+              color: '#fecaca',
+              fontSize: '0.86rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <AlertTriangle size={16} style={{ color: '#f87171', flexShrink: 0 }} />
+              <span>{dashboardError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchDashboardStats()}
+              style={{
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                color: '#ffffff',
+                padding: '0.35rem 0.85rem',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Quick Glass Metrics Strip (Live Database Aggregates) */}
         <motion.div
           className="dash-summary-strip glass"
@@ -336,8 +414,8 @@ const Dashboard = () => {
             <div className="dash-summary-info">
               <span className="dash-summary-label">Questions Solved</span>
               <span className="dash-summary-val">
-                {data.metrics.totalQuestionsSolved}{' '}
-                <span className="dash-summary-unit">/ {data.metrics.targetQuestions.toLocaleString()}</span>
+                {data.metrics.totalQuestionsSolved ?? 0}{' '}
+                <span className="dash-summary-unit">/ {Number(data.metrics.targetQuestions ?? 2500).toLocaleString()}</span>
               </span>
             </div>
           </div>
@@ -546,15 +624,15 @@ const Dashboard = () => {
                           className="activity-score"
                           style={{
                             color:
-                              activity.score.toLowerCase().includes('correct') ||
-                              activity.score.toLowerCase().includes('completed')
+                              String(activity.score ?? '').toLowerCase().includes('correct') ||
+                              String(activity.score ?? '').toLowerCase().includes('completed')
                                 ? '#4ade80'
-                                : activity.score.toLowerCase().includes('incorrect')
+                                : String(activity.score ?? '').toLowerCase().includes('incorrect')
                                   ? '#f87171'
                                   : '#ffd700',
                           }}
                         >
-                          {activity.score}
+                          {activity.score ?? 'Done'}
                         </span>
                         <span className="activity-sep">•</span>
                         <span>{activity.time}</span>

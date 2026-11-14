@@ -28,13 +28,14 @@ export const WebsiteVisitorsWave: React.FC<WebsiteVisitorsWaveProps> = ({
   // Generate smooth cubic wave path for SVG
   const width = 280;
   const height = 54;
-  const points = sparkline.length > 0 ? sparkline : [10, 15, 12, 20, 24, 22, 30];
+  const rawPoints = Array.isArray(sparkline) && sparkline.length > 0 ? sparkline : [10, 15, 12, 20, 24, 22, 30];
+  const points = rawPoints.map((v) => (Number.isFinite(Number(v)) ? Number(v) : 0));
   const min = Math.min(...points);
   const max = Math.max(...points);
   const range = max - min || 1;
 
   const coords = points.map((val, idx) => {
-    const x = (idx / (points.length - 1)) * (width - 12) + 6;
+    const x = points.length === 1 ? width / 2 : (idx / (points.length - 1)) * (width - 12) + 6;
     const y = height - ((val - min) / range) * (height - 14) - 6;
     return { x, y };
   });

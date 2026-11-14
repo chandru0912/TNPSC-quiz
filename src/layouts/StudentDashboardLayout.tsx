@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Menu, Sparkles } from 'lucide-react';
 import { StudentSidebar } from '../components/StudentSidebar';
 import TargetGroupOnboardingModal from '../components/TargetGroupOnboardingModal';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useStudentAuth } from '../context/StudentAuthContext';
 import { useScrollLock } from '../hooks/useScrollLock';
 import './StudentDashboardLayout.css';
@@ -105,7 +106,14 @@ export const StudentDashboardLayout: React.FC = () => {
 
         {/* Dynamic Nested Child Route View */}
         <div className="student-dashboard-content-stream">
-          <Outlet />
+          <ErrorBoundary
+            key={location.pathname}
+            compact
+            fallbackTitle="Unable to display this page"
+            fallbackMessage="An unexpected error occurred while rendering this section. Click Retry to reload the view."
+          >
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </div>
     </div>

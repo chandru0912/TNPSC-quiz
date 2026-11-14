@@ -31,6 +31,7 @@ import {
   type Group2SchoolLesson,
 } from '../data/group2ClassSyllabusData'
 import { compareLessons } from '../utils/naturalSort'
+import { normalizeMatchedTopics } from '../utils/syllabusNormalize'
 import { getGroup2SubjectById } from '../data/group2SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
@@ -137,7 +138,7 @@ const Group2UnitClass = () => {
               textbookTitle: l.textbook_title || undefined,
               textbookUnitNumber: l.textbook_unit_number || undefined,
               textbookUnitTitle: l.textbook_unit_title || undefined,
-              matchedTopics: Array.isArray(l.matched_topics) ? l.matched_topics : [],
+              matchedTopics: normalizeMatchedTopics(l.matched_topics),
               syllabusReference: l.syllabus_reference || undefined,
               verificationStatus: l.verification_status || 'VERIFIED',
               topics: Array.isArray(l.topics) ? l.topics : [],

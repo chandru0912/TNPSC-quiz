@@ -1,9 +1,22 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { StudyManagementService } from '../services/studyManagementService';
 import { TextbookAiLessonService } from '../services/textbookAiLessonService';
 import { requireAdminAuth } from '../middleware/auth';
+import { invalidateCachePrefix } from '../utils/cache';
 
 const router = Router();
+
+// Invalidate syllabus cache whenever admin modifies study materials
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => {
+      if (res.statusCode < 400) {
+        invalidateCachePrefix('syllabus:');
+      }
+    });
+  }
+  next();
+});
 
 // ===========================================================================
 // HIERARCHY TREE (Nested Units -> Lessons -> Topics -> Notes)

@@ -111,7 +111,9 @@ export const TamilNaduMap: React.FC<TamilNaduMapProps> = ({
   // Map district metrics
   const dataMap = useMemo(() => {
     const map = new Map<string, DistrictMetric>();
-    districtsData.forEach((d) => map.set(d.district.toLowerCase(), d));
+    (Array.isArray(districtsData) ? districtsData : []).forEach((d) => {
+      if (d?.district) map.set(String(d.district).toLowerCase(), d);
+    });
     return map;
   }, [districtsData]);
 

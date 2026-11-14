@@ -32,10 +32,10 @@ export const SubscriptionsDonut: React.FC<SubscriptionsDonutProps> = ({
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   // Fallback distribution if none provided
-  const items = distribution.length > 0 ? distribution : [
-    { name: 'Monthly', count: monthlyPass, percentage: 20, color: '#3b82f6' },
-    { name: 'Yearly', count: yearlyPass, percentage: 65, color: '#10b981' },
-    { name: 'Expired', count: expiredSubscriptions, percentage: 15, color: '#64748b' },
+  const items = Array.isArray(distribution) && distribution.length > 0 ? distribution : [
+    { name: 'Monthly', count: monthlyPass || 0, percentage: 20, color: '#3b82f6' },
+    { name: 'Yearly', count: yearlyPass || 0, percentage: 65, color: '#10b981' },
+    { name: 'Expired', count: expiredSubscriptions || 0, percentage: 15, color: '#64748b' },
   ];
 
   const totalCount = items.reduce((acc, item) => acc + item.count, 0) || 1;
@@ -122,7 +122,7 @@ export const SubscriptionsDonut: React.FC<SubscriptionsDonutProps> = ({
               )}
             </span>
             <span className="donut-center-label">
-              {hoveredIdx !== null ? items[hoveredIdx]?.name.split(' ')[0] : 'Active'}
+              {hoveredIdx !== null ? String(items[hoveredIdx]?.name || 'Plan').split(' ')[0] : 'Active'}
             </span>
           </div>
         </div>

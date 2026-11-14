@@ -17,6 +17,7 @@ export const AnimatedCountUp: React.FC<AnimatedCountUpProps> = ({
   suffix = '',
   className = '',
 }) => {
+  const safeEnd = Number.isFinite(Number(end)) ? Number(end) : 0;
   const [displayValue, setDisplayValue] = useState<number>(0);
   const startTimeRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -29,16 +30,16 @@ export const AnimatedCountUp: React.FC<AnimatedCountUpProps> = ({
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (prefersReducedMotion || duration <= 0) {
-      setDisplayValue(end);
-      prevEndRef.current = end;
+      setDisplayValue(safeEnd);
+      prevEndRef.current = safeEnd;
       return;
     }
 
     const startVal = prevEndRef.current;
-    const diff = end - startVal;
+    const diff = safeEnd - startVal;
 
     if (diff === 0) {
-      setDisplayValue(end);
+      setDisplayValue(safeEnd);
       return;
     }
 
@@ -58,8 +59,8 @@ export const AnimatedCountUp: React.FC<AnimatedCountUpProps> = ({
       if (progress < 1) {
         frameRef.current = requestAnimationFrame(animate);
       } else {
-        setDisplayValue(end);
-        prevEndRef.current = end;
+        setDisplayValue(safeEnd);
+        prevEndRef.current = safeEnd;
       }
     };
 
@@ -68,15 +69,16 @@ export const AnimatedCountUp: React.FC<AnimatedCountUpProps> = ({
     return () => {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-  }, [end, duration]);
+  }, [safeEnd, duration]);
 
+  const safeDisplay = Number.isFinite(displayValue) ? displayValue : 0;
   const formatted =
     decimals > 0
-      ? displayValue.toLocaleString('en-IN', {
+      ? safeDisplay.toLocaleString('en-IN', {
           minimumFractionDigits: decimals,
           maximumFractionDigits: decimals,
         })
-      : Math.round(displayValue).toLocaleString('en-IN');
+      : Math.round(safeDisplay).toLocaleString('en-IN');
 
   return (
     <span className={`animated-count-up ${className}`}>

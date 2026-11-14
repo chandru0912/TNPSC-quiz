@@ -1,41 +1,85 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense, type ComponentType } from 'react'
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
 import { GraduationCap } from 'lucide-react'
 import ScrollToTop from './components/ScrollToTop'
 import Navbar from './components/Navbar'
 import { initSpatialTilt } from './utils/spatialTilt'
-import Home from './pages/Home'
-import Dashboard from './pages/Dashboard'
-import StudyMaterials from './pages/StudyMaterials'
-import SchoolMaterials from './pages/SchoolMaterials'
-import Group1GeneralStudies from './pages/Group1GeneralStudies'
-import Group1UnitDetail from './pages/Group1UnitDetail'
-import Group1Lessons from './pages/Group1Lessons'
-import Group1Aptitude from './pages/Group1Aptitude'
-import Group1UnitClass from './pages/Group1UnitClass'
-import Group2SubjectDetail from './pages/Group2SubjectDetail'
-import Group2UnitDetail from './pages/Group2UnitDetail'
-import Group2Lessons from './pages/Group2Lessons'
-import Group2UnitClass from './pages/Group2UnitClass'
-import Group4SubjectDetail from './pages/Group4SubjectDetail'
-import Group4UnitDetail from './pages/Group4UnitDetail'
-import Group4Lessons from './pages/Group4Lessons'
-import Group4UnitClass from './pages/Group4UnitClass'
-import MCQPractice from './pages/MCQPractice'
-import StudyMaterialsPractice from './pages/StudyMaterialsPractice'
-import StudyNotesPage from './pages/StudyNotesPage'
-import MockTests from './pages/MockTests'
-import PreviousPapers from './pages/PreviousPapers'
-import MarkList from './pages/MarkList'
-import ProgressTracker from './pages/ProgressTracker'
 import StudentDashboardLayout from './layouts/StudentDashboardLayout'
-import Login from './pages/Login'
-import Register from './pages/Register'
-import Admin from './pages/Admin'
 import StudentPreviewBanner from './components/StudentPreviewBanner'
 import { LanguageProvider } from './context/LanguageContext'
 import { StudentAuthProvider } from './context/StudentAuthContext'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './App.css'
+
+// Resilient lazy loader that retries once on transient chunk fetch errors (e.g. after Vercel deploy)
+function lazyWithRetry<T extends ComponentType<any>>(importer: () => Promise<{ default: T }>) {
+  return lazy(async () => {
+    try {
+      return await importer()
+    } catch {
+      await new Promise((r) => setTimeout(r, 400))
+      return await importer()
+    }
+  })
+}
+
+const Home = lazyWithRetry(() => import('./pages/Home'))
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'))
+const StudyMaterials = lazyWithRetry(() => import('./pages/StudyMaterials'))
+const SchoolMaterials = lazyWithRetry(() => import('./pages/SchoolMaterials'))
+const Group1GeneralStudies = lazyWithRetry(() => import('./pages/Group1GeneralStudies'))
+const Group1UnitDetail = lazyWithRetry(() => import('./pages/Group1UnitDetail'))
+const Group1Lessons = lazyWithRetry(() => import('./pages/Group1Lessons'))
+const Group1Aptitude = lazyWithRetry(() => import('./pages/Group1Aptitude'))
+const Group1UnitClass = lazyWithRetry(() => import('./pages/Group1UnitClass'))
+const Group2SubjectDetail = lazyWithRetry(() => import('./pages/Group2SubjectDetail'))
+const Group2UnitDetail = lazyWithRetry(() => import('./pages/Group2UnitDetail'))
+const Group2Lessons = lazyWithRetry(() => import('./pages/Group2Lessons'))
+const Group2UnitClass = lazyWithRetry(() => import('./pages/Group2UnitClass'))
+const Group4SubjectDetail = lazyWithRetry(() => import('./pages/Group4SubjectDetail'))
+const Group4UnitDetail = lazyWithRetry(() => import('./pages/Group4UnitDetail'))
+const Group4Lessons = lazyWithRetry(() => import('./pages/Group4Lessons'))
+const Group4UnitClass = lazyWithRetry(() => import('./pages/Group4UnitClass'))
+const MCQPractice = lazyWithRetry(() => import('./pages/MCQPractice'))
+const StudyMaterialsPractice = lazyWithRetry(() => import('./pages/StudyMaterialsPractice'))
+const StudyNotesPage = lazyWithRetry(() => import('./pages/StudyNotesPage'))
+const MockTests = lazyWithRetry(() => import('./pages/MockTests'))
+const PreviousPapers = lazyWithRetry(() => import('./pages/PreviousPapers'))
+const MarkList = lazyWithRetry(() => import('./pages/MarkList'))
+const ProgressTracker = lazyWithRetry(() => import('./pages/ProgressTracker'))
+const Login = lazyWithRetry(() => import('./pages/Login'))
+const Register = lazyWithRetry(() => import('./pages/Register'))
+const Admin = lazyWithRetry(() => import('./pages/Admin'))
+
+function RouteLoadingFallback() {
+  return (
+    <div
+      style={{
+        minHeight: '60vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '0.85rem',
+        color: '#94a3b8',
+      }}
+      role="status"
+      aria-live="polite"
+    >
+      <div
+        style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '50%',
+          border: '3px solid rgba(255, 215, 0, 0.18)',
+          borderTopColor: '#ffd700',
+          animation: 'spin 0.75s linear infinite',
+        }}
+      />
+      <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Loading module...</span>
+    </div>
+  )
+}
 
 function AppShell() {
   const location = useLocation()
@@ -116,7 +160,13 @@ function AppShell() {
       <Navbar />
 
       <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''} ${isDashboardRoute ? 'student-dashboard-main-mode' : ''}`}>
-        <Routes>
+        <ErrorBoundary
+          key={location.pathname}
+          fallbackTitle="Page failed to render"
+          fallbackMessage="An unexpected error occurred while displaying this page. Click Retry to recover."
+        >
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <Routes>
           <Route path="/" element={<Home />} />
 
           {/* Persistent Global Student Dashboard Layout with Independent Dual Scroll */}
@@ -162,6 +212,8 @@ function AppShell() {
           <Route path="/admin" element={<Admin />} />
           <Route path="/admin/*" element={<Admin />} />
         </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       {!isAdmin && !isDashboardRoute && (
@@ -195,14 +247,16 @@ function App() {
   }, [])
 
   return (
-    <Router>
-      <StudentAuthProvider>
-        <LanguageProvider>
-          <ScrollToTop />
-          <AppShell />
-        </LanguageProvider>
-      </StudentAuthProvider>
-    </Router>
+    <ErrorBoundary fallbackTitle="Application Error" fallbackMessage="The application encountered an unexpected error. Click Retry to restore.">
+      <Router>
+        <StudentAuthProvider>
+          <LanguageProvider>
+            <ScrollToTop />
+            <AppShell />
+          </LanguageProvider>
+        </StudentAuthProvider>
+      </Router>
+    </ErrorBoundary>
   )
 }
 

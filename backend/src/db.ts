@@ -26,15 +26,17 @@ const config: PoolConfig = hasExplicitPgVars
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     ssl: isProductionOrCloud ? { rejectUnauthorized: false } : undefined,
-    connectionTimeoutMillis: 10000,
-    idleTimeoutMillis: 30000,
+    max: 10,
+    connectionTimeoutMillis: 8000,
+    idleTimeoutMillis: 15000,
   }
   : connectionString
     ? {
       connectionString,
       ssl: isProductionOrCloud ? { rejectUnauthorized: false } : undefined,
-      connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 30000,
+      max: 10,
+      connectionTimeoutMillis: 8000,
+      idleTimeoutMillis: 15000,
     }
     : {
       host: process.env.PGHOST || 'localhost',
@@ -43,8 +45,9 @@ const config: PoolConfig = hasExplicitPgVars
       user: process.env.PGUSER || 'postgres',
       password: process.env.PGPASSWORD || '',
       ssl: isProductionOrCloud ? { rejectUnauthorized: false } : undefined,
-      connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 30000,
+      max: 10,
+      connectionTimeoutMillis: 8000,
+      idleTimeoutMillis: 15000,
     };
 
 export const pool = new Pool(config);

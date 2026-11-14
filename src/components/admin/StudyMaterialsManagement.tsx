@@ -31,6 +31,7 @@ import './StudyMaterialsManagement.css';
 import { AiSyllabusImportWizard } from './ai-syllabus/AiSyllabusImportWizard';
 import { compareLessons, compareTopics } from '../../utils/naturalSort';
 import { cleanTamilUnicodeText } from '../../utils/tamilUnicodeCleaner';
+import { normalizeMatchedTopics } from '../../utils/syllabusNormalize';
 
 export interface TextbookOption {
   id: number;
@@ -157,7 +158,7 @@ interface LessonItem {
   textbook_title?: string;
   textbook_unit_number?: string;
   textbook_unit_title?: string;
-  matched_topics?: string;
+  matched_topics?: string[] | string | null;
   syllabus_reference?: string;
   description?: string;
   status: string;
@@ -208,6 +209,7 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   const [tree, setTree] = useState<UnitItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [treeError, setTreeError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   // Expand / Collapse state
@@ -425,20 +427,25 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   const fetchTree = async () => {
     try {
       setRefreshing(true);
+      setTreeError(null);
       const url = `/api/study-management/tree?examId=${encodeURIComponent(selectedExamId)}&subjectId=${encodeURIComponent(
         selectedSubjectSlug
       )}${selectedStandard ? `&standardId=${selectedStandard}` : ''}`;
       const res = await apiFetch(url);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.tree)) {
-        setTree(data.tree);
-        // Expand all units by default if newly loaded
-        const allUnitIds = new Set<number>(data.tree.map((u: UnitItem) => u.id));
-        setExpandedUnits(allUnitIds);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || `Failed to load study materials tree (HTTP ${res.status})`);
       }
+      const nextTree = Array.isArray(data.tree) ? data.tree : [];
+      setTree(nextTree);
+      // Expand all units by default if newly loaded
+      const allUnitIds = new Set<number>(nextTree.map((u: UnitItem) => u.id));
+      setExpandedUnits(allUnitIds);
     } catch (err: any) {
       console.error('Failed to load hierarchy tree', err);
-      showToast('Error loading study materials tree', 'error');
+      const msg = err?.message || 'Error loading study materials tree';
+      setTreeError(msg);
+      showToast(msg, 'error');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -538,16 +545,16 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
     return baseTree
       .map((unit) => {
         const unitMatch =
-          unit.title.toLowerCase().includes(term) ||
-          unit.unit_code.toLowerCase().includes(term) ||
+          (unit.title || '').toLowerCase().includes(term) ||
+          (unit.unit_code || '').toLowerCase().includes(term) ||
           (unit.subject_name && unit.subject_name.toLowerCase().includes(term)) ||
           `unit ${unit.unit_number}`.includes(term);
 
         const filteredLessons = (unit.lessons || [])
           .filter((lesson) => {
             const lessonMatch =
-              lesson.title.toLowerCase().includes(term) ||
-              lesson.lesson_number.toLowerCase().includes(term) ||
+              (lesson.title || '').toLowerCase().includes(term) ||
+              String(lesson.lesson_number || '').toLowerCase().includes(term) ||
               `std ${lesson.standard_number}`.includes(term) ||
               `standard ${lesson.standard_number}`.includes(term) ||
               `class ${lesson.standard_number}`.includes(term) ||
@@ -555,7 +562,7 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
 
             const topicMatch = lesson.topics?.some(
               (t) =>
-                t.topic_name.toLowerCase().includes(term) ||
+                (t.topic_name || '').toLowerCase().includes(term) ||
                 (t.description && t.description.toLowerCase().includes(term))
             );
             return lessonMatch || topicMatch;
@@ -1516,6 +1523,16 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
           <p className="smm-state-title">Loading Study Materials Hierarchy...</p>
           <span className="smm-state-sub">Fetching units, lessons, topics, and notes from PostgreSQL</span>
         </div>
+      ) : treeError ? (
+        <div className="smm-state-card glass" style={{ borderColor: 'rgba(248, 113, 113, 0.35)' }}>
+          <AlertCircle size={40} className="smm-empty-icon" style={{ color: '#f87171' }} />
+          <p className="smm-state-title">Unable to Load Study Materials</p>
+          <p className="smm-state-sub">{treeError}</p>
+          <button type="button" className="smm-btn-primary mt-3" onClick={fetchTree}>
+            <RefreshCw size={15} />
+            <span>Retry</span>
+          </button>
+        </div>
       ) : filteredTree.length === 0 ? (
         <div className="smm-state-card glass">
           <BookOpen size={40} className="smm-empty-icon text-amber" />
@@ -1655,23 +1672,27 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
                       const seenFocus = new Set<string>();
                       unitLessons.forEach((l) => {
                         const tbUnit = l.textbook_unit_title || (l.textbook_unit_number ? `Unit ${l.textbook_unit_number}` : undefined);
+                        const normalizedMatched = normalizeMatchedTopics(l.matched_topics);
+                        const matchedStr = normalizedMatched.length > 0 ? normalizedMatched.join(', ') : undefined;
                         if (Array.isArray(l.topics) && l.topics.length > 0) {
                           l.topics.forEach((t) => {
-                            const key = `${l.standard_number}|${t.topic_name.toLowerCase().trim()}`;
+                            const tName = String(t.topic_name || '').trim();
+                            if (!tName) return;
+                            const key = `${l.standard_number}|${tName.toLowerCase()}`;
                             if (!seenFocus.has(key)) {
                               seenFocus.add(key);
                               focusSummary.push({
-                                focusArea: t.topic_name,
+                                focusArea: tName,
                                 standardNumber: l.standard_number,
                                 lessonNumber: l.lesson_number,
                                 lessonTitle: l.title,
                                 textbookUnit: tbUnit,
-                                matchedTopic: l.matched_topics,
+                                matchedTopic: matchedStr,
                               });
                             }
                           });
-                        } else if (l.matched_topics) {
-                          l.matched_topics.split(/[,;]/).map((s) => s.trim()).filter(Boolean).forEach((mt) => {
+                        } else if (normalizedMatched.length > 0) {
+                          normalizedMatched.forEach((mt) => {
                             const key = `${l.standard_number}|${mt.toLowerCase()}`;
                             if (!seenFocus.has(key)) {
                               seenFocus.add(key);
@@ -1681,7 +1702,7 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
                                 lessonNumber: l.lesson_number,
                                 lessonTitle: l.title,
                                 textbookUnit: tbUnit,
-                                matchedTopic: l.matched_topics,
+                                matchedTopic: matchedStr,
                               });
                             }
                           });
@@ -1917,11 +1938,15 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
                                     <span className="smm-topics-label">
                                       Lesson Focus Areas ({topics.length})
                                     </span>
-                                    {lesson.matched_topics && (
-                                      <span style={{ fontSize: '0.73rem', color: '#38bdf8' }}>
-                                        Matched Syllabus Topics: <strong>{lesson.matched_topics}</strong>
-                                      </span>
-                                    )}
+                                    {(() => {
+                                      const normalizedMatched = normalizeMatchedTopics(lesson.matched_topics);
+                                      return normalizedMatched.length > 0 ? (
+                                        <span style={{ fontSize: '0.73rem', color: '#38bdf8' }}>
+                                          Matched Syllabus Topics:{' '}
+                                          <strong>{normalizedMatched.join(', ')}</strong>
+                                        </span>
+                                      ) : null;
+                                    })()}
                                   </div>
 
                                   {topics.length === 0 ? (

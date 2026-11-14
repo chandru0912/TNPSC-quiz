@@ -115,6 +115,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Ensure UTF-8 JSON charset and Unicode NFC normalization for all Tamil/English API payloads
+// (HTTP compression is handled cleanly by Vercel Edge / reverse proxy)
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.body && typeof req.body === 'object') {
     req.body = normalizePayloadUnicode(req.body);

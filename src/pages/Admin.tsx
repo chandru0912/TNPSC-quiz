@@ -57,6 +57,7 @@ import { NewStudentPage } from '../components/admin/pages/NewStudentPage'
 import { RestoreStudentPage } from '../components/admin/pages/RestoreStudentPage'
 import { StudentPerformancePage } from '../components/admin/pages/StudentPerformancePage'
 import { SubscriptionOverviewPage } from '../components/admin/pages/SubscriptionOverviewPage'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import { ExtractedPagesModal } from '../components/ExtractedPagesModal'
@@ -3599,62 +3600,80 @@ const Admin = () => {
 
         {/* 1. Premium Consolidated Enterprise Analytics Dashboard Overview (Zero Duplicate Horizontal Tabs) */}
         {(isControlCenter || isDashboard || isAnalyticsOverview) && (
-          <UnifiedDashboardOverview
-            token={token}
-            adminUser={adminUser}
-            onOpenNewStudent={() => navigate('/admin/analytics/new-student')}
-            onOpenRestoreStudent={() => navigate('/admin/analytics/restore-student')}
-            onOpenStudentPreview={handleOpenStudentPreview}
-          />
+          <ErrorBoundary key={rawPath} compact fallbackTitle="Analytics Dashboard failed to render">
+            <UnifiedDashboardOverview
+              token={token}
+              adminUser={adminUser}
+              onOpenNewStudent={() => navigate('/admin/analytics/new-student')}
+              onOpenRestoreStudent={() => navigate('/admin/analytics/restore-student')}
+              onOpenStudentPreview={handleOpenStudentPreview}
+            />
+          </ErrorBoundary>
         )}
 
         {/* 2. Analytics Sub-Pages */}
         {isTamilNaduMap && (
-          <AdvancedAnalyticsDashboard
-            token={token}
-            activeTab="geographic"
-            hideInternalTabs={true}
-          />
+          <ErrorBoundary key="geo" compact fallbackTitle="Geographic Analytics failed to render">
+            <AdvancedAnalyticsDashboard
+              token={token}
+              activeTab="geographic"
+              hideInternalTabs={true}
+            />
+          </ErrorBoundary>
         )}
 
         {isLiveMonitor && (
-          <AdvancedAnalyticsDashboard
-            token={token}
-            activeTab="live"
-            hideInternalTabs={true}
-          />
+          <ErrorBoundary key="live" compact fallbackTitle="Live Monitor failed to render">
+            <AdvancedAnalyticsDashboard
+              token={token}
+              activeTab="live"
+              hideInternalTabs={true}
+            />
+          </ErrorBoundary>
         )}
 
         {isTraffic && (
-          <AdvancedAnalyticsDashboard
-            token={token}
-            activeTab="traffic"
-            hideInternalTabs={true}
-          />
+          <ErrorBoundary key="traffic" compact fallbackTitle="Traffic Analytics failed to render">
+            <AdvancedAnalyticsDashboard
+              token={token}
+              activeTab="traffic"
+              hideInternalTabs={true}
+            />
+          </ErrorBoundary>
         )}
 
         {isSubscriptions && (
-          <SubscriptionOverviewPage token={token} />
+          <ErrorBoundary key="subs" compact fallbackTitle="Subscription Overview failed to render">
+            <SubscriptionOverviewPage token={token} />
+          </ErrorBoundary>
         )}
 
         {isNewStudent && (
-          <NewStudentPage token={token} onSuccess={fetchAdminUsers} />
+          <ErrorBoundary key="new-student" compact fallbackTitle="New Student page failed to render">
+            <NewStudentPage token={token} onSuccess={fetchAdminUsers} />
+          </ErrorBoundary>
         )}
 
         {isRestoreStudent && (
-          <RestoreStudentPage token={token} />
+          <ErrorBoundary key="restore-student" compact fallbackTitle="Restore Student page failed to render">
+            <RestoreStudentPage token={token} />
+          </ErrorBoundary>
         )}
 
         {isPerformance && (
-          <StudentPerformancePage token={token} />
+          <ErrorBoundary key="perf" compact fallbackTitle="Student Performance page failed to render">
+            <StudentPerformancePage token={token} />
+          </ErrorBoundary>
         )}
 
         {isActiveReport && (
-          <AdvancedAnalyticsDashboard
-            token={token}
-            activeTab="reports"
-            hideInternalTabs={true}
-          />
+          <ErrorBoundary key="reports" compact fallbackTitle="Active Report failed to render">
+            <AdvancedAnalyticsDashboard
+              token={token}
+              activeTab="reports"
+              hideInternalTabs={true}
+            />
+          </ErrorBoundary>
         )}
 
         {/* 4. Student View Simulation Page */}
@@ -5409,7 +5428,9 @@ const Admin = () => {
         {/* Dynamic Study Materials Management System */}
         {isStudyMaterialsManagement && (
           <div className="admin-study-materials-mgmt-section" style={{ width: '100%' }}>
-            <StudyMaterialsManagement token={token} />
+            <ErrorBoundary key="smm" compact fallbackTitle="Study Materials Management failed to render">
+              <StudyMaterialsManagement token={token} />
+            </ErrorBoundary>
           </div>
         )}
 

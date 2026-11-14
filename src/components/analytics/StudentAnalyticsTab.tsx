@@ -39,23 +39,24 @@ export const StudentAnalyticsTab: React.FC<StudentAnalyticsTabProps> = ({
   const [search, setSearch] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<StudentItem | null>(null);
 
+  const safeStudents = Array.isArray(students) ? students : [];
   const filteredStudents = useMemo(() => {
-    if (!search.trim()) return students;
+    if (!search.trim()) return safeStudents;
     const q = search.toLowerCase();
-    return students.filter(
+    return safeStudents.filter(
       (s) =>
-        s.fullName.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q) ||
-        s.district.toLowerCase().includes(q) ||
-        s.targetGroup.toLowerCase().includes(q)
+        (s.fullName || '').toLowerCase().includes(q) ||
+        (s.email || '').toLowerCase().includes(q) ||
+        (s.district || '').toLowerCase().includes(q) ||
+        (s.targetGroup || '').toLowerCase().includes(q)
     );
-  }, [students, search]);
+  }, [safeStudents, search]);
 
-  const totalStudents = students.length;
-  const paidCount = students.filter((s) => s.tier === 'pro' || s.tier === 'paid').length;
+  const totalStudents = safeStudents.length;
+  const paidCount = safeStudents.filter((s) => s.tier === 'pro' || s.tier === 'paid').length;
   const avgAccuracy =
-    students.length > 0
-      ? (students.reduce((acc, curr) => acc + curr.accuracy, 0) / students.length).toFixed(1)
+    safeStudents.length > 0
+      ? (safeStudents.reduce((acc, curr) => acc + (Number(curr.accuracy) || 0), 0) / safeStudents.length).toFixed(1)
       : '0';
 
   return (

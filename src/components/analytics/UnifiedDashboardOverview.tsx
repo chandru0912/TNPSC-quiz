@@ -250,8 +250,9 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
 
   // Card Info Helper
   const getCardInfo = (id: string) => {
+    const cards = Array.isArray(data?.overviewCards) ? data.overviewCards : [];
     return (
-      data?.overviewCards?.find((c) => c.id === id) || {
+      cards.find((c) => c?.id === id) || {
         change: 0,
         trend: 'neutral' as const,
         comparisonText: 'vs previous period',
@@ -282,10 +283,12 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
 
   // SVG Area Chart calculations for Student Registration Trends
   const trendPoints = useMemo(() => {
-    const list = data?.studentAnalytics?.registrationTrends || [];
+    const list = Array.isArray(data?.studentAnalytics?.registrationTrends)
+      ? data.studentAnalytics.registrationTrends
+      : [];
     if (list.length === 0) return { path: '', area: '', points: [] };
 
-    const maxCount = Math.max(...list.map((l) => l.count), 5);
+    const maxCount = Math.max(...list.map((l) => Number(l?.count) || 0), 5);
     const chartW = 560;
     const chartH = 160;
     const padX = 24;
@@ -313,8 +316,10 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
 
   // Donut chart path calculations for Subscriptions
   const donutSegments = useMemo(() => {
-    const dist = data?.subscriptionAnalytics?.distribution || [];
-    const total = dist.reduce((acc, d) => acc + d.count, 0) || 1;
+    const dist = Array.isArray(data?.subscriptionAnalytics?.distribution)
+      ? data.subscriptionAnalytics.distribution
+      : [];
+    const total = dist.reduce((acc, d) => acc + (Number(d?.count) || 0), 0) || 1;
 
     let cumulative = 0;
     return dist.map((item) => {
@@ -792,18 +797,21 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
           <div className="ud-sources-section">
             <span className="ud-section-subheading">TRAFFIC SOURCES BREAKDOWN</span>
             <div className="ud-sources-list">
-              {(data?.websiteTrafficAnalytics?.trafficSources || []).map((src, i) => (
+              {(Array.isArray(data?.websiteTrafficAnalytics?.trafficSources)
+                ? data.websiteTrafficAnalytics.trafficSources
+                : []
+              ).map((src, i) => (
                 <div key={i} className="ud-source-row">
                   <div className="ud-source-meta">
-                    <span className="ud-source-name">{src.source}</span>
+                    <span className="ud-source-name">{src?.source || 'Direct'}</span>
                     <span className="ud-source-pct">
-                      {src.percentage}% ({src.count.toLocaleString('en-IN')})
+                      {Number(src?.percentage || 0)}% ({Number(src?.count || 0).toLocaleString('en-IN')})
                     </span>
                   </div>
                   <div className="ud-progress-track">
                     <div
                       className={`ud-progress-fill source-${i % 4}`}
-                      style={{ width: `${Math.min(100, src.percentage)}%` }}
+                      style={{ width: `${Math.min(100, Number(src?.percentage || 0))}%` }}
                     />
                   </div>
                 </div>
@@ -1108,19 +1116,20 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
           {/* Questions By Subject */}
           <div className="ud-subjects-list-wrap">
             <span className="ud-section-subheading">QUESTIONS BY SUBJECT</span>
-            {data?.questionBankAnalytics?.bySubject && data.questionBankAnalytics.bySubject.length > 0 ? (
+            {Array.isArray(data?.questionBankAnalytics?.bySubject) && data.questionBankAnalytics.bySubject.length > 0 ? (
               <div className="ud-subj-bars">
                 {data.questionBankAnalytics.bySubject.map((subj, idx) => {
                   const maxCount = Math.max(
-                    ...data.questionBankAnalytics.bySubject.map((s) => s.count),
+                    ...data.questionBankAnalytics.bySubject.map((s) => Number(s?.count) || 0),
                     1
                   );
-                  const pct = Math.round((subj.count / maxCount) * 100);
+                  const countVal = Number(subj?.count) || 0;
+                  const pct = Math.round((countVal / maxCount) * 100);
                   return (
                     <div key={idx} className="ud-subj-row">
                       <div className="ud-subj-meta">
-                        <span className="ud-subj-name">{subj.subject}</span>
-                        <span className="ud-subj-count">{subj.count} MCQs</span>
+                        <span className="ud-subj-name">{subj?.subject || 'General'}</span>
+                        <span className="ud-subj-count">{countVal} MCQs</span>
                       </div>
                       <div className="ud-progress-track">
                         <div className="ud-progress-fill rose" style={{ width: `${pct}%` }} />
@@ -1185,10 +1194,11 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
             <span className="ud-section-subheading">INDEXED BY STANDARD (CLASSES 6 - 12)</span>
             <div className="ud-standards-grid">
               {['6', '7', '8', '9', '10', '11', '12'].map((std) => {
-                const found = data?.studyMaterialsAnalytics?.byStandard?.find(
-                  (s) => String(s.standard) === std
-                );
-                const count = found ? found.count : 0;
+                const byStd = Array.isArray(data?.studyMaterialsAnalytics?.byStandard)
+                  ? data.studyMaterialsAnalytics.byStandard
+                  : [];
+                const found = byStd.find((s) => String(s?.standard) === std);
+                const count = found ? Number(found.count) || 0 : 0;
                 return (
                   <div key={std} className={`ud-std-badge ${count > 0 ? 'active' : ''}`}>
                     <span className="ud-std-title">Class {std}</span>
@@ -1204,7 +1214,7 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
       {/* ====================================================================
           SECTION 5: Recent Platform Activity Stream (Only if records exist)
           ==================================================================== */}
-      {data?.recentActivity && data.recentActivity.length > 0 && (
+      {Array.isArray(data?.recentActivity) && data.recentActivity.length > 0 && (
         <section className="ud-section ud-activity-section" aria-label="Recent Platform Activity Stream">
           <div className="ud-section-header">
             <div className="ud-section-title-wrap">

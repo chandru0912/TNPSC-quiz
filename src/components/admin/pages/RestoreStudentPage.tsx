@@ -90,11 +90,11 @@ export const RestoreStudentPage: React.FC<RestoreStudentPageProps> = ({ token, o
     }
   };
 
-  const filteredStudents = students.filter(
+  const filteredStudents = (Array.isArray(students) ? students : []).filter(
     (s) =>
-      s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (s.mobile && s.mobile.includes(searchTerm)) ||
+      (s.fullName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.mobile && String(s.mobile).includes(searchTerm)) ||
       (s.district && s.district.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
