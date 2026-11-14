@@ -1,16 +1,52 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import pool from '../db';
 import { StudyManagementService } from '../services/studyManagementService';
 import {
   generateStudentToken,
   requireStudentAuth,
+  optionalStudentAuth,
   requireAdminAuth,
   hashStudentPassword,
   verifyStudentPassword,
   StudentAuthenticatedRequest,
 } from '../middleware/auth';
+import {
+  getGoogleOAuthPublicConfig,
+  verifyGoogleCredentialOrCode,
+  GoogleAuthError,
+} from '../services/googleAuthService';
 
 const router = Router();
+
+const ALLOWED_TARGET_GROUPS = new Set(['group1', 'group2', 'group2a', 'group4']);
+
+function normalizeTargetGroup(group?: unknown): string {
+  if (typeof group !== 'string') return 'group4';
+  const clean = group.trim().toLowerCase();
+  return ALLOWED_TARGET_GROUPS.has(clean) ? clean : 'group4';
+}
+
+function formatStudentResponse(row: any) {
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    email: row.email,
+    mobile: row.mobile ?? null,
+    targetGroup: row.target_group || 'group4',
+    avatarUrl: row.avatar_url ?? null,
+    authProvider: row.auth_provider || 'email',
+    emailVerified: Boolean(row.email_verified),
+    onboardingCompleted: row.onboarding_completed !== false,
+    role: 'student' as const,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function hashResetToken(token: string): string {
+  return crypto.createHash('sha256').update(token.trim()).digest('hex');
+}
 
 // Helper: format relative time (e.g., '2 hours ago', 'Just now')
 function formatRelativeTime(dateInput: string | Date): string {
@@ -29,11 +65,249 @@ function formatRelativeTime(dateInput: string | Date): string {
 }
 
 // ====================================================
+// 0. GOOGLE OAUTH PUBLIC CONFIG & EMAIL DISCOVERY
+// ====================================================
+router.get('/auth/google/config', (_req: Request, res: Response) => {
+  const config = getGoogleOAuthPublicConfig();
+  return res.status(200).json({
+    status: 'success',
+    clientId: config.clientId,
+    configured: config.configured,
+  });
+});
+
+router.post('/auth/check-email', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ status: 'error', message: 'Please enter a valid email address.' });
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = await pool.query(
+      `SELECT id, auth_provider, (password_hash IS NOT NULL AND password_hash <> '') AS has_password, is_active
+       FROM students
+       WHERE LOWER(email) = $1`,
+      [cleanEmail]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        exists: false,
+      });
+    }
+
+    const row = existing.rows[0];
+    return res.status(200).json({
+      status: 'success',
+      exists: true,
+      authProvider: row.auth_provider || 'email',
+      hasPassword: Boolean(row.has_password),
+      isActive: row.is_active !== false,
+    });
+  } catch (err: any) {
+    console.error('[Check Email Error]:', err);
+    return res.status(500).json({ status: 'error', message: 'Failed to check email status.' });
+  }
+});
+
+// ====================================================
+// 0B. GOOGLE OAUTH LOGIN / AUTO-REGISTER / ACCOUNT LINKING
+// ====================================================
+router.post('/auth/google', async (req: Request, res: Response) => {
+  try {
+    const { code, idToken, redirectUri } = req.body || {};
+
+    if (!code && !idToken) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Google authorization code or token is required.',
+      });
+    }
+
+    const googleProfile = await verifyGoogleCredentialOrCode({ code, idToken, redirectUri });
+
+    if (!googleProfile.emailVerified || !googleProfile.email) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Your Google email address is not verified and cannot be used for sign-in or account linking.',
+      });
+    }
+
+    const client = await pool.connect();
+    let studentRow: any;
+    let isNewUser = false;
+    let linkedAccount = false;
+
+    try {
+      await client.query('BEGIN');
+
+      // 1. Check existing user by verified Google Account ID (sub)
+      const byGoogleId = await client.query(
+        `SELECT id, full_name, email, mobile, password_hash, target_group, google_id, auth_provider,
+                avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
+         FROM students
+         WHERE google_id = $1`,
+        [googleProfile.googleId]
+      );
+
+      if (byGoogleId.rows.length > 0) {
+        const existing = byGoogleId.rows[0];
+        if (existing.is_active === false) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({
+            status: 'error',
+            message: 'This student account has been deactivated. Please contact an administrator.',
+          });
+        }
+
+        const updated = await client.query(
+          `UPDATE students
+           SET avatar_url = COALESCE($1, avatar_url),
+               full_name = CASE WHEN full_name IS NULL OR TRIM(full_name) = '' THEN $2 ELSE full_name END,
+               email_verified = true,
+               role = 'student',
+               last_login_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3
+           RETURNING id, full_name, email, mobile, target_group, google_id, auth_provider,
+                     avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
+          [googleProfile.avatarUrl, googleProfile.fullName, existing.id]
+        );
+        studentRow = updated.rows[0];
+
+        await client.query(
+          `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+           VALUES ($1, 'google_login', $2, 'Logged In with Google', $3::jsonb)`,
+          [studentRow.id, String(studentRow.id), JSON.stringify({ provider: 'google', time: new Date().toISOString() })]
+        );
+      } else {
+        // 2. Check existing user by verified email to prevent duplicates and link securely
+        const byEmail = await client.query(
+          `SELECT id, full_name, email, mobile, password_hash, target_group, google_id, auth_provider,
+                  avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
+           FROM students
+           WHERE LOWER(email) = $1`,
+          [googleProfile.email]
+        );
+
+        if (byEmail.rows.length > 0) {
+          const existing = byEmail.rows[0];
+          if (existing.is_active === false) {
+            await client.query('ROLLBACK');
+            return res.status(403).json({
+              status: 'error',
+              message: 'This student account has been deactivated. Please contact an administrator.',
+            });
+          }
+
+          if (existing.google_id && existing.google_id !== googleProfile.googleId) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              status: 'error',
+              message: 'This email address is already linked to a different Google account.',
+            });
+          }
+
+          const hasPassword = Boolean(existing.password_hash && String(existing.password_hash).trim().length > 0);
+          const nextProvider = hasPassword ? 'both' : 'google';
+
+          const linked = await client.query(
+            `UPDATE students
+             SET google_id = $1,
+                 auth_provider = $2,
+                 avatar_url = COALESCE(avatar_url, $3),
+                 email_verified = true,
+                 role = 'student',
+                 last_login_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $4
+             RETURNING id, full_name, email, mobile, target_group, google_id, auth_provider,
+                       avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
+            [googleProfile.googleId, nextProvider, googleProfile.avatarUrl, existing.id]
+          );
+          studentRow = linked.rows[0];
+          linkedAccount = true;
+
+          await client.query(
+            `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+             VALUES ($1, 'google_account_linked', $2, 'Google Account Linked', $3::jsonb)`,
+            [studentRow.id, String(studentRow.id), JSON.stringify({ provider: nextProvider, time: new Date().toISOString() })]
+          );
+        } else {
+          // 3. Auto-register brand-new student account from verified Google profile (strictly role = 'student')
+          const inserted = await client.query(
+            `INSERT INTO students (
+               full_name, email, mobile, password_hash, target_group,
+               google_id, auth_provider, avatar_url, email_verified, onboarding_completed, role, token_version, last_login_at
+             )
+             VALUES ($1, $2, NULL, NULL, 'group4', $3, 'google', $4, true, false, 'student', 1, CURRENT_TIMESTAMP)
+             RETURNING id, full_name, email, mobile, target_group, google_id, auth_provider,
+                       avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
+            [googleProfile.fullName, googleProfile.email, googleProfile.googleId, googleProfile.avatarUrl]
+          );
+          studentRow = inserted.rows[0];
+          isNewUser = true;
+
+          await client.query(
+            `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+             VALUES ($1, 'account_created', $2, 'Account Created via Google', $3::jsonb)`,
+            [studentRow.id, String(studentRow.id), JSON.stringify({ authProvider: 'google', targetGroup: 'group4' })]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    const token = generateStudentToken(
+      studentRow.id,
+      studentRow.email,
+      studentRow.full_name,
+      studentRow.target_group || 'group4',
+      false,
+      studentRow.token_version || 1
+    );
+
+    return res.status(isNewUser ? 201 : 200).json({
+      status: 'success',
+      message: isNewUser
+        ? 'Account created successfully with Google.'
+        : linkedAccount
+          ? 'Google account securely linked to your existing TNPSC Study Hub account.'
+          : 'Logged in successfully with Google.',
+      token,
+      isNewUser,
+      linkedAccount,
+      student: formatStudentResponse(studentRow),
+    });
+  } catch (err: any) {
+    if (err instanceof GoogleAuthError) {
+      return res.status(err.statusCode).json({
+        status: 'error',
+        code: err.code,
+        message: err.message,
+      });
+    }
+    console.error('[Student Google Auth Error]:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Google authentication failed.',
+    });
+  }
+});
+
+// ====================================================
 // 1. STUDENT AUTHENTICATION: REGISTER
 // ====================================================
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    const { fullName, email, mobile, password, targetGroup } = req.body;
+    const { fullName, email, mobile, password, confirmPassword, targetGroup } = req.body;
 
     if (!fullName || typeof fullName !== 'string' || !fullName.trim()) {
       return res.status(400).json({ status: 'error', message: 'Full name is required.' });
@@ -44,18 +318,27 @@ router.post('/register', async (req: Request, res: Response) => {
     if (!password || typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ status: 'error', message: 'Password must be at least 6 characters long.' });
     }
+    if (confirmPassword !== undefined && password !== confirmPassword) {
+      return res.status(400).json({ status: 'error', message: 'Passwords do not match.' });
+    }
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = fullName.trim();
     const cleanMobile = mobile ? String(mobile).trim() : null;
-    const cleanGroup = targetGroup && typeof targetGroup === 'string' ? targetGroup.trim() : 'group4';
+    const cleanGroup = normalizeTargetGroup(targetGroup);
 
     // Check if email already exists
-    const existing = await pool.query('SELECT id FROM students WHERE LOWER(email) = $1', [cleanEmail]);
+    const existing = await pool.query('SELECT id, auth_provider FROM students WHERE LOWER(email) = $1', [cleanEmail]);
     if (existing.rows.length > 0) {
+      const provider = existing.rows[0].auth_provider;
+      const msg =
+        provider === 'google'
+          ? 'An account with this email already exists via Google Sign-In. Please click "Continue with Google" or use Forgot Password to set a password.'
+          : 'An account with this email address already exists. Please log in.';
       return res.status(409).json({
         status: 'error',
-        message: 'An account with this email address already exists. Please log in.',
+        code: 'EMAIL_EXISTS',
+        message: msg,
       });
     }
 
@@ -63,9 +346,13 @@ router.post('/register', async (req: Request, res: Response) => {
     const passwordHash = hashStudentPassword(password);
 
     const insertResult = await pool.query(
-      `INSERT INTO students (full_name, email, mobile, password_hash, target_group)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, full_name, email, mobile, target_group, created_at`,
+      `INSERT INTO students (
+         full_name, email, mobile, password_hash, target_group,
+         auth_provider, email_verified, onboarding_completed, role, token_version, last_login_at
+       )
+       VALUES ($1, $2, $3, $4, $5, 'email', false, true, 'student', 1, CURRENT_TIMESTAMP)
+       RETURNING id, full_name, email, mobile, target_group, avatar_url, auth_provider,
+                 email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
       [cleanName, cleanEmail, cleanMobile, passwordHash, cleanGroup]
     );
 
@@ -75,24 +362,24 @@ router.post('/register', async (req: Request, res: Response) => {
     await pool.query(
       `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
        VALUES ($1, 'account_created', $2, 'Account Created', $3::jsonb)`,
-      [newStudent.id, String(newStudent.id), JSON.stringify({ targetGroup: cleanGroup })]
+      [newStudent.id, String(newStudent.id), JSON.stringify({ targetGroup: cleanGroup, authProvider: 'email' })]
     );
 
     // Generate JWT token
-    const token = generateStudentToken(newStudent.id, newStudent.email, newStudent.full_name, newStudent.target_group);
+    const token = generateStudentToken(
+      newStudent.id,
+      newStudent.email,
+      newStudent.full_name,
+      newStudent.target_group,
+      false,
+      newStudent.token_version || 1
+    );
 
     return res.status(201).json({
       status: 'success',
       message: 'Student account registered successfully.',
       token,
-      student: {
-        id: newStudent.id,
-        fullName: newStudent.full_name,
-        email: newStudent.email,
-        mobile: newStudent.mobile,
-        targetGroup: newStudent.target_group,
-        createdAt: newStudent.created_at,
-      },
+      student: formatStudentResponse(newStudent),
     });
   } catch (err: any) {
     console.error('[Student Register Error]:', err);
@@ -114,7 +401,8 @@ router.post('/login', async (req: Request, res: Response) => {
     const cleanEmail = String(email).trim().toLowerCase();
 
     const studentRes = await pool.query(
-      `SELECT id, full_name, email, mobile, password_hash, target_group, created_at
+      `SELECT id, full_name, email, mobile, password_hash, target_group, google_id, auth_provider,
+              avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
        FROM students
        WHERE LOWER(email) = $1`,
       [cleanEmail]
@@ -126,6 +414,21 @@ router.post('/login', async (req: Request, res: Response) => {
 
     const student = studentRes.rows[0];
 
+    if (student.is_active === false) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'This student account has been deactivated. Please contact an administrator.',
+      });
+    }
+
+    if (!student.password_hash) {
+      return res.status(401).json({
+        status: 'error',
+        code: 'GOOGLE_ONLY_ACCOUNT',
+        message: 'This account uses Google Sign-In. Please click "Continue with Google" or use "Forgot Password?" to create a password.',
+      });
+    }
+
     const isMatch = verifyStudentPassword(password, student.password_hash);
     if (!isMatch) {
       return res.status(401).json({ status: 'error', message: 'Invalid email address or password.' });
@@ -135,31 +438,231 @@ router.post('/login', async (req: Request, res: Response) => {
     await pool.query(
       `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
        VALUES ($1, 'login', $2, 'Logged In', $3::jsonb)`,
-      [student.id, String(student.id), JSON.stringify({ time: new Date().toISOString() })]
+      [student.id, String(student.id), JSON.stringify({ provider: 'email', time: new Date().toISOString() })]
     );
 
     // Update last_login_at timestamp
     await pool.query('UPDATE students SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [student.id]);
 
     // Generate JWT token
-    const token = generateStudentToken(student.id, student.email, student.full_name, student.target_group);
+    const token = generateStudentToken(
+      student.id,
+      student.email,
+      student.full_name,
+      student.target_group || 'group4',
+      false,
+      student.token_version || 1
+    );
 
     return res.status(200).json({
       status: 'success',
       message: 'Login successful.',
       token,
-      student: {
-        id: student.id,
-        fullName: student.full_name,
-        email: student.email,
-        mobile: student.mobile,
-        targetGroup: student.target_group,
-        createdAt: student.created_at,
-      },
+      student: formatStudentResponse(student),
     });
   } catch (err: any) {
     console.error('[Student Login Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Login failed.' });
+  }
+});
+
+// ====================================================
+// 2B. LOGOUT (SERVER-SIDE SESSION REVOCATION)
+// ====================================================
+router.post('/logout', optionalStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.studentUser;
+    if (user && !user.isPreview && user.studentId) {
+      await pool.query(
+        'UPDATE students SET token_version = COALESCE(token_version, 1) + 1 WHERE id = $1',
+        [user.studentId]
+      );
+      await pool.query(
+        `UPDATE study_sessions
+         SET is_active = false, ended_at = CURRENT_TIMESTAMP
+         WHERE student_id = $1 AND is_active = true`,
+        [user.studentId]
+      );
+      await pool.query(
+        `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+         VALUES ($1, 'logout', $2, 'Logged Out', $3::jsonb)`,
+        [user.studentId, String(user.studentId), JSON.stringify({ time: new Date().toISOString() })]
+      );
+    }
+    return res.status(200).json({
+      status: 'success',
+      message: 'Logged out successfully.',
+    });
+  } catch (err: any) {
+    console.error('[Student Logout Error]:', err);
+    return res.status(200).json({
+      status: 'success',
+      message: 'Session ended.',
+    });
+  }
+});
+
+// ====================================================
+// 2C. FORGOT PASSWORD & RESET PASSWORD
+// ====================================================
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body || {};
+    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ status: 'error', message: 'Please enter a valid email address.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const studentRes = await pool.query(
+      'SELECT id, full_name, email, is_active FROM students WHERE LOWER(email) = $1',
+      [cleanEmail]
+    );
+
+    if (studentRes.rows.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'No student account found with this email address.',
+      });
+    }
+
+    const student = studentRes.rows[0];
+    if (student.is_active === false) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'This student account has been deactivated. Please contact an administrator.',
+      });
+    }
+
+    const resetCode = String(crypto.randomInt(100000, 1000000));
+    const tokenHash = hashResetToken(resetCode);
+
+    // Invalidate any prior unused reset codes
+    await pool.query(
+      'UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE student_id = $1 AND used_at IS NULL',
+      [student.id]
+    );
+
+    await pool.query(
+      `INSERT INTO password_reset_tokens (student_id, token_hash, expires_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP + INTERVAL '15 minutes')`,
+      [student.id, tokenHash]
+    );
+
+    const allowPreview =
+      process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_RESET_PREVIEW === 'true';
+
+    console.info(`[Password Reset] Generated 15-min reset code for ${cleanEmail}${allowPreview ? `: ${resetCode}` : ''}`);
+
+    return res.status(200).json({
+      status: 'success',
+      message: allowPreview
+        ? 'A 6-digit password reset code has been generated (valid for 15 minutes).'
+        : 'Password reset instructions have been processed for your account.',
+      expiresInMinutes: 15,
+      ...(allowPreview ? { devResetCode: resetCode } : {}),
+    });
+  } catch (err: any) {
+    console.error('[Forgot Password Error]:', err);
+    return res.status(500).json({ status: 'error', message: 'Failed to process password reset request.' });
+  }
+});
+
+router.post('/reset-password', async (req: Request, res: Response) => {
+  try {
+    const { email, resetCode, token, newPassword, confirmPassword } = req.body || {};
+    const rawCode = String(resetCode || token || '').trim();
+
+    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ status: 'error', message: 'A valid email address is required.' });
+    }
+    if (!rawCode) {
+      return res.status(400).json({ status: 'error', message: 'Reset code is required.' });
+    }
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({ status: 'error', message: 'New password must be at least 6 characters long.' });
+    }
+    if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+      return res.status(400).json({ status: 'error', message: 'Passwords do not match.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const studentRes = await pool.query(
+      'SELECT id, google_id, is_active FROM students WHERE LOWER(email) = $1',
+      [cleanEmail]
+    );
+    if (studentRes.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Account not found.' });
+    }
+
+    const student = studentRes.rows[0];
+    if (student.is_active === false) {
+      return res.status(403).json({ status: 'error', message: 'This account has been deactivated.' });
+    }
+
+    const candidateHash = hashResetToken(rawCode);
+    const tokenRes = await pool.query(
+      `SELECT id, token_hash, expires_at
+       FROM password_reset_tokens
+       WHERE student_id = $1 AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [student.id]
+    );
+
+    if (tokenRes.rows.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Reset code is invalid or has expired. Please request a new reset code.',
+      });
+    }
+
+    const storedRow = tokenRes.rows[0];
+    const candBuf = Buffer.from(candidateHash, 'hex');
+    const storedBuf = Buffer.from(storedRow.token_hash, 'hex');
+    if (candBuf.length !== storedBuf.length || !crypto.timingSafeEqual(candBuf, storedBuf)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid reset code. Please check and try again.',
+      });
+    }
+
+    const passwordHash = hashStudentPassword(newPassword);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE students
+         SET password_hash = $1,
+             auth_provider = CASE WHEN google_id IS NOT NULL THEN 'both' ELSE 'email' END,
+             token_version = COALESCE(token_version, 1) + 1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [passwordHash, student.id]
+      );
+      await client.query(
+        'UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = $1',
+        [storedRow.id]
+      );
+      await client.query(
+        `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+         VALUES ($1, 'password_reset', $2, 'Password Reset', $3::jsonb)`,
+        [student.id, String(student.id), JSON.stringify({ time: new Date().toISOString() })]
+      );
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Your password has been reset successfully. You can now log in with your new password.',
+    });
+  } catch (err: any) {
+    console.error('[Reset Password Error]:', err);
+    return res.status(500).json({ status: 'error', message: 'Failed to reset password.' });
   }
 });
 
@@ -170,7 +673,8 @@ router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
   try {
     const studentId = req.studentUser!.studentId;
     const studentRes = await pool.query(
-      `SELECT id, full_name, email, mobile, target_group, created_at, updated_at
+      `SELECT id, full_name, email, mobile, target_group, avatar_url, auth_provider,
+              email_verified, onboarding_completed, role, created_at, updated_at
        FROM students
        WHERE id = $1`,
       [studentId]
@@ -180,18 +684,9 @@ router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
       return res.status(404).json({ status: 'error', message: 'Student profile not found.' });
     }
 
-    const s = studentRes.rows[0];
     return res.status(200).json({
       status: 'success',
-      student: {
-        id: s.id,
-        fullName: s.full_name,
-        email: s.email,
-        mobile: s.mobile,
-        targetGroup: s.target_group,
-        createdAt: s.created_at,
-        updatedAt: s.updated_at,
-      },
+      student: formatStudentResponse(studentRes.rows[0]),
     });
   } catch (err: any) {
     console.error('[Student Profile Error]:', err);
@@ -202,7 +697,7 @@ router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
 router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
     const studentId = req.studentUser!.studentId;
-    const { fullName, mobile, targetGroup } = req.body;
+    const { fullName, mobile, targetGroup, onboardingCompleted } = req.body;
 
     // Read-only server guard: never alter student database records during admin preview mode
     if (req.studentUser?.isPreview) {
@@ -214,7 +709,9 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
           fullName: fullName?.trim() || req.studentUser.fullName,
           email: req.studentUser.email,
           mobile: mobile !== undefined ? (mobile ? String(mobile).trim() : null) : null,
-          targetGroup: targetGroup?.trim() || req.studentUser.targetGroup,
+          targetGroup: targetGroup ? normalizeTargetGroup(targetGroup) : req.studentUser.targetGroup,
+          onboardingCompleted: true,
+          role: 'student',
           updatedAt: new Date().toISOString(),
         },
       });
@@ -234,7 +731,11 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
     }
     if (targetGroup && typeof targetGroup === 'string' && targetGroup.trim()) {
       updates.push(`target_group = $${pIdx++}`);
-      values.push(targetGroup.trim());
+      values.push(normalizeTargetGroup(targetGroup));
+    }
+    if (typeof onboardingCompleted === 'boolean') {
+      updates.push(`onboarding_completed = $${pIdx++}`);
+      values.push(onboardingCompleted);
     }
 
     if (updates.length === 0) {
@@ -248,7 +749,8 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
       UPDATE students
       SET ${updates.join(', ')}
       WHERE id = $${pIdx}
-      RETURNING id, full_name, email, mobile, target_group, updated_at
+      RETURNING id, full_name, email, mobile, target_group, avatar_url, auth_provider,
+                email_verified, onboarding_completed, role, created_at, updated_at
     `;
 
     const result = await pool.query(updateQuery, values);
@@ -257,14 +759,7 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
     return res.status(200).json({
       status: 'success',
       message: 'Profile updated successfully.',
-      student: {
-        id: updated.id,
-        fullName: updated.full_name,
-        email: updated.email,
-        mobile: updated.mobile,
-        targetGroup: updated.target_group,
-        updatedAt: updated.updated_at,
-      },
+      student: formatStudentResponse(updated),
     });
   } catch (err: any) {
     console.error('[Student Profile Update Error]:', err);

@@ -38,9 +38,9 @@ export interface UnitOption {
 }
 
 const TNPSC_GROUPS: GroupOption[] = [
-  { id: 'group1', name: 'TNPSC Group 1', code: '', badge: '', description: '' },
-  { id: 'group2', name: 'TNPSC Group 2, 2A', code: '', badge: '', description: '' },
-  { id: 'group4', name: 'TNPSC Group 4', code: '', badge: '', description: '' },
+  { id: 'group1', name: 'TNPSC Group 1', code: 'Code: 497', badge: 'Degree Standard • Prelims', description: '' },
+  { id: 'group2', name: 'TNPSC Group 2 & 2A', code: 'Code: 495', badge: 'Degree Standard • Combined Prelims', description: '' },
+  { id: 'group4', name: 'TNPSC Group 4', code: 'Code: 496', badge: 'SSLC Standard • Single Paper', description: '' },
 ];
 
 const GROUP_SUBJECTS: Record<string, SubjectOption[]> = {
@@ -183,20 +183,18 @@ router.get('/groups', async (_req: Request, res: Response) => {
 /**
  * GET /api/syllabus/subjects?groupId=
  * Returns subjects configured strictly for the specified TNPSC Group from database or fallback.
+ * When TNPSC Group 2 & 2A (group2/group2a) is selected, merges Group 2 and Group 2A subjects without duplicates.
  */
 router.get('/subjects', async (req: Request, res: Response) => {
   let rawGroup = String(req.query.groupId || 'group4').toLowerCase().trim();
-  const groupId = rawGroup === 'group2a' ? 'group2' : rawGroup;
+  const groupId = rawGroup === 'group-2a' ? 'group2a' : rawGroup === 'group2_2a' || rawGroup === 'group-2' ? 'group2' : rawGroup;
   try {
-    const dbSubs = await pool.query(
-      'SELECT * FROM syllabus_subjects WHERE exam_id = $1 AND is_active = true ORDER BY display_order ASC, name ASC',
-      [groupId]
-    );
-    if (dbSubs.rows.length > 0) {
+    const dbSubjects = await StudyManagementService.getSubjects(groupId);
+    if (dbSubjects.length > 0) {
       return res.status(200).json({
         success: true,
         groupId,
-        subjects: dbSubs.rows.map((s) => ({
+        subjects: dbSubjects.map((s) => ({
           id: s.subject_slug,
           name: s.name,
           description: s.description || '',
@@ -219,11 +217,11 @@ router.get('/subjects', async (req: Request, res: Response) => {
  * GET /api/syllabus/standards?groupId=&subjectId=
  * Returns standards dynamically based on Group and Subject.
  * Group 4 & Aptitude: 6th to 10th (SSLC).
- * Group 1, 2, 2A with General Studies / Tamil / English: 6th to 12th.
+ * Group 1, Group 2 & 2A with General Studies / Tamil / English: 6th to 12th.
  */
 router.get('/standards', (req: Request, res: Response) => {
   let rawGroup = String(req.query.groupId || 'group4').toLowerCase().trim();
-  const groupId = rawGroup === 'group2a' ? 'group2' : rawGroup;
+  const groupId = rawGroup === 'group-2a' ? 'group2a' : rawGroup === 'group2_2a' || rawGroup === 'group-2' ? 'group2' : rawGroup;
   const subjectId = String(req.query.subjectId || 'general-studies').toLowerCase().trim();
 
   let standards = ALL_STANDARDS;
@@ -242,55 +240,59 @@ router.get('/standards', (req: Request, res: Response) => {
 /**
  * GET /api/syllabus/units?groupId=&subjectId=&standardId=
  * Loads units dynamically based on Selected Group, Subject, Standard.
+ * When TNPSC Group 2 & 2A is selected, merges Group 2 and Group 2A units without duplicates.
  * Cross-references with PostgreSQL study_notes and google_drive_materials to report live counts.
  */
 router.get('/units', async (req: Request, res: Response) => {
   try {
     const rawGroupId = String(req.query.groupId || 'group4').toLowerCase().trim();
-    const groupId = (rawGroupId === 'group2_2a' || rawGroupId === 'group2' || rawGroupId === 'group-2' || rawGroupId === 'group2a')
-      ? 'group2'
-      : (rawGroupId === 'group4_vao' || rawGroupId === 'group4' || rawGroupId === 'group-4' || rawGroupId === 'vao')
-      ? 'group4'
-      : rawGroupId;
+    const groupId =
+      rawGroupId === 'group2a' || rawGroupId === 'group-2a'
+        ? 'group2a'
+        : rawGroupId === 'group2_2a' || rawGroupId === 'group2' || rawGroupId === 'group-2'
+        ? 'group2'
+        : rawGroupId === 'group4_vao' || rawGroupId === 'group4' || rawGroupId === 'group-4' || rawGroupId === 'vao'
+        ? 'group4'
+        : rawGroupId;
     const subjectId = String(req.query.subjectId || 'general-studies').toLowerCase().trim();
-    const standardId = parseInt(String(req.query.standardId || '6'), 10) || 6;
+    const hasStandardParam = req.query.standardId !== undefined && req.query.standardId !== '' && req.query.standardId !== 'all';
+    const standardId = hasStandardParam ? parseInt(String(req.query.standardId), 10) || 6 : 6;
 
-    // Query database syllabus_units first, fallback to canonical
-    let baseUnits: Array<{ id: number; unitNumber: string; title: string; subjectName: string }> = [];
+    // Query database syllabus_units (merges group2 and group2a without duplicates when Group 2 & 2A is selected)
+    let baseUnits: Array<{ id: number; unitNumber: string; unitNum?: number; title: string; subjectName: string; examId?: string }> = [];
     try {
-      const dbUnitsRes = await pool.query(
-        `SELECT * FROM syllabus_units
-         WHERE (exam_id = $1 OR ($1 = 'group2a' AND exam_id = 'group2') OR ($1 = 'group2' AND exam_id = 'group2a'))
-           AND (subject_id = $2 OR subject_id = $3 OR subject_id = 'all')
-           AND is_active = true
-         ORDER BY display_order ASC, unit_number ASC`,
-        [groupId, subjectId, `${groupId}-${subjectId}`]
+      const dbUnits = await StudyManagementService.getUnits(
+        groupId,
+        subjectId,
+        hasStandardParam ? standardId : undefined
       );
-      if (dbUnitsRes.rows.length > 0) {
-        baseUnits = dbUnitsRes.rows.map((r) => ({
+      if (dbUnits.length > 0) {
+        baseUnits = dbUnits.map((r) => ({
           id: r.id,
           unitNumber: r.unit_code || `Unit ${r.unit_number}`,
           unitNum: r.unit_number,
           title: r.title,
           subjectName: r.subject_name || r.title,
+          examId: r.exam_id,
         }));
       }
     } catch (err: any) {
       // Fallback
     }
 
-    if (baseUnits.length === 0) {
+    if (baseUnits.length === 0 && !hasStandardParam) {
       baseUnits = getCanonicalUnits(subjectId, standardId);
     }
 
-    // Query live counts from study_notes
+    // Query live counts from study_notes (combine group2 and group2a when either is requested)
+    const isGroup2Family = groupId === 'group2' || groupId === 'group2a';
     const notesCountRes = await pool.query(
       `SELECT unit_id, COUNT(*)::int AS count
        FROM study_notes
-       WHERE (LOWER(category) = LOWER($1) OR ($1 = 'group2a' AND LOWER(category) = 'group2'))
+       WHERE (LOWER(category) = LOWER($1) OR ($3::boolean = true AND LOWER(category) IN ('group2', 'group2a')))
          AND class_id = $2
        GROUP BY unit_id`,
-      [groupId, standardId]
+      [groupId, standardId, isGroup2Family]
     );
     const notesCountMap = new Map<number, number>();
     for (const row of notesCountRes.rows) {
@@ -304,8 +306,13 @@ router.get('/units', async (req: Request, res: Response) => {
       `SELECT id, unit, classification_meta, extracted_toc
        FROM google_drive_materials
        WHERE standard = $1
-         AND (applicable_groups IS NULL OR applicable_groups::text ILIKE '%' || $2 || '%' OR LOWER(tnpsc_group) = LOWER($2))`,
-      [standardId, groupId]
+         AND (
+           applicable_groups IS NULL
+           OR applicable_groups::text ILIKE '%' || $2 || '%'
+           OR LOWER(tnpsc_group) = LOWER($2)
+           OR ($3::boolean = true AND (applicable_groups::text ILIKE '%group2%' OR LOWER(tnpsc_group) IN ('group2', 'group2a')))
+         )`,
+      [standardId, groupId, isGroup2Family]
     );
 
     const materialsCountMap = new Map<number, number>();
@@ -368,7 +375,7 @@ router.get('/lessons', async (req: Request, res: Response) => {
     const unitId = (rawUnitId && rawUnitId !== 'all' && !isNaN(Number(rawUnitId))) ? parseInt(rawUnitId, 10) : undefined;
     const unitNumber = (rawUnitNum && rawUnitNum !== 'all' && !isNaN(Number(rawUnitNum))) ? parseInt(rawUnitNum, 10) : undefined;
     const rawExam = String(req.query.examId || req.query.groupId || '').toLowerCase().trim();
-    const examId = rawExam === 'group2a' ? 'group2' : (rawExam || undefined);
+    const examId = rawExam === 'group-2a' ? 'group2a' : (rawExam || undefined);
     const rawSubject = req.query.subjectId ? String(req.query.subjectId).trim() : '';
     const subjectId = (rawSubject && rawSubject !== 'all') ? rawSubject : undefined;
 
@@ -475,11 +482,30 @@ router.delete('/units/:id', requireAdminAuth, async (req: Request, res: Response
   try {
     const id = parseInt(req.params.id, 10);
     const force = req.query.force === 'true' || req.body?.force === true;
-    const result = await StudyManagementService.deleteUnit(id, force);
+    const examId = req.query.examId ? String(req.query.examId) : req.body?.examId;
+    const subjectId = req.query.subjectId ? String(req.query.subjectId) : req.body?.subjectId;
+    const rawStd = req.query.standardId ?? req.query.standardNumber ?? req.body?.standardId ?? req.body?.standardNumber;
+    const standardNumber =
+      rawStd != null && String(rawStd).trim() !== '' && String(rawStd) !== 'all' && !isNaN(Number(rawStd))
+        ? parseInt(String(rawStd), 10)
+        : null;
+
+    const result = await StudyManagementService.deleteUnit(id, force, {
+      examId,
+      subjectId,
+      standardNumber,
+    });
     if (!result.success) {
-      return res.status(400).json({ success: false, message: result.message, dependencies: result.dependencies });
+      const status = result.notFound ? 404 : result.invalidOwnership ? 400 : result.dependencies ? 409 : 400;
+      return res.status(status).json({
+        success: false,
+        invalidOwnership: result.invalidOwnership,
+        message: result.message,
+        scope: result.scope,
+        dependencies: result.dependencies,
+      });
     }
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, scope: result.scope, deleted: result.deleted });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -533,11 +559,32 @@ router.put('/lessons/:id', requireAdminAuth, async (req: Request, res: Response)
 router.delete('/lessons/:id', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const force = req.query.force === 'true' || req.body?.force === true;
-    const result = await StudyManagementService.deleteLesson(req.params.id, force);
+    const rawUnitId = req.query.unitId ?? req.body?.unitId;
+    const unitId = rawUnitId != null && !isNaN(Number(rawUnitId)) ? parseInt(String(rawUnitId), 10) : undefined;
+    const examId = req.query.examId ? String(req.query.examId) : req.body?.examId;
+    const subjectId = req.query.subjectId ? String(req.query.subjectId) : req.body?.subjectId;
+    const rawStd = req.query.standardId ?? req.query.standardNumber ?? req.body?.standardId ?? req.body?.standardNumber;
+    const standardNumber =
+      rawStd != null && String(rawStd).trim() !== '' && String(rawStd) !== 'all' && !isNaN(Number(rawStd))
+        ? parseInt(String(rawStd), 10)
+        : undefined;
+
+    const result = await StudyManagementService.deleteLesson(req.params.id, force, {
+      unitId,
+      examId,
+      subjectId,
+      standardNumber,
+    });
     if (!result.success) {
-      return res.status(400).json({ success: false, message: result.message, dependencies: result.dependencies });
+      const status = result.notFound ? 404 : result.invalidOwnership ? 400 : result.dependencies ? 409 : 400;
+      return res.status(status).json({
+        success: false,
+        invalidOwnership: result.invalidOwnership,
+        message: result.message,
+        dependencies: result.dependencies,
+      });
     }
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, deleted: result.deleted });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -587,9 +634,19 @@ router.delete('/topics/:id', requireAdminAuth, async (req: Request, res: Respons
   try {
     const id = parseInt(req.params.id, 10);
     const force = req.query.force === 'true' || req.body?.force === true;
-    const result = await StudyManagementService.deleteTopic(id, force);
+    const lessonId = req.query.lessonId ? String(req.query.lessonId) : req.body?.lessonId;
+    const rawUnitId = req.query.unitId ?? req.body?.unitId;
+    const unitId = rawUnitId != null && !isNaN(Number(rawUnitId)) ? parseInt(String(rawUnitId), 10) : undefined;
+
+    const result = await StudyManagementService.deleteTopic(id, force, { lessonId, unitId });
     if (!result.success) {
-      return res.status(400).json({ success: false, message: result.message, dependencies: result.dependencies });
+      const status = result.notFound ? 404 : result.invalidOwnership ? 400 : result.dependencies ? 409 : 400;
+      return res.status(status).json({
+        success: false,
+        invalidOwnership: result.invalidOwnership,
+        message: result.message,
+        dependencies: result.dependencies,
+      });
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {

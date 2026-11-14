@@ -1,0 +1,582 @@
+/* =========================================================
+   TNPSC STUDY HUB - PROGRESS TRACKER PAGE STYLES
+   ========================================================= */
+
+.progress-tracker-page {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  box-sizing: border-box;
+}
+
+/* 1. Header Banner */
+.tracker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 1.75rem;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(22, 28, 48, 0.6) 0%, rgba(12, 16, 28, 0.75) 100%);
+  border: 1px solid rgba(255, 215, 0, 0.22);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  flex-wrap: wrap;
+}
+
+.tracker-header-left {
+  display: flex;
+  align-items: center;
+  gap: 1.15rem;
+}
+
+.tracker-icon-badge {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffd700 0%, #f59e0b 50%, #b45309 100%);
+  color: #0b1120;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 8px 24px rgba(255, 215, 0, 0.4), inset 0 2px 2px rgba(255, 255, 255, 0.8);
+  flex-shrink: 0;
+}
+
+.tracker-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.tracker-dot {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.tracker-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: -0.02em;
+}
+
+.tracker-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.tracker-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  background: rgba(255, 215, 0, 0.1);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  color: #ffd700;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tracker-refresh-btn:hover {
+  background: rgba(255, 215, 0, 0.2);
+  transform: translateY(-1px);
+}
+
+/* 2. Top Summary Strip */
+.tracker-summary-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.15rem 1.75rem;
+  border-radius: 18px;
+  background: rgba(22, 28, 48, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.tracker-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.tracker-summary-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.tracker-summary-icon.gold {
+  background: rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  color: #ffd700;
+}
+
+.tracker-summary-icon.cyan {
+  background: rgba(6, 182, 212, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.35);
+  color: #22d3ee;
+}
+
+.tracker-summary-icon.indigo {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #818cf8;
+}
+
+.tracker-summary-icon.flame {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+}
+
+.tracker-summary-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.tracker-summary-val {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+.tracker-summary-unit {
+  font-size: 0.85rem;
+  color: #ffd700;
+  font-weight: 600;
+}
+
+.tracker-summary-divider {
+  width: 1px;
+  height: 38px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 900px) {
+  .tracker-summary-divider {
+    display: none;
+  }
+}
+
+/* 3. Overview Split (Ring + Weekly Chart) */
+.tracker-overview-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 1.25rem;
+}
+
+@media (max-width: 960px) {
+  .tracker-overview-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tracker-ring-card {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.5rem 1.75rem;
+  border-radius: 20px;
+  background: rgba(22, 28, 48, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.tracker-ring-visual {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  flex-shrink: 0;
+}
+
+.tracker-ring-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.tracker-ring-track {
+  stroke: rgba(255, 255, 255, 0.08);
+}
+
+.tracker-ring-fill {
+  transition: stroke-dashoffset 1s ease-out;
+}
+
+.tracker-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+}
+
+.tracker-ring-percent {
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.tracker-ring-label {
+  font-size: 0.65rem;
+  color: #ffd700;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.tracker-ring-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.tracker-ring-heading {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.tracker-ring-desc {
+  margin: 0.4rem 0 0.85rem;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.4;
+}
+
+.tracker-ring-tags {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.tracker-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.tracker-tag.completed {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.tracker-tag.revision {
+  background: rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  color: #ffd700;
+}
+
+/* Right: Chart Card */
+.tracker-chart-card {
+  padding: 1.5rem 1.75rem;
+  border-radius: 20px;
+  background: rgba(22, 28, 48, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.tracker-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.tracker-chart-head-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tracker-chart-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.tracker-chart-hint {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.tracker-bar-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 110px;
+  gap: 0.5rem;
+}
+
+.tracker-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.tracker-bar-num {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 0.35rem;
+}
+
+.tracker-bar-track {
+  flex: 1;
+  width: 18px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.tracker-bar-fill {
+  width: 100%;
+  border-radius: 6px;
+  transition: height 0.6s ease;
+}
+
+.tracker-bar-day {
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+}
+
+/* 4. Standards Section */
+.tracker-section-card {
+  padding: 1.5rem 1.75rem;
+  border-radius: 20px;
+  background: rgba(22, 28, 48, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.tracker-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.tracker-section-head-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tracker-section-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.tracker-section-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.tracker-section-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #ffd700;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.2s ease;
+}
+
+.tracker-section-link:hover {
+  transform: translateX(2px);
+}
+
+.tracker-standards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.tracker-std-item {
+  padding: 1rem 1.15rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tracker-std-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tracker-std-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tracker-std-pct {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #ffd700;
+}
+
+.tracker-std-bar-bg {
+  width: 100%;
+  height: 7px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.tracker-std-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #d97706, #ffd700);
+}
+
+.tracker-std-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* 5. Units Table */
+.tracker-units-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tracker-units-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.tracker-units-table th {
+  padding: 0.85rem 1rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(15, 23, 42, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tracker-units-table td {
+  padding: 0.95rem 1rem;
+  font-size: 0.84rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  vertical-align: middle;
+}
+
+.tracker-unit-code-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  color: #ffd700;
+  font-weight: 700;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.tracker-unit-name-text {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.tracker-weight-tag {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.tracker-table-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 130px;
+}
+
+.tracker-table-bar-bg {
+  flex: 1;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.tracker-table-bar-fill.coverage {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+}
+
+.tracker-table-bar-fill.accuracy {
+  height: 100%;
+  background: linear-gradient(90deg, #d97706, #ffd700);
+}
+
+.tracker-unit-drill-btn {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.tracker-unit-drill-btn:hover {
+  background: rgba(255, 215, 0, 0.15);
+  border-color: rgba(255, 215, 0, 0.4);
+  color: #ffd700;
+}
+

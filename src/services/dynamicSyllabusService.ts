@@ -74,9 +74,8 @@ export interface DynamicTopic {
 
 export const CANONICAL_EXAMS: DynamicExam[] = [
   { id: 'group1', name: 'TNPSC Group 1', display_order: 1 },
-  { id: 'group2', name: 'TNPSC Group 2', display_order: 2 },
-  { id: 'group2a', name: 'TNPSC Group 2A', display_order: 3 },
-  { id: 'group4', name: 'TNPSC Group 4', display_order: 4 },
+  { id: 'group2', name: 'TNPSC Group 2 & 2A', display_order: 2 },
+  { id: 'group4', name: 'TNPSC Group 4', display_order: 3 },
 ];
 
 export const ALL_STANDARDS: DynamicStandard[] = [
@@ -216,19 +215,27 @@ export const dynamicSyllabusService = {
       const res = await fetch('/api/syllabus/exams');
       const data = await res.json();
       if (data.success && Array.isArray(data.exams) && data.exams.length > 0) {
-        // Support all 4 canonical groups
-        const allowed = new Set(['group1', 'group2', 'group2a', 'group4']);
-        const filtered: DynamicExam[] = data.exams
-          .filter((e: any) => allowed.has(e.id))
-          .map((e: any) => ({
-            id: e.id,
-            name: e.name || (e.id === 'group1' ? 'TNPSC Group 1' : e.id === 'group2' ? 'TNPSC Group 2' : e.id === 'group2a' ? 'TNPSC Group 2A' : 'TNPSC Group 4'),
-            display_order: e.display_order || (e.id === 'group1' ? 1 : e.id === 'group2' ? 2 : e.id === 'group2a' ? 3 : 4),
-            code: e.code || null,
-            badge: e.badge || null,
-            description: e.description || null,
-          }))
-          .sort((a: DynamicExam, b: DynamicExam) => a.display_order - b.display_order);
+        // Support the 3 canonical groups: TNPSC Group 1, TNPSC Group 2 & 2A, TNPSC Group 4
+        const allowed = new Set(['group1', 'group2', 'group4']);
+        const seen = new Set<string>();
+        const filtered: DynamicExam[] = [];
+
+        data.exams.forEach((e: any) => {
+          const normId = e.id === 'group2a' || e.id === 'group2_2a' ? 'group2' : e.id;
+          if (allowed.has(normId) && !seen.has(normId)) {
+            seen.add(normId);
+            filtered.push({
+              id: normId,
+              name: normId === 'group1' ? 'TNPSC Group 1' : normId === 'group2' ? 'TNPSC Group 2 & 2A' : 'TNPSC Group 4',
+              display_order: normId === 'group1' ? 1 : normId === 'group2' ? 2 : 3,
+              code: e.code || null,
+              badge: e.badge || null,
+              description: e.description || null,
+            });
+          }
+        });
+
+        filtered.sort((a: DynamicExam, b: DynamicExam) => a.display_order - b.display_order);
 
         cache.exams = filtered;
         return filtered;

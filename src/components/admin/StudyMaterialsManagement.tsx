@@ -23,15 +23,14 @@ import {
   FileCheck,
   Tag,
   Sparkles,
-  UploadCloud,
-  AlertTriangle,
-  ArrowLeft,
-  Check,
-  CheckSquare,
+    CheckSquare,
   Square,
   Loader2,
 } from 'lucide-react';
 import './StudyMaterialsManagement.css';
+import { AiSyllabusImportWizard } from './ai-syllabus/AiSyllabusImportWizard';
+import { compareLessons, compareTopics } from '../../utils/naturalSort';
+import { cleanTamilUnicodeText } from '../../utils/tamilUnicodeCleaner';
 
 export interface TextbookOption {
   id: number;
@@ -55,100 +54,66 @@ export interface MatchedLessonDraft {
   standard_number: number;
   subject: string;
   term: string;
+  textbook_unit_number?: string;
   textbook_unit_title?: string;
   lesson_number: string;
   lesson_title: string;
   matching_reason: string;
+  matched_syllabus_topics?: string[];
+  verification_status?: 'VERIFIED' | 'UNVERIFIED';
   confidence_score: number;
   is_already_in_db: boolean;
   selected: boolean;
   topics: Array<{ topic_name: string; display_order: number }>;
 }
 
-export interface ExtractedTopicDraft {
-  topic_name: string;
-  description?: string;
-  display_order: number;
-  source_page_reference?: string;
-}
-
-export interface ExtractedLessonDraft {
-  lesson_number: string;
-  title: string;
-  standard_number: number;
-  term?: string;
-  description?: string;
-  textbook_id?: number;
-  source_page_start?: number;
-  source_page_end?: number;
-  textbook_title?: string;
-  topics: ExtractedTopicDraft[];
-}
-
-export interface SharedTextbookRecord {
-  id: number;
-  bookName: string;
-  fileName: string;
-  standard: number;
-  standardDisplay: string;
-  subject: string;
-  term: string;
-  medium: string;
-  fileSize: number;
-  fileSizeFormatted: string;
-  totalPages: number;
-  hasExtractedToc: boolean;
-  hasExtractedPages: boolean;
-  extractionStatus: string;
-  storageRef: string;
-}
-
-export interface ExtractedUnitDraft {
-  unit_number: number;
-  unit_code: string;
-  title: string;
-  standard_number?: number;
-  term?: string;
-  subject_slug?: string;
-  subject_name?: string;
-  standard_reference?: string;
-  description?: string;
-  question_count?: number;
-  is_existing?: boolean;
-  selected_for_publish?: boolean;
-  lessons: ExtractedLessonDraft[];
-}
-
-export interface SyllabusAnalysisResult {
-  exam_id: string;
-  exam_name: string;
-  subject_slug: string;
-  subject_name: string;
-  total_units: number;
-  total_lessons: number;
-  total_topics: number;
-  extracted_text_preview: string;
-  parsing_mode: 'ai_cloud' | 'structural_parser' | 'textbook_repository';
-  units: ExtractedUnitDraft[];
-  existing_comparison: {
-    existing_units_count: number;
-    new_units_count: number;
-    duplicate_units: string[];
+export interface FocusAreaValidationReport {
+  tnpscGroup: string;
+  subjectId: string;
+  unitNumber: number;
+  unitTitle: string;
+  standard: number | string;
+  syllabusTopicCoverage: {
+    totalSyllabusTopics: number;
+    coveredTopics: string[];
+    missingTopics: Array<{ topic: string; status: 'NOT FOUND' | 'UNVERIFIED' }>;
+    coveragePercent: number;
   };
+  standardWiseValidation: {
+    valid: boolean;
+    standardsCovered: number[];
+    lessonsByStandard: Record<number, number>;
+  };
+  textbookUnitValidation: {
+    valid: boolean;
+    verifiedUnitsCount: number;
+  };
+  lessonTitleValidation: {
+    valid: boolean;
+    verifiedLessonsCount: number;
+  };
+  duplicateFocusAreaDetection: {
+    duplicatesFound: number;
+    duplicateRecords: string[];
+  };
+  incorrectMappingDetection: {
+    rejectedCount: number;
+    rejectedReasons: string[];
+  };
+  groupIsolationVerified: boolean;
+  sourceTextbookVerified: boolean;
 }
 
 const CANONICAL_EXAMS: ExamItem[] = [
   { id: 'group1', name: 'TNPSC Group 1', display_order: 1 },
-  { id: 'group2', name: 'TNPSC Group 2', display_order: 2 },
-  { id: 'group2a', name: 'TNPSC Group 2A', display_order: 3 },
-  { id: 'group4', name: 'TNPSC Group 4', display_order: 4 },
+  { id: 'group2', name: 'TNPSC Group 2 & 2A', display_order: 2 },
+  { id: 'group4', name: 'TNPSC Group 4', display_order: 3 },
 ];
 
 const CANONICAL_EXAM_ORDER: Record<string, number> = {
   group1: 1,
   group2: 2,
-  group2a: 3,
-  group4: 4,
+  group4: 3,
 };
 
 interface ExamItem {
@@ -189,6 +154,11 @@ interface LessonItem {
   lesson_number: string;
   title: string;
   term?: string;
+  textbook_title?: string;
+  textbook_unit_number?: string;
+  textbook_unit_title?: string;
+  matched_topics?: string;
+  syllabus_reference?: string;
   description?: string;
   status: string;
   display_order: number;
@@ -200,6 +170,7 @@ interface UnitItem {
   id: number;
   exam_id: string;
   subject_id: string;
+  standard_number?: number | null;
   unit_number: number;
   unit_code: string;
   title: string;
@@ -207,6 +178,7 @@ interface UnitItem {
   description?: string;
   question_count?: number;
   display_order: number;
+  source_groups?: string[];
   lessons?: LessonItem[];
 }
 
@@ -245,35 +217,8 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   // Toast State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // AI Syllabus Import State
+  // AI Syllabus Import State (Clean Placeholder - ready for rebuild)
   const [aiImportModalOpen, setAiImportModalOpen] = useState<boolean>(false);
-  const [aiImportStep, setAiImportStep] = useState<'upload' | 'analyzing' | 'review'>('upload');
-  const [aiImportInputMode, setAiImportInputMode] = useState<'textbook' | 'pdf' | 'text'>('textbook');
-  const [aiImportExamId, setAiImportExamId] = useState<string>('group1');
-  const [aiImportSubjectSlug, setAiImportSubjectSlug] = useState<string>('general-studies');
-  const [aiImportStandard, setAiImportStandard] = useState<'all' | number>('all');
-  const [aiReviewSelectedClass, setAiReviewSelectedClass] = useState<'all' | number>('all');
-  const [aiImportFile, setAiImportFile] = useState<File | null>(null);
-  const [aiImportPastedText, setAiImportPastedText] = useState<string>('');
-  const [aiAnalysisResult, setAiAnalysisResult] = useState<SyllabusAnalysisResult | null>(null);
-  const [editableUnits, setEditableUnits] = useState<ExtractedUnitDraft[]>([]);
-  const [overwriteExisting, setOverwriteExisting] = useState<boolean>(false);
-  const [isPublishing, setIsPublishing] = useState<boolean>(false);
-  const [aiImportError, setAiImportError] = useState<string | null>(null);
-  const [expandedReviewUnits, setExpandedReviewUnits] = useState<Set<string>>(new Set());
-
-  // Shared Textbook Repository State (from Textbook Management - 72 Samacheer Kalvi books)
-  const [aiRepoTextbooks, setAiRepoTextbooks] = useState<SharedTextbookRecord[]>([]);
-  const [isLoadingAiRepo, setIsLoadingAiRepo] = useState<boolean>(false);
-  const [selectedRepoBookId, setSelectedRepoBookId] = useState<number | null>(null);
-  const [selectedRepoBook, setSelectedRepoBook] = useState<SharedTextbookRecord | null>(null);
-  const [aiExtractionMode, setAiExtractionMode] = useState<'fast_toc' | 'deep_text' | 'ocr_fallback'>('fast_toc');
-  const [aiRepoMedium, setAiRepoMedium] = useState<string>('all');
-  const [aiRepoTerm, setAiRepoTerm] = useState<string>('all');
-
-  // Helper to generate deterministic, unique keys per review unit
-  const getReviewUnitKey = (u: ExtractedUnitDraft, idx: number): string =>
-    `unit-rev-${u.standard_number || 10}-${u.unit_number || idx + 1}-${idx}`;
 
   // Modals
   const [examModal, setExamModal] = useState<{ open: boolean; mode: 'add' | 'edit'; data: Partial<ExamItem> }>({
@@ -319,6 +264,7 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
   const [aiMatchingStep, setAiMatchingStep] = useState<'select' | 'matching' | 'review'>('select');
   const [matchingStatusMessage, setMatchingStatusMessage] = useState<string>('');
   const [matchedLessons, setMatchedLessons] = useState<MatchedLessonDraft[]>([]);
+  const [aiValidationReport, setAiValidationReport] = useState<FocusAreaValidationReport | null>(null);
   const [isSavingMatchedLessons, setIsSavingMatchedLessons] = useState<boolean>(false);
   const aiMatchingAbortRef = useRef<AbortController | null>(null);
 
@@ -361,9 +307,12 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{
     open: boolean;
-    type: 'exam' | 'subject' | 'unit' | 'lesson' | 'topic';
+    type: 'exam' | 'subject' | 'standard' | 'unit' | 'lesson' | 'topic';
     id: any;
     name: string;
+    unitId?: number;
+    lessonId?: string;
+    standardNumber?: number | null;
     dependencies?: { lessons: number; topics: number; notes: number; questions: number } | null;
     loadingDeps?: boolean;
     submitting?: boolean;
@@ -379,35 +328,47 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // 1. Fetch Exams - Guarantees Canonical 4 Options in Exact Order: Group 1, Group 2, Group 2A, Group 4
+  // 1. Fetch Exams - Guarantees Canonical 3 Options in Exact Order: Group 1, Group 2 & 2A, Group 4
   const fetchExams = async () => {
     try {
       const res = await apiFetch('/api/study-management/exams');
       const data = await res.json();
       if (data.success && Array.isArray(data.exams)) {
-        // Filter strictly to the 3 canonical exams and normalize names without descriptions/badges
+        // Filter strictly to the 3 canonical exams: TNPSC Group 1, TNPSC Group 2 & 2A, TNPSC Group 4
         const allowedIds = new Set(['group1', 'group2', 'group4']);
-        const validExams: ExamItem[] = data.exams
-          .filter((e: any) => allowedIds.has(e.id))
-          .map((e: any) => ({
-            ...e,
-            name: e.id === 'group2' ? 'TNPSC Group 2, 2A' : (e.id === 'group1' ? 'TNPSC Group 1' : (e.id === 'group4' ? 'TNPSC Group 4' : e.name)),
-            badge: undefined,
-            description: undefined,
-          }));
+        const canonicalNameMap: Record<string, string> = {
+          group1: 'TNPSC Group 1',
+          group2: 'TNPSC Group 2 & 2A',
+          group4: 'TNPSC Group 4',
+        };
+        const seenIds = new Set<string>();
+        const validExams: ExamItem[] = [];
 
-        const existingIds = new Set(validExams.map((e) => e.id));
+        data.exams.forEach((e: any) => {
+          const normId = e.id === 'group2a' || e.id === 'group2_2a' ? 'group2' : e.id;
+          if (allowedIds.has(normId) && !seenIds.has(normId)) {
+            seenIds.add(normId);
+            validExams.push({
+              ...e,
+              id: normId,
+              name: canonicalNameMap[normId] || e.name,
+              badge: undefined,
+              description: undefined,
+            });
+          }
+        });
 
-        // Ensure all canonical exams are present
+        // Ensure all 3 canonical exams are present
         CANONICAL_EXAMS.forEach((c) => {
-          if (!existingIds.has(c.id)) {
+          if (!seenIds.has(c.id)) {
+            seenIds.add(c.id);
             validExams.push(c);
           }
         });
 
         // Strict Canonical Order Sort:
         // 1. TNPSC Group 1 (group1)
-        // 2. TNPSC Group 2, 2A (group2)
+        // 2. TNPSC Group 2 & 2A (group2)
         // 3. TNPSC Group 4 (group4)
         validExams.sort((a, b) => {
           const ordA = CANONICAL_EXAM_ORDER[a.id] ?? (a.display_order || 99);
@@ -416,7 +377,9 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
         });
 
         setExams(validExams);
-        if (validExams.length > 0 && (!selectedExamId || selectedExamId === 'group2a' || !validExams.some((e) => e.id === selectedExamId))) {
+        if (selectedExamId === 'group2a' || selectedExamId === 'group2_2a') {
+          setSelectedExamId('group2');
+        } else if (validExams.length > 0 && (!selectedExamId || !validExams.some((e) => e.id === selectedExamId))) {
           setSelectedExamId(validExams[0].id);
         }
       } else {
@@ -428,450 +391,14 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
     }
   };
 
-  // Sample syllabus text for 1-click test fill
-  const SAMPLE_TNPSC_SYLLABUS = `UNIT-I: GENERAL SCIENCE
-(i) Scientific Knowledge and Scientific Temper - Power of Reasoning - Rote Learning vs Conceptual Learning - Science as a tool to understand the past, present and future.
-(ii) Nature of Universe - General Scientific Laws – Mechanics - Properties of Matter, Force, Motion and Energy - Everyday application of the basic principles of Mechanics, Electricity and Magnetism, Light, Sound, Heat, Nuclear Physics, Laser, Electronics and Communications.
-(iii) Elements and Compounds, Acids, Bases, Salts, Petroleum Products, Fertilizers, Pesticides.
-(iv) Main concepts of Life Science, Classification of Living Organisms, Evolution, Genetics, Physiology, Nutrition, Health and Hygiene, Human diseases.
-(v) Environment and Ecology.
 
-UNIT-II: CURRENT EVENTS
-(i) History - Latest diary of events - National symbols - Profile of States - Eminent personalities and places in news - Sports - Books and authors.
-(ii) Polity - Political parties and political system in India - Public awareness and General administration - Welfare oriented Government schemes and their utility, Problems in Public Delivery Systems.
-(iii) Geography - Geographical landmarks.
-(iv) Economics - Current socio-economic issues.
-(v) Science and Technology - Latest inventions in Science and Technology.`;
 
-  // Shared Textbook Repository Fetcher (Textbook Management 72 books)
-  const fetchAiRepoTextbooks = async () => {
-    try {
-      setIsLoadingAiRepo(true);
-      const params = new URLSearchParams();
-      if (aiImportStandard !== 'all') {
-        params.append('standard', String(aiImportStandard));
-      }
-      if (aiImportSubjectSlug && aiImportSubjectSlug !== 'all') {
-        params.append('subject', aiImportSubjectSlug);
-      }
-      if (aiRepoTerm && aiRepoTerm !== 'all') {
-        params.append('term', aiRepoTerm);
-      }
-      if (aiRepoMedium && aiRepoMedium !== 'all') {
-        params.append('medium', aiRepoMedium);
-      }
 
-      const res = await apiFetch(`/api/study-management/ai-syllabus/textbooks?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${activeToken}` },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success && Array.isArray(data.textbooks)) {
-        setAiRepoTextbooks(data.textbooks);
-        if (data.textbooks.length > 0) {
-          setSelectedRepoBookId((prev) => {
-            const exists = data.textbooks.some((tb: SharedTextbookRecord) => tb.id === prev);
-            const chosen = exists ? prev : data.textbooks[0].id;
-            const fullRecord = data.textbooks.find((tb: SharedTextbookRecord) => tb.id === chosen) || data.textbooks[0];
-            setSelectedRepoBook(fullRecord);
-            return chosen;
-          });
-        } else {
-          setSelectedRepoBookId(null);
-          setSelectedRepoBook(null);
-        }
-      } else {
-        setAiRepoTextbooks([]);
-        setSelectedRepoBookId(null);
-        setSelectedRepoBook(null);
-      }
-    } catch (err: any) {
-      console.warn('[AISyllabus] Failed to load textbooks from repository:', err);
-      setAiRepoTextbooks([]);
-      setSelectedRepoBookId(null);
-      setSelectedRepoBook(null);
-    } finally {
-      setIsLoadingAiRepo(false);
-    }
-  };
 
-  useEffect(() => {
-    if (aiImportModalOpen && aiImportInputMode === 'textbook') {
-      fetchAiRepoTextbooks();
-    }
-  }, [aiImportModalOpen, aiImportInputMode, aiImportStandard, aiImportSubjectSlug, aiRepoTerm, aiRepoMedium]);
 
-  // AI Syllabus Import Handlers
-  const handleOpenAiImport = () => {
-    setAiImportExamId(selectedExamId || 'group1');
-    setAiImportSubjectSlug('all'); // Universal default - processes all units & subjects
-    setAiImportInputMode('textbook');
-    setAiImportFile(null);
-    setAiImportPastedText('');
-    setAiAnalysisResult(null);
-    setEditableUnits([]);
-    setOverwriteExisting(false);
-    setAiImportError(null);
-    setAiImportStep('upload');
-    setAiImportModalOpen(true);
-  };
 
-  const handleStartAnalysis = async () => {
-    if (aiImportInputMode === 'textbook') {
-      if (!selectedRepoBookId) {
-        setAiImportError('Please select an uploaded Samacheer Kalvi textbook PDF from the repository.');
-        return;
-      }
-    } else if (aiImportInputMode === 'pdf') {
-      if (!aiImportFile) {
-        setAiImportError('Please select or drop a valid TNPSC syllabus PDF file.');
-        return;
-      }
-    } else {
-      if (!aiImportPastedText || aiImportPastedText.trim().length < 30) {
-        setAiImportError('Please paste syllabus text containing at least 30 characters (with Units and Lessons).');
-        return;
-      }
-    }
 
-    setAiImportStep('analyzing');
-    setAiImportError(null);
 
-    try {
-      const authToken = activeToken;
-      let res: Response;
-
-      if (aiImportInputMode === 'textbook') {
-        res = await apiFetch('/api/study-management/ai-syllabus/analyze-textbook', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: JSON.stringify({
-            textbookId: selectedRepoBookId,
-            examId: aiImportExamId,
-            subjectId: aiImportSubjectSlug,
-            standard: aiImportStandard !== 'all' ? aiImportStandard : (selectedRepoBook?.standard || undefined),
-            extractionMode: aiExtractionMode,
-          }),
-          timeoutMs: 120000,
-        });
-      } else if (aiImportInputMode === 'pdf') {
-        const formData = new FormData();
-        formData.append('pdf', aiImportFile!);
-        formData.append('examId', aiImportExamId);
-        formData.append('subjectId', aiImportSubjectSlug);
-        formData.append('standard', String(aiImportStandard));
-
-        res = await apiFetch('/api/study-management/ai-syllabus/upload', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: formData,
-          timeoutMs: 120000,
-        });
-      } else {
-        res = await apiFetch('/api/study-management/ai-syllabus/analyze-text', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: JSON.stringify({
-            syllabusText: aiImportPastedText,
-            examId: aiImportExamId,
-            subjectId: aiImportSubjectSlug,
-            standard: aiImportStandard,
-          }),
-          timeoutMs: 120000,
-        });
-      }
-
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = null;
-      }
-
-      if (!res.ok || !data?.success) {
-        const errorMsg =
-          data?.message ||
-          data?.error ||
-          (res.status === 404
-            ? 'AI Syllabus extraction endpoint not found (404). Please ensure the backend server is running.'
-            : `Failed to extract and analyze syllabus (HTTP ${res.status}).`);
-        throw new Error(errorMsg);
-      }
-
-      setAiAnalysisResult(data);
-      const units: ExtractedUnitDraft[] = (data.units || []).map((u: any) => ({
-        ...u,
-        standard_number: typeof u.standard_number === 'number'
-          ? u.standard_number
-          : (typeof aiImportStandard === 'number'
-              ? aiImportStandard
-              : (selectedRepoBook?.standard || (aiImportExamId === 'group4' ? 10 : 11))),
-        term: u.term || selectedRepoBook?.term || 'Term 1',
-        selected_for_publish: true,
-      }));
-      setEditableUnits(units);
-
-      // Auto-expand all units in review with distinct composite keys
-      const allUnitKeys = new Set<string>(units.map((u, idx) => getReviewUnitKey(u, idx)));
-      setExpandedReviewUnits(allUnitKeys);
-
-      // If duplicate units exist, set default overwrite based on duplicates
-      if (data.existing_comparison?.duplicate_units?.length > 0) {
-        setOverwriteExisting(false);
-      }
-
-      setAiImportStep('review');
-    } catch (err: any) {
-      console.error('[AISyllabus] Analysis error:', err);
-      let errMsg = err.message || 'Failed to analyze syllabus.';
-      if (errMsg.includes('Failed to fetch') || err.name === 'TypeError') {
-        errMsg = 'Connection Error: Unable to reach backend server. Please verify the backend is running on http://localhost:5000.';
-      }
-      setAiImportError(errMsg);
-      setAiImportStep('upload');
-    }
-  };
-
-  const handlePublishApprovedSyllabus = async (singleUnit?: ExtractedUnitDraft) => {
-    const unitsToPublish = singleUnit
-      ? [singleUnit]
-      : editableUnits.filter((u) => u.selected_for_publish !== false);
-
-    if (unitsToPublish.length === 0) {
-      showToast('No units selected for publishing. Check at least one unit.', 'error');
-      return;
-    }
-
-    setIsPublishing(true);
-    try {
-      const authToken = activeToken;
-      const res = await apiFetch('/api/study-management/ai-syllabus/publish', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          examId: aiImportExamId,
-          subjectSlug: aiImportSubjectSlug,
-          subjectName: aiAnalysisResult?.subject_name || 'Complete Syllabus',
-          units: unitsToPublish,
-          overwriteExisting,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || 'Failed to publish syllabus.');
-      }
-
-      showToast(data.message || 'Syllabus approved and published successfully!', 'success');
-      dynamicSyllabusService.notifySyllabusChanged('published', { examId: aiImportExamId, subjectSlug: aiImportSubjectSlug });
-
-      if (!singleUnit || unitsToPublish.length === editableUnits.length) {
-        setAiImportModalOpen(false);
-      } else {
-        // Mark published unit
-        setEditableUnits((prev) =>
-          prev.map((u) =>
-            u.unit_number === singleUnit.unit_number && u.subject_slug === singleUnit.subject_slug
-              ? { ...u, is_existing: true }
-              : u
-          )
-        );
-      }
-
-      // Switch active exam & subject to the imported one immediately
-      setSelectedExamId(aiImportExamId);
-      if (singleUnit?.subject_slug) {
-        setSelectedSubjectSlug(singleUnit.subject_slug);
-      } else if (aiImportSubjectSlug !== 'all') {
-        setSelectedSubjectSlug(aiImportSubjectSlug);
-      }
-      setSelectedStandard(null);
-
-      // Re-fetch tree to immediately reflect in existing Admin Panel and Student view
-      fetchSubjects(aiImportExamId);
-      fetchTree();
-    } catch (err: any) {
-      console.error('[AISyllabus] Publish error:', err);
-      let errMsg = err.message || 'Failed to publish syllabus.';
-      if (errMsg.includes('Failed to fetch') || err.name === 'TypeError') {
-        errMsg = 'Connection Error: Unable to reach backend server. Please ensure the backend server is running on http://localhost:5000.';
-      }
-      showToast(errMsg, 'error');
-    } finally {
-      setIsPublishing(false);
-    }
-  };
-
-  // Bulk & unit selection helpers
-  const handleToggleSelectAll = (select: boolean) => {
-    setEditableUnits((prev) => prev.map((u) => ({ ...u, selected_for_publish: select })));
-  };
-
-  const handleToggleSelectUnit = (uIdx: number) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      const cur = updated[uIdx].selected_for_publish !== false;
-      updated[uIdx] = { ...updated[uIdx], selected_for_publish: !cur };
-      return updated;
-    });
-  };
-
-  const expandAllReview = () => {
-    const allKeys = new Set<string>(editableUnits.map((u, idx) => getReviewUnitKey(u, idx)));
-    setExpandedReviewUnits(allKeys);
-  };
-
-  const collapseAllReview = () => {
-    setExpandedReviewUnits(new Set());
-  };
-
-  // Review tree editing helpers - independent unit toggles
-  const toggleReviewUnit = (unitKey: string) => {
-    setExpandedReviewUnits((prev) => {
-      const next = new Set(prev);
-      if (next.has(unitKey)) next.delete(unitKey);
-      else next.add(unitKey);
-      return next;
-    });
-  };
-
-  const updateUnitField = (uIdx: number, field: keyof ExtractedUnitDraft, val: any) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      updated[uIdx] = { ...updated[uIdx], [field]: val };
-      return updated;
-    });
-  };
-
-  const removeUnitDraft = (uIdx: number) => {
-    setEditableUnits((prev) => prev.filter((_, idx) => idx !== uIdx));
-  };
-
-  const addUnitDraft = () => {
-    const nextNum = editableUnits.length + 1;
-    const stdNum = typeof aiReviewSelectedClass === 'number'
-      ? aiReviewSelectedClass
-      : (selectedExamId === 'group4' ? 10 : 11);
-
-    const newUnit: ExtractedUnitDraft = {
-      unit_number: nextNum,
-      unit_code: `Unit ${nextNum}`,
-      title: `New Unit ${nextNum}`,
-      standard_number: stdNum,
-      term: 'Term 1',
-      question_count: 15,
-      selected_for_publish: true,
-      lessons: [
-        {
-          lesson_number: `${nextNum}.1`,
-          title: `Introductory Topics`,
-          standard_number: stdNum,
-          topics: [{ topic_name: 'Core Overview', display_order: 1 }],
-        },
-      ],
-    };
-
-    setEditableUnits((prev) => {
-      const updated = [...prev, newUnit];
-      const newKey = getReviewUnitKey(newUnit, updated.length - 1);
-      setExpandedReviewUnits((prevKeys) => new Set([...prevKeys, newKey]));
-      return updated;
-    });
-
-    // Bring newly added unit into view smoothly
-    setTimeout(() => {
-      const scrollBox = document.querySelector('.smm-modal-body.ai-modal-body');
-      if (scrollBox) {
-        scrollBox.scrollTo({ top: scrollBox.scrollHeight, behavior: 'smooth' });
-      }
-    }, 120);
-  };
-
-  const updateLessonField = (uIdx: number, lIdx: number, field: keyof ExtractedLessonDraft, val: any) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      const lessons = [...updated[uIdx].lessons];
-      lessons[lIdx] = { ...lessons[lIdx], [field]: val };
-      updated[uIdx] = { ...updated[uIdx], lessons };
-      return updated;
-    });
-  };
-
-  const removeLessonDraft = (uIdx: number, lIdx: number) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      const lessons = updated[uIdx].lessons.filter((_, idx) => idx !== lIdx);
-      updated[uIdx] = { ...updated[uIdx], lessons };
-      return updated;
-    });
-  };
-
-  const addLessonDraft = (uIdx: number) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      const u = updated[uIdx];
-      const nextLNum = `${u.unit_number}.${u.lessons.length + 1}`;
-      const lessons = [
-        ...u.lessons,
-        {
-          lesson_number: nextLNum,
-          title: `Lesson ${nextLNum}`,
-          standard_number: 10,
-          topics: [{ topic_name: 'Overview', display_order: 1 }],
-        },
-      ];
-      updated[uIdx] = { ...u, lessons };
-      return updated;
-    });
-  };
-
-  const updateTopicDraft = (uIdx: number, lIdx: number, tIdx: number, val: string) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      const lessons = [...updated[uIdx].lessons];
-      const topics = [...lessons[lIdx].topics];
-      topics[tIdx] = { ...topics[tIdx], topic_name: val };
-      lessons[lIdx] = { ...lessons[lIdx], topics };
-      updated[uIdx] = { ...updated[uIdx], lessons };
-      return updated;
-    });
-  };
-
-  const removeTopicDraft = (uIdx: number, lIdx: number, tIdx: number) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      const lessons = [...updated[uIdx].lessons];
-      const topics = lessons[lIdx].topics.filter((_, idx) => idx !== tIdx);
-      lessons[lIdx] = { ...lessons[lIdx], topics };
-      updated[uIdx] = { ...updated[uIdx], lessons };
-      return updated;
-    });
-  };
-
-  const addTopicDraft = (uIdx: number, lIdx: number) => {
-    setEditableUnits((prev) => {
-      const updated = [...prev];
-      const lessons = [...updated[uIdx].lessons];
-      const topics = [
-        ...lessons[lIdx].topics,
-        { topic_name: 'New Subtopic', display_order: lessons[lIdx].topics.length + 1 },
-      ];
-      lessons[lIdx] = { ...lessons[lIdx], topics };
-      updated[uIdx] = { ...updated[uIdx], lessons };
-      return updated;
-    });
-  };
 
   // 2. Fetch Subjects for active Exam
   const fetchSubjects = async (examId: string) => {
@@ -994,10 +521,21 @@ UNIT-II: CURRENT EVENTS
 
   // Filtered Tree based on Search Term (TNPSC Unit, Standard, Subject, Lesson, Topic)
   const filteredTree = useMemo(() => {
-    if (!searchTerm.trim()) return tree;
+    // First apply selectedStandard filter strictly if set
+    let baseTree = tree;
+    if (selectedStandard !== null) {
+      baseTree = tree
+        .map((unit) => {
+          const lessons = (unit.lessons || []).filter((l) => Number(l.standard_number) === Number(selectedStandard));
+          return { ...unit, lessons };
+        })
+        .filter((unit) => (unit.lessons || []).length > 0 || !searchTerm.trim());
+    }
+
+    if (!searchTerm.trim()) return baseTree;
     const term = searchTerm.toLowerCase();
 
-    return tree
+    return baseTree
       .map((unit) => {
         const unitMatch =
           unit.title.toLowerCase().includes(term) ||
@@ -1005,22 +543,24 @@ UNIT-II: CURRENT EVENTS
           (unit.subject_name && unit.subject_name.toLowerCase().includes(term)) ||
           `unit ${unit.unit_number}`.includes(term);
 
-        const filteredLessons = (unit.lessons || []).filter((lesson) => {
-          const lessonMatch =
-            lesson.title.toLowerCase().includes(term) ||
-            lesson.lesson_number.toLowerCase().includes(term) ||
-            `std ${lesson.standard_number}`.includes(term) ||
-            `standard ${lesson.standard_number}`.includes(term) ||
-            `class ${lesson.standard_number}`.includes(term) ||
-            `${lesson.standard_number}th`.includes(term);
+        const filteredLessons = (unit.lessons || [])
+          .filter((lesson) => {
+            const lessonMatch =
+              lesson.title.toLowerCase().includes(term) ||
+              lesson.lesson_number.toLowerCase().includes(term) ||
+              `std ${lesson.standard_number}`.includes(term) ||
+              `standard ${lesson.standard_number}`.includes(term) ||
+              `class ${lesson.standard_number}`.includes(term) ||
+              `${lesson.standard_number}th`.includes(term);
 
-          const topicMatch = lesson.topics?.some(
-            (t) =>
-              t.topic_name.toLowerCase().includes(term) ||
-              (t.description && t.description.toLowerCase().includes(term))
-          );
-          return lessonMatch || topicMatch;
-        });
+            const topicMatch = lesson.topics?.some(
+              (t) =>
+                t.topic_name.toLowerCase().includes(term) ||
+                (t.description && t.description.toLowerCase().includes(term))
+            );
+            return lessonMatch || topicMatch;
+          })
+          .sort(compareLessons);
 
         if (unitMatch) return unit;
         if (filteredLessons.length > 0) {
@@ -1029,7 +569,7 @@ UNIT-II: CURRENT EVENTS
         return null;
       })
       .filter((u): u is UnitItem => u !== null);
-  }, [tree, searchTerm]);
+  }, [tree, searchTerm, selectedStandard]);
 
   // =========================================================================
   // HANDLERS: CREATE / EDIT / DELETE ACTIONS
@@ -1147,10 +687,10 @@ UNIT-II: CURRENT EVENTS
           exam_id: selectedExamId,
           subject_id: selectedSubjectSlug,
           unit_number: Number(unit_number),
-          unit_code: unit_code || `Unit ${unit_number}`,
-          title,
+          unit_code: cleanTamilUnicodeText(unit_code || `Unit ${unit_number}`),
+          title: cleanTamilUnicodeText(title),
           question_count: question_count || 0,
-          description,
+          description: description ? cleanTamilUnicodeText(description) : description,
         }),
       });
       const data = await res.json();
@@ -1199,20 +739,26 @@ UNIT-II: CURRENT EVENTS
     const uNum = targetUnit?.unit_number || 1;
     const uTitle = targetUnit?.title || '';
 
-    // Smart default syllabus topics based on TNPSC Unit
+    // Smart default syllabus topics based on the actual Subject and TNPSC Unit
     let suggestedTopics = '';
     const uTitleLower = uTitle.toLowerCase();
-    if (uTitleLower.includes('science') || uNum === 1) {
+    const isGeneralStudies = !selectedSubjectSlug || selectedSubjectSlug === 'general-studies';
+
+    if (targetUnit?.description && targetUnit.description.trim().length > 10 && targetUnit.description.trim() !== uTitle.trim()) {
+      suggestedTopics = targetUnit.description.trim();
+    } else if (!isGeneralStudies) {
+      suggestedTopics = targetUnit?.description?.trim() || uTitle;
+    } else if (uTitleLower.includes('science') || (isGeneralStudies && uNum === 1)) {
       suggestedTopics = 'Scientific Knowledge and Scientific Temper, Nature of Universe, Mechanics, Properties of Matter, Force, Motion and Energy, Electricity and Magnetism, Light, Sound, Heat, Nuclear Physics, Elements and Compounds, Acids, Bases, Salts, Petroleum Products, Fertilizers, Pesticides, Life Science, Nutrition and Dietetics, Human Diseases, Environment and Ecology';
-    } else if (uTitleLower.includes('geography') || uNum === 2) {
+    } else if (uTitleLower.includes('geography') || (isGeneralStudies && uNum === 2)) {
       suggestedTopics = 'Location, Physical Features, Monsoon, Rainfall, Weather and Climate, Water Resources, Rivers in India, Soil, Minerals and Natural Resources, Forest and Wildlife, Agriculture, Transport and Communication, Social Geography, Population Density, Major Tribes, Natural Calamities, Disaster Management, Environmental Pollution, Climate Change';
-    } else if (uTitleLower.includes('history') || uTitleLower.includes('inm') || uNum === 3) {
+    } else if (uTitleLower.includes('history') || uTitleLower.includes('inm') || (isGeneralStudies && uNum === 3)) {
       suggestedTopics = 'Indus Valley Civilization, Guptas, Delhi Sultans, Mughals, Marathas, Vijayanagara and Bahmani Kingdoms, South Indian History, Indian Culture, Unity in Diversity, Secular State, National Renaissance, Early Uprising Against British Rule, 1857 Revolt, Indian National Congress, Freedom Movement Leaders, Gandhian Era, Partition of Bengal';
-    } else if (uTitleLower.includes('polity') || uNum === 4) {
+    } else if (uTitleLower.includes('polity') || (isGeneralStudies && uNum === 4)) {
       suggestedTopics = 'Constitution of India, Preamble, Salient Features, Union, State and Union Territory, Citizenship, Fundamental Rights, Fundamental Duties, Directive Principles of State Policy, Union Executive, Parliament, State Government, Local Governments, Panchayat Raj, Judiciary, Rule of Law, Anti-Corruption, Lokpal, RTI';
-    } else if (uTitleLower.includes('economy') || uNum === 5) {
+    } else if (uTitleLower.includes('economy') || (isGeneralStudies && uNum === 5)) {
       suggestedTopics = 'Nature of Indian Economy, Five Year Plans, NITI Aayog, Reserve Bank of India, Fiscal Policy, Monetary Policy, Finance Commission, GST, Agriculture, Land Reforms, Industrial Growth, Rural Welfare Programmes, Employment, Poverty, Social Problems';
-    } else if (uTitleLower.includes('tamil') || uTitleLower.includes('heritage') || uNum === 6) {
+    } else if (uTitleLower.includes('heritage') || (isGeneralStudies && uNum === 6)) {
       suggestedTopics = 'History of Tamil Society, Archaeological Discoveries, Sangam Literature, Thirukkural, Secular Literature, Impact on Humanity, Role of Tamil Nadu in Freedom Struggle, Early Agitations Against British Rule, Women in Freedom Struggle, Social Reformers, Periyar EVR, Justice Party, Self-Respect Movement';
     } else {
       suggestedTopics = targetUnit?.description || uTitle;
@@ -1227,7 +773,13 @@ UNIT-II: CURRENT EVENTS
 
     let defaultStd = targetStandard || selectedStandard || (selectedExamId === 'group4' ? 10 : 11);
     let defaultSubject = 'all';
-    if (uTitleLower.includes('science')) {
+    if (selectedSubjectSlug === 'general-tamil') {
+      defaultSubject = 'Tamil';
+    } else if (selectedSubjectSlug === 'general-english') {
+      defaultSubject = 'English';
+    } else if (selectedSubjectSlug === 'aptitude') {
+      defaultSubject = 'Mathematics';
+    } else if (uTitleLower.includes('science')) {
       defaultSubject = 'Science';
     } else if (
       uTitleLower.includes('geography') ||
@@ -1321,6 +873,7 @@ UNIT-II: CURRENT EVENTS
       }
 
       setMatchedLessons(data.matchedLessons || []);
+      setAiValidationReport(data.validationReport || null);
       setAiMatchingStep('review');
       showToast(`AI matched ${data.matchedLessons?.length || 0} relevant lessons from textbooks!`, 'success');
     } catch (err: any) {
@@ -1364,6 +917,10 @@ UNIT-II: CURRENT EVENTS
             lesson_number: m.lesson_number,
             title: m.lesson_title,
             term: m.term,
+            textbook_unit_number: m.textbook_unit_number,
+            textbook_unit_title: m.textbook_unit_title,
+            matched_syllabus_topics: m.matched_syllabus_topics,
+            verification_status: m.verification_status,
             description: `${m.matching_reason} (Standard ${m.standard_number}, ${m.subject}, ${m.term})`,
             textbook_material_id: m.textbook_material_id,
             textbook_file_name: m.textbook_file_name,
@@ -1417,9 +974,9 @@ UNIT-II: CURRENT EVENTS
           subject_id: selectedSubjectSlug,
           standard_number: Number(standard_number || 6),
           lesson_number,
-          title,
+          title: cleanTamilUnicodeText(title),
           term: term || 'Term 1',
-          description,
+          description: description ? cleanTamilUnicodeText(description) : description,
           status: status || 'Available',
         }),
       });
@@ -1472,8 +1029,8 @@ UNIT-II: CURRENT EVENTS
         body: JSON.stringify({
           lesson_id: lessonId,
           unit_id: unitId,
-          topic_name,
-          description,
+          topic_name: cleanTamilUnicodeText(topic_name),
+          description: description ? cleanTamilUnicodeText(description) : description,
         }),
       });
       const data = await res.json();
@@ -1544,9 +1101,9 @@ UNIT-II: CURRENT EVENTS
           standard_number: noteModal.standardNumber,
           exam_id: selectedExamId,
           subject_id: selectedSubjectSlug,
-          topic_name: noteModal.topicName,
-          lesson_title: noteModal.lessonTitle,
-          content: noteModal.content,
+          topic_name: cleanTamilUnicodeText(noteModal.topicName),
+          lesson_title: cleanTamilUnicodeText(noteModal.lessonTitle),
+          content: cleanTamilUnicodeText(noteModal.content),
         }),
       });
       const data = await res.json();
@@ -1567,18 +1124,22 @@ UNIT-II: CURRENT EVENTS
   // --- DELETE CONFIRMATION ---
   const closeDeleteConfirm = () => setDeleteConfirm({ open: false, type: 'unit', id: null, name: '' });
 
-  // Opens the unit delete dialog and loads child-record counts from the database
+  // Opens the unit delete dialog and loads child-record counts from the database (scoped to active Group/Subject/Standard)
   const openUnitDeleteConfirm = async (unit: { id: number; unit_code?: string; unit_number: number; title: string }) => {
+    const stdParam = selectedStandard !== null ? `&standardId=${selectedStandard}` : '';
+    const scopeQuery = `examId=${encodeURIComponent(selectedExamId)}&subjectId=${encodeURIComponent(selectedSubjectSlug)}${stdParam}`;
     setDeleteConfirm({
       open: true,
       type: 'unit',
       id: unit.id,
+      unitId: unit.id,
+      standardNumber: selectedStandard,
       name: `${unit.unit_code || `Unit ${unit.unit_number}`}: ${unit.title}`,
       dependencies: null,
       loadingDeps: true,
     });
     try {
-      const res = await apiFetch(`/api/study-management/units/${unit.id}/dependencies`, {
+      const res = await apiFetch(`/api/study-management/units/${unit.id}/dependencies?${scopeQuery}`, {
         headers: { Authorization: `Bearer ${activeToken}` },
       });
       const data = await res.json();
@@ -1593,17 +1154,28 @@ UNIT-II: CURRENT EVENTS
   };
 
   const handleExecuteDelete = async () => {
-    const { type, id, name } = deleteConfirm;
+    const { type, id, name, unitId, lessonId, standardNumber } = deleteConfirm;
     if (deleteConfirm.submitting || deleteConfirm.loadingDeps) return;
     setDeleteConfirm((prev) => ({ ...prev, submitting: true }));
     try {
+      const stdVal = standardNumber !== undefined ? standardNumber : selectedStandard;
+      const stdParam = stdVal !== null && stdVal !== undefined ? `&standardId=${stdVal}` : '';
+      const baseScope = `examId=${encodeURIComponent(selectedExamId)}&subjectId=${encodeURIComponent(selectedSubjectSlug)}`;
+
       let endpoint = '';
-      if (type === 'exam') endpoint = `/api/study-management/exams/${id}`;
-      else if (type === 'subject') endpoint = `/api/study-management/subjects/${id}`;
-      // The admin has reviewed the child-record warning in this dialog, so cascade explicitly.
-      else if (type === 'unit') endpoint = `/api/study-management/units/${id}?force=true`;
-      else if (type === 'lesson') endpoint = `/api/study-management/lessons/${id}`;
-      else if (type === 'topic') endpoint = `/api/study-management/topics/${id}`;
+      if (type === 'exam') endpoint = `/api/study-management/exams/${encodeURIComponent(String(id))}`;
+      else if (type === 'subject') endpoint = `/api/study-management/subjects/${encodeURIComponent(String(id))}?examId=${encodeURIComponent(selectedExamId)}`;
+      else if (type === 'standard') endpoint = `/api/study-management/standards/${encodeURIComponent(String(id))}?${baseScope}`;
+      // The admin has reviewed the child-record warning in this dialog, so cascade explicitly within the verified scope.
+      else if (type === 'unit') endpoint = `/api/study-management/units/${id}?force=true&${baseScope}${stdParam}`;
+      else if (type === 'lesson') {
+        const uParam = unitId ? `&unitId=${unitId}` : '';
+        endpoint = `/api/study-management/lessons/${encodeURIComponent(String(id))}?force=true&${baseScope}${uParam}${stdParam}`;
+      } else if (type === 'topic') {
+        const lParam = lessonId ? `&lessonId=${encodeURIComponent(lessonId)}` : '';
+        const uParam = unitId ? `&unitId=${unitId}` : '';
+        endpoint = `/api/study-management/topics/${id}?force=true&${baseScope}${lParam}${uParam}`;
+      }
 
       const res = await apiFetch(endpoint, {
         method: 'DELETE',
@@ -1612,10 +1184,13 @@ UNIT-II: CURRENT EVENTS
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         const d = data.deleted;
+        const stdLabel = stdVal ? ` (${stdVal}th Standard only)` : '';
         const detail =
-          type === 'unit' && d ? ` (${d.lessons} lessons, ${d.topics} topics, ${d.notes} study notes removed)` : '';
+          (type === 'unit' || type === 'standard') && d
+            ? `${stdLabel} (${d.lessons ?? 0} lessons, ${d.topics ?? 0} focus areas, ${d.notes ?? 0} study notes removed)`
+            : '';
         showToast(`${type === 'unit' ? `"${name}"` : type.toUpperCase()} deleted successfully${detail}`);
-        dynamicSyllabusService.notifySyllabusChanged('deleted', { type, id });
+        dynamicSyllabusService.notifySyllabusChanged('deleted', { type, id, examId: selectedExamId, standardId: stdVal });
         closeDeleteConfirm();
         if (type === 'exam') fetchExams();
         else if (type === 'subject') fetchSubjects(selectedExamId);
@@ -1914,8 +1489,8 @@ UNIT-II: CURRENT EVENTS
             <button
               type="button"
               className="smm-btn-ai-import"
-              onClick={handleOpenAiImport}
-              title="Import official TNPSC syllabus from PDF or direct text with AI structuring"
+              onClick={() => setAiImportModalOpen(true)}
+              title="AI Syllabus Import (Reset & Ready for Rebuild)"
             >
               <Sparkles size={15} />
               <span>AI Syllabus Import</span>
@@ -1959,7 +1534,7 @@ UNIT-II: CURRENT EVENTS
         <div className="smm-units-stack">
           {filteredTree.map((unit, unitIdx) => {
             const isExpanded = expandedUnits.has(unit.id);
-            const unitLessons = unit.lessons || [];
+            const unitLessons = (unit.lessons || []).slice().sort(compareLessons);
 
             return (
               <div key={unit.id} className={`smm-unit-card glass ${isExpanded ? 'is-expanded' : ''}`}>
@@ -1989,6 +1564,19 @@ UNIT-II: CURRENT EVENTS
 
                   <div className="smm-unit-controls" onClick={(e) => e.stopPropagation()}>
                     <div className="smm-unit-stats-pills">
+                      {selectedExamId === 'group2' && (
+                        <span
+                          className="smm-stat-pill slate"
+                          style={{ background: 'rgba(139, 92, 246, 0.14)', color: '#c4b5fd', borderColor: 'rgba(139, 92, 246, 0.3)' }}
+                          title="Preserved source group identification"
+                        >
+                          {unit.source_groups && unit.source_groups.length > 1
+                            ? 'Group 2 & 2A'
+                            : unit.exam_id === 'group2a'
+                            ? 'Group 2A'
+                            : 'Group 2 & 2A'}
+                        </span>
+                      )}
                       <span className="smm-stat-pill slate">{unitLessons.length} Lessons</span>
                       {unit.question_count ? (
                         <span className="smm-stat-pill gold">{unit.question_count} Qs</span>
@@ -2054,6 +1642,105 @@ UNIT-II: CURRENT EVENTS
                 {/* UNIT BODY: LESSONS & TOPICS */}
                 {isExpanded && (
                   <div className="smm-unit-content">
+                    {/* TEXTBOOK SYLLABUS & FOCUS AREAS DYNAMIC SECTION */}
+                    {unitLessons.length > 0 && (() => {
+                      const focusSummary: Array<{
+                        focusArea: string;
+                        standardNumber: number;
+                        lessonNumber: string;
+                        lessonTitle: string;
+                        textbookUnit?: string;
+                        matchedTopic?: string;
+                      }> = [];
+                      const seenFocus = new Set<string>();
+                      unitLessons.forEach((l) => {
+                        const tbUnit = l.textbook_unit_title || (l.textbook_unit_number ? `Unit ${l.textbook_unit_number}` : undefined);
+                        if (Array.isArray(l.topics) && l.topics.length > 0) {
+                          l.topics.forEach((t) => {
+                            const key = `${l.standard_number}|${t.topic_name.toLowerCase().trim()}`;
+                            if (!seenFocus.has(key)) {
+                              seenFocus.add(key);
+                              focusSummary.push({
+                                focusArea: t.topic_name,
+                                standardNumber: l.standard_number,
+                                lessonNumber: l.lesson_number,
+                                lessonTitle: l.title,
+                                textbookUnit: tbUnit,
+                                matchedTopic: l.matched_topics,
+                              });
+                            }
+                          });
+                        } else if (l.matched_topics) {
+                          l.matched_topics.split(/[,;]/).map((s) => s.trim()).filter(Boolean).forEach((mt) => {
+                            const key = `${l.standard_number}|${mt.toLowerCase()}`;
+                            if (!seenFocus.has(key)) {
+                              seenFocus.add(key);
+                              focusSummary.push({
+                                focusArea: mt,
+                                standardNumber: l.standard_number,
+                                lessonNumber: l.lesson_number,
+                                lessonTitle: l.title,
+                                textbookUnit: tbUnit,
+                                matchedTopic: l.matched_topics,
+                              });
+                            }
+                          });
+                        }
+                      });
+                      return (
+                        <div
+                          style={{
+                            marginBottom: '0.85rem',
+                            padding: '0.75rem 1rem',
+                            borderRadius: '10px',
+                            background: 'rgba(15, 23, 42, 0.55)',
+                            border: '1px solid rgba(56, 189, 248, 0.22)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                            <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                              Textbook Syllabus & Focus Areas ({selectedStandard ? `${selectedStandard}th Standard` : 'Classes 6th–12th'})
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                              {exams.find((e) => e.id === selectedExamId)?.name || selectedExamId.toUpperCase()} • {subjects.find((s) => s.subject_slug === selectedSubjectSlug)?.name || selectedSubjectSlug} • {unit.unit_code || `Unit ${unit.unit_number}`}
+                            </span>
+                          </div>
+                          {focusSummary.length > 0 ? (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.38rem' }}>
+                              {focusSummary.slice(0, 18).map((fa, fIdx) => (
+                                <span
+                                  key={fIdx}
+                                  title={`${fa.standardNumber}th Std • ${fa.textbookUnit ? `${fa.textbookUnit} • ` : ''}L-${fa.lessonNumber}: ${fa.lessonTitle}`}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.3rem',
+                                    padding: '0.2rem 0.55rem',
+                                    borderRadius: '999px',
+                                    fontSize: '0.73rem',
+                                    background: 'rgba(56, 189, 248, 0.1)',
+                                    border: '1px solid rgba(56, 189, 248, 0.28)',
+                                    color: '#e2e8f0',
+                                  }}
+                                >
+                                  <strong style={{ color: '#38bdf8', fontSize: '0.68rem' }}>Std {fa.standardNumber} L-{fa.lessonNumber}:</strong>
+                                  <span>{fa.focusArea}</span>
+                                </span>
+                              ))}
+                              {focusSummary.length > 18 && (
+                                <span style={{ fontSize: '0.72rem', color: '#94a3b8', alignSelf: 'center', paddingLeft: '0.25rem' }}>
+                                  +{focusSummary.length - 18} more focus areas
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                              {unit.description || 'Expand lessons below to view or manage lesson-specific Focus Areas.'}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {unitLessons.length === 0 ? (
                       <div className="smm-empty-lessons">
                         <span>No lessons added to this unit yet.</span>
@@ -2069,7 +1756,7 @@ UNIT-II: CURRENT EVENTS
                       <div className="smm-lessons-stack">
                         {unitLessons.map((lesson, lessonIdx) => {
                           const isLessonExpanded = expandedLessons.has(lesson.id);
-                          const topics = lesson.topics || [];
+                          const topics = (lesson.topics || []).slice().sort(compareTopics);
 
                           return (
                             <div
@@ -2098,8 +1785,22 @@ UNIT-II: CURRENT EVENTS
                                     <span className="smm-pill-std">
                                       {lesson.standard_number}th Std
                                     </span>
+                                    {selectedExamId === 'group2' && lesson.exam_id && (
+                                      <span
+                                        className="smm-pill-term"
+                                        style={{ background: 'rgba(139, 92, 246, 0.14)', color: '#c4b5fd', borderColor: 'rgba(139, 92, 246, 0.3)' }}
+                                        title={`Database source exam_id: ${lesson.exam_id}`}
+                                      >
+                                        {lesson.exam_id === 'group2a' ? 'Group 2A' : 'Group 2'}
+                                      </span>
+                                    )}
                                     {lesson.term && (
                                       <span className="smm-pill-term">{lesson.term}</span>
+                                    )}
+                                    {(lesson.textbook_unit_title || lesson.textbook_unit_number) && (
+                                      <span className="smm-pill-term" style={{ background: 'rgba(16, 185, 129, 0.14)', color: '#6ee7b7', borderColor: 'rgba(16, 185, 129, 0.3)' }}>
+                                        {lesson.textbook_unit_title || `TB Unit ${lesson.textbook_unit_number}`}
+                                      </span>
                                     )}
                                     <span className="smm-pill-num">L-{lesson.lesson_number}</span>
                                   </div>
@@ -2115,7 +1816,7 @@ UNIT-II: CURRENT EVENTS
                                 >
                                   <div className="smm-lesson-stats-pills">
                                     <span className="smm-stat-pill-sm slate">
-                                      {topics.length} Topics
+                                      {topics.length} Focus Areas
                                     </span>
                                     {lesson.has_notes ? (
                                       <span
@@ -2157,10 +1858,10 @@ UNIT-II: CURRENT EVENTS
                                       type="button"
                                       className="smm-action-btn btn-add sm"
                                       onClick={() => handleOpenAddTopic(lesson.id, unit.id)}
-                                      title="Add Topic to this lesson"
+                                      title="Add Focus Area / Topic to this lesson"
                                     >
                                       <Plus size={12} />
-                                      <span>Add Topic</span>
+                                      <span>Add Focus Area</span>
                                     </button>
                                     <button
                                       type="button"
@@ -2195,7 +1896,9 @@ UNIT-II: CURRENT EVENTS
                                           open: true,
                                           type: 'lesson',
                                           id: lesson.id,
-                                          name: `Lesson ${lesson.lesson_number}: ${lesson.title}`,
+                                          unitId: unit.id,
+                                          standardNumber: lesson.standard_number,
+                                          name: `${lesson.standard_number}th Std • Lesson ${lesson.lesson_number}: ${lesson.title}`,
                                         })
                                       }
                                       title="Delete Lesson"
@@ -2210,21 +1913,26 @@ UNIT-II: CURRENT EVENTS
                               {/* TOPICS CONTAINER */}
                               {isLessonExpanded && (
                                 <div className="smm-topics-container">
-                                  <div className="smm-topics-header">
+                                  <div className="smm-topics-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
                                     <span className="smm-topics-label">
-                                      Curated Topics ({topics.length})
+                                      Lesson Focus Areas ({topics.length})
                                     </span>
+                                    {lesson.matched_topics && (
+                                      <span style={{ fontSize: '0.73rem', color: '#38bdf8' }}>
+                                        Matched Syllabus Topics: <strong>{lesson.matched_topics}</strong>
+                                      </span>
+                                    )}
                                   </div>
 
                                   {topics.length === 0 ? (
                                     <div className="smm-empty-topics">
-                                      <span>No subtopics created for this lesson yet.</span>
+                                      <span>No focus areas created for this lesson yet.</span>
                                       <button
                                         type="button"
                                         className="smm-btn-inline-add"
                                         onClick={() => handleOpenAddTopic(lesson.id, unit.id)}
                                       >
-                                        <Plus size={12} /> Add First Topic
+                                        <Plus size={12} /> Add First Focus Area
                                       </button>
                                     </div>
                                   ) : (
@@ -2251,7 +1959,7 @@ UNIT-II: CURRENT EVENTS
                                               className="smm-action-btn btn-secondary xs"
                                               onClick={() => handleMoveTopic(topics, tIdx, 'up')}
                                               disabled={tIdx === 0}
-                                              title="Move Topic Up"
+                                              title="Move Focus Area Up"
                                             >
                                               <ChevronUp size={11} />
                                             </button>
@@ -2260,7 +1968,7 @@ UNIT-II: CURRENT EVENTS
                                               className="smm-action-btn btn-secondary xs"
                                               onClick={() => handleMoveTopic(topics, tIdx, 'down')}
                                               disabled={tIdx === topics.length - 1}
-                                              title="Move Topic Down"
+                                              title="Move Focus Area Down"
                                             >
                                               <ChevronDown size={11} />
                                             </button>
@@ -2270,7 +1978,7 @@ UNIT-II: CURRENT EVENTS
                                               onClick={() =>
                                                 handleOpenNoteModal(lesson, topic.topic_name, topic.id)
                                               }
-                                              title="Upload or edit note for this topic"
+                                              title="Upload or edit note for this focus area"
                                             >
                                               <FileText size={11} />
                                               <span>{topic.has_notes ? 'Edit Note' : 'Upload Note'}</span>
@@ -2287,7 +1995,7 @@ UNIT-II: CURRENT EVENTS
                                                   data: topic,
                                                 })
                                               }
-                                              title="Edit Topic"
+                                              title="Edit Focus Area"
                                             >
                                               <Edit2 size={11} />
                                               <span>Edit</span>
@@ -2300,10 +2008,13 @@ UNIT-II: CURRENT EVENTS
                                                   open: true,
                                                   type: 'topic',
                                                   id: topic.id,
+                                                  lessonId: lesson.id,
+                                                  unitId: unit.id,
+                                                  standardNumber: lesson.standard_number,
                                                   name: topic.topic_name,
                                                 })
                                               }
-                                              title="Delete Topic"
+                                              title="Delete Focus Area"
                                             >
                                               <Trash2 size={11} />
                                               <span>Delete</span>
@@ -3045,6 +2756,46 @@ UNIT-II: CURRENT EVENTS
                           </div>
                         </div>
 
+                        {/* 9-POINT FOCUS AREA VALIDATION SUMMARY PANEL */}
+                        {aiValidationReport && (
+                          <div
+                            style={{
+                              marginBottom: '0.9rem',
+                              padding: '0.75rem 0.95rem',
+                              borderRadius: '10px',
+                              background: 'rgba(15, 23, 42, 0.7)',
+                              border: '1px solid rgba(16, 185, 129, 0.28)',
+                              fontSize: '0.76rem',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                              <strong style={{ color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                9-Point Focus Area Validation & Hierarchy Review
+                              </strong>
+                              <span style={{ color: '#94a3b8' }}>
+                                Group: <strong style={{ color: '#f8fafc' }}>{aiValidationReport.tnpscGroup}</strong> • Subject: <strong style={{ color: '#f8fafc' }}>{aiValidationReport.subjectId}</strong> • Unit {aiValidationReport.unitNumber}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem', marginBottom: '0.35rem', color: '#cbd5e1' }}>
+                              <span>✓ Syllabus Coverage: <strong>{aiValidationReport.syllabusTopicCoverage.coveragePercent}%</strong> ({aiValidationReport.syllabusTopicCoverage.coveredTopics.length}/{aiValidationReport.syllabusTopicCoverage.totalSyllabusTopics})</span>
+                              <span>• Standards Verified: <strong>{aiValidationReport.standardWiseValidation.standardsCovered.map((s) => `${s}th`).join(', ') || 'None'}</strong></span>
+                              <span>• Textbook Units: <strong>{aiValidationReport.textbookUnitValidation.verifiedUnitsCount} verified</strong></span>
+                              <span>• Duplicates: <strong>{aiValidationReport.duplicateFocusAreaDetection.duplicatesFound}</strong></span>
+                              <span>• Group Isolation: <strong>{aiValidationReport.groupIsolationVerified ? 'VERIFIED' : 'CHECK'}</strong></span>
+                            </div>
+                            {aiValidationReport.syllabusTopicCoverage.missingTopics.length > 0 && (
+                              <div style={{ marginTop: '0.35rem', color: '#fbbf24', fontSize: '0.73rem' }}>
+                                <strong>Missing / Unverified Syllabus Topics: </strong>
+                                {aiValidationReport.syllabusTopicCoverage.missingTopics.map((m, mIdx) => (
+                                  <span key={mIdx} style={{ marginRight: '0.45rem' }}>
+                                    {m.topic} ({m.status})
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {matchedLessons.length === 0 ? (
                           <div className="smm-tb-empty">
                             <AlertCircle size={28} className="text-amber" />
@@ -3091,6 +2842,11 @@ UNIT-II: CURRENT EVENTS
                                       <span className="smm-badge-term" style={{ flexShrink: 0 }}>
                                         {item.term}
                                       </span>
+                                      {(item.textbook_unit_title || item.textbook_unit_number) && (
+                                        <span className="smm-badge-term" style={{ flexShrink: 0, background: 'rgba(16, 185, 129, 0.14)', color: '#6ee7b7' }}>
+                                          {item.textbook_unit_title || `Unit ${item.textbook_unit_number}`}
+                                        </span>
+                                      )}
                                       <span
                                         style={{
                                           fontSize: '0.75rem',
@@ -3099,7 +2855,7 @@ UNIT-II: CURRENT EVENTS
                                           flexShrink: 0,
                                         }}
                                       >
-                                        Ch {item.lesson_number}
+                                        L-{item.lesson_number}
                                       </span>
 
                                       <input
@@ -3119,9 +2875,20 @@ UNIT-II: CURRENT EVENTS
                                     </div>
 
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+                                      {item.verification_status && (
+                                        <span
+                                          className="smm-reason-pill"
+                                          style={{
+                                            background: item.verification_status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                                            color: item.verification_status === 'VERIFIED' ? '#34d399' : '#fbbf24',
+                                          }}
+                                        >
+                                          {item.verification_status}
+                                        </span>
+                                      )}
                                       {item.is_already_in_db && (
                                         <span className="smm-duplicate-pill" title="This lesson is already in this unit">
-                                          Already in Unit
+                                          Duplicate / Already in Unit
                                         </span>
                                       )}
                                       <span className="smm-reason-pill">
@@ -3139,10 +2906,15 @@ UNIT-II: CURRENT EVENTS
                                       paddingLeft: '2rem',
                                       fontSize: '0.78rem',
                                       color: '#94a3b8',
+                                      flexWrap: 'wrap',
+                                      gap: '0.4rem',
                                     }}
                                   >
                                     <span>
-                                      <strong>Relevance:</strong> {item.matching_reason}
+                                      <strong>Matched Syllabus Topics:</strong>{' '}
+                                      {item.matched_syllabus_topics && item.matched_syllabus_topics.length > 0
+                                        ? item.matched_syllabus_topics.join(', ')
+                                        : item.matching_reason}
                                     </span>
                                     <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
                                       Source: {item.textbook_file_name}
@@ -3151,7 +2923,7 @@ UNIT-II: CURRENT EVENTS
 
                                   {item.topics && item.topics.length > 0 && (
                                     <div className="smm-matched-subtopics">
-                                      <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Topics:</span>
+                                      <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Focus Areas:</span>
                                       {item.topics.map((t, tIdx) => (
                                         <span key={tIdx} className="smm-subtopic-tag">
                                           {t.topic_name}
@@ -3384,1048 +3156,122 @@ UNIT-II: CURRENT EVENTS
       )}
 
       {/* 7. DELETE CONFIRMATION MODAL */}
-      {deleteConfirm.open && (
-        <div className="smm-modal-overlay">
-          <div className="smm-modal-card delete-card">
-            <div className="smm-modal-header danger-header">
-              <div className="smm-modal-title-wrap danger">
-                <AlertCircle size={20} />
-                <h3>Confirm Deletion</h3>
+      {deleteConfirm.open && (() => {
+        const activeExamName = exams.find((e) => e.id === selectedExamId)?.name || selectedExamId.toUpperCase();
+        const activeSubjectName = subjects.find((s) => s.subject_slug === selectedSubjectSlug)?.name || selectedSubjectSlug;
+        const activeStdNumber = deleteConfirm.standardNumber !== undefined ? deleteConfirm.standardNumber : selectedStandard;
+        const activeStdLabel = activeStdNumber
+          ? `${activeStdNumber}th Standard (Samacheer Kalvi)`
+          : 'All Standards (6th–12th Standard)';
+        const targetUnitObj = deleteConfirm.unitId ? tree.find((u) => u.id === deleteConfirm.unitId) : null;
+        const unitLabel =
+          deleteConfirm.type === 'unit'
+            ? deleteConfirm.name
+            : targetUnitObj
+              ? `${targetUnitObj.unit_code || `Unit ${targetUnitObj.unit_number}`} – ${targetUnitObj.title}`
+              : 'Selected Unit';
+
+        return (
+          <div className="smm-modal-overlay">
+            <div className="smm-modal-card delete-card">
+              <div className="smm-modal-header danger-header">
+                <div className="smm-modal-title-wrap danger">
+                  <AlertCircle size={20} />
+                  <h3>Confirm Scoped Deletion</h3>
+                </div>
+                <button
+                  type="button"
+                  className="smm-modal-close"
+                  onClick={() => setDeleteConfirm({ open: false, type: 'unit', id: null, name: '' })}
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <button
-                type="button"
-                className="smm-modal-close"
-                onClick={() => setDeleteConfirm({ open: false, type: 'unit', id: null, name: '' })}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="smm-modal-body">
-              <p className="smm-delete-lead">
-                Are you sure you want to permanently delete this {deleteConfirm.type}:
-              </p>
-              <div className="smm-delete-target-pill">{deleteConfirm.name}</div>
-              {deleteConfirm.type === 'unit' && deleteConfirm.loadingDeps ? (
-                <p className="smm-delete-warning">
-                  <Loader2 size={14} className="spin-icon" /> Checking lessons, topics and study notes in this unit...
+              <div className="smm-modal-body">
+                <p className="smm-delete-lead">
+                  Are you sure you want to permanently delete this {deleteConfirm.type === 'topic' ? 'Focus Area' : deleteConfirm.type}:
                 </p>
-              ) : deleteConfirm.type === 'unit' && deleteConfirm.dependencies ? (
-                deleteConfirm.dependencies.lessons + deleteConfirm.dependencies.topics + deleteConfirm.dependencies.notes > 0 ? (
+                <div className="smm-delete-target-pill">{deleteConfirm.name}</div>
+
+                {/* OWNERSHIP & SCOPE VERIFICATION DETAILS */}
+                <div
+                  style={{
+                    margin: '0.75rem 0',
+                    padding: '0.75rem 0.95rem',
+                    borderRadius: '8px',
+                    background: 'rgba(15, 23, 42, 0.75)',
+                    border: '1px solid rgba(239, 68, 68, 0.28)',
+                    fontSize: '0.8rem',
+                    lineHeight: 1.65,
+                    color: '#e2e8f0',
+                  }}
+                >
+                  <div><strong style={{ color: '#94a3b8' }}>TNPSC Group:</strong> {activeExamName}</div>
+                  <div><strong style={{ color: '#94a3b8' }}>Subject:</strong> {activeSubjectName}</div>
+                  <div><strong style={{ color: '#94a3b8' }}>Standard:</strong> {activeStdLabel}</div>
+                  <div><strong style={{ color: '#94a3b8' }}>Unit:</strong> {unitLabel}</div>
+                </div>
+
+                {deleteConfirm.type === 'unit' && deleteConfirm.loadingDeps ? (
                   <p className="smm-delete-warning">
-                    ⚠️ This unit contains <strong>{deleteConfirm.dependencies.lessons}</strong> lesson(s),{' '}
-                    <strong>{deleteConfirm.dependencies.topics}</strong> topic(s) and{' '}
-                    <strong>{deleteConfirm.dependencies.notes}</strong> study note(s). They will all be permanently
-                    deleted from the database.
-                    {deleteConfirm.dependencies.questions > 0 &&
-                      ` ${deleteConfirm.dependencies.questions} linked practice question(s) in the Question Bank will be kept.`}
+                    <Loader2 size={14} className="spin-icon" /> Checking lessons, focus areas and study notes in this unit...
                   </p>
-                ) : (
-                  <p className="smm-delete-warning">This unit has no lessons, topics or study notes.</p>
-                )
-              ) : (
-                <p className="smm-delete-warning">
-                  ⚠️ All nested child items (lessons, topics, and attached study notes) will be deleted
-                  permanently from the database.
-                </p>
-              )}
-            </div>
-            <div className="smm-modal-footer">
-              <button
-                type="button"
-                className="smm-btn-ghost"
-                onClick={closeDeleteConfirm}
-                disabled={deleteConfirm.submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="smm-btn-danger"
-                onClick={handleExecuteDelete}
-                disabled={deleteConfirm.submitting || deleteConfirm.loadingDeps}
-              >
-                {deleteConfirm.submitting ? <Loader2 size={14} className="spin-icon" /> : <Trash2 size={14} />}
-                <span>{deleteConfirm.submitting ? 'Deleting...' : 'Yes, Delete Permanently'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* 8. AI SYLLABUS PDF IMPORT MODAL */}
-      {aiImportModalOpen && (
-        <div className="smm-modal-overlay">
-          <div className="smm-modal-card ai-modal-large">
-            {/* Modal Header */}
-            <div className="smm-modal-header">
-              <div className="smm-modal-title-wrap">
-                <Sparkles size={20} className="text-purple" />
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <h3 style={{ margin: 0 }}>AI Syllabus Import</h3>
-                    <span className="smm-ai-header-badge">PDF & Text Auto-Extraction</span>
-                  </div>
-                  <span className="smm-modal-subtitle">
-                    Import official TNPSC Syllabus (Group 1, 2, 2A, 4) via PDF upload or direct text paste to auto-extract units, lessons, and topics
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="smm-modal-close"
-                onClick={() => setAiImportModalOpen(false)}
-                disabled={isPublishing || aiImportStep === 'analyzing'}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Modal Body: Switch between 'upload', 'analyzing', 'review' */}
-            <div className="smm-modal-body ai-modal-body">
-              {/* STEP 1: UPLOAD & INPUT SCREEN */}
-              {aiImportStep === 'upload' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  {aiImportError && (
-                    <div
-                      className="smm-ai-warning-box"
-                      style={{ background: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
-                    >
-                      <div className="smm-ai-warning-header" style={{ color: '#f87171', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <AlertTriangle size={16} />
-                          <span>Analysis Notice</span>
-                        </div>
-                        <button
-                          type="button"
-                          className="smm-btn-ghost sm"
-                          style={{
-                            color: '#fca5a5',
-                            borderColor: 'rgba(239, 68, 68, 0.35)',
-                            padding: '0.2rem 0.6rem',
-                            fontSize: '0.72rem',
-                          }}
-                          onClick={handleStartAnalysis}
-                        >
-                          <RefreshCw size={11} />
-                          <span>Retry Analysis</span>
-                        </button>
-                      </div>
-                      <div className="smm-ai-warning-sub" style={{ marginTop: '0.35rem' }}>{aiImportError}</div>
-                    </div>
-                  )}
-
-                  <div className="smm-modal-grid-2">
-                    <div>
-                      <label>Target TNPSC Examination *</label>
-                      <select
-                        className="smm-modal-select"
-                        value={aiImportExamId}
-                        onChange={(e) => setAiImportExamId(e.target.value)}
-                      >
-                        <option value="group1">TNPSC Group 1</option>
-                        <option value="group2">TNPSC Group 2, 2A</option>
-                        <option value="group4">TNPSC Group 4</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label>Target Subject / Paper *</label>
-                      <select
-                        className="smm-modal-select"
-                        value={aiImportSubjectSlug}
-                        onChange={(e) => setAiImportSubjectSlug(e.target.value)}
-                      >
-                        <option value="all">🌟 Complete Syllabus – All Units & Sections (Auto-Detect)</option>
-                        <option value="general-studies">General Studies (பொது அறிவு)</option>
-                        <option value="aptitude">Aptitude and Mental Ability (திறனறிவு)</option>
-                        <option value="general-tamil">General Tamil (பொதுத் தமிழ்)</option>
-                        <option value="general-english">General English</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="smm-modal-grid-2">
-                    <div>
-                      <label>Standard / Class Scope *</label>
-                      <select
-                        className="smm-modal-select"
-                        value={aiImportStandard}
-                        onChange={(e) =>
-                          setAiImportStandard(e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10))
-                        }
-                      >
-                        <option value="all">📚 All Standards (6th to 12th Auto-Organize)</option>
-                        <option value="6">6th Standard (Class 6)</option>
-                        <option value="7">7th Standard (Class 7)</option>
-                        <option value="8">8th Standard (Class 8)</option>
-                        <option value="9">9th Standard (Class 9)</option>
-                        <option value="10">10th Standard (SSLC / Class 10)</option>
-                        <option value="11">11th Standard (Higher Secondary / Class 11)</option>
-                        <option value="12">12th Standard (Higher Secondary / Class 12)</option>
-                      </select>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                      <span style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.4 }}>
-                        ✨ <strong style={{ color: '#c084fc' }}>Dynamic Units:</strong> Generates distinct Unit sequences for each class. Standard 6 and Standard 10 will have their own independent Unit numbering without collision.
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Mode Selector Tabs: Textbook Repository vs PDF vs Text Paste */}
-                  <div className="smm-ai-tab-group">
-                    <button
-                      type="button"
-                      className={`smm-ai-tab-btn ${aiImportInputMode === 'textbook' ? 'active' : ''}`}
-                      onClick={() => {
-                        setAiImportInputMode('textbook');
-                        setAiImportError(null);
-                        fetchAiRepoTextbooks();
-                      }}
-                    >
-                      <BookOpen size={15} />
-                      <span>Existing Textbook PDF</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`smm-ai-tab-btn ${aiImportInputMode === 'pdf' ? 'active' : ''}`}
-                      onClick={() => {
-                        setAiImportInputMode('pdf');
-                        setAiImportError(null);
-                      }}
-                    >
-                      <FileText size={15} />
-                      <span>Upload Syllabus PDF</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`smm-ai-tab-btn ${aiImportInputMode === 'text' ? 'active' : ''}`}
-                      onClick={() => {
-                        setAiImportInputMode('text');
-                        setAiImportError(null);
-                      }}
-                    >
-                      <Edit2 size={15} />
-                      <span>Direct Text Paste</span>
-                    </button>
-                  </div>
-
-                  {aiImportInputMode === 'textbook' ? (
-                    <div className="smm-tb-repo-container">
-                      {/* Sub-Filters: Term & Medium */}
-                      <div className="smm-tb-repo-filter-row">
-                        <div>
-                          <label style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>School Term</label>
-                          <select
-                            className="smm-modal-select"
-                            value={aiRepoTerm}
-                            onChange={(e) => setAiRepoTerm(e.target.value)}
-                          >
-                            <option value="all">All Terms (Full Year / Term 1, 2, 3)</option>
-                            <option value="Term 1">Term 1</option>
-                            <option value="Term 2">Term 2</option>
-                            <option value="Term 3">Term 3</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>Medium of Instruction</label>
-                          <select
-                            className="smm-modal-select"
-                            value={aiRepoMedium}
-                            onChange={(e) => setAiRepoMedium(e.target.value)}
-                          >
-                            <option value="all">All Mediums (English & Tamil)</option>
-                            <option value="English">English Medium</option>
-                            <option value="Tamil">Tamil Medium (தமிழ்)</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Textbook Selector Dropdown */}
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                          <label style={{ margin: 0, fontWeight: 600, color: '#f1f5f9' }}>
-                            Select Samacheer Kalvi Textbook PDF *
-                          </label>
-                          <span style={{ fontSize: '0.75rem', color: '#38bdf8' }}>
-                            {isLoadingAiRepo ? 'Scanning repository...' : `${aiRepoTextbooks.length} matching textbooks found`}
-                          </span>
-                        </div>
-                        <select
-                          className="smm-modal-select"
-                          value={selectedRepoBookId || ''}
-                          onChange={(e) => {
-                            const chosenId = Number(e.target.value);
-                            setSelectedRepoBookId(chosenId);
-                            const found = aiRepoTextbooks.find((b) => b.id === chosenId) || null;
-                            setSelectedRepoBook(found);
-                            setAiImportError(null);
-                          }}
-                          disabled={isLoadingAiRepo}
-                        >
-                          {isLoadingAiRepo ? (
-                            <option value="">Loading textbook repository...</option>
-                          ) : aiRepoTextbooks.length === 0 ? (
-                            <option value="">No textbooks found matching selected filters</option>
-                          ) : (
-                            aiRepoTextbooks.map((tb) => (
-                              <option key={tb.id} value={tb.id}>
-                                {tb.standardDisplay} – {tb.bookName} ({tb.medium} Medium • {tb.term})
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </div>
-
-                      {/* Selected Textbook Preview Card */}
-                      {selectedRepoBook && (
-                        <div className="smm-tb-repo-card">
-                          <div className="smm-tb-card-header">
-                            <span className="smm-tb-card-title">
-                              <BookOpen size={16} className="text-purple" />
-                              <span>{selectedRepoBook.bookName}</span>
-                            </span>
-                            <span className="smm-tb-badge drive" title="Google Drive Cloud Reference">
-                              <CheckCircle2 size={12} />
-                              <span>Google Drive Verified</span>
-                            </span>
-                          </div>
-
-                          <div className="smm-tb-badges-row">
-                            <span className="smm-tb-badge std">{selectedRepoBook.standardDisplay}</span>
-                            <span className="smm-tb-badge medium">{selectedRepoBook.medium} Medium</span>
-                            <span className="smm-tb-badge term">{selectedRepoBook.term}</span>
-                            <span className="smm-tb-badge pages">{selectedRepoBook.totalPages} Pages</span>
-                            <span className="smm-tb-badge pages">{selectedRepoBook.fileSizeFormatted}</span>
-                            {selectedRepoBook.hasExtractedToc && (
-                              <span className="smm-tb-badge drive" title="Table of Contents Pre-Indexed">
-                                ⚡ TOC Indexed
-                              </span>
-                            )}
-                            {selectedRepoBook.hasExtractedPages && (
-                              <span className="smm-tb-badge drive" title="Page-by-page text pre-extracted">
-                                📄 Full Text Cached
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Extraction Mode Radio Selector */}
-                          <div style={{ marginTop: '0.4rem' }}>
-                            <label style={{ fontSize: '0.78rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '0.4rem', display: 'block' }}>
-                              Extraction & Analysis Mode
-                            </label>
-                            <div className="smm-tb-mode-group">
-                              <div
-                                className={`smm-tb-mode-card ${aiExtractionMode === 'fast_toc' ? 'selected' : ''}`}
-                                onClick={() => setAiExtractionMode('fast_toc')}
-                              >
-                                <div className="smm-tb-mode-content">
-                                  <div className="smm-tb-mode-title">⚡ Instant TOC Extraction</div>
-                                  <div className="smm-tb-mode-desc">
-                                    Instant extraction from official Table of Contents with page ranges. Recommended & fastest.
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div
-                                className={`smm-tb-mode-card ${aiExtractionMode === 'deep_text' ? 'selected' : ''}`}
-                                onClick={() => setAiExtractionMode('deep_text')}
-                              >
-                                <div className="smm-tb-mode-content">
-                                  <div className="smm-tb-mode-title">🧠 Deep Content Analysis</div>
-                                  <div className="smm-tb-mode-desc">
-                                    Analyzes pre-extracted full text pages to generate rich topics and subtopics for each lesson.
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div
-                                className={`smm-tb-mode-card ${aiExtractionMode === 'ocr_fallback' ? 'selected' : ''}`}
-                                onClick={() => setAiExtractionMode('ocr_fallback')}
-                              >
-                                <div className="smm-tb-mode-content">
-                                  <div className="smm-tb-mode-title">🔍 Full OCR / PDF Stream</div>
-                                  <div className="smm-tb-mode-desc">
-                                    Streams binary PDF directly from Google Drive for complete structural syllabus parsing.
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Zero matching books warning */}
-                      {!isLoadingAiRepo && aiRepoTextbooks.length === 0 && (
-                        <div className="smm-ai-warning-box">
-                          <div className="smm-ai-warning-header">
-                            <AlertTriangle size={15} />
-                            <span>No Matching Textbooks Found</span>
-                          </div>
-                          <div className="smm-ai-warning-sub">
-                            No uploaded textbooks match your current filter selection (Standard: {aiImportStandard === 'all' ? 'All' : `Class ${aiImportStandard}`}, Subject: {aiImportSubjectSlug}, Term: {aiRepoTerm}, Medium: {aiRepoMedium}). Try selecting "All Standards" or check Admin → Textbook Management to upload the textbook PDF.
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : aiImportInputMode === 'pdf' ? (
-                    /* Drag & Drop File Upload Area */
-                    <div>
-                      <label>Official TNPSC Syllabus PDF File *</label>
-                      <label
-                        htmlFor="smm-syllabus-file-input"
-                        className="smm-ai-upload-box"
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                            const f = e.dataTransfer.files[0];
-                            if (f.type === 'application/pdf' || f.name.endsWith('.pdf')) {
-                              setAiImportFile(f);
-                              setAiImportError(null);
-                            } else {
-                              setAiImportError('Please provide a valid PDF file.');
-                            }
-                          }
-                        }}
-                      >
-                        <UploadCloud size={38} className="smm-ai-upload-icon" />
-                        <div className="smm-ai-upload-title">
-                          {aiImportFile ? aiImportFile.name : 'Click to Browse or Drag & Drop Syllabus PDF'}
-                        </div>
-                        <div className="smm-ai-upload-sub">
-                          {aiImportFile
-                            ? `${(aiImportFile.size / (1024 * 1024)).toFixed(2)} MB PDF selected`
-                            : 'Supports official TNPSC notification & syllabus PDF files (up to 50MB)'}
-                        </div>
-                        <input
-                          id="smm-syllabus-file-input"
-                          type="file"
-                          accept="application/pdf"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              setAiImportFile(e.target.files[0]);
-                              setAiImportError(null);
-                            }
-                          }}
-                        />
-                      </label>
-
-                      {aiImportFile && (
-                        <div className="smm-ai-file-preview">
-                          <FileCheck size={18} className="text-emerald" />
-                          <span style={{ flex: 1, fontWeight: 600 }}>{aiImportFile.name}</span>
-                          <button
-                            type="button"
-                            className="smm-search-clear"
-                            onClick={() => setAiImportFile(null)}
-                            title="Remove file"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    /* Direct Text Paste Area */
-                    <div className="smm-ai-textarea-box">
-                      <div className="smm-ai-textarea-toolbar">
-                        <label style={{ margin: 0, fontWeight: 600, color: '#f1f5f9' }}>
-                          Paste TNPSC Syllabus Text *
-                        </label>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <button
-                            type="button"
-                            className="smm-btn-ghost sm"
-                            onClick={() => setAiImportPastedText(SAMPLE_TNPSC_SYLLABUS)}
-                            title="Insert sample TNPSC syllabus to preview"
-                          >
-                            <Sparkles size={12} className="text-amber" />
-                            <span>Insert Sample TNPSC Format</span>
-                          </button>
-                          {aiImportPastedText && (
-                            <button
-                              type="button"
-                              className="smm-btn-ghost sm"
-                              onClick={() => setAiImportPastedText('')}
-                              title="Clear text"
-                            >
-                              Clear
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <textarea
-                        className="smm-ai-textarea"
-                        rows={10}
-                        placeholder={`Paste syllabus text here...\n\nExample:\nUNIT-I: GENERAL SCIENCE\n(i) Scientific Knowledge and Scientific Temper - Power of Reasoning - Rote Learning vs Conceptual Learning...\n(ii) Nature of Universe - General Scientific Laws – Mechanics - Properties of Matter, Force, Motion and Energy...\n(iii) Elements and Compounds, Acids, Bases, Salts, Petroleum Products, Fertilizers, Pesticides.`}
-                        value={aiImportPastedText}
-                        onChange={(e) => {
-                          setAiImportPastedText(e.target.value);
-                          setAiImportError(null);
-                        }}
-                      />
-                      <div className="smm-ai-char-counter">
-                        <span>{aiImportPastedText.length} characters</span>
-                        {aiImportPastedText.trim().length >= 30 ? (
-                          <span style={{ color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                            <CheckCircle2 size={12} /> Ready for analysis
-                          </span>
-                        ) : (
-                          <span style={{ color: '#94a3b8' }}>Minimum 30 characters required</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* STEP 2: ANALYZING SPINNER */}
-              {aiImportStep === 'analyzing' && (
-                <div className="smm-ai-analyzing-wrap">
-                  <div className="smm-ai-spinner" />
-                  <div>
-                    <h4 style={{ margin: '0 0 0.4rem', color: '#f8fafc', fontSize: '1.1rem' }}>
-                      Analyzing & Structuring Syllabus...
-                    </h4>
-                    <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.86rem' }}>
-                      Extracting text, detecting units, identifying standard references, and organizing topics...
+                ) : deleteConfirm.type === 'unit' && deleteConfirm.dependencies ? (
+                  deleteConfirm.dependencies.lessons + deleteConfirm.dependencies.topics + deleteConfirm.dependencies.notes > 0 ? (
+                    <p className="smm-delete-warning">
+                      ⚠️ Only the selected Unit and its associated records will be deleted ({activeStdNumber ? `${activeStdNumber}th Standard only` : 'for this Group & Subject'}):{' '}
+                      <strong>{deleteConfirm.dependencies.lessons}</strong> lesson(s),{' '}
+                      <strong>{deleteConfirm.dependencies.topics}</strong> focus area(s) and{' '}
+                      <strong>{deleteConfirm.dependencies.notes}</strong> study note(s).
+                      {activeStdNumber
+                        ? ` Other Standards (${[6, 7, 8, 9, 10, 11, 12].filter((s) => s !== activeStdNumber).map((s) => `${s}th`).join(', ')}) will remain 100% untouched.`
+                        : ''}
                     </p>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 3: ADMIN REVIEW BEFORE PUBLISHING */}
-              {aiImportStep === 'review' && (
-                <div className="smm-ai-review-container">
-                  {/* Summary Bar */}
-                  <div className="smm-ai-summary-bar">
-                    <div className="smm-ai-stat-chip">
-                      <span className="smm-ai-stat-label">Exam</span>
-                      <span className="smm-ai-stat-value" style={{ color: '#ffd700' }}>
-                        {aiAnalysisResult?.exam_name || aiImportExamId.toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="smm-ai-stat-chip">
-                      <span className="smm-ai-stat-label">Subject</span>
-                      <span className="smm-ai-stat-value" style={{ color: '#38bdf8' }}>
-                        {aiAnalysisResult?.subject_name || 'General Studies'}
-                      </span>
-                    </div>
-                    <div className="smm-ai-stat-chip">
-                      <span className="smm-ai-stat-label">Total Units</span>
-                      <span className="smm-ai-stat-value" style={{ color: '#c084fc' }}>
-                        {editableUnits.length}
-                      </span>
-                    </div>
-                    <div className="smm-ai-stat-chip">
-                      <span className="smm-ai-stat-label">Total Lessons</span>
-                      <span className="smm-ai-stat-value">
-                        {editableUnits.reduce((acc, u) => acc + u.lessons.length, 0)}
-                      </span>
-                    </div>
-                    <div className="smm-ai-stat-chip">
-                      <span className="smm-ai-stat-label">Total Topics</span>
-                      <span className="smm-ai-stat-value">
-                        {editableUnits.reduce(
-                          (acc, u) => acc + u.lessons.reduce((lAcc, l) => lAcc + l.topics.length, 0),
-                          0
-                        )}
-                      </span>
-                    </div>
-                    <div className="smm-ai-stat-chip">
-                      <span className="smm-ai-stat-label">Engine</span>
-                      <span className="smm-ai-stat-value" style={{ fontSize: '0.82rem', color: '#10b981' }}>
-                        {aiAnalysisResult?.parsing_mode === 'ai_cloud' ? 'AI Cloud' : 'Structural Parser'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Overwrite Protection Banner if duplicates detected */}
-                  {aiAnalysisResult?.existing_comparison?.duplicate_units &&
-                    aiAnalysisResult.existing_comparison.duplicate_units.length > 0 && (
-                      <div className="smm-ai-warning-box">
-                        <div className="smm-ai-warning-header">
-                          <AlertTriangle size={16} />
-                          <span>Existing Syllabus Units Detected in {aiImportExamId.toUpperCase()}</span>
-                        </div>
-                        <div className="smm-ai-warning-sub">
-                          The database already has {aiAnalysisResult.existing_comparison.duplicate_units.length} units
-                          for this exam ({aiAnalysisResult.existing_comparison.duplicate_units.join(', ')}).
-                        </div>
-                        <label className="smm-ai-overwrite-toggle">
-                          <input
-                            type="checkbox"
-                            checked={overwriteExisting}
-                            onChange={(e) => setOverwriteExisting(e.target.checked)}
-                          />
-                          <span>
-                            <strong>Overwrite / Update existing units</strong> with extracted syllabus (uncheck to
-                            append as additional units)
-                          </span>
-                        </label>
-                      </div>
-                    )}
-
-                  {/* Editable Units & Topics Tree with Bulk & Individual Selection Toolbar */}
-                  <div className="smm-ai-review-toolbar">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <label
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.45rem',
-                          cursor: 'pointer',
-                          fontSize: '0.82rem',
-                          fontWeight: 600,
-                          color: '#f1f5f9',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={
-                            editableUnits.length > 0 &&
-                            editableUnits.every((u) => u.selected_for_publish !== false)
-                          }
-                          onChange={(e) => handleToggleSelectAll(e.target.checked)}
-                          style={{ accentColor: '#ffd700', width: '15px', height: '15px', cursor: 'pointer' }}
-                        />
-                        <span>Select All Units</span>
-                      </label>
-                      <span
-                        style={{
-                          fontSize: '0.78rem',
-                          color: '#38bdf8',
-                          background: 'rgba(56, 189, 248, 0.1)',
-                          padding: '0.15rem 0.55rem',
-                          borderRadius: '999px',
-                          border: '1px solid rgba(56, 189, 248, 0.25)',
-                        }}
-                      >
-                        {editableUnits.filter((u) => u.selected_for_publish !== false).length} of{' '}
-                        {editableUnits.length} Units Selected
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <button
-                        type="button"
-                        className="smm-btn-ghost sm"
-                        onClick={expandAllReview}
-                        title="Expand all units in review"
-                      >
-                        Expand All
-                      </button>
-                      <button
-                        type="button"
-                        className="smm-btn-ghost sm"
-                        onClick={collapseAllReview}
-                        title="Collapse all units in review"
-                      >
-                        Collapse All
-                      </button>
-                      <button
-                        type="button"
-                        className="smm-btn-ghost sm"
-                        onClick={addUnitDraft}
-                        title="Add a new custom Unit to this import draft"
-                      >
-                        <Plus size={12} />
-                        <span>Add Unit</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Class-wise Filter Tabs */}
-                  {(() => {
-                    const presentClasses = Array.from(
-                      new Set(editableUnits.map((u) => u.standard_number || 10))
-                    ).sort((a, b) => a - b);
-
-                    if (presentClasses.length <= 1 && aiImportStandard !== 'all') {
-                      return null;
-                    }
-
-                    return (
-                      <div className="smm-ai-class-tabs">
-                        <button
-                          type="button"
-                          className={`smm-ai-class-tab ${aiReviewSelectedClass === 'all' ? 'active' : ''}`}
-                          onClick={() => setAiReviewSelectedClass('all')}
-                        >
-                          <span>All Classes</span>
-                          <span className="smm-ai-class-count">{editableUnits.length}</span>
-                        </button>
-                        {presentClasses.map((cls) => {
-                          const count = editableUnits.filter((u) => (u.standard_number || 10) === cls).length;
-                          return (
-                            <button
-                              key={cls}
-                              type="button"
-                              className={`smm-ai-class-tab ${aiReviewSelectedClass === cls ? 'active' : ''}`}
-                              onClick={() => setAiReviewSelectedClass(cls)}
-                            >
-                              <span>Class {cls}</span>
-                              <span className="smm-ai-class-count">{count}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-
-                  <div className="smm-ai-table-header-row">
-                    <div className="smm-ai-th-select" title="Toggle Selection">
-                      <input
-                        type="checkbox"
-                        checked={editableUnits.length > 0 && editableUnits.every((u) => u.selected_for_publish !== false)}
-                        onChange={(e) => handleToggleSelectAll(e.target.checked)}
-                        title="Select/Deselect All Units"
-                        style={{ accentColor: '#ffd700', width: '15px', height: '15px', cursor: 'pointer' }}
-                      />
-                    </div>
-                    <div className="smm-ai-th-num">Import / Unit #</div>
-                    <div className="smm-ai-th-title">Unit Title & Scope</div>
-                    <div className="smm-ai-th-actions">Actions</div>
-                  </div>
-
-                  <div className="smm-ai-review-tree">
-                    {editableUnits.map((u, uIdx) => {
-                      if (aiReviewSelectedClass !== 'all' && (u.standard_number || 10) !== aiReviewSelectedClass) {
-                        return null;
-                      }
-                      const unitKey = getReviewUnitKey(u, uIdx);
-                      const isExpanded = expandedReviewUnits.has(unitKey);
-                      const isSelected = u.selected_for_publish !== false;
-                      return (
-                        <div
-                          key={unitKey}
-                          id={unitKey}
-                          className={`smm-ai-unit-accordion ${isExpanded ? 'is-expanded' : ''}`}
-                          style={{
-                            opacity: isSelected ? 1 : 0.65,
-                            borderLeft: isSelected
-                              ? '3px solid #c084fc'
-                              : '3px solid rgba(255, 255, 255, 0.15)',
-                          }}
-                        >
-                          <div
-                            className="smm-ai-unit-head"
-                            onClick={() => toggleReviewUnit(unitKey)}
-                          >
-                            <div className="smm-ai-unit-left" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => handleToggleSelectUnit(uIdx)}
-                                title="Check to include this unit in publish, uncheck to skip"
-                                style={{
-                                  accentColor: '#ffd700',
-                                  width: '16px',
-                                  height: '16px',
-                                  cursor: 'pointer',
-                                }}
-                              />
-                              <button
-                                type="button"
-                                className="smm-accordion-chevron"
-                                onClick={() => toggleReviewUnit(unitKey)}
-                                title={isExpanded ? 'Collapse Unit' : 'Expand Unit'}
-                              >
-                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                              </button>
-                              
-                              {/* Dedicated Generated / Import Number Column */}
-                              <div className="smm-ai-unit-num-wrap" title="Unit / Import Sequence Number">
-                                <span className="smm-ai-unit-num-prefix">Unit</span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="99"
-                                  className="smm-ai-unit-num-input"
-                                  value={u.unit_number || uIdx + 1}
-                                  onChange={(e) => {
-                                    const val = parseInt(e.target.value, 10) || (uIdx + 1);
-                                    updateUnitField(uIdx, 'unit_number', val);
-                                    updateUnitField(uIdx, 'unit_code', `Unit ${val}`);
-                                  }}
-                                  title="Edit Unit / Import Number"
-                                />
-                              </div>
-
-                              {/* Class and Term Badges */}
-                              <span className="smm-ai-class-badge" title="Standard / Class">
-                                Class {u.standard_number || 10}
-                              </span>
-                              {u.term && (
-                                <span className="smm-ai-term-badge" title="School Term">
-                                  {u.term}
-                                </span>
-                              )}
-
-                              <input
-                                type="text"
-                                className="smm-ai-inline-input"
-                                value={u.title}
-                                onChange={(e) => updateUnitField(uIdx, 'title', e.target.value)}
-                                placeholder="Unit Title"
-                              />
-                              {u.subject_name && (
-                                <span
-                                  style={{
-                                    fontSize: '0.72rem',
-                                    color: '#38bdf8',
-                                    background: 'rgba(56, 189, 248, 0.12)',
-                                    border: '1px solid rgba(56, 189, 248, 0.25)',
-                                    padding: '0.15rem 0.5rem',
-                                    borderRadius: '5px',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  {u.subject_name}
-                                </span>
-                              )}
-                            </div>
-                            <div
-                              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <button
-                                type="button"
-                                className="smm-btn-ghost sm"
-                                style={{
-                                  padding: '0.2rem 0.55rem',
-                                  fontSize: '0.75rem',
-                                  borderColor: 'rgba(16, 185, 129, 0.35)',
-                                  color: '#34d399',
-                                }}
-                                onClick={() => handlePublishApprovedSyllabus(u)}
-                                title="Approve and publish ONLY this unit to PostgreSQL immediately"
-                              >
-                                <Check size={11} />
-                                <span>Publish Unit</span>
-                              </button>
-                              <button
-                                type="button"
-                                className="smm-btn-mini-action"
-                                onClick={() => addLessonDraft(uIdx)}
-                                title="Add Lesson under this Unit"
-                              >
-                                <Plus size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                className="smm-btn-mini-action delete"
-                                onClick={() => removeUnitDraft(uIdx)}
-                                title="Remove Unit"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          </div>
-
-                          {isExpanded && (
-                            <div className="smm-ai-unit-body">
-                              {u.lessons.length > 0 && (
-                                <div className="smm-ai-lessons-header-bar">
-                                  <span style={{ width: '85px', textAlign: 'center' }}>Lesson #</span>
-                                  <span style={{ flex: 1, paddingLeft: '0.25rem' }}>Lesson Title</span>
-                                  <span style={{ width: '120px' }}>Standard</span>
-                                  <span style={{ width: '55px', textAlign: 'right' }}>Actions</span>
-                                </div>
-                              )}
-                              {u.lessons.map((lesson, lIdx) => (
-                                <div key={lIdx} className="smm-ai-lesson-card">
-                                  <div className="smm-ai-lesson-head">
-                                    <BookOpen size={13} className="text-amber" />
-                                    <input
-                                      type="text"
-                                      className="smm-ai-inline-input"
-                                      style={{ maxWidth: '85px', textAlign: 'center', fontWeight: 700 }}
-                                      value={lesson.lesson_number}
-                                      onChange={(e) =>
-                                        updateLessonField(uIdx, lIdx, 'lesson_number', e.target.value)
-                                      }
-                                      placeholder="Num"
-                                      title="Lesson Sequence Number"
-                                    />
-                                    <input
-                                      type="text"
-                                      className="smm-ai-inline-input"
-                                      value={lesson.title}
-                                      onChange={(e) => updateLessonField(uIdx, lIdx, 'title', e.target.value)}
-                                      placeholder="Lesson Title"
-                                    />
-                                    <select
-                                      className="smm-modal-select"
-                                      style={{
-                                        width: '120px',
-                                        padding: '0.3rem 0.5rem',
-                                        fontSize: '0.78rem',
-                                      }}
-                                      value={lesson.standard_number || 10}
-                                      onChange={(e) =>
-                                        updateLessonField(
-                                          uIdx,
-                                          lIdx,
-                                          'standard_number',
-                                          parseInt(e.target.value, 10)
-                                        )
-                                      }
-                                    >
-                                      {[6, 7, 8, 9, 10, 11, 12].map((std) => (
-                                        <option key={std} value={std}>
-                                          Class {std}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <button
-                                      type="button"
-                                      className="smm-btn-mini-action"
-                                      onClick={() => addTopicDraft(uIdx, lIdx)}
-                                      title="Add Topic under this Lesson"
-                                    >
-                                      <Plus size={11} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="smm-btn-mini-action delete"
-                                      onClick={() => removeLessonDraft(uIdx, lIdx)}
-                                      title="Remove Lesson"
-                                    >
-                                      <Trash2 size={11} />
-                                    </button>
-                                  </div>
-
-                                  {/* Topics under lesson */}
-                                  <div className="smm-ai-topics-list">
-                                    {lesson.topics.map((top, tIdx) => (
-                                      <div key={tIdx} className="smm-ai-topic-chip">
-                                        <input
-                                          type="text"
-                                          value={top.topic_name}
-                                          onChange={(e) =>
-                                            updateTopicDraft(uIdx, lIdx, tIdx, e.target.value)
-                                          }
-                                          placeholder="Topic name"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => removeTopicDraft(uIdx, lIdx, tIdx)}
-                                          title="Remove Topic"
-                                        >
-                                          <X size={12} />
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="smm-modal-footer">
-              {aiImportStep === 'upload' && (
-                <>
-                  <button
-                    type="button"
-                    className="smm-btn-ghost"
-                    onClick={() => setAiImportModalOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="smm-btn-ai-import"
-                    onClick={handleStartAnalysis}
-                    disabled={
-                      aiImportInputMode === 'pdf'
-                        ? !aiImportFile
-                        : aiImportPastedText.trim().length < 30
-                    }
-                  >
-                    <Sparkles size={15} />
-                    <span>Analyze & Extract Syllabus</span>
-                  </button>
-                </>
-              )}
-
-              {aiImportStep === 'review' && (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <button
-                      type="button"
-                      className="smm-btn-ghost"
-                      onClick={() => setAiImportStep('upload')}
-                      disabled={isPublishing}
-                    >
-                      <ArrowLeft size={14} />
-                      <span>Back to Upload</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="smm-btn-ghost"
-                      onClick={handleStartAnalysis}
-                      disabled={isPublishing}
-                      title="Re-run AI & Structural extraction on this PDF"
-                    >
-                      <RefreshCw size={13} />
-                      <span>Regenerate</span>
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <button
-                      type="button"
-                      className="smm-btn-ghost"
-                      onClick={() => setAiImportModalOpen(false)}
-                      disabled={isPublishing}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="smm-btn-primary highlight"
-                      onClick={() => handlePublishApprovedSyllabus()}
-                      disabled={
-                        isPublishing ||
-                        editableUnits.filter((u) => u.selected_for_publish !== false).length === 0
-                      }
-                    >
-                      {isPublishing ? (
-                        <>
-                          <RefreshCw size={14} className="spin-icon" />
-                          <span>Publishing to Database...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Check size={14} />
-                          <span>
-                            Approve & Publish Selected (
-                            {editableUnits.filter((u) => u.selected_for_publish !== false).length} Units)
-                          </span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </>
-              )}
+                  ) : (
+                    <p className="smm-delete-warning">
+                      ⚠️ Only the selected Unit and its associated records will be deleted. This unit currently has no lessons, focus areas or study notes in {activeStdLabel}.
+                    </p>
+                  )
+                ) : (
+                  <p className="smm-delete-warning">
+                    ⚠️ Only the selected {deleteConfirm.type === 'topic' ? 'Focus Area' : deleteConfirm.type} and its directly associated records under <strong>{activeExamName} → {activeSubjectName} → {activeStdLabel}</strong> will be deleted permanently from the database. Other Standards, Units, and Groups will not be affected.
+                  </p>
+                )}
+              </div>
+              <div className="smm-modal-footer">
+                <button
+                  type="button"
+                  className="smm-btn-ghost"
+                  onClick={closeDeleteConfirm}
+                  disabled={deleteConfirm.submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="smm-btn-danger"
+                  onClick={handleExecuteDelete}
+                  disabled={deleteConfirm.submitting || deleteConfirm.loadingDeps}
+                >
+                  {deleteConfirm.submitting ? <Loader2 size={14} className="spin-icon" /> : <Trash2 size={14} />}
+                  <span>{deleteConfirm.submitting ? 'Deleting...' : 'Yes, Delete Permanently'}</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+            {/* 8. 12-STEP AI SYLLABUS IMPORT WIZARD */}
+      <AiSyllabusImportWizard
+        isOpen={aiImportModalOpen}
+        onClose={() => setAiImportModalOpen(false)}
+        onPublished={() => {
+          setAiImportModalOpen(false);
+          fetchTree();
+          showToast('Syllabus imported and published successfully with safe merge!', 'success');
+        }}
+      />
+
     </div>
   );
 };

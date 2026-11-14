@@ -33,6 +33,8 @@ import {
 } from '../utils/bilingualSyllabus'
 import { translateQuestionItem } from '../utils/languageData'
 import { apiFetch } from '../utils/api'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
+import { compareLessons } from '../utils/naturalSort'
 import './Group1Lessons.css'
 
 const Group4Lessons = () => {
@@ -60,14 +62,17 @@ const Group4Lessons = () => {
   useScrollLock(Boolean(activeLesson))
 
   useEffect(() => {
+    let isCancelled = false
+
     const fetchDynamicContent = async () => {
-      if (!baseUnit) return
       try {
-        const [questionsRes, notesRes, unitsRes] = await Promise.allSettled([
+        const [questionsRes, notesRes, unitsRes, lessonsRes] = await Promise.allSettled([
           apiFetch(`/api/study-materials/questions?group=group4&subjectId=${activeSubjectId}&unitId=${parsedUnitId}&limit=500`),
           apiFetch(`/api/notes?category=group4_vao&unitId=${parsedUnitId}&limit=500`),
           apiFetch(`/api/study-management/units?examId=group4&subjectId=${activeSubjectId}`),
+          apiFetch(`/api/study-management/lessons?examId=group4&subjectId=${activeSubjectId}&unitNumber=${parsedUnitId}`),
         ])
+        if (isCancelled) return
 
         const dbQuestions: any[] = []
         if (questionsRes.status === 'fulfilled' && questionsRes.value.ok) {
@@ -96,24 +101,67 @@ const Group4Lessons = () => {
                 title: n.title || n.lessonTitle,
                 content: n.content,
                 lessonTitle: n.lessonTitle,
+                lessonId: n.lessonId,
               })
             })
           }
         }
 
-        const clonedUnit: any = JSON.parse(JSON.stringify(baseUnit))
+        const fallbackBase = baseUnit || {
+          id: parsedUnitId,
+          unitNumber: `Unit ${parsedUnitId}`,
+          title: `Unit ${parsedUnitId}`,
+          tamilTitle: `Unit ${parsedUnitId}`,
+          questionCount: 10,
+          standard: 'SSLC Standard',
+          officialTopics: [],
+          chapters: [],
+        }
+        const clonedUnit: any = JSON.parse(JSON.stringify(fallbackBase))
+
         if (unitsRes.status === 'fulfilled' && unitsRes.value.ok) {
           const udata = await unitsRes.value.json()
           if (udata.success && Array.isArray(udata.units)) {
-            const match = udata.units.find((u: any) => u.unit_number === parsedUnitId)
+            const match = udata.units.find((u: any) => Number(u.unit_number) === parsedUnitId)
             if (match) {
-              clonedUnit.title = match.title || clonedUnit.title
-              clonedUnit.tamilTitle = match.subject_name || clonedUnit.tamilTitle
+              const exactTitle = (match.title || clonedUnit.title).trim()
+              clonedUnit.title = exactTitle
+              clonedUnit.tamilTitle = exactTitle
               clonedUnit.unitNumber = match.unit_code || clonedUnit.unitNumber
               clonedUnit.questionCount = match.question_count || clonedUnit.questionCount
             }
           }
         }
+
+        if (lessonsRes.status === 'fulfilled' && lessonsRes.value.ok) {
+          const ldata = await lessonsRes.value.json()
+          if (ldata.success && Array.isArray(ldata.lessons) && ldata.lessons.length > 0) {
+            const sortedLessons = ldata.lessons.slice().sort(compareLessons)
+            const byStd = new Map<number, any[]>()
+            for (const l of sortedLessons) {
+              const std = Number(l.standard_number) || 6
+              if (!byStd.has(std)) byStd.set(std, [])
+              byStd.get(std)!.push(l)
+            }
+            const sortedStds = Array.from(byStd.keys()).sort((a, b) => a - b)
+            clonedUnit.chapters = sortedStds.map((std, idx) => ({
+              id: `db-ch-u${parsedUnitId}-s${std}`,
+              chapterNumber: idx + 1,
+              title: `Class ${std}th Standard Textbook Lessons`,
+              description: `Official Samacheer Kalvi Class ${std}th Standard lessons mapped to ${clonedUnit.title}.`,
+              lessons: byStd.get(std)!.map((l: any) => ({
+                id: l.id,
+                lessonNumber: l.lesson_number,
+                title: l.title,
+                duration: l.term || 'Term 1',
+                summary: l.description || `Samacheer Kalvi Class ${std}th Standard (${l.term || 'Term 1'})`,
+                studyNotes: [],
+                practiceQuestions: [],
+              })),
+            }))
+          }
+        }
+
         clonedUnit.chapters?.forEach((chapter: any) => {
           chapter.lessons?.forEach((lesson: any) => {
             const matchingDbQs = dbQuestions.filter((dq) => 
@@ -147,8 +195,17 @@ const Group4Lessons = () => {
         console.error('Failed to merge dynamic content:', err)
       }
     }
+
     fetchDynamicContent()
-  }, [baseUnit, parsedUnitId])
+    const unsubscribe = dynamicSyllabusService.subscribe(() => {
+      fetchDynamicContent()
+    })
+
+    return () => {
+      isCancelled = true
+      unsubscribe()
+    }
+  }, [baseUnit, activeSubjectId, parsedUnitId])
 
   if (!subject || !unit) {
     return (

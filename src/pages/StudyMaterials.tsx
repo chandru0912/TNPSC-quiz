@@ -69,8 +69,8 @@ const StudyMaterials = () => {
 
   const groups = [
     { id: 'group1' as const, name: isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1' },
-    { id: 'group2_2a' as const, name: isTamil ? 'TNPSC குரூப் 2, 2A' : 'TNPSC Group 2, 2A' },
-    { id: 'group4_vao' as const, name: isTamil ? 'TNPSC குரூப் 4 & VAO' : 'TNPSC Group 4' },
+    { id: 'group2_2a' as const, name: isTamil ? 'TNPSC குரூப் 2 & 2A' : 'TNPSC Group 2 & 2A' },
+    { id: 'group4_vao' as const, name: isTamil ? 'TNPSC குரூப் 4' : 'TNPSC Group 4' },
   ]
 
   const handleGroupChange = (group: GroupId) => {
@@ -115,10 +115,10 @@ const StudyMaterials = () => {
           if (apt > 0) next['g1-apt'] = apt
         }
         if (g2?.success && Array.isArray(g2.units)) {
-          const gs = g2.units.filter((u: any) => u.subject_id === 'general-studies' || u.subject_id === 'group2-general-studies').length
-          const apt = g2.units.filter((u: any) => u.subject_id === 'aptitude' || u.subject_id === 'group2-aptitude').length
-          const en = g2.units.filter((u: any) => u.subject_id === 'general-english' || u.subject_id === 'group2-general-english').length
-          const ta = g2.units.filter((u: any) => u.subject_id === 'general-tamil' || u.subject_id === 'group2-general-tamil').length
+          const gs = g2.units.filter((u: any) => u.subject_id === 'general-studies' || u.subject_id === 'group2-general-studies' || u.subject_id === 'group2a-general-studies').length
+          const apt = g2.units.filter((u: any) => u.subject_id === 'aptitude' || u.subject_id === 'group2-aptitude' || u.subject_id === 'group2a-aptitude').length
+          const en = g2.units.filter((u: any) => u.subject_id === 'general-english' || u.subject_id === 'group2-general-english' || u.subject_id === 'group2a-general-english').length
+          const ta = g2.units.filter((u: any) => u.subject_id === 'general-tamil' || u.subject_id === 'group2-general-tamil' || u.subject_id === 'group2a-general-tamil').length
           if (gs > 0) next['g2-gs'] = gs
           if (apt > 0) next['g2-apt'] = apt
           if (en > 0) next['g2-en'] = en

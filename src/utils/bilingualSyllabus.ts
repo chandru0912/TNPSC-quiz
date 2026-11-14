@@ -1420,11 +1420,44 @@ export function translateClassTitle(classTitleOrId: string | number | undefined,
 
 /**
  * Translates General Studies Unit Titles
+ * Preserves custom Admin unit titles and non-General-Studies unit titles (e.g. General Tamil, General English, Aptitude).
  */
 export function translateUnitTitle(unitId: number | string | undefined, fallbackTitle: string, lang: Language): string {
   if (lang !== 'ta') return fallbackTitle
-  const id = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId
+  const trimmed = (fallbackTitle || '').trim()
 
+  // If the title already contains Tamil script, return it as-is (do not overwrite with General Studies titles)
+  if (/[\u0B80-\u0BFF]/.test(trimmed)) {
+    return trimmed
+  }
+
+  // Only translate known English General Studies / Aptitude canonical titles to Tamil;
+  // if the admin configured a custom unit title, preserve the admin's exact title.
+  const norm = trimmed.toLowerCase()
+  if (norm === 'general science') return 'பொது அறிவியல்'
+  if (norm === 'geography of india' || norm === 'geography') return 'இந்தியப் புவியியல்'
+  if (norm === 'history & culture of india and inm' || norm === 'history & culture of india' || norm === 'history and culture of india') {
+    return 'இந்தியாவின் வரலாறும் பண்பாடும்'
+  }
+  if (norm === 'indian polity') return 'இந்திய ஆட்சியியல்'
+  if (norm === 'indian economy & tn admin' || norm === 'indian economy') return 'இந்தியப் பொருளாதாரம்'
+  if (norm === 'indian national movement') return 'இந்திய தேசிய இயக்கம்'
+  if (
+    norm === 'history, culture & heritage of tamil nadu' ||
+    norm === 'history, culture, heritage & socio-political movements in tamil nadu'
+  ) {
+    return 'தமிழ்நாட்டின் வரலாறு, பண்பாடு, மரபு மற்றும் சமூக-அரசியல் இயக்கங்கள்'
+  }
+  if (norm === 'development administration in tamil nadu') return 'தமிழ்நாட்டில் வளர்ச்சி நிர்வாகம்'
+  if (norm === 'aptitude & mental ability' || norm === 'aptitude and mental ability') {
+    return 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்'
+  }
+
+  if (trimmed.length > 0) {
+    return trimmed
+  }
+
+  const id = typeof unitId === 'string' ? parseInt(unitId, 10) : unitId
   switch (id) {
     case 1:
       return 'பொது அறிவியல்'
@@ -1443,7 +1476,6 @@ export function translateUnitTitle(unitId: number | string | undefined, fallback
     case 8:
       return 'தமிழ்நாட்டில் வளர்ச்சி நிர்வாகம்'
     case 9:
-      return 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்'
     case 10:
       return 'திறனறிவும் மனக்கணக்கு நுண்ணறிவும்'
     default:
@@ -1452,21 +1484,28 @@ export function translateUnitTitle(unitId: number | string | undefined, fallback
 }
 
 /**
- * Translates Unit Number (e.g. "Unit 1" -> "அலகு 1", "Unit I" -> "அலகு 1")
+ * Translates Unit Number (e.g. "Unit 1" -> "அலகு 1", "Unit VII" -> "அலகு 7")
  */
 export function translateUnitNumber(unitNumber: string | number, lang: Language): string {
-  if (lang !== 'ta') return String(unitNumber)
-  const str = String(unitNumber)
+  const str = String(unitNumber || '').trim()
+  if (lang !== 'ta') return str
+  if (/[\u0B80-\u0BFF]/.test(str)) return str
+
   const numMatch = str.match(/\d+/)
   if (numMatch) {
     return `அலகு ${numMatch[0]}`
   }
-  if (str.includes('VI')) return 'அலகு 6'
-  if (str.includes('IV')) return 'அலகு 4'
-  if (str.includes('V')) return 'அலகு 5'
-  if (str.includes('III')) return 'அலகு 3'
-  if (str.includes('II')) return 'அலகு 2'
-  if (str.includes('I')) return 'அலகு 1'
+  // Check Roman numerals longest/most-specific first so VII is never matched by VI or I
+  if (/\bVIII\b/i.test(str)) return 'அலகு 8'
+  if (/\bVII\b/i.test(str)) return 'அலகு 7'
+  if (/\bVI\b/i.test(str)) return 'அலகு 6'
+  if (/\bIV\b/i.test(str)) return 'அலகு 4'
+  if (/\bIX\b/i.test(str)) return 'அலகு 9'
+  if (/\bX\b/i.test(str)) return 'அலகு 10'
+  if (/\bV\b/i.test(str)) return 'அலகு 5'
+  if (/\bIII\b/i.test(str)) return 'அலகு 3'
+  if (/\bII\b/i.test(str)) return 'அலகு 2'
+  if (/\bI\b/i.test(str)) return 'அலகு 1'
   return str.replace(/Unit/gi, 'அலகு')
 }
 

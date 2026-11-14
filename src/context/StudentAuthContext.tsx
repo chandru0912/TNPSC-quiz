@@ -7,6 +7,11 @@ export interface StudentUser {
   email: string
   mobile?: string | null
   targetGroup: string
+  avatarUrl?: string | null
+  authProvider?: string
+  emailVerified?: boolean
+  onboardingCompleted?: boolean
+  role?: string
   createdAt?: string
   isPreview?: boolean
 }
@@ -71,8 +76,21 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     localStorage.setItem(USER_KEY, JSON.stringify(newStudent))
   }, [])
 
-  // Standard student logout handler
+  // Standard student logout handler with server-side token revocation
   const logout = useCallback(() => {
+    const curToken = localStorage.getItem(TOKEN_KEY)
+    const isPrev = localStorage.getItem(PREVIEW_KEY) === 'true'
+    if (curToken && !isPrev) {
+      apiFetch('/api/student/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${curToken}`,
+        },
+        keepalive: true,
+      }).catch(() => {
+        // Best-effort server revocation; client session is always cleared
+      })
+    }
     localStorage.removeItem(PREVIEW_KEY)
     setIsPreviewMode(false)
     setToken(null)

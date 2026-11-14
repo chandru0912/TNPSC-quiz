@@ -57,6 +57,10 @@ const ScrollToTop = () => {
       if (mainContainer) {
         mainContainer.scrollTop = 0
       }
+      const studentViewport = document.querySelector('.student-dashboard-viewport')
+      if (studentViewport) {
+        studentViewport.scrollTop = 0
+      }
     }
 
     // 1. Immediate synchronous reset before paint

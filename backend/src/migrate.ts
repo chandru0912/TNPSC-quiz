@@ -794,6 +794,29 @@ export async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_students_last_login ON students (last_login_at);
       CREATE INDEX IF NOT EXISTS idx_students_is_active ON students (is_active);
 
+      -- 14. Google OAuth 2.0, Onboarding & Password Reset Support
+      ALTER TABLE students ALTER COLUMN password_hash DROP NOT NULL;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(30) NOT NULL DEFAULT 'email';
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS role VARCHAR(30) NOT NULL DEFAULT 'student';
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 1;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_students_google_id_unique ON students (google_id) WHERE google_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_students_auth_provider ON students (auth_provider);
+
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        token_hash VARCHAR(128) NOT NULL,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        used_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_password_reset_student ON password_reset_tokens (student_id);
+      CREATE INDEX IF NOT EXISTS idx_password_reset_hash ON password_reset_tokens (token_hash);
+
       CREATE TABLE IF NOT EXISTS visitor_sessions (
         id SERIAL PRIMARY KEY,
         session_id VARCHAR(64) UNIQUE NOT NULL,

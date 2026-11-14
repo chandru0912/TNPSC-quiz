@@ -21,6 +21,7 @@ import {
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
+import { compareLessons, compareTopics } from '../utils/naturalSort'
 
 export type GroupId = 'group1' | 'group2' | 'group2a' | 'group4'
 export type Language = 'tamil' | 'english'
@@ -231,7 +232,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
             classId: l.standard_number,
             topicsCount: l.topics_count || 0,
             topics: [],
-          }))
+          })).sort(compareLessons)
           setDynamicLessons(mapped)
 
           // If current lesson doesn't belong to this unit's lessons, auto-apply the first lesson
@@ -255,9 +256,9 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   // 5. Available lesson titles strictly from Study Notes Generation structure
   const availableLessons = useMemo(() => {
     if (dynamicLessons.length > 0) {
-      return dynamicLessons
+      return [...dynamicLessons].sort(compareLessons)
     }
-    return getLessonsForSelection(effectiveGroupId, subjectId, standard, Number(unitId), term)
+    return [...getLessonsForSelection(effectiveGroupId, subjectId, standard, Number(unitId), term)].sort(compareLessons)
   }, [dynamicLessons, effectiveGroupId, subjectId, standard, unitId, term])
 
   // 6. Currently selected Lesson object
@@ -278,7 +279,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
         .then((tList) => {
         if (!mounted || seq !== topicReqSeq.current) return
         if (tList.length > 0) {
-          const names = tList.map((t) => t.topic_name)
+          const names = [...tList].sort(compareTopics).map((t) => t.topic_name)
           setAvailableTopics(names)
           setSelectedTopics(names)
         } else {

@@ -29,6 +29,8 @@ import {
   type Group2Lesson,
 } from '../data/group2SyllabusData'
 import { standardClasses } from '../data/group2ClassSyllabusData'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
+import { compareLessons } from '../utils/naturalSort'
 import { useLanguage } from '../context/LanguageContext'
 import LanguageSwitch from '../components/LanguageSwitch'
 import {
@@ -63,39 +65,103 @@ const Group2UnitDetail = () => {
   const [unit, setUnit] = useState<Group2Unit | null>(staticUnit || null)
 
   useEffect(() => {
-    fetch(`/api/study-management/units?examId=group2&subjectId=${activeSubjectId}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success && Array.isArray(d.units)) {
-          const match = d.units.find((u: any) => u.unit_number === parsedUnitId)
-          if (match) {
-            setUnit((prev: Group2Unit | null) => {
-              if (prev) {
-                return {
-                  ...prev,
-                  title: match.title || prev.title,
-                  tamilTitle: match.subject_name || prev.tamilTitle,
-                  questionCount: match.question_count || prev.questionCount,
-                  unitNumber: match.unit_code || prev.unitNumber,
-                  officialTopics: match.description ? [match.description] : prev.officialTopics,
-                }
-              }
-              return {
-                id: match.unit_number,
-                unitNumber: match.unit_code || `Unit ${match.unit_number}`,
-                title: match.title,
-                tamilTitle: match.subject_name || match.title,
-                questionCount: match.question_count || 10,
-                standard: 'Degree Standard',
-                officialTopics: match.description ? [match.description] : [`Syllabus outline for ${match.title}`],
-                chapters: [],
-              }
-            })
+    let isCancelled = false
+
+    const loadUnitAndLessons = async () => {
+      try {
+        const [uRes, lRes] = await Promise.all([
+          fetch(`/api/study-management/units?examId=group2&subjectId=${activeSubjectId}`),
+          fetch(`/api/study-management/lessons?examId=group2&subjectId=${activeSubjectId}&unitNumber=${parsedUnitId}`),
+        ])
+        const uData = await uRes.json()
+        const lData = await lRes.json()
+        if (isCancelled) return
+
+        const match =
+          uData.success && Array.isArray(uData.units)
+            ? uData.units.find((u: any) => Number(u.unit_number) === parsedUnitId)
+            : null
+
+        const dbLessons: any[] =
+          lData.success && Array.isArray(lData.lessons)
+            ? lData.lessons.slice().sort(compareLessons)
+            : []
+
+        let dbChapters: Group2Chapter[] | null = null
+        if (dbLessons.length > 0) {
+          const byStd = new Map<number, any[]>()
+          for (const l of dbLessons) {
+            const std = Number(l.standard_number) || 6
+            if (!byStd.has(std)) byStd.set(std, [])
+            byStd.get(std)!.push(l)
           }
+          const sortedStds = Array.from(byStd.keys()).sort((a, b) => a - b)
+          dbChapters = sortedStds.map((std, idx) => {
+            const stdLessons = byStd.get(std)!
+            return {
+              id: `db-ch-u${parsedUnitId}-s${std}`,
+              chapterNumber: idx + 1,
+              title: `Class ${std}th Standard Textbook Lessons`,
+              description: `Official Samacheer Kalvi Class ${std}th Standard lessons mapped to ${match?.title || staticUnit?.title || `Unit ${parsedUnitId}`}.`,
+              lessons: stdLessons.map((l: any) => ({
+                id: l.id,
+                lessonNumber: l.lesson_number,
+                title: l.title,
+                duration: l.term || 'Term 1',
+                summary: l.description || `Samacheer Kalvi Class ${std}th Standard (${l.term || 'Term 1'})`,
+                keyConcepts: [],
+                studyNotes: [],
+                practiceQuestions: [],
+              })),
+            }
+          })
         }
-      })
-      .catch(() => {})
-  }, [activeSubjectId, parsedUnitId])
+
+        if (match || dbChapters) {
+          const base = staticUnit || {
+            id: parsedUnitId,
+            unitNumber: `Unit ${parsedUnitId}`,
+            title: `Unit ${parsedUnitId}`,
+            tamilTitle: `Unit ${parsedUnitId}`,
+            questionCount: 10,
+            standard: 'Degree Standard',
+            officialTopics: [],
+            chapters: [],
+          }
+          const exactTitle = (match?.title || base.title).trim()
+          const exactCode = (match?.unit_code || base.unitNumber).trim()
+          setUnit({
+            ...base,
+            id: parsedUnitId,
+            unitNumber: exactCode,
+            title: exactTitle,
+            tamilTitle: exactTitle,
+            questionCount: match?.question_count || base.questionCount,
+            officialTopics: match?.description
+              ? [match.description]
+              : base.officialTopics.length > 0
+              ? base.officialTopics
+              : [`Syllabus outline for ${exactTitle}`],
+            chapters: dbChapters || base.chapters,
+          })
+        } else {
+          setUnit(staticUnit || null)
+        }
+      } catch {
+        // Fallback to staticUnit if network fails
+      }
+    }
+
+    loadUnitAndLessons()
+    const unsubscribe = dynamicSyllabusService.subscribe(() => {
+      loadUnitAndLessons()
+    })
+
+    return () => {
+      isCancelled = true
+      unsubscribe()
+    }
+  }, [activeSubjectId, parsedUnitId, staticUnit])
 
   if (!subject || !unit) {
     return (

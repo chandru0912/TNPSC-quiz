@@ -12,6 +12,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors, { CorsOptions } from 'cors';
 import pool, { isProductionOrCloud } from './db';
 import { ensureDatabaseSchema } from './migrate';
+import { normalizePayloadUnicode } from './utils/tamilUnicode';
 import questionsRouter from './routes/questions';
 import authRouter, { getConfiguredAdminCount } from './routes/auth';
 import { generateAdminToken, verifyAdminToken } from './middleware/auth';
@@ -27,6 +28,8 @@ import driveRouter from './routes/drive';
 import studentRouter from './routes/student';
 import analyticsRouter from './routes/analyticsRoutes';
 import studyManagementRouter from './routes/studyMaterialsManagementRoutes';
+import aiSyllabusImportRouter from './routes/aiSyllabusImportRoutes';
+import { AISyllabusJobService } from './services/aiSyllabusJobService';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -109,6 +112,25 @@ const corsOptions: CorsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Ensure UTF-8 JSON charset and Unicode NFC normalization for all Tamil/English API payloads
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.body && typeof req.body === 'object') {
+    req.body = normalizePayloadUnicode(req.body);
+  }
+  if (req.query && typeof req.query === 'object') {
+    req.query = normalizePayloadUnicode(req.query);
+  }
+  const origJson = res.json.bind(res);
+  res.json = (body: any) => {
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    }
+    return origJson(body);
+  };
+  next();
+});
 
 // Safeguard: Normalize any accidental Vercel /dist/server.js prefix or edge rewrite routing
 app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -294,8 +316,7 @@ const requireSchemaMiddleware = async (_req: Request, _res: Response, next: Next
   }
 };
 
-app.use('/api/admin/analytics', requireSchemaMiddleware, analyticsRouter);
-app.use('/admin/analytics', requireSchemaMiddleware, analyticsRouter);
+app.use(['/api/admin/analytics', '/admin/analytics', '/api/api/admin/analytics', '/api/admin/overview', '/admin/overview'], requireSchemaMiddleware, analyticsRouter);
 
 app.use('/api/admin', authRouter);
 app.use('/admin', authRouter);
@@ -345,10 +366,9 @@ app.use('/api/student', requireSchemaMiddleware, studentRouter);
 app.use('/student', requireSchemaMiddleware, studentRouter);
 app.use('/api/api/student', requireSchemaMiddleware, studentRouter);
 
-app.use('/api/analytics', requireSchemaMiddleware, analyticsRouter);
-app.use('/analytics', requireSchemaMiddleware, analyticsRouter);
-app.use('/api/api/analytics', requireSchemaMiddleware, analyticsRouter);
+app.use(['/api/analytics', '/analytics', '/api/api/analytics', '/api/overview', '/overview'], requireSchemaMiddleware, analyticsRouter);
 
+app.use(['/api/study-management/ai-import', '/study-management/ai-import', '/api/api/study-management/ai-import'], requireSchemaMiddleware, aiSyllabusImportRouter);
 app.use('/api/study-management', requireSchemaMiddleware, studyManagementRouter);
 app.use('/study-management', requireSchemaMiddleware, studyManagementRouter);
 app.use('/api/api/study-management', requireSchemaMiddleware, studyManagementRouter);
@@ -497,9 +517,15 @@ process.on('uncaughtException', (err: any) => {
 });
 
 if (!process.env.VERCEL) {
-  ensureDatabaseSchema().catch((err) => {
-    console.warn('[Server Startup] Schema check warning:', err?.message || err);
-  });
+  ensureDatabaseSchema()
+    .then(() => {
+      AISyllabusJobService.recoverOrphanedJobs().catch((err) => {
+        console.warn('[Server Startup] Job recovery warning:', err?.message || err);
+      });
+    })
+    .catch((err) => {
+      console.warn('[Server Startup] Schema check warning:', err?.message || err);
+    });
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

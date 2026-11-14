@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import DateCalendarPopover from '../components/DateCalendarPopover'
 import {
-  LayoutDashboard,
   BookOpen,
   ListChecks,
   FileText,
@@ -18,19 +17,12 @@ import {
   CheckCircle2,
   Circle,
   ChevronRight,
-  Menu,
-  X,
-  ArrowLeft,
-  Sparkles,
   BarChart3,
   Zap,
   AlertTriangle,
   RotateCcw,
-  LogOut,
-  User,
 } from 'lucide-react'
 import './Dashboard.css'
-import { useScrollLock } from '../hooks/useScrollLock'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { apiFetch } from '../utils/api'
@@ -149,7 +141,7 @@ const defaultDashboardData: DashboardData = {
 }
 
 const Dashboard = () => {
-  const { student, token, isAuthenticated, logout } = useStudentAuth()
+  const { student, token } = useStudentAuth()
 
   // Track active study time automatically in real-time
   useStudyTimeTracker()
@@ -163,10 +155,6 @@ const Dashboard = () => {
     }
     return null
   })
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-
-  // Lock background scroll when mobile sidebar drawer is open
-  useScrollLock(sidebarOpen)
 
   // Fetch live dashboard statistics from PostgreSQL backend
   const fetchDashboardStats = useCallback(async (silent = false) => {
@@ -211,18 +199,11 @@ const Dashboard = () => {
   const userGroup =
     student?.targetGroup === 'group1'
       ? 'Group 1 Aspirant'
-      : student?.targetGroup === 'group2'
-        ? 'Group 2 & 2A Aspirant'
-        : 'Group 4 & VAO Aspirant'
-
-  const sidebarLinks = [
-    { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
-    { label: 'Study Materials', to: '/materials', icon: BookOpen },
-    { label: 'Lesson-wise Questions', to: '/school-materials', icon: ListChecks },
-    { label: 'MCQ Practice', to: '/practice', icon: FileText },
-    { label: 'Mock Tests', to: '/mock-tests', icon: GraduationCap },
-    { label: 'Previous Year Questions', to: '/previous-papers', icon: Archive },
-  ]
+      : student?.targetGroup === 'group2a'
+        ? 'Group 2A Aspirant'
+        : student?.targetGroup === 'group2'
+          ? 'Group 2 & 2A Aspirant'
+          : 'Group 4 & VAO Aspirant'
 
   const featureCards = [
     {
@@ -263,9 +244,16 @@ const Dashboard = () => {
     {
       title: 'Progress Tracker',
       description: 'See accuracy, streaks and weak areas.',
-      to: '/dashboard',
+      to: '/progress-tracker',
       icon: TrendingUp,
       meta: 'Updated live',
+    },
+    {
+      title: 'Mark List',
+      description: 'Exam scorecards, marks obtained & evaluation.',
+      to: '/mark-list',
+      icon: Award,
+      meta: 'All Assessments',
     },
   ]
 
@@ -275,127 +263,9 @@ const Dashboard = () => {
   const ringRadius = 52
   const ringCircumference = 2 * Math.PI * ringRadius
 
-  const sidebarContent = (
-    <>
-      <div className="sidebar-brand">
-        <div className="sidebar-brand-mark">
-          <Sparkles size={20} />
-        </div>
-        <div className="sidebar-brand-text">
-          <span className="sidebar-brand-title">Study Hub</span>
-          <span className="sidebar-brand-sub">TNPSC Premium</span>
-        </div>
-        <button
-          type="button"
-          className="sidebar-close"
-          onClick={() => setSidebarOpen(false)}
-          aria-label="Close sidebar"
-        >
-          <X size={20} />
-        </button>
-      </div>
-
-      <div className="sidebar-profile">
-        <div className="sidebar-avatar">{userName.charAt(0).toUpperCase()}</div>
-        <div className="sidebar-profile-info">
-          <span className="sidebar-profile-name">{userName}</span>
-          <span className="sidebar-profile-role">{userGroup}</span>
-        </div>
-      </div>
-
-      <nav className="sidebar-nav" aria-label="Dashboard navigation">
-        <span className="sidebar-nav-label">Learn</span>
-        {sidebarLinks.map((link) => {
-          const Icon = link.icon
-          const active = link.to === '/dashboard'
-          return (
-            <Link
-              key={link.label}
-              to={link.to}
-              className={`sidebar-link ${active ? 'active' : ''}`}
-              onClick={() => setSidebarOpen(false)}
-            >
-              <Icon size={18} />
-              <span>{link.label}</span>
-              {active && <span className="sidebar-link-dot" />}
-            </Link>
-          )
-        })}
-      </nav>
-
-      <div className="sidebar-streak">
-        <div className="sidebar-streak-icon">
-          <Flame size={18} />
-        </div>
-        <div>
-          <div className="sidebar-streak-value">
-            {data.metrics.currentStreak} day streak
-          </div>
-          <div className="sidebar-streak-text">
-            {data.metrics.currentStreak > 0
-              ? 'Keep the momentum going'
-              : 'Complete an activity today to start your streak'}
-          </div>
-        </div>
-      </div>
-
-      {isAuthenticated ? (
-        <button
-          type="button"
-          onClick={() => {
-            logout()
-            setSidebarOpen(false)
-          }}
-          className="sidebar-home"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#f87171' }}
-        >
-          <LogOut size={16} />
-          <span>Logout</span>
-        </button>
-      ) : (
-        <Link to="/login" className="sidebar-home" onClick={() => setSidebarOpen(false)}>
-          <User size={16} />
-          <span>Sign In / Register</span>
-        </Link>
-      )}
-
-      <Link to="/" className="sidebar-home" onClick={() => setSidebarOpen(false)}>
-        <ArrowLeft size={16} />
-        <span>Back to Home</span>
-      </Link>
-    </>
-  )
-
   return (
-    <div className="dashboard-shell">
-      {/* Desktop sidebar */}
-      <aside className="dashboard-sidebar glass">{sidebarContent}</aside>
-
-      {/* Mobile sidebar drawer */}
-      <AnimatePresence>
-        {sidebarOpen && (
-          <>
-            <motion.div
-              className="sidebar-overlay"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSidebarOpen(false)}
-            />
-            <motion.aside
-              className="dashboard-sidebar sidebar-mobile glass"
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'tween', duration: 0.25 }}
-            >
-              {sidebarContent}
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
-
-      <div className="dashboard-content">
+    <div className="dashboard-shell dashboard-shell-viewport">
+      <div className="dashboard-content dashboard-content-viewport">
         {/* Header */}
         <motion.header
           className="dash-header"
@@ -404,19 +274,11 @@ const Dashboard = () => {
           transition={{ duration: 0.5 }}
         >
           <div className="dash-header-left">
-            <button
-              type="button"
-              className="dash-menu-btn"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open sidebar"
-            >
-              <Menu size={20} />
-            </button>
             <div>
               <p className="dash-eyebrow">Study Dashboard</p>
               <h1 className="dash-title">My Dashboard</h1>
               <p className="dash-subtitle">
-                Welcome back, <span className="dash-user-highlight">{userName}</span> • Your TNPSC preparation, tracked live.
+                Welcome back, <span className="dash-user-highlight">{userName}</span> ({userGroup}) • Your TNPSC preparation, tracked live.
               </p>
             </div>
           </div>

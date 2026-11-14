@@ -8,21 +8,27 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 0 24px;
   position: sticky;
   top: 0;
   z-index: 50;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .top-header-left {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
+  flex: 1;
 }
 
 .mobile-hamburger-btn {
   display: none;
+  flex-shrink: 0;
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #f1f5f9;
@@ -41,6 +47,8 @@
   align-items: center;
   gap: 8px;
   font-size: 0.85rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .crumb-root {
@@ -67,12 +75,17 @@
 .crumb-current {
   color: #f1f5f9;
   font-weight: 600;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .top-header-right {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 /* Live Status Pill */
@@ -247,7 +260,7 @@
   }
 
   .admin-enterprise-top-header {
-    padding: 0 16px;
+    padding: 0 20px;
   }
 
   .header-breadcrumbs .crumb-root,
@@ -260,7 +273,26 @@
   }
 }
 
+@media (max-width: 768px) {
+  .admin-enterprise-top-header {
+    padding: 0 16px;
+  }
+}
+
 @media (max-width: 640px) {
+  .top-header-left {
+    gap: 10px;
+  }
+
+  .header-breadcrumbs .crumb-group,
+  .header-breadcrumbs .crumb-separator {
+    display: none;
+  }
+
+  .top-header-right {
+    gap: 8px;
+  }
+
   .admin-profile-meta {
     display: none;
   }

@@ -235,3 +235,85 @@
   color: #a5b4fc;
 }
 
+/* ==========================================================================
+   8. Global Tamil Mode & Bilingual Script Protection (Desktop, Tablet & Mobile)
+   Prevents positive letter-spacing from breaking Tamil ligatures & vowel signs
+   across Dashboard, Study Materials, MCQ Practice, Mock Tests, PYQs & Admin.
+   ========================================================================== */
+
+html[lang="ta"],
+html[lang="ta"] body,
+:lang(ta),
+.tamil-text {
+  font-family: 'Noto Sans Tamil', 'Noto Serif Tamil', 'Nirmala UI', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  letter-spacing: normal !important;
+  word-spacing: normal;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+}
+
+html[lang="ta"] * {
+  letter-spacing: normal !important;
+}
+
+html[lang="ta"] p,
+html[lang="ta"] li,
+html[lang="ta"] td,
+html[lang="ta"] th,
+html[lang="ta"] label,
+html[lang="ta"] button,
+html[lang="ta"] .btn,
+.tamil-text {
+  line-height: 1.75;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* Admin & Student Inputs / Textareas / ContentEditable: protect Tamil diacritic shaping */
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  font-family: 'Noto Sans Tamil', 'Noto Serif Tamil', 'Nirmala UI', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: normal;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+}
+
+textarea,
+[contenteditable="true"] {
+  line-height: 1.75;
+}
+
+/* Responsive Tamil Typography for Mobile & Tablet */
+@media (max-width: 768px) {
+  .tamil-notes-renderer,
+  .tamil-text-container {
+    line-height: 1.8 !important;
+    font-size: 0.96rem;
+  }
+
+  .tamil-heading-l1 {
+    font-size: 1.25rem;
+    line-height: 1.5;
+  }
+
+  .tamil-heading-l2 {
+    font-size: 1.1rem;
+    line-height: 1.55;
+  }
+
+  .tamil-paragraph,
+  .tamil-list-text {
+    font-size: 0.95rem;
+    line-height: 1.8;
+  }
+
+  .tamil-markdown-table th,
+  .tamil-markdown-table td {
+    padding: 0.65rem 0.75rem;
+    font-size: 0.86rem;
+    white-space: normal;
+  }
+}
+

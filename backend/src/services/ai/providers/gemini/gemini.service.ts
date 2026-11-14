@@ -19,6 +19,7 @@ import {
   persistGeminiEnv,
 } from './gemini.config';
 import { parseGeminiJsonResponse, classifyGeminiError } from './gemini.validator';
+import { GeminiRetryService } from './geminiRetryService';
 import pool from '../../../../db';
 
 export class GeminiProviderService implements IAIProvider {
@@ -116,13 +117,18 @@ export class GeminiProviderService implements IAIProvider {
     } catch (err: any) {
       const latencyMs = Date.now() - start;
       const classified = classifyGeminiError(err);
+      const mappedErrorType =
+        classified.errorType === 'service_unavailable' || classified.errorType === 'timeout'
+          ? 'network_error'
+          : classified.errorType;
+
       return {
         success: false,
         status: 'FAILED',
         provider: 'Google Gemini',
         model,
         message: classified.message,
-        errorType: classified.errorType,
+        errorType: mappedErrorType as any,
         latencyMs,
       };
     }
@@ -166,43 +172,69 @@ export class GeminiProviderService implements IAIProvider {
       throw new Error('Google Gemini API key is missing. Set GEMINI_API_KEY in the environment or Admin Settings.');
     }
 
+    let primaryModel = getGeminiModel();
     try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      let model = getGeminiModel();
-      try {
-        const dbRes = await pool.query('SELECT model FROM ai_provider_configs WHERE provider = $1', ['gemini']);
-        if (dbRes.rows[0]?.model) model = dbRes.rows[0].model;
-      } catch {}
+      const dbRes = await pool.query('SELECT model FROM ai_provider_configs WHERE provider = $1', ['gemini']);
+      if (dbRes.rows[0]?.model) primaryModel = dbRes.rows[0].model;
+    } catch {}
 
-      const modelConfig: any = {
-        model,
-        generationConfig: {
-          temperature: options?.temperature !== undefined ? options.temperature : 0.4,
-          maxOutputTokens: options?.maxTokens || 4096,
-        },
-      };
+    const genAI = new GoogleGenerativeAI(apiKey);
 
-      if (options?.systemPrompt) {
-        modelConfig.systemInstruction = options.systemPrompt;
+    const execResult = await GeminiRetryService.executeWithRetryAndFallback<string>(
+      async (currentModel: string) => {
+        const modelConfig: any = {
+          model: currentModel,
+          generationConfig: {
+            temperature: options?.temperature !== undefined ? options.temperature : 0.4,
+            maxOutputTokens: options?.maxTokens || 8192,
+          },
+        };
+
+        if (options?.systemPrompt) {
+          modelConfig.systemInstruction = options.systemPrompt;
+        }
+
+        if (options?.responseFormat === 'json') {
+          modelConfig.generationConfig.responseMimeType = 'application/json';
+          if (options.responseSchema) {
+            modelConfig.generationConfig.responseSchema = options.responseSchema;
+          }
+        }
+
+        const geminiModel = genAI.getGenerativeModel(modelConfig);
+        const timeoutMs = 60000;
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          const timer = setTimeout(() => {
+            const tErr = new Error(`Google Gemini API request timed out after ${timeoutMs}ms on model "${currentModel}"`);
+            (tErr as any).statusCode = 504;
+            (tErr as any).errorType = 'timeout';
+            reject(tErr);
+          }, timeoutMs);
+          if (typeof (timer as any).unref === 'function') {
+            (timer as any).unref();
+          }
+        });
+
+        const result = (await Promise.race([
+          geminiModel.generateContent(prompt),
+          timeoutPromise,
+        ])) as any;
+
+        const text = result.response.text().trim();
+
+        if (!text) {
+          throw new Error('Received empty content from Google Gemini API.');
+        }
+
+        return text;
+      },
+      {
+        primaryModel,
       }
+    );
 
-      if (options?.responseFormat === 'json') {
-        modelConfig.generationConfig.responseMimeType = 'application/json';
-      }
-
-      const geminiModel = genAI.getGenerativeModel(modelConfig);
-      const result = await geminiModel.generateContent(prompt);
-      const text = result.response.text().trim();
-
-      if (!text) {
-        throw new Error('Received empty content from Google Gemini API.');
-      }
-
-      return text;
-    } catch (err: any) {
-      const classified = classifyGeminiError(err);
-      throw new Error(classified.message);
-    }
+    return execResult.data;
   }
 
   async generateJson<T>(prompt: string, options?: AICompletionOptions): Promise<T> {

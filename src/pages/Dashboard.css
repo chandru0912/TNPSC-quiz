@@ -17,6 +17,23 @@
   z-index: 2;
 }
 
+.dashboard-shell.dashboard-shell-viewport {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: none !important;
+  gap: 1.5rem;
+  box-sizing: border-box;
+}
+
+.dashboard-content.dashboard-content-viewport {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* ---------- Desktop Sidebar: Detached Floating Pill Dock ---------- */
 .dashboard-sidebar {
   position: sticky;

@@ -10,6 +10,7 @@ import {
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
 import { dynamicSyllabusService, type DynamicTopic } from '../services/dynamicSyllabusService'
+import { compareLessons } from '../utils/naturalSort'
 
 export type GroupFilterValue = 'all' | 'group1' | 'group2' | 'group4'
 
@@ -234,7 +235,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
             topicsCount: l.topics_count || 0,
             topics: [],
           }))
-          setDynamicLessons(mapped)
+          setDynamicLessons(mapped.sort(compareLessons))
 
           if (!allowAll) {
             setLessonTitle((prev) => {
@@ -259,7 +260,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
   // 4. Available lessons for selected Group, Subject, Standard, and Unit
   const availableLessons = useMemo(() => {
     if (dynamicLessons.length > 0) {
-      return dynamicLessons
+      return [...dynamicLessons].sort(compareLessons)
     }
     if (!allowAll) {
       return getLessonsForSelection(
@@ -267,7 +268,7 @@ export function useSyllabusCascade(options: UseSyllabusCascadeOptions = {}): Syl
         effectiveSubjectIdForCascade,
         currentClassId,
         currentUnitId
-      )
+      ).slice().sort(compareLessons)
     }
 
     // In filter mode (allowAll = true):

@@ -61,6 +61,7 @@ export interface AICompletionOptions {
   temperature?: number;
   maxTokens?: number;
   responseFormat?: 'json' | 'text';
+  responseSchema?: any;
   timeoutMs?: number;
   retryCount?: number;
 }

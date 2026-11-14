@@ -24,6 +24,7 @@ import {
   getTotalGSChapters,
 } from '../data/group1SyllabusData'
 import { standardClasses } from '../data/group1ClassSyllabusData'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { useLanguage } from '../context/LanguageContext'
 import LanguageSwitch from '../components/LanguageSwitch'
 import './Group1GeneralStudies.css'
@@ -44,40 +45,54 @@ const Group1GeneralStudies = () => {
 
   // Dynamically merge units from Study Materials Management database
   useEffect(() => {
-    fetch('/api/study-management/units?examId=group1&subjectId=general-studies')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.units) && data.units.length > 0) {
-          setUnits((prev) => {
-            const staticMap = new Map(prev.map((u) => [u.id, u]))
-            return data.units.map((u: any) => {
-              const existing = staticMap.get(u.unit_number)
-              if (existing) {
-                return {
-                  ...existing,
-                  title: u.title || existing.title,
-                  tamilTitle: u.subject_name || existing.tamilTitle,
-                  questionCount: u.question_count || existing.questionCount,
-                  unitNumber: u.unit_code || existing.unitNumber,
-                  officialSyllabusTopics: u.description ? [u.description] : existing.officialSyllabusTopics,
-                }
-              }
+    let isCancelled = false
+
+    const loadUnits = () => {
+      fetch('/api/study-management/units?examId=group1&subjectId=general-studies')
+        .then((res) => res.json())
+        .then((data) => {
+          if (isCancelled) return
+          if (data.success && Array.isArray(data.units) && data.units.length > 0) {
+            const staticMap = new Map(group1GeneralStudiesUnits.map((u) => [u.id, u]))
+            const mapped = data.units.map((u: any) => {
+              const existing = staticMap.get(Number(u.unit_number))
+              const exactTitle = (u.title || existing?.title || `Unit ${u.unit_number}`).trim()
+              const exactCode = (u.unit_code || existing?.unitNumber || `Unit ${u.unit_number}`).trim()
               return {
-                id: u.unit_number,
-                unitNumber: u.unit_code || `Unit ${u.unit_number}`,
-                title: u.title,
-                tamilTitle: u.subject_name || u.title,
-                questionCount: u.question_count || 20,
-                standard: 'Degree Standard',
-                color: '#3b82f6',
-                officialSyllabusTopics: u.description ? [u.description] : [`Syllabus outline for ${u.title}`],
-                chapters: [],
+                ...(existing || {
+                  id: Number(u.unit_number),
+                  standard: 'Degree Standard',
+                  color: '#3b82f6',
+                  chapters: [],
+                }),
+                id: Number(u.unit_number),
+                unitNumber: exactCode,
+                title: exactTitle,
+                tamilTitle: exactTitle,
+                questionCount: u.question_count || existing?.questionCount || 20,
+                officialSyllabusTopics: u.description
+                  ? [u.description]
+                  : existing?.officialSyllabusTopics || [`Syllabus outline for ${exactTitle}`],
+                dbLessonsCount: Number(u.lessons_count || 0),
               }
             })
-          })
-        }
-      })
-      .catch(() => {})
+            setUnits(mapped)
+          } else {
+            setUnits(group1GeneralStudiesUnits)
+          }
+        })
+        .catch(() => {})
+    }
+
+    loadUnits()
+    const unsubscribe = dynamicSyllabusService.subscribe(() => {
+      loadUnits()
+    })
+
+    return () => {
+      isCancelled = true
+      unsubscribe()
+    }
   }, [])
 
   const totalQuestions = getTotalGSQuestions() // 175
@@ -240,7 +255,7 @@ const Group1GeneralStudies = () => {
           {units.map((unit, index) => {
             const Icon = unitIcons[unit.id] || BookOpen
             const chapterCount = getUnitChapterCount(unit)
-            const lessonCount = getUnitLessonCount(unit)
+            const lessonCount = (unit as any).dbLessonsCount ?? getUnitLessonCount(unit)
 
             return (
               <motion.div
@@ -262,8 +277,10 @@ const Group1GeneralStudies = () => {
                     <Icon size={24} />
                   </div>
                   <div className="unit-title-group">
-                    <h2 className="unit-title">{isTamil && unit.tamilTitle ? unit.tamilTitle : unit.title}</h2>
-                    {unit.tamilTitle && <span className="unit-tamil-title">{isTamil ? unit.title : unit.tamilTitle}</span>}
+                    <h2 className="unit-title">{unit.title}</h2>
+                    {unit.tamilTitle && unit.tamilTitle !== unit.title && (
+                      <span className="unit-tamil-title">{unit.tamilTitle}</span>
+                    )}
                   </div>
                 </div>
 

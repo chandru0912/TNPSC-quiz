@@ -102,6 +102,32 @@ export async function ensureSyllabusMappingSchema(): Promise<void> {
         ON syllabus_validation_reports (exam_id, unit_number);
     `);
 
+    // 5. Strict Syllabus Textbook Mappings (Full Traceability per Section 9 of Master Spec)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS syllabus_textbook_mappings (
+        id SERIAL PRIMARY KEY,
+        tnpsc_group VARCHAR(50) NOT NULL,
+        subject VARCHAR(100) NOT NULL,
+        tnpsc_unit VARCHAR(100) NOT NULL,
+        standard INT NOT NULL,
+        textbook_id INT,
+        textbook_unit_number VARCHAR(50),
+        textbook_unit_title TEXT,
+        lesson_number VARCHAR(50) NOT NULL,
+        lesson_title TEXT NOT NULL,
+        matched_topics JSONB DEFAULT '[]'::jsonb,
+        syllabus_reference TEXT,
+        textbook_page_reference TEXT,
+        mapping_status VARCHAR(50) NOT NULL DEFAULT 'FULLY MAPPED',
+        verification_status VARCHAR(50) NOT NULL DEFAULT 'VERIFIED',
+        import_batch_id VARCHAR(100),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_syllabus_textbook_mappings_dedupe
+        ON syllabus_textbook_mappings (tnpsc_group, subject, tnpsc_unit, standard, lesson_number, lesson_title);
+    `);
+
     await client.query('COMMIT');
     console.log('[SyllabusMapping] Schema tables and indexes verified successfully.');
   } catch (err: any) {

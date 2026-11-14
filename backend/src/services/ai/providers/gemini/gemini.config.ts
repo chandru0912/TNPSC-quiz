@@ -6,32 +6,51 @@
 import fs from 'fs';
 import path from 'path';
 
-export const GEMINI_DEFAULT_MODEL = 'gemini-3.8-flash';
+export const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash';
 
 /**
- * Normalizes model aliases to valid Gemini model identifiers.
+ * Normalizes model aliases to valid, currently active Gemini model identifiers.
+ * Automatically maps deprecated models (1.5-flash, 2.0-flash, 2.5-flash) to the verified gemini-3.5-flash.
  */
 export function resolveGeminiModel(rawModel?: string): string {
   const model = String(rawModel || '').trim().toLowerCase();
   if (!model) return GEMINI_DEFAULT_MODEL;
 
+  // Active verified models
+  if (model === 'gemini-3.5' || model === 'gemini-3.5-flash') {
+    return 'gemini-3.5-flash';
+  }
+  if (model === 'gemini-3.5-flash-lite' || model === 'flash-lite') {
+    return 'gemini-3.5-flash-lite';
+  }
+  if (model === 'gemini-3.1-flash-lite') {
+    return 'gemini-3.1-flash-lite';
+  }
+  if (model === 'gemini-3.6' || model === 'gemini-3.6-flash') {
+    return 'gemini-3.6-flash';
+  }
+  if (model === 'gemini-flash-lite-latest') {
+    return 'gemini-flash-lite-latest';
+  }
   if (model === 'gemini-3.8' || model === 'gemini-3.8-flash') {
     return 'gemini-3.8-flash';
   }
-  if (model === 'gemini-3.5' || model === 'gemini-3.5-flash-lite') {
-    return 'gemini-3.5-flash-lite';
-  }
-  if (model === 'gemini-flash' || model === 'gemini-1.5-flash' || model === 'flash') {
-    return 'gemini-1.5-flash';
-  }
-  if (model === 'gemini-pro' || model === 'gemini-1.5-pro' || model === 'pro') {
-    return 'gemini-1.5-pro';
-  }
-  if (model === 'gemini-2.0-flash' || model === 'gemini-2-flash' || model === 'gemini-2.0') {
-    return 'gemini-2.0-flash';
-  }
-  if (model === 'gemini-2.5-flash') {
-    return 'gemini-2.5-flash';
+
+  // Deprecated models - auto-map to active gemini-3.5-flash
+  if (
+    model === 'gemini-flash' ||
+    model === 'gemini-1.5-flash' ||
+    model === 'flash' ||
+    model === 'gemini-pro' ||
+    model === 'gemini-1.5-pro' ||
+    model === 'pro' ||
+    model === 'gemini-2.0-flash' ||
+    model === 'gemini-2-flash' ||
+    model === 'gemini-2.0' ||
+    model === 'gemini-2.5-flash' ||
+    model === 'gemini-2.5-flash-lite'
+  ) {
+    return 'gemini-3.5-flash';
   }
 
   // If starts with "models/", strip it for SDK compatibility or keep base name
@@ -44,6 +63,26 @@ export function getGeminiApiKey(): string {
 
 export function getGeminiModel(): string {
   return resolveGeminiModel(process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL);
+}
+
+export const GEMINI_DEFAULT_FALLBACK_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3.6-flash',
+];
+
+export function getGeminiFallbackModels(): string[] {
+  const envVal = process.env.GEMINI_FALLBACK_MODELS;
+  if (envVal) {
+    const list = envVal
+      .split(',')
+      .map((m) => resolveGeminiModel(m.trim()))
+      .filter(Boolean);
+    if (list.length > 0) return list;
+  }
+  return GEMINI_DEFAULT_FALLBACK_MODELS;
 }
 
 export function maskGeminiApiKey(key?: string): string {

@@ -26,6 +26,9 @@ import StudyMaterialsPractice from './pages/StudyMaterialsPractice'
 import StudyNotesPage from './pages/StudyNotesPage'
 import MockTests from './pages/MockTests'
 import PreviousPapers from './pages/PreviousPapers'
+import MarkList from './pages/MarkList'
+import ProgressTracker from './pages/ProgressTracker'
+import StudentDashboardLayout from './layouts/StudentDashboardLayout'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Admin from './pages/Admin'
@@ -37,9 +40,23 @@ import './App.css'
 function AppShell() {
   const location = useLocation()
   const isAdmin = location.pathname.startsWith('/admin')
+  const isDashboardRoute =
+    !isAdmin &&
+    [
+      '/dashboard',
+      '/materials',
+      '/school-materials',
+      '/study-materials',
+      '/practice',
+      '/mock-tests',
+      '/previous-papers',
+      '/mark-list',
+      '/progress-tracker',
+      '/study-notes',
+    ].some((prefix) => location.pathname.startsWith(prefix))
 
   return (
-    <div className={`app ${isAdmin ? 'admin-app-mode' : ''}`}>
+    <div className={`app ${isAdmin ? 'admin-app-mode' : ''} ${isDashboardRoute ? 'student-dashboard-app-mode' : ''}`}>
       {/* Global SVG Definitions for 3D Volumetric Extrusion, Bevel & Gold Gradient */}
       <svg
         className="spatial-svg-defs"
@@ -98,36 +115,48 @@ function AppShell() {
       {!isAdmin && <StudentPreviewBanner />}
       <Navbar />
 
-      <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''}`}>
+      <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''} ${isDashboardRoute ? 'student-dashboard-main-mode' : ''}`}>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/materials" element={<StudyMaterials />} />
-          <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
-          <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
-          <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
-          <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
-          <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
-          <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
-          <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
-          <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
-          <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
-          <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
-          <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
-          <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
-          <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
-          <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
-          <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
-          <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
-          <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-          <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-          <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-          <Route path="/school-materials" element={<SchoolMaterials />} />
-          <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
-          <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
-          <Route path="/practice" element={<MCQPractice />} />
-          <Route path="/mock-tests" element={<MockTests />} />
-          <Route path="/previous-papers" element={<PreviousPapers />} />
+
+          {/* Persistent Global Student Dashboard Layout with Independent Dual Scroll */}
+          <Route element={<StudentDashboardLayout />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/materials" element={<StudyMaterials />} />
+            <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
+            <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
+            <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
+            <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+            <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
+            <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
+            <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
+            <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+            <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+            <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+            <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
+            <Route path="/materials/group2a/:subjectId" element={<Group2SubjectDetail />} />
+            <Route path="/materials/group2a/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+            <Route path="/materials/group2a/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+            <Route path="/materials/group2a/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+            <Route path="/materials/group2a/:subjectId/class/:classId" element={<Group2UnitClass />} />
+            <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
+            <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
+            <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
+            <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
+            <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
+            <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+            <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+            <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+            <Route path="/school-materials" element={<SchoolMaterials />} />
+            <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
+            <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
+            <Route path="/practice" element={<MCQPractice />} />
+            <Route path="/mock-tests" element={<MockTests />} />
+            <Route path="/previous-papers" element={<PreviousPapers />} />
+            <Route path="/mark-list" element={<MarkList />} />
+            <Route path="/progress-tracker" element={<ProgressTracker />} />
+          </Route>
+
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/admin" element={<Admin />} />
@@ -135,7 +164,7 @@ function AppShell() {
         </Routes>
       </main>
 
-      {!isAdmin && (
+      {!isAdmin && !isDashboardRoute && (
         <footer className="footer glass">
           <div className="footer-content">
             <div className="footer-brand">

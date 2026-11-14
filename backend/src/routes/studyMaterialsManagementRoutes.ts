@@ -1,27 +1,9 @@
 import { Router, Request, Response } from 'express';
-import multer from 'multer';
 import { StudyManagementService } from '../services/studyManagementService';
-import { AISyllabusImportService } from '../services/aiSyllabusImportService';
 import { TextbookAiLessonService } from '../services/textbookAiLessonService';
-import { SharedTextbookRepositoryService } from '../services/sharedTextbookRepositoryService';
 import { requireAdminAuth } from '../middleware/auth';
 
 const router = Router();
-
-// Configure memory storage for syllabus PDF uploads
-const syllabusUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max file size
-  },
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF files are supported for syllabus import.'));
-    }
-  },
-});
 
 // ===========================================================================
 // HIERARCHY TREE (Nested Units -> Lessons -> Topics -> Notes)
@@ -146,8 +128,40 @@ router.put('/subjects/:id', requireAdminAuth, async (req: Request, res: Response
 
 router.delete('/subjects/:id', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const ok = await StudyManagementService.deleteSubject(req.params.id);
+    const examId = req.query.examId ? String(req.query.examId) : req.body?.examId;
+    const ok = await StudyManagementService.deleteSubject(req.params.id, examId ? { examId } : undefined);
     return res.status(200).json({ success: ok });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// ===========================================================================
+// STANDARDS (Scoped Standard Content Deletion)
+// ===========================================================================
+router.delete('/standards/:standardId', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const standardNumber = parseInt(req.params.standardId, 10);
+    const examId = String(req.query.examId || req.body?.examId || '').trim();
+    const subjectId = req.query.subjectId
+      ? String(req.query.subjectId)
+      : req.body?.subjectId
+      ? String(req.body.subjectId)
+      : undefined;
+
+    if (!examId || !Number.isInteger(standardNumber)) {
+      return res.status(400).json({
+        success: false,
+        message: 'examId and a valid standardId (6 to 12) are required.',
+      });
+    }
+
+    const result = await StudyManagementService.deleteStandardContent({
+      examId,
+      subjectId,
+      standardNumber,
+    });
+    return res.status(200).json(result);
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -159,7 +173,7 @@ router.delete('/subjects/:id', requireAdminAuth, async (req: Request, res: Respo
 router.get('/units', async (req: Request, res: Response) => {
   try {
     const examId = String(req.query.examId || 'group1');
-    const subjectId = String(req.query.subjectId || 'general-studies');
+    const subjectId = String(req.query.subjectId || 'all');
     const standardId = req.query.standardId ? parseInt(String(req.query.standardId), 10) : undefined;
 
     const units = await StudyManagementService.getUnits(examId, subjectId, standardId);
@@ -208,12 +222,43 @@ router.get('/units/:id/dependencies', requireAdminAuth, async (req: Request, res
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ success: false, message: 'Invalid unit ID.' });
     }
-    const deps = await StudyManagementService.getUnitDependencies(id);
+    const examId = req.query.examId ? String(req.query.examId) : undefined;
+    const subjectId = req.query.subjectId ? String(req.query.subjectId) : undefined;
+    const rawStd = req.query.standardId ?? req.query.standardNumber;
+    const standardNumber =
+      rawStd != null && String(rawStd).trim() !== '' && String(rawStd) !== 'all' && !isNaN(Number(rawStd))
+        ? parseInt(String(rawStd), 10)
+        : null;
+
+    const deps = await StudyManagementService.getUnitDependencies(id, {
+      examId,
+      subjectId,
+      standardNumber,
+    });
     if (!deps.exists) {
       return res.status(404).json({ success: false, message: `Unit #${id} was not found.` });
     }
-    const { exists: _exists, ...dependencies } = deps;
-    return res.status(200).json({ success: true, dependencies });
+    if (deps.invalidOwnership) {
+      return res.status(400).json({ success: false, invalidOwnership: true, message: deps.ownershipError });
+    }
+    return res.status(200).json({
+      success: true,
+      dependencies: {
+        lessons: deps.lessons,
+        topics: deps.topics,
+        notes: deps.notes,
+        questions: deps.questions,
+      },
+      scope: {
+        unitId: deps.unit?.id,
+        examId: deps.unit?.exam_id,
+        subjectId: deps.unit?.subject_id,
+        standardNumber: deps.scopeStandard ?? null,
+        unitNumber: deps.unit?.unit_number,
+        unitCode: deps.unit?.unit_code,
+        unitTitle: deps.unit?.title,
+      },
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -223,12 +268,30 @@ router.delete('/units/:id', requireAdminAuth, async (req: Request, res: Response
   try {
     const id = parseInt(req.params.id, 10);
     const force = req.query.force === 'true' || req.body?.force === true;
-    const result = await StudyManagementService.deleteUnit(id, force);
+    const examId = req.query.examId ? String(req.query.examId) : req.body?.examId;
+    const subjectId = req.query.subjectId ? String(req.query.subjectId) : req.body?.subjectId;
+    const rawStd = req.query.standardId ?? req.query.standardNumber ?? req.body?.standardId ?? req.body?.standardNumber;
+    const standardNumber =
+      rawStd != null && String(rawStd).trim() !== '' && String(rawStd) !== 'all' && !isNaN(Number(rawStd))
+        ? parseInt(String(rawStd), 10)
+        : null;
+
+    const result = await StudyManagementService.deleteUnit(id, force, {
+      examId,
+      subjectId,
+      standardNumber,
+    });
     if (!result.success) {
-      const status = result.notFound ? 404 : result.dependencies ? 409 : 400;
-      return res.status(status).json({ success: false, message: result.message, dependencies: result.dependencies });
+      const status = result.notFound ? 404 : result.invalidOwnership ? 400 : result.dependencies ? 409 : 400;
+      return res.status(status).json({
+        success: false,
+        invalidOwnership: result.invalidOwnership,
+        message: result.message,
+        scope: result.scope,
+        dependencies: result.dependencies,
+      });
     }
-    return res.status(200).json({ success: true, deleted: result.deleted });
+    return res.status(200).json({ success: true, scope: result.scope, deleted: result.deleted });
   } catch (err: any) {
     console.error('[StudyManagement API] DELETE /units/:id error:', err);
     return res.status(500).json({ success: false, message: err.message });
@@ -299,11 +362,32 @@ router.put('/lessons/:id', requireAdminAuth, async (req: Request, res: Response)
 router.delete('/lessons/:id', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const force = req.query.force === 'true' || req.body?.force === true;
-    const result = await StudyManagementService.deleteLesson(req.params.id, force);
+    const rawUnitId = req.query.unitId ?? req.body?.unitId;
+    const unitId = rawUnitId != null && !isNaN(Number(rawUnitId)) ? parseInt(String(rawUnitId), 10) : undefined;
+    const examId = req.query.examId ? String(req.query.examId) : req.body?.examId;
+    const subjectId = req.query.subjectId ? String(req.query.subjectId) : req.body?.subjectId;
+    const rawStd = req.query.standardId ?? req.query.standardNumber ?? req.body?.standardId ?? req.body?.standardNumber;
+    const standardNumber =
+      rawStd != null && String(rawStd).trim() !== '' && String(rawStd) !== 'all' && !isNaN(Number(rawStd))
+        ? parseInt(String(rawStd), 10)
+        : undefined;
+
+    const result = await StudyManagementService.deleteLesson(req.params.id, force, {
+      unitId,
+      examId,
+      subjectId,
+      standardNumber,
+    });
     if (!result.success) {
-      return res.status(400).json({ success: false, message: result.message, dependencies: result.dependencies });
+      const status = result.notFound ? 404 : result.invalidOwnership ? 400 : result.dependencies ? 409 : 400;
+      return res.status(status).json({
+        success: false,
+        invalidOwnership: result.invalidOwnership,
+        message: result.message,
+        dependencies: result.dependencies,
+      });
     }
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, deleted: result.deleted });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -362,9 +446,19 @@ router.delete('/topics/:id', requireAdminAuth, async (req: Request, res: Respons
   try {
     const id = parseInt(req.params.id, 10);
     const force = req.query.force === 'true' || req.body?.force === true;
-    const result = await StudyManagementService.deleteTopic(id, force);
+    const lessonId = req.query.lessonId ? String(req.query.lessonId) : req.body?.lessonId;
+    const rawUnitId = req.query.unitId ?? req.body?.unitId;
+    const unitId = rawUnitId != null && !isNaN(Number(rawUnitId)) ? parseInt(String(rawUnitId), 10) : undefined;
+
+    const result = await StudyManagementService.deleteTopic(id, force, { lessonId, unitId });
     if (!result.success) {
-      return res.status(400).json({ success: false, message: result.message, dependencies: result.dependencies });
+      const status = result.notFound ? 404 : result.invalidOwnership ? 400 : result.dependencies ? 409 : 400;
+      return res.status(status).json({
+        success: false,
+        invalidOwnership: result.invalidOwnership,
+        message: result.message,
+        dependencies: result.dependencies,
+      });
     }
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -421,143 +515,6 @@ router.post('/notes', requireAdminAuth, async (req: Request, res: Response) => {
     const note = await StudyManagementService.saveStudyNote(req.body);
     return res.status(200).json({ success: true, note });
   } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// ===========================================================================
-// AI SYLLABUS IMPORT & GENERATION (SHARED TEXTBOOK REPOSITORY, PDF UPLOAD & DIRECT TEXT PASTE)
-// ===========================================================================
-
-router.get('/ai-syllabus/textbooks', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { standard, subject, term, medium, search } = req.query;
-    const textbooks = await SharedTextbookRepositoryService.listAvailableTextbooks({
-      standard: standard as any,
-      subject: subject ? String(subject) : undefined,
-      term: term ? String(term) : undefined,
-      medium: medium ? String(medium) : undefined,
-      search: search ? String(search) : undefined,
-    });
-    return res.status(200).json({ success: true, count: textbooks.length, textbooks });
-  } catch (err: any) {
-    console.error('[StudyManagement API] /ai-syllabus/textbooks error:', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.post('/ai-syllabus/analyze-textbook', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { textbookId, examId, subjectId, standard, extractionMode } = req.body;
-    if (!textbookId) {
-      return res.status(400).json({ success: false, message: 'textbookId is required.' });
-    }
-    const analysis = await SharedTextbookRepositoryService.extractSyllabusFromTextbook({
-      textbookId: Number(textbookId),
-      examId: String(examId || 'group1'),
-      subjectId: subjectId ? String(subjectId) : undefined,
-      standard: standard ? Number(standard) : undefined,
-      extractionMode,
-    });
-    return res.status(200).json({ success: true, ...analysis });
-  } catch (err: any) {
-    console.error('[StudyManagement API] /ai-syllabus/analyze-textbook error:', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.post('/ai-syllabus/upload', requireAdminAuth, syllabusUpload.single('pdf'), async (req: Request, res: Response) => {
-  try {
-    const examId = String(req.body.examId || 'group1');
-    const subjectId = req.body.subjectId ? String(req.body.subjectId) : undefined;
-    const syllabusText = typeof req.body.syllabusText === 'string' ? req.body.syllabusText : undefined;
-    const fileName = req.file?.originalname || (syllabusText ? 'pasted-syllabus.txt' : 'syllabus.pdf');
-    const rawStandard = req.body.standard;
-    const standard: number | 'all' | undefined =
-      rawStandard === 'all'
-        ? 'all'
-        : (parseInt(String(rawStandard), 10) >= 6 && parseInt(String(rawStandard), 10) <= 12
-          ? parseInt(String(rawStandard), 10)
-          : undefined);
-
-    if (!req.file?.buffer && (!syllabusText || syllabusText.trim().length < 30)) {
-      return res.status(400).json({
-        success: false,
-        message: 'A valid PDF file or syllabus text (minimum 30 characters) is required.',
-      });
-    }
-
-    const analysis = await AISyllabusImportService.analyzeSyllabus({
-      pdfBuffer: req.file?.buffer,
-      rawText: syllabusText,
-      examId,
-      subjectId,
-      fileName,
-      standard,
-    });
-
-    return res.status(200).json({ success: true, ...analysis });
-  } catch (err: any) {
-    console.error('[StudyManagement API] /ai-syllabus/upload error:', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.post('/ai-syllabus/analyze-text', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { syllabusText, examId, subjectId, standard: rawStandard } = req.body;
-    if (!syllabusText || typeof syllabusText !== 'string' || syllabusText.trim().length < 30) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide syllabus text (minimum 30 characters) for analysis.',
-      });
-    }
-
-    const cleanExamId = String(examId || 'group1');
-    const cleanSubId = subjectId ? String(subjectId) : undefined;
-    const standard: number | 'all' | undefined =
-      rawStandard === 'all'
-        ? 'all'
-        : (parseInt(String(rawStandard), 10) >= 6 && parseInt(String(rawStandard), 10) <= 12
-          ? parseInt(String(rawStandard), 10)
-          : undefined);
-
-    const analysis = await AISyllabusImportService.analyzeSyllabus({
-      rawText: syllabusText,
-      examId: cleanExamId,
-      subjectId: cleanSubId,
-      fileName: 'direct-text-paste.txt',
-      standard,
-    });
-
-    return res.status(200).json({ success: true, ...analysis });
-  } catch (err: any) {
-    console.error('[StudyManagement API] /ai-syllabus/analyze-text error:', err);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.post('/ai-syllabus/publish', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { examId, subjectSlug, subjectName, units, overwriteExisting } = req.body;
-    if (!examId || !subjectSlug || !Array.isArray(units) || units.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'examId, subjectSlug, and approved units array are required.',
-      });
-    }
-
-    const result = await AISyllabusImportService.publishApprovedSyllabus({
-      examId,
-      subjectSlug,
-      subjectName,
-      units,
-      overwriteExisting: Boolean(overwriteExisting),
-    });
-
-    return res.status(200).json(result);
-  } catch (err: any) {
-    console.error('[StudyManagement API] /ai-syllabus/publish error:', err);
     return res.status(500).json({ success: false, message: err.message });
   }
 });

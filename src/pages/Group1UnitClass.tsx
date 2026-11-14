@@ -30,7 +30,9 @@ import {
   standardClasses,
   type SchoolLesson,
 } from '../data/group1ClassSyllabusData'
+import { compareLessons } from '../utils/naturalSort'
 import { group1GeneralStudiesUnits } from '../data/group1SyllabusData'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
 import { useLanguage } from '../context/LanguageContext'
 import LanguageSwitch from '../components/LanguageSwitch'
@@ -65,28 +67,185 @@ const Group1UnitClass = () => {
 
   const data = getUnitClassData(parsedUnitId, parsedClassId)
   const Icon = unitIcons[parsedUnitId] || BookOpen
+  const [dynamicUnits, setDynamicUnits] = useState<Array<{
+    id: number
+    dbId: number
+    unitNumber: string
+    title: string
+    description?: string
+    lessonsCount?: number
+  }> | null>(null)
   const [dynamicLessons, setDynamicLessons] = useState<SchoolLesson[] | null>(null)
-  const lessons = dynamicLessons || data.lessons || []
 
   useEffect(() => {
-    fetch(`/api/study-management/lessons?unitNumber=${parsedUnitId}&standardId=${parsedClassId}&examId=group1&subjectId=general-studies`)
-      .then((res) => res.json())
-      .then((resData) => {
-        if (resData.success && Array.isArray(resData.lessons)) {
-          const mapped: SchoolLesson[] = resData.lessons.map((l: any) => ({
-            id: l.id,
-            lessonNumber: l.lesson_number,
-            title: l.title,
-            term: l.term || 'Term 1',
-            description: l.description || '',
-            status: l.status === 'Coming Soon' ? 'Coming Soon' : 'Available',
-          }))
-          setDynamicLessons(mapped)
-        }
-      })
-      .catch(() => {})
+    let isCancelled = false
+
+    const loadUnitsAndLessons = () => {
+      setDynamicLessons([])
+
+      fetch('/api/study-management/units?examId=group1&subjectId=general-studies')
+        .then((res) => res.json())
+        .then((resData) => {
+          if (isCancelled) return
+          if (resData.success && Array.isArray(resData.units) && resData.units.length > 0) {
+            const mappedUnits = resData.units.map((u: any) => ({
+              id: Number(u.unit_number),
+              dbId: Number(u.id),
+              unitNumber: u.unit_code || `Unit ${u.unit_number}`,
+              title: u.title,
+              description: u.description || '',
+              lessonsCount: Number(u.lessons_count || 0),
+            }))
+            setDynamicUnits(mappedUnits)
+          } else {
+            setDynamicUnits([])
+          }
+        })
+        .catch(() => {})
+
+      fetch(`/api/study-management/lessons?unitNumber=${parsedUnitId}&standardId=${parsedClassId}&examId=group1&subjectId=general-studies`)
+        .then((res) => res.json())
+        .then((resData) => {
+          if (isCancelled) return
+          if (resData.success && Array.isArray(resData.lessons)) {
+            const mapped: Array<SchoolLesson & {
+              textbookTitle?: string
+              textbookUnitNumber?: string
+              textbookUnitTitle?: string
+              matchedTopics?: string[]
+              syllabusReference?: string
+              verificationStatus?: string
+              topics?: Array<{ id?: number; topic_name: string; syllabus_reference?: string; display_order?: number }>
+            }> = resData.lessons.map((l: any) => ({
+              id: l.id,
+              lessonNumber: l.lesson_number,
+              title: l.title,
+              term: l.term || 'Term 1',
+              description: l.description || '',
+              status: l.status === 'Coming Soon' ? 'Coming Soon' : 'Available',
+              textbookTitle: l.textbook_title || undefined,
+              textbookUnitNumber: l.textbook_unit_number || undefined,
+              textbookUnitTitle: l.textbook_unit_title || undefined,
+              matchedTopics: Array.isArray(l.matched_topics) ? l.matched_topics : [],
+              syllabusReference: l.syllabus_reference || undefined,
+              verificationStatus: l.verification_status || 'VERIFIED',
+              topics: Array.isArray(l.topics) ? l.topics : [],
+            }))
+            setDynamicLessons(mapped.sort(compareLessons))
+          } else {
+            setDynamicLessons([])
+          }
+        })
+        .catch(() => {})
+    }
+
+    loadUnitsAndLessons()
+    const unsubscribe = dynamicSyllabusService.subscribe(() => {
+      loadUnitsAndLessons()
+    })
+
+    return () => {
+      isCancelled = true
+      unsubscribe()
+    }
   }, [parsedUnitId, parsedClassId])
+
+  const availableUnits =
+    dynamicUnits && dynamicUnits.length > 0
+      ? dynamicUnits
+      : group1GeneralStudiesUnits.map((u) => ({
+          id: u.id,
+          dbId: u.id,
+          unitNumber: u.unitNumber,
+          title: u.title,
+          description: '',
+          lessonsCount: 0,
+        }))
+
+  const activeUnit = availableUnits.find((u) => u.id === parsedUnitId)
+  const displayUnitNumber = activeUnit
+    ? activeUnit.unitNumber
+    : isTamil
+    ? translateUnitNumber(data.unitNumber, language)
+    : data.unitNumber
+  const displayUnitTitle = activeUnit
+    ? activeUnit.title
+    : isTamil
+    ? translateUnitTitle(data.unitId, data.unitTitle, language)
+    : data.unitTitle
+
+  const formatUnitButtonLabel = (u: { id: number; unitNumber: string; title: string }) => {
+    const cleanTitle = (u.title || '').trim()
+    const cleanCode = (u.unitNumber || `Unit ${u.id}`).trim()
+    if (!cleanTitle) return cleanCode
+    if (/^(unit|அலகு)\b/i.test(cleanTitle)) return cleanTitle
+    return `${cleanCode} – ${cleanTitle}`
+  }
+
+  const lessons = (
+    dynamicLessons !== null
+      ? dynamicLessons
+      : dynamicUnits && dynamicUnits.length > 0
+      ? []
+      : data.lessons || []
+  )
+    .slice()
+    .sort(compareLessons)
   const hasLessons = lessons.length > 0
+
+  // Dynamically compute "Textbook Syllabus & Focus Areas" from actual database lessons & focus areas for this Group, Subject, Unit, and Standard
+  const dynamicFocusAreas: Array<{
+    text: string
+    lessonNumber?: string
+    lessonTitle?: string
+    textbookUnit?: string
+    syllabusRef?: string
+  }> = (() => {
+    const items: Array<{ text: string; lessonNumber?: string; lessonTitle?: string; textbookUnit?: string; syllabusRef?: string }> = []
+    const seen = new Set<string>()
+    for (const l of lessons as any[]) {
+      const tbUnit = l.textbookUnitTitle || (l.textbookUnitNumber ? `Unit ${l.textbookUnitNumber}` : undefined)
+      if (Array.isArray(l.topics) && l.topics.length > 0) {
+        for (const t of l.topics) {
+          const name = String(t.topic_name || '').trim()
+          if (!name) continue
+          const key = name.toLowerCase()
+          if (!seen.has(key)) {
+            seen.add(key)
+            items.push({
+              text: name,
+              lessonNumber: l.lessonNumber,
+              lessonTitle: l.title,
+              textbookUnit: tbUnit,
+              syllabusRef: t.syllabus_reference || l.syllabusReference,
+            })
+          }
+        }
+      }
+      if (Array.isArray(l.matchedTopics) && l.matchedTopics.length > 0) {
+        for (const mt of l.matchedTopics) {
+          const name = String(mt || '').trim()
+          if (!name) continue
+          const key = name.toLowerCase()
+          if (!seen.has(key)) {
+            seen.add(key)
+            items.push({
+              text: name,
+              lessonNumber: l.lessonNumber,
+              lessonTitle: l.title,
+              textbookUnit: tbUnit,
+              syllabusRef: l.syllabusReference,
+            })
+          }
+        }
+      }
+    }
+    if (items.length > 0) return items
+    if (dynamicLessons === null && (!dynamicUnits || dynamicUnits.length === 0) && Array.isArray(data.topics)) {
+      return data.topics.map((t) => ({ text: t }))
+    }
+    return []
+  })()
 
   // Interactive Study Notes Modal State
   const [activeReadingLesson, setActiveReadingLesson] = useState<SchoolLesson | null>(null)
@@ -152,8 +311,7 @@ const Group1UnitClass = () => {
           <Link to="/materials/group1/general-studies">{isTamil ? 'பொது அறிவு' : 'General Studies'}</Link>
           <ChevronRight size={14} />
           <span className="active">
-            {isTamil ? translateUnitNumber(data.unitNumber, language) : data.unitNumber} –{' '}
-            {isTamil ? translateClassTitle(data.classId, language) : data.classTitle}
+            {displayUnitNumber} – {displayUnitTitle} ({isTamil ? translateClassTitle(data.classId, language) : data.classTitle})
           </span>
         </div>
 
@@ -170,8 +328,8 @@ const Group1UnitClass = () => {
             <BookOpen size={16} />
             <span>
               {isTamil
-                ? `${translateUnitNumber(data.unitNumber, language)} முழு பாடத்திட்டத்தைக் காண்க`
-                : `View Full ${data.unitNumber} Syllabus`}
+                ? `${displayUnitNumber} முழு பாடத்திட்டத்தைக் காண்க`
+                : `View Full ${displayUnitNumber} Syllabus`}
             </span>
           </Link>
         </div>
@@ -189,7 +347,7 @@ const Group1UnitClass = () => {
               {isTamil ? 'TNPSC குரூப் 1 பொது அறிவு' : 'TNPSC Group 1 General Studies'}
             </span>
             <span className="hero-badge hero-badge-cyan">
-              {isTamil ? translateUnitNumber(data.unitNumber, language) : data.unitNumber}
+              {displayUnitNumber}
             </span>
             <span className="hero-badge hero-badge-purple">
               <GraduationCap size={14} />
@@ -206,8 +364,7 @@ const Group1UnitClass = () => {
             </div>
             <div className="unit-class-title-group">
               <h1 className="unit-class-hero-title">
-                {isTamil ? translateUnitNumber(data.unitNumber, language) : data.unitNumber}:{' '}
-                {isTamil ? translateUnitTitle(data.unitId, data.unitTitle, language) : data.unitTitle} –{' '}
+                {displayUnitNumber}: {displayUnitTitle} –{' '}
                 <span className="gold-text">
                   {isTamil ? translateClassTitle(data.classId, language) : data.classTitle}
                 </span>
@@ -241,20 +398,21 @@ const Group1UnitClass = () => {
               </div>
             </div>
 
-            {/* Unit Switcher (Unit 1 to 6) */}
+            {/* Unit Switcher */}
             <div className="switcher-row">
               <span className="switcher-label">{isTamil ? 'அலகைத் தேர்ந்தெடுக்க:' : 'Select Unit:'}</span>
               <div className="switcher-pills">
-                {group1GeneralStudiesUnits.map((u) => {
+                {availableUnits.map((u) => {
                   const isActive = u.id === parsedUnitId
+                  const buttonLabel = formatUnitButtonLabel(u)
                   return (
                     <button
                       key={u.id}
                       className={`switcher-pill unit-pill ${isActive ? 'active' : ''}`}
                       onClick={() => navigate(`/materials/group1/unit/${u.id}/class/${parsedClassId}`)}
-                      title={isTamil && u.tamilTitle ? u.tamilTitle : u.title}
+                      title={buttonLabel}
                     >
-                      {isTamil ? translateUnitNumber(u.id, language) : u.unitNumber}
+                      {buttonLabel}
                     </button>
                   )
                 })}
@@ -263,8 +421,8 @@ const Group1UnitClass = () => {
           </div>
         </motion.div>
 
-        {/* Mapped Syllabus Scope for this Standard */}
-        {data.topics && data.topics.length > 0 && (
+        {/* Mapped Syllabus Scope & Focus Areas for this Standard */}
+        {dynamicFocusAreas.length > 0 && (
           <motion.div
             className="unit-class-topics-box glass"
             initial={{ opacity: 0, y: 15 }}
@@ -281,15 +439,23 @@ const Group1UnitClass = () => {
                 </span>
               </div>
               <span className="topics-count-badge">
-                {data.topics.length} {isTamil ? 'முக்கியத் தலைப்புகள்' : 'Key Topics'}
+                {dynamicFocusAreas.length} {isTamil ? 'முக்கியத் தலைப்புகள்' : 'Focus Areas'}
               </span>
             </div>
 
             <div className="topics-chips-list">
-              {data.topics.map((topic, idx) => (
-                <div key={idx} className="topic-chip">
+              {dynamicFocusAreas.map((item, idx) => (
+                <div key={idx} className="topic-chip" title={item.lessonTitle ? `Lesson ${item.lessonNumber}: ${item.lessonTitle}` : undefined}>
                   <span className="topic-chip-num">{idx + 1}</span>
-                  <span className="topic-chip-text">{translateTopic(topic, language)}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span className="topic-chip-text">{translateTopic(item.text, language)}</span>
+                    {(item.lessonNumber || item.textbookUnit) && (
+                      <span style={{ fontSize: '0.7rem', color: 'rgba(255, 215, 0, 0.78)', fontWeight: 500 }}>
+                        {item.textbookUnit ? `${item.textbookUnit} • ` : ''}
+                        {item.lessonNumber ? `${isTamil ? 'பாடம்' : 'Lesson'} ${item.lessonNumber}` : ''}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -307,8 +473,8 @@ const Group1UnitClass = () => {
               </h2>
               <p className="section-sub">
                 {isTamil
-                  ? `${translateUnitTitle(data.unitId, data.unitTitle, language)} பாடத்திட்டத்திற்குரிய சமச்சீர் கல்வி பாடங்கள்`
-                  : `Samacheer Kalvi school textbook chapters mapped to ${data.unitTitle}`}
+                  ? `${displayUnitTitle} பாடத்திட்டத்திற்குரிய சமச்சீர் கல்வி பாடங்கள்`
+                  : `Samacheer Kalvi school textbook chapters mapped to ${displayUnitTitle}`}
               </p>
             </div>
             {hasLessons && (
@@ -321,9 +487,10 @@ const Group1UnitClass = () => {
 
           {hasLessons ? (
             <div className="lessons-grid">
-              {lessons.map((lesson: SchoolLesson, index: number) => {
+              {lessons.map((lesson: any, index: number) => {
                 const translated = translateLesson(lesson, language)
                 const practiceUrl = `/study-materials/practice/group1/general-studies/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
+                const lessonTopics: Array<{ topic_name: string }> = Array.isArray(lesson.topics) ? lesson.topics : []
 
                 return (
                   <motion.div
@@ -338,6 +505,11 @@ const Group1UnitClass = () => {
                         {isTamil ? `பாடம் ${translated.lessonNumber}` : `Lesson ${translated.lessonNumber}`}
                       </span>
                       {translated.term && <span className="lesson-term-badge">{translated.term}</span>}
+                      {lesson.textbookUnitTitle && (
+                        <span className="lesson-term-badge" style={{ background: 'rgba(56, 189, 248, 0.14)', color: '#7dd3fc', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                          {lesson.textbookUnitTitle}
+                        </span>
+                      )}
                       <span className="lesson-status-badge">
                         <CheckCircle2 size={12} />
                         {translated.status}
@@ -348,6 +520,31 @@ const Group1UnitClass = () => {
 
                     {translated.description && (
                       <p className="lesson-desc">{translated.description}</p>
+                    )}
+
+                    {lessonTopics.length > 0 && (
+                      <div style={{ margin: '0.5rem 0 0.75rem', padding: '0.6rem 0.75rem', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.45)', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                        <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#fbbf24', marginBottom: '0.35rem' }}>
+                          {isTamil ? 'முக்கியப் பாடப்பகுதிகள் (Focus Areas):' : 'Focus Areas:'}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                          {lessonTopics.slice(0, 4).map((ft, ftIdx) => (
+                            <span
+                              key={ftIdx}
+                              style={{
+                                fontSize: '0.73rem',
+                                padding: '0.2rem 0.55rem',
+                                borderRadius: '6px',
+                                background: 'rgba(255, 255, 255, 0.06)',
+                                color: '#e2e8f0',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                              }}
+                            >
+                              {ft.topic_name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     <div className="lesson-action-row">

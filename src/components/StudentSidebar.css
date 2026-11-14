@@ -1,0 +1,454 @@
+/* =========================================================
+   TNPSC STUDY HUB - PERSISTENT GLOBAL STUDENT SIDEBAR
+   Independent Scrolling & VisionOS Liquid Glassmorphism
+   ========================================================= */
+
+/* Desktop Sidebar Container Wrapper */
+.student-sidebar-desktop-wrapper {
+  width: 270px;
+  min-width: 270px;
+  max-width: 270px;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* Glass Floating Card Shell */
+.student-sidebar-glass-card {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 24px;
+  background: linear-gradient(
+    175deg,
+    rgba(22, 28, 48, 0.55) 0%,
+    rgba(12, 16, 28, 0.72) 100%
+  );
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 0 20px 0 rgba(255, 255, 255, 0.02),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Scrollable Inner Region - Independent Vertical Scroll */
+.student-sidebar-inner {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  padding: 1.25rem 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 215, 0, 0.25) transparent;
+}
+
+/* Custom Sleek Scrollbar */
+.student-sidebar-inner::-webkit-scrollbar {
+  width: 5px;
+}
+
+.student-sidebar-inner::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.student-sidebar-inner::-webkit-scrollbar-thumb {
+  background: rgba(255, 215, 0, 0.25);
+  border-radius: 9999px;
+  transition: background 0.2s ease;
+}
+
+.student-sidebar-inner::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 215, 0, 0.55);
+}
+
+/* 1. Header Branding */
+.student-sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.student-brand-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.25s ease;
+}
+
+.student-brand-link:hover {
+  transform: translateY(-1px);
+}
+
+.student-brand-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background:
+    radial-gradient(130% 120% at 50% -10%, rgba(255, 255, 255, 0.45) 0%, rgba(255, 235, 120, 0.2) 40%, transparent 70%),
+    linear-gradient(145deg, rgba(255, 215, 0, 0.9) 0%, rgba(245, 158, 11, 0.85) 45%, rgba(180, 83, 9, 0.85) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  color: #0b1120;
+  flex-shrink: 0;
+  box-shadow:
+    0 8px 20px -3px rgba(0, 0, 0, 0.55),
+    0 3px 8px rgba(245, 158, 11, 0.4),
+    inset 0 2px 2px rgba(255, 255, 255, 0.85),
+    inset 0 -2px 3px rgba(120, 53, 15, 0.55);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.student-brand-link:hover .student-brand-mark {
+  transform: scale(1.05) rotate(-3deg);
+  box-shadow: 0 10px 24px rgba(255, 215, 0, 0.4);
+}
+
+.student-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.student-brand-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(180deg, #ffffff 0%, #fff59d 30%, #ffd700 70%, #d97706 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 10px rgba(255, 215, 0, 0.25));
+}
+
+.student-brand-sub {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+}
+
+.student-sidebar-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.student-sidebar-close-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #ffffff;
+}
+
+/* 2. Student Profile Card */
+.student-sidebar-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.student-profile-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0b1120;
+  background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.student-profile-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.student-profile-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.student-profile-role {
+  font-size: 0.72rem;
+  color: #ffd700;
+  opacity: 0.85;
+}
+
+/* 3. Navigation List */
+.student-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.student-sidebar-nav-label {
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 0 0.65rem 0.35rem;
+  font-weight: 700;
+}
+
+.student-sidebar-links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.student-sidebar-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.68rem 0.85rem;
+  padding-right: 1.25rem;
+  border-radius: 12px;
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: rgba(226, 232, 240, 0.85);
+  border: 1px solid transparent;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.student-link-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(226, 232, 240, 0.75);
+  transition: color 0.2s ease, transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.student-sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 215, 0, 0.25);
+  color: #ffffff;
+  transform: translateX(2px);
+}
+
+.student-sidebar-link:hover .student-link-icon-wrap {
+  color: #ffd700;
+  transform: scale(1.1);
+}
+
+/* Active State: Luminous Gold Glass Pill */
+.student-sidebar-link.active {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 215, 0, 0.18) 0%,
+    rgba(217, 119, 6, 0.14) 100%
+  );
+  border-color: rgba(255, 215, 0, 0.45);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.3),
+    0 0 16px rgba(255, 215, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.student-sidebar-link.active .student-link-icon-wrap {
+  color: #ffd700;
+  filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.5));
+}
+
+.student-link-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.student-link-active-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffd700;
+  box-shadow: 0 0 8px #ffd700, 0 0 14px rgba(255, 215, 0, 0.6);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* 4. Active Streak Counter Card */
+.student-sidebar-streak-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  background: linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.12) 0%,
+    rgba(239, 68, 68, 0.08) 100%
+  );
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+.student-streak-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(245, 158, 11, 0.45);
+  flex-shrink: 0;
+}
+
+.student-streak-content {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.student-streak-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #ffd700;
+}
+
+.student-streak-desc {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 5. Sidebar Bottom Actions */
+.student-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.student-footer-action {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-decoration: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.student-footer-action.login:hover,
+.student-footer-action.home:hover {
+  background: rgba(255, 215, 0, 0.08);
+  border-color: rgba(255, 215, 0, 0.3);
+  color: #ffffff;
+  transform: translateX(-2px);
+}
+
+.student-footer-action.logout {
+  color: #f87171;
+}
+
+.student-footer-action.logout:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  transform: translateX(-2px);
+}
+
+/* =========================================================
+   Mobile Drawer Overlay & Responsive Shell
+   ========================================================= */
+.student-sidebar-mobile-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+}
+
+.student-sidebar-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.student-sidebar-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 285px;
+  max-width: 85vw;
+  height: 100%;
+  background: linear-gradient(
+    180deg,
+    rgba(15, 23, 42, 0.96) 0%,
+    rgba(9, 14, 26, 0.98) 100%
+  );
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border-right: 1px solid rgba(255, 215, 0, 0.3);
+  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.85);
+  z-index: 2001;
+  display: flex;
+  flex-direction: column;
+}
+

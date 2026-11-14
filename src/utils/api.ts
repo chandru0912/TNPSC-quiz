@@ -10,27 +10,34 @@ function isFrontendDevPortUrl(url: string): boolean {
 }
 
 function resolveApiBaseUrl(): string {
+  const isBrowserOnLocalhost =
+    typeof window !== 'undefined' &&
+    /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname);
+
+  // In browser on localhost / 127.0.0.1 in development/preview, ALWAYS use relative URL ''
+  // to route through Vite's same-origin proxy (/api -> http://localhost:5000).
+  // This completely eliminates CORS preflight rejections, private network blocks, and IPv6 vs IPv4 socket mismatches.
+  if (isBrowserOnLocalhost) {
+    return '';
+  }
+
   const rawEnvUrl = (
-    (import.meta.env.VITE_API_URL as string) ||
-    (import.meta.env.VITE_API_BASE_URL as string) ||
-    (import.meta.env.VITE_BACKEND_URL as string) ||
+    (import.meta.env?.VITE_API_URL as string) ||
+    (import.meta.env?.VITE_API_BASE_URL as string) ||
+    (import.meta.env?.VITE_BACKEND_URL as string) ||
     ''
   ).trim();
 
-  const isBrowserOnLocalhost =
-    typeof window === 'undefined'
-      ? Boolean(import.meta.env.DEV)
-      : /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname);
-
-  // On remote domains (e.g. deployed on Vercel), route to production backend
-  if (!isBrowserOnLocalhost) {
-    if (rawEnvUrl && !isLocalhostUrl(rawEnvUrl)) {
+  // If in browser on a remote domain (e.g. deployed on Vercel), check if relative rewrite or explicit URL
+  if (typeof window !== 'undefined') {
+    if (rawEnvUrl && (rawEnvUrl.startsWith('http://') || rawEnvUrl.startsWith('https://')) && !isLocalhostUrl(rawEnvUrl)) {
       return rawEnvUrl.replace(/\/+$/, '');
     }
-    return PRODUCTION_BACKEND_URL;
+    // On Vercel, vercel.json rewrites /api/(.*) automatically, so relative '' is ideal
+    return '';
   }
 
-  // In local development or local preview on localhost, use configured backend
+  // Non-browser / SSR environment
   if (rawEnvUrl && !isFrontendDevPortUrl(rawEnvUrl)) {
     return rawEnvUrl.replace(/\/+$/, '');
   }
@@ -85,20 +92,61 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
 
   try {
     try {
-      return await executeFetch(primaryUrl, activeSignal);
-    } catch (err: any) {
-      // In dev mode, if direct localhost call fails with Failed to fetch, retry via Vite's dev proxy using relative path
-      const isRelativeCandidate =
-        typeof path === 'string' &&
-        path.startsWith('/') &&
-        (primaryUrl.startsWith('http://localhost:5000') || primaryUrl.startsWith('http://127.0.0.1:5000'));
+      let response = await executeFetch(primaryUrl, activeSignal);
 
-      if (isRelativeCandidate && err?.name !== 'AbortError' && !controller?.signal?.aborted) {
-        console.warn(`[apiFetch] Direct fetch to ${primaryUrl} failed. Retrying via Vite dev proxy: ${path}`);
-        try {
-          return await executeFetch(path, activeSignal);
-        } catch {
-          throw err;
+      // Automated Multi-Tier 404 Failover:
+      // If primaryUrl returned 404 and is a candidate for fallback
+      if (response.status === 404 && typeof path === 'string' && path.startsWith('/')) {
+        const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+        // Tier 1: If on remote or preview domain, and primary was relative or not production backend,
+        // retry against the canonical PRODUCTION_BACKEND_URL
+        if (PRODUCTION_BACKEND_URL && !primaryUrl.startsWith(PRODUCTION_BACKEND_URL)) {
+          try {
+            const fallbackUrl = `${PRODUCTION_BACKEND_URL}${normalizedPath}`;
+            const fbRes = await executeFetch(fallbackUrl, activeSignal);
+            if (fbRes.ok || fbRes.status !== 404) {
+              return fbRes;
+            }
+          } catch {
+            // continue fallback chain
+          }
+        }
+
+        // Tier 2: If in local development and primary was relative via dev proxy,
+        // retry directly against LOCAL_BACKEND_URL (http://localhost:5000)
+        if (!primaryUrl.startsWith(LOCAL_BACKEND_URL) && typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname)) {
+          try {
+            const fbRes = await executeFetch(`${LOCAL_BACKEND_URL}${normalizedPath}`, activeSignal);
+            if (fbRes.ok || fbRes.status !== 404) {
+              return fbRes;
+            }
+          } catch {
+            // continue
+          }
+        }
+      }
+
+      return response;
+    } catch (err: any) {
+      if (err?.name !== 'AbortError' && !controller?.signal?.aborted) {
+        // Fallback 1: If relative path failed in browser on localhost, try direct LOCAL_BACKEND_URL
+        if (primaryUrl.startsWith('/') && typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname)) {
+          console.warn(`[apiFetch] Relative fetch to ${primaryUrl} failed. Retrying directly against ${LOCAL_BACKEND_URL}: ${path}`);
+          try {
+            return await executeFetch(`${LOCAL_BACKEND_URL}${primaryUrl}`, activeSignal);
+          } catch {
+            // continue
+          }
+        }
+        // Fallback 2: If direct localhost call failed, retry via Vite dev proxy using relative path
+        if (primaryUrl.startsWith('http://localhost:5000') || primaryUrl.startsWith('http://127.0.0.1:5000')) {
+          console.warn(`[apiFetch] Direct fetch to ${primaryUrl} failed. Retrying via Vite dev proxy: ${path}`);
+          try {
+            return await executeFetch(path, activeSignal);
+          } catch {
+            // continue
+          }
         }
       }
       throw err;

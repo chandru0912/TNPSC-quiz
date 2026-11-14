@@ -2,8 +2,13 @@
  * canonicalSyllabusLessons.ts
  *
  * Authoritative Canonical Syllabus Lessons Dataset for TNPSC Study Hub.
- * Covers all TNPSC Subjects (General Studies, Aptitude, General Tamil, General English),
- * Standards 6th through 12th, Units 1 through 7, and Terms (Term 1, Term 2, Term 3, Full Year).
+ * Strictly covers all 4 TNPSC Subjects:
+ * 1. General Studies (Exactly 6 Parent Units: Units 1 to 6)
+ * 2. Aptitude and Mental Ability (Units 1 to 2)
+ * 3. General English (Units 1 to 4)
+ * 4. General Tamil (Units 1 to 6)
+ *
+ * Full, non-missing coverage across Standards 6th through 12th.
  */
 
 export interface CanonicalLesson {
@@ -3285,27 +3290,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 6,
     "lessonId": "tam-6-1-1-1",
     "lessonNumber": "1.1",
-    "title": "தமிழ் எழுத்துகளின் வகை தொகை (இலக்கணம்)",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 6,
-    "lessonId": "tam-6-2-2-1",
-    "lessonNumber": "2.1",
-    "title": "இன்பத்தமிழ் & தமிழ்க்கும்மி (பாரதிதாசன், பெருஞ்சித்திரனார்)",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 6,
-    "lessonId": "tam-6-5-5-1",
-    "lessonNumber": "5.1",
-    "title": "வளர்தமிழ் & கனவு பலித்தது (உரைநடை/கடிதம்)",
+    "title": "தமிழ் எழுத்துகளின் வகை தொகை & மாத்திரை அளவுகள் (இலக்கணம்)",
     "term": "Term 1",
     "mappedSubject": "Tamil"
   },
@@ -3315,27 +3300,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 6,
     "lessonId": "tam-6-1-1-2",
     "lessonNumber": "1.2",
-    "title": "இனவெழுத்துகள் & மயங்கொலிகள் (இலக்கணம்)",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 3,
-    "standard": 6,
-    "lessonId": "tam-6-3-3-1",
-    "lessonNumber": "3.1",
-    "title": "மூதுரை & துன்பம் வெல்லும் கல்வி (பட்டுக்கோட்டை கல்யாணசுந்தரம்)",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 6,
-    "lessonId": "tam-6-5-5-2",
-    "lessonNumber": "5.2",
-    "title": "கல்விக்கண் திறந்த காமராசர் & நூலகம் நோக்கி",
+    "title": "இனவெழுத்துகள் & மயங்கொலிகள் வேறுபாடுகள் (இலக்கணம்)",
     "term": "Term 2",
     "mappedSubject": "Tamil"
   },
@@ -3345,27 +3310,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 6,
     "lessonId": "tam-6-1-1-3",
     "lessonNumber": "1.3",
-    "title": "சுட்டு எழுத்துகள், வினா எழுத்துகள் & நால்வகைச் சொற்கள்",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 4,
-    "standard": 6,
-    "lessonId": "tam-6-4-4-1",
-    "lessonNumber": "4.1",
-    "title": "பாரதம் அன்றைய நாற்றங்கால் & பராபரக் கண்ணி (தாயுமானவர்)",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 6,
-    "lessonId": "tam-6-5-5-3",
-    "lessonNumber": "5.3",
-    "title": "தமிழ்நாட்டில் காந்தி & வேலுநாச்சியார்",
+    "title": "சுட்டு எழுத்துகள், வினா எழுத்துகள் & சொல் இலக்கணம்",
     "term": "Term 3",
     "mappedSubject": "Tamil"
   },
@@ -3375,27 +3320,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 7,
     "lessonId": "tam-7-1-1-1",
     "lessonNumber": "1.1",
-    "title": "குற்றியலுகரம், குற்றியலிகரம் (இலக்கணம்)",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 7,
-    "lessonId": "tam-7-2-2-1",
-    "lessonNumber": "2.1",
-    "title": "எங்கள் தமிழ் & ஒன்றல்ல இரண்டல்ல (நாமக்கல் கவிஞர், உடுமலை நாராயணகவி)",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 7,
-    "lessonId": "tam-7-5-5-1",
-    "lessonNumber": "5.1",
-    "title": "பேச்சுமொழியும் எழுத்துமொழியும் (மொழி நடை)",
+    "title": "குற்றியலுகரம், குற்றியலிகரம் & குறுக்கங்கள் (இலக்கணம்)",
     "term": "Term 1",
     "mappedSubject": "Tamil"
   },
@@ -3405,27 +3330,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 7,
     "lessonId": "tam-7-1-1-2",
     "lessonNumber": "1.2",
-    "title": "இலக்கிய வகைச் சொற்கள் & நால்வகை குறுக்கங்கள்",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 7,
-    "lessonId": "tam-7-2-2-2",
-    "lessonNumber": "2.2",
-    "title": "காடு (சுரதா) & அப்படியே நிற்கட்டும் அந்த மரம்",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 7,
-    "lessonId": "tam-7-5-5-2",
-    "lessonNumber": "5.2",
-    "title": "கப்பலோட்டிய தமிழர் வ.உ.சி & தேசியம் காத்த செம்மல் பசும்பொன் முத்துராமலிங்கத்தேவர்",
+    "title": "அணி இலக்கணம்: உவமை, உருவகம் & ஏகதேச உருவக அணி",
     "term": "Term 2",
     "mappedSubject": "Tamil"
   },
@@ -3435,27 +3340,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 7,
     "lessonId": "tam-7-1-1-3",
     "lessonNumber": "1.3",
-    "title": "அணி இலக்கணம் (உவமை, உருவகம், ஏகதேச உருவகம்)",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 3,
-    "standard": 7,
-    "lessonId": "tam-7-3-3-1",
-    "lessonNumber": "3.1",
-    "title": "விருந்தோம்பல், வயல் வழி & திருக்குறள் அறக்கருத்துகள்",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 7,
-    "lessonId": "tam-7-5-5-3",
-    "lessonNumber": "5.3",
-    "title": "தமிழர் வணிகம் & கப்பற்கலை",
+    "title": "ஆகுபெயர் வகைகள் & பகுபத உறுப்பிலக்கணம்",
     "term": "Term 3",
     "mappedSubject": "Tamil"
   },
@@ -3465,27 +3350,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 8,
     "lessonId": "tam-8-1-1-1",
     "lessonNumber": "1.1",
-    "title": "எழுத்துகளின் பிறப்பு & வேற்றுமை உருபுகள் (இலக்கணம்)",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 8,
-    "lessonId": "tam-8-2-2-1",
-    "lessonNumber": "2.1",
-    "title": "தமிழ்மொழி வாழ்த்து (பாரதியார்) & தமிழ்மொழி மரபு",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 8,
-    "lessonId": "tam-8-5-5-1",
-    "lessonNumber": "5.1",
-    "title": "தமிழ் வரிவடிவ வளர்ச்சி & கவிமணி தேசிக விநாயகம் பிள்ளை",
+    "title": "எழுத்துகளின் பிறப்பு & வேற்றுமை உருபுகள் (முதல் முதல் எட்டாம் வரை)",
     "term": "Term 1",
     "mappedSubject": "Tamil"
   },
@@ -3495,27 +3360,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 8,
     "lessonId": "tam-8-1-1-2",
     "lessonNumber": "1.2",
-    "title": "வினைமுற்று, எச்சம், வினையெச்சம் & பெயரெச்சம்",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 3,
-    "standard": 8,
-    "lessonId": "tam-8-3-3-1",
-    "lessonNumber": "3.1",
-    "title": "திருக்குறள், நன்னெறி & நீதி வெண்பா",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 8,
-    "lessonId": "tam-8-5-5-2",
-    "lessonNumber": "5.2",
-    "title": "அயோத்திதாசப் பண்டிதர் சிந்தனைகள் & கல்வி வளர்ச்சி",
+    "title": "யாப்பிலக்கணம் (எழுத்து, அசை, சீர், தளை, அடி, தொடை) & அணி இலக்கணம்",
     "term": "Term 2",
     "mappedSubject": "Tamil"
   },
@@ -3525,27 +3370,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 8,
     "lessonId": "tam-8-1-1-3",
     "lessonNumber": "1.3",
-    "title": "யாப்பிலக்கணம் (எழுத்து, அசை, சீர், தளை, அடி, தொடை) & அணி",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 4,
-    "standard": 8,
-    "lessonId": "tam-8-4-4-1",
-    "lessonNumber": "4.1",
-    "title": "படை வேழம் (ஜெயங்கொண்டார் - கலிங்கத்துப்பரணி)",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 7,
-    "standard": 8,
-    "lessonId": "tam-8-7-7-1",
-    "lessonNumber": "7.1",
-    "title": "நாட்டுப்புறக் கைவினைக் கலைகள் & தமிழர் இசைக்கருவிகள்",
+    "title": "புணர்ச்சி விதிகள் & தொகைநிலை-தொகாநிலை தொடர்கள்",
     "term": "Term 3",
     "mappedSubject": "Tamil"
   },
@@ -3556,27 +3381,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "lessonId": "tam-9-1-1-1",
     "lessonNumber": "1.1",
     "title": "தொடர் இலக்கணம் & தன்வினை, பிறவினை, செய்வினை, செயப்பாட்டுவினை",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 9,
-    "lessonId": "tam-9-2-2-1",
-    "lessonNumber": "2.1",
-    "title": "திராவிட மொழிக்குடும்பம் & தமிழோவியம் (ஈரோடு தமிழன்பன்)",
-    "term": "Term 1",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 9,
-    "lessonId": "tam-9-5-5-1",
-    "lessonNumber": "5.1",
-    "title": "தமிழ் விடு தூது & தற்கால உரைநடை வளர்ச்சி",
-    "term": "Term 1",
+    "term": "Full Year",
     "mappedSubject": "Tamil"
   },
   {
@@ -3585,28 +3390,8 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 9,
     "lessonId": "tam-9-1-1-2",
     "lessonNumber": "1.2",
-    "title": "துணைவினைகள் & புணர்ச்சி விதிகள்",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 9,
-    "lessonId": "tam-9-2-2-2",
-    "lessonNumber": "2.2",
-    "title": "பட்டமரம், பெரியபுராணம் (சேக்கிழார்) & புறநானூறு",
-    "term": "Term 2",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 9,
-    "lessonId": "tam-9-5-5-2",
-    "lessonNumber": "5.2",
-    "title": "பெரியாரின் பெண் விடுதலைச் சிந்தனைகள்",
-    "term": "Term 2",
+    "title": "புணர்ச்சி இலக்கணம் (உயிர் ஈறு, மெய் ஈறு) & ஆகுபெயர்",
+    "term": "Full Year",
     "mappedSubject": "Tamil"
   },
   {
@@ -3615,28 +3400,8 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 9,
     "lessonId": "tam-9-1-1-3",
     "lessonNumber": "1.3",
-    "title": "ஆகுபெயர் வகைகள் & வல்லினம் மிகும் இடங்கள் மிகா இடங்கள்",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 9,
-    "lessonId": "tam-9-2-2-3",
-    "lessonNumber": "2.3",
-    "title": "இராவண காவியம் (புலவர் குழந்தை) & மணிமேகலை (சீத்தலைச் சாத்தனார்)",
-    "term": "Term 3",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 7,
-    "standard": 9,
-    "lessonId": "tam-9-7-7-1",
-    "lessonNumber": "7.1",
-    "title": "சிற்பக்கலை, இந்திய தேசிய ராணுவத்தில் தமிழர் பங்கு",
-    "term": "Term 3",
+    "title": "யாப்பிலக்கணம் (யாப்பின் உறுப்புகள் & பா வகைகள்)",
+    "term": "Full Year",
     "mappedSubject": "Tamil"
   },
   {
@@ -3645,7 +3410,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 10,
     "lessonId": "tam-10-1-1-1",
     "lessonNumber": "1.1",
-    "title": "எழுத்து, சொல் (இலக்கணம் - இயல் 1)",
+    "title": "எழுத்து, சொல், தொடர்நிலை & சான்றோர் வழக்கு (இயல் 1)",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3655,7 +3420,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 10,
     "lessonId": "tam-10-1-1-2",
     "lessonNumber": "1.2",
-    "title": "தொகைநிலைத் தொடர்கள் (இலக்கணம் - இயல் 2)",
+    "title": "தொகைநிலைத் தொடர்கள் & தொகாநிலைத் தொடர்கள் (இயல் 2 & 3)",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3665,7 +3430,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 10,
     "lessonId": "tam-10-1-1-3",
     "lessonNumber": "1.3",
-    "title": "தொகாநிலைத் தொடர்கள் (இலக்கணம் - இயல் 3)",
+    "title": "இலக்கணம் பொது & வினா, விடை வகைகள், பொருள்கோள் (இயல் 4 & 5)",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3675,7 +3440,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 10,
     "lessonId": "tam-10-1-1-4",
     "lessonNumber": "1.4",
-    "title": "இலக்கணம் - பொது & வினா, விடை, பொருள்கோள் (இயல் 4 & 5)",
+    "title": "அகப்பொருள் இலக்கணம் & புறப்பொருள் இலக்கணம் (இயல் 6 & 7)",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3685,87 +3450,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 10,
     "lessonId": "tam-10-1-1-5",
     "lessonNumber": "1.5",
-    "title": "அகப்பொருள் இலக்கணம் & புறப்பொருள் இலக்கணம் (இயல் 6 & 7)",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 1,
-    "standard": 10,
-    "lessonId": "tam-10-1-1-6",
-    "lessonNumber": "1.6",
     "title": "பா-வகை, அலகிடுதல் & அணி இலக்கணம் (இயல் 8 & 9)",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 10,
-    "lessonId": "tam-10-2-2-1",
-    "lessonNumber": "2.1",
-    "title": "அன்னை மொழியே (பெருஞ்சித்திரனார்) & இரட்டுற மொழிதல்",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 2,
-    "standard": 10,
-    "lessonId": "tam-10-2-2-2",
-    "lessonNumber": "2.2",
-    "title": "காற்றே வா (பாரதியார்) & முல்லைப்பாட்டு (நப்பூதனார்)",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 3,
-    "standard": 10,
-    "lessonId": "tam-10-3-3-1",
-    "lessonNumber": "3.1",
-    "title": "காசிக்காண்டம் (அதிவீரராம பாண்டியர்) & மலைபடுகடாம்",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 4,
-    "standard": 10,
-    "lessonId": "tam-10-4-4-1",
-    "lessonNumber": "4.1",
-    "title": "நீதி வெண்பா (செய்குதம்பி பாவலர்) & திருவிளையாடற் புராணம்",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 10,
-    "lessonId": "tam-10-5-5-1",
-    "lessonNumber": "5.1",
-    "title": "தமிழ்ச் சொல்வளம் (தேவநேயப் பாவாணர்) & மொழிபெயர்ப்புக் கல்வி",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 10,
-    "lessonId": "tam-10-5-5-2",
-    "lessonNumber": "5.2",
-    "title": "செயற்கை நுண்ணறிவு & காலம் தந்த தன்னம்பிக்கை (ஸ்டீபன் ஹாக்கிங்)",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 7,
-    "standard": 10,
-    "lessonId": "tam-10-7-7-1",
-    "lessonNumber": "7.1",
-    "title": "நிகழ்கலை (சிற்றகல் ஒளி - ம.பொ.சி) & சிலப்பதிகாரம் (இளங்கோவடிகள்)",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3775,37 +3460,17 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 11,
     "lessonId": "tam-11-1-1-1",
     "lessonNumber": "1.1",
-    "title": "மொழியின் முதல் மற்றும் இறுதி எழுத்துகள், புணர்ச்சி விதிகள்",
+    "title": "மொழியின் முதல் மற்றும் இறுதி எழுத்துகள் & புணர்ச்சி விதிகள்",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
   {
     "subjectId": "general-tamil",
-    "unitId": 2,
+    "unitId": 1,
     "standard": 11,
-    "lessonId": "tam-11-2-2-1",
-    "lessonNumber": "2.1",
-    "title": "நற்றிணை, குறுந்தொகை, புறநானூறு செய்யுள் பகுதிகள்",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 3,
-    "standard": 11,
-    "lessonId": "tam-11-3-3-1",
-    "lessonNumber": "3.1",
-    "title": "சீவக சிந்தாமணி (திருத்தக்கதேவர்) & கம்பராமாயணம்",
-    "term": "Full Year",
-    "mappedSubject": "Tamil"
-  },
-  {
-    "subjectId": "general-tamil",
-    "unitId": 5,
-    "standard": 11,
-    "lessonId": "tam-11-5-5-1",
-    "lessonNumber": "5.1",
-    "title": "தமிழர் பண்பாடு, பாரதிதாசன் கவிதைகள் & தற்கால உரைநடை",
+    "lessonId": "tam-11-1-1-2",
+    "lessonNumber": "1.2",
+    "title": "நன்னூல் பாயிரம், ஆகுபெயர் & சொல்வகை இலக்கணம்",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3822,10 +3487,210 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   {
     "subjectId": "general-tamil",
     "unitId": 2,
+    "standard": 6,
+    "lessonId": "tam-6-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "நால்வகைச் சொற்கள், அகரவரிசைப்படுத்துதல் & எதிர்ச்சொல் அறிதல்",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 2,
+    "standard": 7,
+    "lessonId": "tam-7-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "இலக்கிய வகைச் சொற்கள் (இயற்சொல், திரிசொல், திசைச்சொல், வடசொல்) & குறுக்கங்கள்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 2,
+    "standard": 8,
+    "lessonId": "tam-8-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "வினைமுற்று, எச்சம், வினையெச்சம் & பெயரெச்சச் சொல்வளம்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 2,
+    "standard": 9,
+    "lessonId": "tam-9-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "வல்லினம் மிகும் இடங்கள், மிகா இடங்கள் & சொல்லமைப்பு விதிகள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 2,
+    "standard": 9,
+    "lessonId": "tam-9-2-2-2",
+    "lessonNumber": "2.2",
+    "title": "துணைவினைகள், மரபுத்தொடர்கள் & ஒருபொருள் குறித்த பலசொற்கள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 2,
+    "standard": 10,
+    "lessonId": "tam-10-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "சொல்வளம், சொற்பொருத்தம், மரபுத்தொடர் & வினா-விடை வகைகள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 2,
+    "standard": 11,
+    "lessonId": "tam-11-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "சொல் இலக்கணம், ஆகுபெயர் & செந்தமிழ் சொல் அகராதி உருவாக்கம்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 2,
     "standard": 12,
     "lessonId": "tam-12-2-2-1",
     "lessonNumber": "2.1",
-    "title": "சிலப்பதிகாரம், கம்பராமாயணம், நெடுநல்வாடை",
+    "title": "செந்தமிழ் சொற்களஞ்சியம், மரபுசார் சொல்வளம் & அருஞ்சொற்பொருள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 3,
+    "standard": 6,
+    "lessonId": "tam-6-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "கடிதம் எழுதுதல்: உறவுமுறைக் கடிதம் & விண்ணப்பக் கடிதம் (கனவு பலித்தது)",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 3,
+    "standard": 7,
+    "lessonId": "tam-7-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "கட்டுரை அமைத்தல், பத்தி சுருக்குதல் & கருத்து ஒருமைப்பாடு (நடை அழகியல்)",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 3,
+    "standard": 8,
+    "lessonId": "tam-8-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "விரிவானம் & படைப்பாற்றல் எழுத்து: நாட்குறிப்பு மற்றும் சுற்றறிக்கை தயாரித்தல்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 3,
+    "standard": 9,
+    "lessonId": "tam-9-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "அலுவலகக் கடிதங்கள், பொதுமக்கள் மனுக்கள் & செய்தி அறிக்கை தயாரிக்கும் முறை",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 3,
+    "standard": 10,
+    "lessonId": "tam-10-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "விண்ணப்பப் படிவம் நிரப்புதல், கடிதம் வரைவு & பத்தி சுருக்கி வரைதல் (Précis Writing)",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 3,
+    "standard": 11,
+    "lessonId": "tam-11-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "கருத்துரை, விவாத உரை & ஆய்வுக்கட்டுரை எழுதும் நெறிமுறைகள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 3,
+    "standard": 12,
+    "lessonId": "tam-12-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "செய்தித்தாள் அறிக்கை, தலையங்கம் & நேர்காணல் வினாத்தாள் தயாரித்தல்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 4,
+    "standard": 6,
+    "lessonId": "tam-6-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "அன்றாட பயன்பாட்டு கலைச்சொற்கள் & அறிவியல் கலைச்சொல் அகராதி",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 4,
+    "standard": 7,
+    "lessonId": "tam-7-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "ஊடகம், தகவல் தொடர்பு & அரசுத் துறை கலைச்சொற்கள்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 4,
+    "standard": 8,
+    "lessonId": "tam-8-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "வங்கி, வணிகம் & நிருவாகச் சொற்களஞ்சியம்",
+    "term": "Term 3",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 4,
+    "standard": 9,
+    "lessonId": "tam-9-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "கணினித் தமிழ், இணையப் பயன்பாடு & மின்னாளுமை கலைச்சொற்கள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 4,
+    "standard": 10,
+    "lessonId": "tam-10-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "அறிவியல், தொழில்நுட்பம் மற்றும் தலைமைச் செயலக அலுவலகக் கலைச்சொற்கள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 4,
+    "standard": 11,
+    "lessonId": "tam-11-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "சட்டவியல், நீதிமன்றம், நீதித்துறை மற்றும் இதழியல் கலைச்சொற்கள்",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3835,7 +3700,67 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 12,
     "lessonId": "tam-12-4-4-1",
     "lessonNumber": "4.1",
-    "title": "தேம்பாவணி, திருக்குறள் மெய்ப்பாட்டியல் & புறப்பொருள் வெண்பாமாலை",
+    "title": "உயர்தொழில்நுட்ப, நிதி, மருத்துவ மற்றும் வணிகவியல் கலைச்சொற்கள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 5,
+    "standard": 6,
+    "lessonId": "tam-6-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "வளர்தமிழ் & நூலகம் நோக்கி (உரைநடை வாசித்தல் & கருத்துணர்தல்)",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 5,
+    "standard": 7,
+    "lessonId": "tam-7-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "பேச்சுமொழியும் எழுத்துமொழியும் (மொழி நடை வாசிப்புத் திறன்)",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 5,
+    "standard": 8,
+    "lessonId": "tam-8-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "தமிழ் வரிவடிவ வளர்ச்சி & உரைநடை பத்தி கருத்துணர்தல்",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 5,
+    "standard": 9,
+    "lessonId": "tam-9-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "தற்கால உரைநடை வளர்ச்சி & பத்தி வினா விடை ஆய்வுகள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 5,
+    "standard": 10,
+    "lessonId": "tam-10-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "உரைநடை உலகம்: செயற்கை நுண்ணறிவு & பத்தி கருத்துணர்தல்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 5,
+    "standard": 11,
+    "lessonId": "tam-11-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "உரைநடை வீச்சு: இலக்கிய பத்தி வாசிப்பும் ஆய்வுத் திறனும்",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3845,7 +3770,407 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
     "standard": 12,
     "lessonId": "tam-12-5-5-1",
     "lessonNumber": "5.1",
-    "title": "பாரதியார் கவிதைகள், உ.வே.சா தமிழ்ப்பணி & சிற்பிகளின் கலைப்பயணம்",
+    "title": "நவீனத் தமிழ் உரைநடை: கட்டுரை வாசித்தல் மற்றும் பொருளுணர்தல்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 6,
+    "standard": 6,
+    "lessonId": "tam-6-6-6-1",
+    "lessonNumber": "6.1",
+    "title": "எளிய சொற்றொடர் தமிழாக்கம் & ஆங்கில-தமிழ் தொடரமைப்பு",
+    "term": "Term 3",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 6,
+    "standard": 7,
+    "lessonId": "tam-7-6-6-1",
+    "lessonNumber": "6.1",
+    "title": "அன்றாட பயன்பாட்டு வாக்கிய மொழிபெயர்ப்பு & பழமொழி தமிழாக்கம்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 6,
+    "standard": 8,
+    "lessonId": "tam-8-6-6-1",
+    "lessonNumber": "6.1",
+    "title": "உரைநடைப் பத்தி மொழிபெயர்ப்பு & வாக்கிய அமைப்பு மாற்றங்கள்",
+    "term": "Term 3",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 6,
+    "standard": 9,
+    "lessonId": "tam-9-6-6-1",
+    "lessonNumber": "6.1",
+    "title": "திராவிட மொழிக் குடும்பம் & ஆங்கில-தமிழ் பத்தி மொழிபெயர்ப்பு",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 6,
+    "standard": 10,
+    "lessonId": "tam-10-6-6-1",
+    "lessonNumber": "6.1",
+    "title": "மொழிபெயர்ப்புக் கலை (Translation Practice & Principles)",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 6,
+    "standard": 11,
+    "lessonId": "tam-11-6-6-1",
+    "lessonNumber": "6.1",
+    "title": "இருமொழி நடை வேறுபாடுகள் & அலுவலகக் குறிப்பு மொழிபெயர்ப்பு",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 6,
+    "standard": 12,
+    "lessonId": "tam-12-6-6-1",
+    "lessonNumber": "6.1",
+    "title": "இலக்கிய மொழிபெயர்ப்பு, செய்தித் துணுக்குகள் & ஆங்கில ஆவணத் தமிழாக்கம்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 6,
+    "lessonId": "tam-6-7-7-1",
+    "lessonNumber": "7.1",
+    "title": "இன்பத்தமிழ் & தமிழ்க்கும்மி (பாரதிதாசன், பெருஞ்சித்திரனார்)",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 6,
+    "lessonId": "tam-6-7-7-2",
+    "lessonNumber": "7.2",
+    "title": "மூதுரை & துன்பம் வெல்லும் கல்வி (பட்டுக்கோட்டை கல்யாணசுந்தரம்)",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 6,
+    "lessonId": "tam-6-7-7-3",
+    "lessonNumber": "7.3",
+    "title": "பாரதம் அன்றைய நாற்றங்கால் & பராபரக் கண்ணி (தாயுமானவர்)",
+    "term": "Term 3",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 6,
+    "lessonId": "tam-6-7-7-4",
+    "lessonNumber": "7.4",
+    "title": "கல்விக்கண் திறந்த காமராசர், தமிழ்நாட்டில் காந்தி & வேலுநாச்சியார்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 6,
+    "lessonId": "tam-6-7-7-5",
+    "lessonNumber": "7.5",
+    "title": "தமிழரின் கப்பற்கலை, ஆடை அணிகலன்கள், நாட்டுப்புறப் பாடல்கள் & நடுகல் வழிபாடு",
+    "term": "Term 3",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 7,
+    "lessonId": "tam-7-7-7-1",
+    "lessonNumber": "7.1",
+    "title": "எங்கள் தமிழ் & ஒன்றல்ல இரண்டல்ல (நாமக்கல் கவிஞர், உடுமலை நாராயணகவி)",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 7,
+    "lessonId": "tam-7-7-7-2",
+    "lessonNumber": "7.2",
+    "title": "காடு (சுரதா) & அப்படியே நிற்கட்டும் அந்த மரம்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 7,
+    "lessonId": "tam-7-7-7-3",
+    "lessonNumber": "7.3",
+    "title": "திருக்குறள் (அறக்கருத்துகள்), நாலடியார், பழமொழி நானூறு & நான்மணிக்கடிகை",
+    "term": "Term 3",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 7,
+    "lessonId": "tam-7-7-7-4",
+    "lessonNumber": "7.4",
+    "title": "கப்பலோட்டிய தமிழர் வ.உ.சி, பசும்பொன் முத்துராமலிங்கத்தேவர் & கீழடி ஆய்வுகள்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 7,
+    "lessonId": "tam-7-7-7-5",
+    "lessonNumber": "7.5",
+    "title": "தமிழர் இசைக்கருவிகள், கூத்து, வில்லுப்பாட்டு & திருவிழா மரபுகள்",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 8,
+    "lessonId": "tam-8-7-7-1",
+    "lessonNumber": "7.1",
+    "title": "தமிழ்மொழி வாழ்த்து (பாரதியார்) & தமிழ்மொழி மரபு",
+    "term": "Term 1",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 8,
+    "lessonId": "tam-8-7-7-2",
+    "lessonNumber": "7.2",
+    "title": "திருக்குறள், நன்னெறி & நீதி வெண்பா",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 8,
+    "lessonId": "tam-8-7-7-3",
+    "lessonNumber": "7.3",
+    "title": "படை வேழம் (ஜெயங்கொண்டார் - கலிங்கத்துப்பரணி) & தமிழர் இசைக்கருவிகள்",
+    "term": "Term 3",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 8,
+    "lessonId": "tam-8-7-7-4",
+    "lessonNumber": "7.4",
+    "title": "அயோத்திதாசப் பண்டிதர் சிந்தனைகள், கவிமணி & நாட்டுப்புறக் கைவினைக் கலைகள்",
+    "term": "Term 2",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 9,
+    "lessonId": "tam-9-7-7-1",
+    "lessonNumber": "7.1",
+    "title": "தமிழ் விடு தூது & இராவண காவியம் (புலவர் குழந்தை)",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 9,
+    "lessonId": "tam-9-7-7-2",
+    "lessonNumber": "7.2",
+    "title": "பெரியார், அண்ணா சிந்தனைகள், சிற்பி பாலசுப்பிரமணியம் & கல்யாண்ஜி (அக்கறை)",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 9,
+    "lessonId": "tam-9-7-7-3",
+    "lessonNumber": "7.3",
+    "title": "திருக்குறள், மணிமேகலை & பதினெண்கீழ்க்கணக்கு அறநெறிகள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 9,
+    "lessonId": "tam-9-7-7-4",
+    "lessonNumber": "7.4",
+    "title": "சீவக சிந்தாமணி, முத்தொள்ளாயிரம் & மதுரைக்காஞ்சி",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 10,
+    "lessonId": "tam-10-7-7-1",
+    "lessonNumber": "7.1",
+    "title": "அன்னை மொழியே (பாவலரேறு பெருஞ்சித்திரனார்) & காற்றே வா (பாரதியார்)",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 10,
+    "lessonId": "tam-10-7-7-2",
+    "lessonNumber": "7.2",
+    "title": "காசிக்காண்டம் (அதிவீரராம பாண்டியர்) & மலைபடுகடாம்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 10,
+    "lessonId": "tam-10-7-7-3",
+    "lessonNumber": "7.3",
+    "title": "நீதி வெண்பா (செய்குதம்பி பாவலர்) & திருவிளையாடற் புராணம்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 10,
+    "lessonId": "tam-10-7-7-4",
+    "lessonNumber": "7.4",
+    "title": "கம்பராமாயணம், சிலப்பதிகாரம் & மெய்க்கீர்த்தி",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 10,
+    "lessonId": "tam-10-7-7-5",
+    "lessonNumber": "7.5",
+    "title": "காலக்கணிதம் (கண்ணதாசன்), தேம்பாவணி & சிற்றிலக்கியங்கள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 10,
+    "lessonId": "tam-10-7-7-6",
+    "lessonNumber": "7.6",
+    "title": "நிகழ்கலை, சிற்றகல் ஒளி (ம.பொ.சி) & ஏர் புதிதா (கு.ப.ரா)",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 11,
+    "lessonId": "tam-11-7-7-1",
+    "lessonNumber": "7.1",
+    "title": "நற்றிணை, குறுந்தொகை, புறநானூறு வாழ்வியல் & நீதி வெண்பா",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 11,
+    "lessonId": "tam-11-7-7-2",
+    "lessonNumber": "7.2",
+    "title": "சீறாப்புராணம், குற்றாலக்குறவஞ்சி & பிள்ளைத்தமிழ் இலக்கியங்கள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 11,
+    "lessonId": "tam-11-7-7-3",
+    "lessonNumber": "7.3",
+    "title": "தமிழகக் கலைகள்: நாட்டியம், சிற்பம், ஓவியம், திராவிடக் கட்டிடக்கலை & சு.வெங்கடேசன்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 11,
+    "lessonId": "tam-11-7-7-4",
+    "lessonNumber": "7.4",
+    "title": "சங்ககாலத் தமிழர் வாழ்வியல், வீரம், விருந்தோம்பல் மற்றும் கொடை மரபு",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 12,
+    "lessonId": "tam-12-7-7-1",
+    "lessonNumber": "7.1",
+    "title": "சிலப்பதிகாரம், கம்பராமாயணம், நெடுநல்வாடை செய்யுள் பகுதிகள்",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 12,
+    "lessonId": "tam-12-7-7-2",
+    "lessonNumber": "7.2",
+    "title": "தேம்பாவணி, திருக்குறள் மெய்ப்பாட்டியல் & புறப்பொருள் வெண்பாமாலை",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 12,
+    "lessonId": "tam-12-7-7-3",
+    "lessonNumber": "7.3",
+    "title": "திரைப்படப் பாடல்கள் & நவீனக் கவிஞர்கள்: கண்ணதாசன், பட்டுக்கோட்டை, வாலி",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 12,
+    "lessonId": "tam-12-7-7-4",
+    "lessonNumber": "7.4",
+    "title": "தமிழ்ப் பேராசிரியர் பெருமக்கள்: உ.வே.சா, வையாபுரிப்பிள்ளை, கா.சு. பிள்ளை & அறிஞர் அண்ணா",
+    "term": "Full Year",
+    "mappedSubject": "Tamil"
+  },
+  {
+    "subjectId": "general-tamil",
+    "unitId": 7,
+    "standard": 12,
+    "lessonId": "tam-12-7-7-5",
+    "lessonNumber": "7.5",
+    "title": "தமிழர் தத்துவ மரபுகள், தொல் தமிழ் நாகரிகம், ஆதிச்சநல்லூர் அகழாய்வுகள் & பண்பாட்டு அடையாளங்கள்",
     "term": "Full Year",
     "mappedSubject": "Tamil"
   },
@@ -3861,10 +4186,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 6,
-    "lessonId": "eng-6-7-7-1",
-    "lessonNumber": "7.1",
+    "lessonId": "eng-6-6-7-1",
+    "lessonNumber": "6.1",
     "title": "Prose & Poetry: Sea Turtles & The Crocodile",
     "term": "Term 1",
     "mappedSubject": "English"
@@ -3881,10 +4206,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 6,
-    "lessonId": "eng-6-7-7-2",
-    "lessonNumber": "7.2",
+    "lessonId": "eng-6-6-7-2",
+    "lessonNumber": "6.2",
     "title": "Prose & Poetry: Trip to Ooty & From a Railway Carriage",
     "term": "Term 2",
     "mappedSubject": "English"
@@ -3901,10 +4226,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 6,
-    "lessonId": "eng-6-7-7-3",
-    "lessonNumber": "7.3",
+    "lessonId": "eng-6-6-7-3",
+    "lessonNumber": "6.3",
     "title": "Prose & Poetry: Who Owns the Water? & The Indian Seasons",
     "term": "Term 3",
     "mappedSubject": "English"
@@ -3921,10 +4246,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 7,
-    "lessonId": "eng-7-7-7-1",
-    "lessonNumber": "7.1",
+    "lessonId": "eng-6-7-7-1",
+    "lessonNumber": "6.1",
     "title": "Prose & Poetry: Eidgah & The Computer Swallowed Grandma",
     "term": "Term 1",
     "mappedSubject": "English"
@@ -3941,10 +4266,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 7,
-    "lessonId": "eng-7-7-7-2",
-    "lessonNumber": "7.2",
+    "lessonId": "eng-6-7-7-2",
+    "lessonNumber": "6.2",
     "title": "Prose & Poetry: The Wind on Haunted Hill & The Listeners",
     "term": "Term 2",
     "mappedSubject": "English"
@@ -3961,10 +4286,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 7,
-    "lessonId": "eng-7-7-7-3",
-    "lessonNumber": "7.3",
+    "lessonId": "eng-6-7-7-3",
+    "lessonNumber": "6.3",
     "title": "Prose & Poetry: Journey by Train & Sea Fever",
     "term": "Term 3",
     "mappedSubject": "English"
@@ -3991,10 +4316,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 8,
-    "lessonId": "eng-8-7-7-1",
-    "lessonNumber": "7.1",
+    "lessonId": "eng-8-6-7-1",
+    "lessonNumber": "6.1",
     "title": "Prose & Poetry: The Nose-Jewel & Special Hero",
     "term": "Term 1",
     "mappedSubject": "English"
@@ -4011,10 +4336,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 8,
-    "lessonId": "eng-8-7-7-2",
-    "lessonNumber": "7.2",
+    "lessonId": "eng-8-6-7-2",
+    "lessonNumber": "6.2",
     "title": "Prose & Poetry: Sir Isaac Newton & The Secret of the Machines",
     "term": "Term 2",
     "mappedSubject": "English"
@@ -4031,10 +4356,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 8,
-    "lessonId": "eng-8-7-7-3",
-    "lessonNumber": "7.3",
+    "lessonId": "eng-8-6-7-3",
+    "lessonNumber": "6.3",
     "title": "Prose & Poetry: The Wooden Horse & The Mystery of the Cyber Friend",
     "term": "Term 3",
     "mappedSubject": "English"
@@ -4061,10 +4386,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 9,
-    "lessonId": "eng-9-7-7-1",
-    "lessonNumber": "7.1",
+    "lessonId": "eng-9-6-7-1",
+    "lessonNumber": "6.1",
     "title": "Prose & Poetry: Learning the Game & Stopping by Woods on a Snowy Evening",
     "term": "Term 1",
     "mappedSubject": "English"
@@ -4081,10 +4406,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 9,
-    "lessonId": "eng-9-7-7-2",
-    "lessonNumber": "7.2",
+    "lessonId": "eng-9-6-7-2",
+    "lessonNumber": "6.2",
     "title": "Prose & Drama: A Poison Tree & The Tempest (Tales from Shakespeare)",
     "term": "Term 2",
     "mappedSubject": "English"
@@ -4101,10 +4426,10 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 9,
-    "lessonId": "eng-9-7-7-3",
-    "lessonNumber": "7.3",
+    "lessonId": "eng-9-6-7-3",
+    "lessonNumber": "6.3",
     "title": "Prose & Poetry: Earthquake, The Cat and the Pain-Killer & On Killing a Tree",
     "term": "Term 3",
     "mappedSubject": "English"
@@ -4161,7 +4486,7 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 5,
+    "unitId": 3,
     "standard": 10,
     "lessonId": "eng-10-5-5-1",
     "lessonNumber": "5.1",
@@ -4171,40 +4496,40 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 10,
-    "lessonId": "eng-10-7-7-1",
-    "lessonNumber": "7.1",
+    "lessonId": "eng-10-6-7-1",
+    "lessonNumber": "6.1",
     "title": "Prose & Poetry: His First Flight & Life (Henry Van Dyke)",
     "term": "Full Year",
     "mappedSubject": "English"
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 10,
-    "lessonId": "eng-10-7-7-2",
-    "lessonNumber": "7.2",
+    "lessonId": "eng-10-6-7-2",
+    "lessonNumber": "6.2",
     "title": "Prose & Poetry: The Night the Ghost Got In & The Grumble Family",
     "term": "Full Year",
     "mappedSubject": "English"
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 10,
-    "lessonId": "eng-10-7-7-3",
-    "lessonNumber": "7.3",
+    "lessonId": "eng-10-6-7-3",
+    "lessonNumber": "6.3",
     "title": "Prose & Poetry: Empowered Women Navigating the World & I am Every Woman",
     "term": "Full Year",
     "mappedSubject": "English"
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 10,
-    "lessonId": "eng-10-7-7-4",
-    "lessonNumber": "7.4",
+    "lessonId": "eng-10-6-7-4",
+    "lessonNumber": "6.4",
     "title": "Prose & Drama: The Attic & The Ant and the Cricket",
     "term": "Full Year",
     "mappedSubject": "English"
@@ -4231,20 +4556,20 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 11,
-    "lessonId": "eng-11-7-7-1",
-    "lessonNumber": "7.1",
+    "lessonId": "eng-11-6-7-1",
+    "lessonNumber": "6.1",
     "title": "Prose & Poetry: The Portrait of a Lady & Once Upon a Time",
     "term": "Full Year",
     "mappedSubject": "English"
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 11,
-    "lessonId": "eng-11-7-7-2",
-    "lessonNumber": "7.2",
+    "lessonId": "eng-11-6-7-2",
+    "lessonNumber": "6.2",
     "title": "Prose & Poetry: The Queen of Boxing & Tight Corners",
     "term": "Full Year",
     "mappedSubject": "English"
@@ -4271,21 +4596,607 @@ export const CANONICAL_SYLLABUS_LESSONS: CanonicalLesson[] = [
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 12,
-    "lessonId": "eng-12-7-7-1",
-    "lessonNumber": "7.1",
+    "lessonId": "eng-12-6-7-1",
+    "lessonNumber": "6.1",
     "title": "Prose & Poetry: Two Gentlemen of Verona & The Castle",
     "term": "Full Year",
     "mappedSubject": "English"
   },
   {
     "subjectId": "general-english",
-    "unitId": 7,
+    "unitId": 6,
     "standard": 12,
-    "lessonId": "eng-12-7-7-2",
-    "lessonNumber": "7.2",
+    "lessonId": "eng-12-6-7-2",
+    "lessonNumber": "6.2",
     "title": "Prose & Poetry: In Celebration of Being Alive & All the World's a Stage",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 11,
+    "lessonId": "apt-11-1-1-1",
+    "lessonNumber": "1.1",
+    "title": "Matrices and Determinants: Basic Operations, Inverses & Rank",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 11,
+    "lessonId": "apt-11-1-1-2",
+    "lessonNumber": "1.2",
+    "title": "Sets, Relations and Functions: Information Processing & Data Sets",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 11,
+    "lessonId": "apt-11-1-1-3",
+    "lessonNumber": "1.3",
+    "title": "Sequences and Series: Arithmetic, Geometric & Harmonic Progressions",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 11,
+    "lessonId": "apt-11-1-1-4",
+    "lessonNumber": "1.4",
+    "title": "Combinatorics and Mathematical Induction: Permutations & Combinations",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 11,
+    "lessonId": "apt-11-1-1-5",
+    "lessonNumber": "1.5",
+    "title": "Financial Mathematics: Simple & Compound Interest, Annuities & Depreciation",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Business Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 12,
+    "lessonId": "apt-12-1-1-1",
+    "lessonNumber": "1.1",
+    "title": "Applications of Matrices: System of Linear Equations & Cramer Rule",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 12,
+    "lessonId": "apt-12-1-1-2",
+    "lessonNumber": "1.2",
+    "title": "Theory of Equations: Polynomial Roots & Vieta Formulas",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 12,
+    "lessonId": "apt-12-1-1-3",
+    "lessonNumber": "1.3",
+    "title": "Applications of Differential Calculus in Commerce: Profit & Cost Maximization",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Business Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 1,
+    "standard": 12,
+    "lessonId": "apt-12-1-1-4",
+    "lessonNumber": "1.4",
+    "title": "Numerical Methods and Interpolation: Finite Differences & Newton Forward Formula",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Business Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 2,
+    "standard": 11,
+    "lessonId": "apt-11-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "Analytical Geometry & Direction Reasoning: Coordinate Planes & Straight Lines",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 2,
+    "standard": 11,
+    "lessonId": "apt-11-2-2-2",
+    "lessonNumber": "2.2",
+    "title": "Descriptive Statistics: Measures of Central Tendency & Standard Deviation",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Business Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 2,
+    "standard": 11,
+    "lessonId": "apt-11-2-2-3",
+    "lessonNumber": "2.3",
+    "title": "Probability Theory: Conditional Probability, Independent Events & Bayes Rule",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 2,
+    "standard": 12,
+    "lessonId": "apt-12-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "Discrete Mathematics: Mathematical Logic, Truth Tables & Logical Equivalence",
+    "term": "Full Year",
+    "volume": "Volume 1",
+    "mappedSubject": "Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 2,
+    "standard": 12,
+    "lessonId": "apt-12-2-2-2",
+    "lessonNumber": "2.2",
+    "title": "Probability Distributions: Binomial, Poisson & Normal Curves",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Business Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 2,
+    "standard": 12,
+    "lessonId": "apt-12-2-2-3",
+    "lessonNumber": "2.3",
+    "title": "Operations Research: Linear Programming Problems, Transportation & Assignment",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Business Mathematics"
+  },
+  {
+    "subjectId": "aptitude",
+    "unitId": 2,
+    "standard": 12,
+    "lessonId": "apt-12-2-2-4",
+    "lessonNumber": "2.4",
+    "title": "Sampling Techniques & Statistical Inference: Data Interpretation & Hypothesis Tests",
+    "term": "Full Year",
+    "volume": "Volume 2",
+    "mappedSubject": "Business Mathematics"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 2,
+    "standard": 6,
+    "lessonId": "eng-6-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "Poetry Appreciation: The Crocodile (Lewis Carroll) & Trees (Shirley Bauer)",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 2,
+    "standard": 6,
+    "lessonId": "eng-6-2-2-2",
+    "lessonNumber": "2.2",
+    "title": "Poetry Appreciation: I Dream of Spices (Raj Arumugam) & A Tragic Story",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 2,
+    "standard": 6,
+    "lessonId": "eng-6-2-2-3",
+    "lessonNumber": "2.3",
+    "title": "Poetry Appreciation: The Indian Seasons (Nisha Dyrene) & Team Work",
+    "term": "Term 3",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 2,
+    "standard": 7,
+    "lessonId": "eng-7-2-2-1",
+    "lessonNumber": "2.1",
+    "title": "Poetry Appreciation: The Computer Swallowed Grandma & The Listeners (Walter de la Mare)",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 2,
+    "standard": 7,
+    "lessonId": "eng-7-2-2-2",
+    "lessonNumber": "2.2",
+    "title": "Poetry Appreciation: Your Space (David Bates) & Sea Fever (John Masefield)",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 2,
+    "standard": 7,
+    "lessonId": "eng-7-2-2-3",
+    "lessonNumber": "2.3",
+    "title": "Poetry Appreciation: Courage (Edgar Albert Guest) & Wandering Singers (Sarojini Naidu)",
+    "term": "Term 3",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 6,
+    "lessonId": "eng-6-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "Reading Comprehension: Environmental Conservation & Wildlife Tales",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 6,
+    "lessonId": "eng-6-3-3-2",
+    "lessonNumber": "3.2",
+    "title": "Reading Comprehension: Historical Monuments & Travel Narratives",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 7,
+    "lessonId": "eng-7-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "Reading Comprehension: Scientific Inventions & Biographical Passages",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 7,
+    "lessonId": "eng-7-3-3-2",
+    "lessonNumber": "3.2",
+    "title": "Reading Comprehension: Sports Legends & Social Courage Narratives",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 8,
+    "lessonId": "eng-8-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "Reading Comprehension: Space Exploration & Marine Ecosystems",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 9,
+    "lessonId": "eng-9-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "Reading Comprehension: Digital Technology, Human Rights & Literature",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 11,
+    "lessonId": "eng-11-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "Advanced Reading Comprehension: Analytical Essays, Speeches & Inferences",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 3,
+    "standard": 12,
+    "lessonId": "eng-12-3-3-1",
+    "lessonNumber": "3.1",
+    "title": "Advanced Reading Comprehension: Global Classics, Philosophy & Precis Writing",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 6,
+    "lessonId": "eng-6-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "Technical Terms: Basic Environmental, Scientific & Classroom Terms",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 6,
+    "lessonId": "eng-6-4-4-2",
+    "lessonNumber": "4.2",
+    "title": "Technical Terms: Community Services, Civic & Occupational Terminology",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 7,
+    "lessonId": "eng-7-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "Technical Terms: Public Utilities, Media & Communication Terms",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 7,
+    "lessonId": "eng-7-4-4-2",
+    "lessonNumber": "4.2",
+    "title": "Technical Terms: Banking, Commerce & Transport Nomenclature",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 8,
+    "lessonId": "eng-8-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "Technical Terms: Institutional, Educational & Postal Terminology",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 8,
+    "lessonId": "eng-8-4-4-2",
+    "lessonNumber": "4.2",
+    "title": "Technical Terms: Government Offices & Public Administration Vocabulary",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 9,
+    "lessonId": "eng-9-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "Technical Terms: Office Correspondence & Administrative Vocabulary",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 9,
+    "lessonId": "eng-9-4-4-2",
+    "lessonNumber": "4.2",
+    "title": "Technical Terms: Judicial, Legal & Secretariat Glossaries",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 10,
+    "lessonId": "eng-10-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "Technical Terms: Official Government Secretariat Terminology & Commercial Terms",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 10,
+    "lessonId": "eng-10-4-4-2",
+    "lessonNumber": "4.2",
+    "title": "Technical Terms: Departmental Designations, File Notings & Public Notices",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 11,
+    "lessonId": "eng-11-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "Technical Terms: Public Administration, Constitutional & Statutory Vocabulary",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 11,
+    "lessonId": "eng-11-4-4-2",
+    "lessonNumber": "4.2",
+    "title": "Technical Terms: Financial Rules, Budgetary Terms & Departmental Glossaries",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 12,
+    "lessonId": "eng-12-4-4-1",
+    "lessonNumber": "4.1",
+    "title": "Technical Terms: Secretariat Official Proceedings, Gazette & Statutory Terminology",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 4,
+    "standard": 12,
+    "lessonId": "eng-12-4-4-2",
+    "lessonNumber": "4.2",
+    "title": "Technical Terms: High-Court Judicial Terms, Treaties & Administrative Codifications",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 6,
+    "lessonId": "eng-6-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "Reading Comprehension: Factual Passages & Key Detail Extraction",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 6,
+    "lessonId": "eng-6-5-5-2",
+    "lessonNumber": "5.2",
+    "title": "Reading Comprehension: Narrative Stories & Sequential Comprehension",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 7,
+    "lessonId": "eng-7-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "Reading Comprehension: Biographical Passages & Descriptive Analysis",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 7,
+    "lessonId": "eng-7-5-5-2",
+    "lessonNumber": "5.2",
+    "title": "Reading Comprehension: Informational Articles & Fact Verification",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 8,
+    "lessonId": "eng-8-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "Reading Comprehension: Discursive Passages & Author Viewpoints",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 8,
+    "lessonId": "eng-8-5-5-2",
+    "lessonNumber": "5.2",
+    "title": "Reading Comprehension: Scientific Articles & Conceptual Inferences",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 9,
+    "lessonId": "eng-9-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "Reading Comprehension: Expository Essays & Contextual Vocabulary",
+    "term": "Term 1",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 9,
+    "lessonId": "eng-9-5-5-2",
+    "lessonNumber": "5.2",
+    "title": "Reading Comprehension: Historical & Environmental Texts Comprehension",
+    "term": "Term 2",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 10,
+    "lessonId": "eng-10-5-5-2",
+    "lessonNumber": "5.2",
+    "title": "Reading Comprehension: Editorials, Analytical Deduction & Fact Ascertainment",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 11,
+    "lessonId": "eng-11-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "Reading Comprehension: Editorial Passages & Tone/Intent Identification",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 11,
+    "lessonId": "eng-11-5-5-2",
+    "lessonNumber": "5.2",
+    "title": "Reading Comprehension: Complex Philosophical & Scientific Articles",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 12,
+    "lessonId": "eng-12-5-5-1",
+    "lessonNumber": "5.1",
+    "title": "Reading Comprehension: High-Level Analytical Passages & Critical Reasoning",
+    "term": "Full Year",
+    "mappedSubject": "English"
+  },
+  {
+    "subjectId": "general-english",
+    "unitId": 5,
+    "standard": 12,
+    "lessonId": "eng-12-5-5-2",
+    "lessonNumber": "5.2",
+    "title": "Reading Comprehension: Official Reports, Editorials & Summary Inference",
     "term": "Full Year",
     "mappedSubject": "English"
   }
@@ -4305,7 +5216,18 @@ export function getCanonicalLessons(
   return CANONICAL_SYLLABUS_LESSONS.filter((l) => {
     if (l.subjectId.toLowerCase() !== normSub) return false;
     if (l.standard !== targetStd) return false;
-    if (l.unitId !== targetUnit) return false;
+
+    // Unit match with legacy unitId alias support
+    let unitMatches = l.unitId === targetUnit;
+    if (!unitMatches) {
+      if (normSub === 'general-english') {
+        if ((targetUnit === 3 && l.unitId === 5) || (targetUnit === 5 && l.unitId === 3)) unitMatches = true;
+        if ((targetUnit === 4 && l.unitId === 7) || (targetUnit === 7 && l.unitId === 4)) unitMatches = true;
+      } else if (normSub === 'general-tamil') {
+        if ((targetUnit === 6 && l.unitId === 7) || (targetUnit === 7 && l.unitId === 6)) unitMatches = true;
+      }
+    }
+    if (!unitMatches) return false;
 
     if (normTerm && normTerm !== 'all' && normTerm !== 'not applicable') {
       const lessonTerm = String(l.term || '').trim().toLowerCase();

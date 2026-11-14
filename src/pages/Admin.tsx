@@ -89,6 +89,7 @@ import {
   type TextbookMedium,
   type StandardId,
 } from '../data/samacheerTextbookCatalog'
+import { compareLessons, compareTopics } from '../utils/naturalSort'
 
 interface QuestionItem {
   id: number
@@ -756,13 +757,13 @@ const Admin = () => {
       unitId: editingQuestion.unitId || 1,
     }).then((lessons) => {
       if (!mounted) return
-      setQbModalLessons(lessons)
+      setQbModalLessons([...lessons].sort(compareLessons))
     })
 
     if (editingQuestion.lessonId) {
       dynamicSyllabusService.getTopics(editingQuestion.lessonId).then((topics) => {
         if (!mounted) return
-        setQbModalTopics(topics)
+        setQbModalTopics([...topics].sort(compareTopics))
       })
     } else {
       setQbModalTopics([])
@@ -804,13 +805,13 @@ const Admin = () => {
       unitId: editingNote.unitId || 1,
     }).then((lessons) => {
       if (!mounted) return
-      setNotesModalLessons(lessons)
+      setNotesModalLessons([...lessons].sort(compareLessons))
     })
 
     if (editingNote.lessonId) {
       dynamicSyllabusService.getTopics(editingNote.lessonId).then((topics) => {
         if (!mounted) return
-        setNotesModalTopics(topics)
+        setNotesModalTopics([...topics].sort(compareTopics))
       })
     } else {
       setNotesModalTopics([])
@@ -3573,8 +3574,8 @@ const Admin = () => {
         />
 
         <div className="admin-enterprise-body-content">
-          <div className="admin-page" style={{ padding: 0 }}>
-            <div className="admin-container" style={{ maxWidth: '100%' }}>
+          <div className={`admin-page ${(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isGdrive || isClaude) ? 'is-content-page' : ''}`}>
+            <div className="admin-container">
         {/* Toast Notification */}
         {actionMessage && (
           <motion.div
@@ -3788,7 +3789,7 @@ const Admin = () => {
 
                 {/* Dynamic 4 Dashboard Statistics Cards HUD for Active Management Tab */}
         {isQuestions && (
-          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+          <div className="admin-metrics-grid">
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-gold">
                 <Database size={24} />
@@ -3832,7 +3833,7 @@ const Admin = () => {
         )}
 
         {isTextbooks && (
-          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+          <div className="admin-metrics-grid">
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-gold">
                 <BookOpen size={24} />
@@ -3878,7 +3879,7 @@ const Admin = () => {
         )}
 
         {isNotes && (
-          <div className="admin-metrics-grid" style={{ marginBottom: '1.75rem' }}>
+          <div className="admin-metrics-grid">
             <div className="admin-metric-card glass">
               <div className="metric-icon-box metric-icon-gold">
                 <FileText size={24} />
@@ -4069,17 +4070,7 @@ const Admin = () => {
         {isQuestions && (
           <>
             {/* PDF Processing Dashboard (Page-by-Page Extraction Status & Overview) */}
-            <div
-              className="glass"
-              style={{
-                marginBottom: '1.25rem',
-                padding: '1.25rem',
-                borderRadius: '14px',
-                background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%)',
-                border: '1px solid rgba(234, 179, 8, 0.25)',
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
-              }}
-            >
+            <div className="admin-pdf-extraction-panel glass">
               <div
                 style={{
                   display: 'flex',
@@ -4301,7 +4292,7 @@ const Admin = () => {
             {/* Toolbar & Filters */}
         <div className="admin-toolbar glass">
           {/* Target System Toggle: Study Materials (Lesson-wise) vs Main Practice */}
-          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.85rem' }}>
+          <div className="admin-target-system-bar">
             <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Target Question System:</span>
             <div style={{ display: 'inline-flex', padding: '3px', background: 'rgba(255,255,255,0.06)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)' }}>
               <button
@@ -4674,7 +4665,7 @@ const Admin = () => {
                   Upload, process, and manage Classes 6–12 Samacheer Kalvi textbooks in Tamil & English. Texts are extracted, OCR-verified, and mapped to syllabus units for AI generation.
                 </p>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div className="admin-section-actions">
                 <button
                   className="admin-btn admin-btn-primary"
                   onClick={() => {
@@ -4795,22 +4786,7 @@ const Admin = () => {
             </div>
 
             {/* Top Delete Actions Toolbar Section for Textbooks */}
-            <div
-              className="admin-delete-section glass"
-              style={{
-                marginTop: '1rem',
-                marginBottom: '1rem',
-                padding: '0.85rem 1.25rem',
-                borderRadius: '12px',
-                background: 'rgba(15, 23, 42, 0.75)',
-                border: '1px solid rgba(239, 68, 68, 0.25)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '0.85rem',
-              }}
-            >
+            <div className="admin-delete-section glass">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <input
@@ -4862,7 +4838,7 @@ const Admin = () => {
               </div>
 
               {/* Action Buttons: Delete Selected & Delete All */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <div className="admin-delete-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                 {/* Option 1: Delete Selected */}
                 <button
                   type="button"
@@ -5620,17 +5596,7 @@ const Admin = () => {
             </div>
 
             {/* PDF Processing Dashboard (Page-by-Page Extraction Status & Overview) */}
-            <div
-              className="glass"
-              style={{
-                marginBottom: '1.25rem',
-                padding: '1.25rem',
-                borderRadius: '14px',
-                background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%)',
-                border: '1px solid rgba(234, 179, 8, 0.25)',
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
-              }}
-            >
+            <div className="admin-pdf-extraction-panel glass">
               <div
                 style={{
                   display: 'flex',
@@ -6060,7 +6026,7 @@ const Admin = () => {
               </div>
 
               {/* Action Buttons: Delete Selected & Delete All */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <div className="admin-delete-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                 <button
                   type="button"
                   className="admin-btn"
@@ -7517,13 +7483,13 @@ const Admin = () => {
                         const subj = subjects.find((s: any) => s.name === currentSubj) || subjects[0]
                         const subjId = subj?.id || 'general-studies'
                         const canonicalLessons = getLessonsForSelection(currentCat, subjId, currentClassId, currentUnitId)
-                        const availableEditLessons = qbModalLessons.length > 0
+                        const availableEditLessons = (qbModalLessons.length > 0
                           ? qbModalLessons.map((l: any) => ({
                               id: l.id,
                               lessonNumber: l.lesson_number || l.lessonNumber,
                               title: l.title,
                             }))
-                          : canonicalLessons
+                          : canonicalLessons).slice().sort(compareLessons)
                         return (
                           <select
                             className="filter-select"
@@ -9108,13 +9074,13 @@ const Admin = () => {
                           <label>5. Lesson Selection (Exact Lesson) *</label>
                           {(() => {
                             const canonicalLessons = getLessonsForSelection(currentCat, currentSubjId, currentClassId, currentUnitId)
-                            const activeLessons = notesModalLessons.length > 0
+                            const activeLessons = (notesModalLessons.length > 0
                               ? notesModalLessons.map((l: any) => ({
                                   id: l.id,
                                   lessonNumber: l.lesson_number || l.lessonNumber,
                                   title: l.title,
                                 }))
-                              : canonicalLessons
+                              : canonicalLessons).slice().sort(compareLessons)
                             return (
                               <select
                                 className="ai-select"

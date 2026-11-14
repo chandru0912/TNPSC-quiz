@@ -74,7 +74,7 @@ export class AIProviderFactory {
         [
           cleanName,
           cleanName === 'gemini'
-            ? 'gemini-3.8-flash'
+            ? 'gemini-3.5-flash'
             : cleanName === 'openai'
             ? 'gpt-4o-mini'
             : 'claude-3-5-sonnet-20241022',

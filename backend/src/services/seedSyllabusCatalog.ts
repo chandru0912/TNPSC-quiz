@@ -2,6 +2,7 @@ import pool from '../db';
 import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
+import { AISyllabusEngineService } from './aiSyllabusEngineService';
 
 function loadTsModule(relPath: string): any {
   const filePath = path.resolve(__dirname, relPath);
@@ -37,28 +38,40 @@ export async function seedCompleteSyllabusData(): Promise<number> {
       ON syllabus_topics (lesson_id, topic_name);
     `);
 
-    // 1. Ensure Canonical Exams
+    // Remove any stray 'all' subject rows
+    await client.query(`DELETE FROM syllabus_subjects WHERE subject_slug = 'all' OR id LIKE '%-all'`);
+
+    // 1. Ensure Canonical Exams (Preserving both group2 and group2a in DB while naming group2 "TNPSC Group 2 & 2A")
     await client.query(`
       INSERT INTO syllabus_exams (id, name, code, badge, description, display_order, is_active) VALUES
         ('group1', 'TNPSC Group 1', 'Code: 497', 'Degree Standard • Prelims', 'Deputy Collector, DSP, Commercial Tax Officer', 1, true),
-        ('group2', 'TNPSC Group 2 & 2A', 'Code: 495', 'Degree Standard • Prelims & Non-Interview', 'Sub Registrar, Municipal Commissioner', 2, true),
-        ('group4', 'TNPSC Group 4', 'Code: 496', 'SSLC Standard • Single Paper', 'Junior Assistant, VAO, Bill Collector, Typist', 3, true)
+        ('group2', 'TNPSC Group 2 & 2A', 'Code: 495', 'Degree Standard • Combined Prelims (Interview & Non-Interview Posts)', 'Sub Registrar, Municipal Commissioner, Probation Officer, ASO', 2, true),
+        ('group2a', 'TNPSC Group 2A', 'Code: 495A', 'Degree Standard • Non-Interview Posts', 'Assistant Section Officer, Senior Inspector, Audit Inspector', 3, true),
+        ('group4', 'TNPSC Group 4', 'Code: 496', 'SSLC Standard • Single Paper', 'Junior Assistant, VAO, Bill Collector, Typist', 4, true)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
+        code = COALESCE(syllabus_exams.code, EXCLUDED.code),
+        badge = COALESCE(syllabus_exams.badge, EXCLUDED.badge),
+        description = COALESCE(syllabus_exams.description, EXCLUDED.description),
+        display_order = EXCLUDED.display_order,
         is_active = true;
     `);
 
-    // 2. Ensure Canonical Subjects
+    // 2. Ensure Canonical Subjects for all 4 Groups
     const canonicalSubjects = [
       { id: 'group1-general-studies', exam: 'group1', slug: 'general-studies', name: 'General Studies', desc: 'General Science, History, Polity, Economy, Geography, TN Heritage', ord: 1 },
       { id: 'group1-aptitude', exam: 'group1', slug: 'aptitude', name: 'Aptitude and Mental Ability', desc: 'Mental ability, Simplification, Ratio, Logical reasoning', ord: 2 },
       { id: 'group2-general-studies', exam: 'group2', slug: 'general-studies', name: 'General Studies', desc: 'General Science, History, Polity, Economy, Geography, TN Heritage', ord: 1 },
       { id: 'group2-aptitude', exam: 'group2', slug: 'aptitude', name: 'Aptitude and Mental Ability', desc: 'Mental ability, Simplification, Ratio, Logical reasoning', ord: 2 },
       { id: 'group2-general-english', exam: 'group2', slug: 'general-english', name: 'General English', desc: 'Grammar, Literature, Vocabulary, Comprehension', ord: 3 },
-      { id: 'group2-general-tamil', exam: 'group2', slug: 'general-tamil', name: 'General Tamil', desc: 'இலக்கணம், இலக்கியம், தமிழ் அறிஞர்களும் தமிழ்த் தொண்டும்', ord: 4 },
+      { id: 'group2-general-tamil', exam: 'group2', slug: 'general-tamil', name: 'General Tamil', desc: 'இலக்கணம், சொல்லகராதி, எழுதும் திறன், கலைச் சொற்கள், வாசித்தல், மொழிபெயர்ப்பு, இலக்கியம்', ord: 4 },
+      { id: 'group2a-general-studies', exam: 'group2a', slug: 'general-studies', name: 'General Studies', desc: 'General Science, History, Polity, Economy, Geography, TN Heritage', ord: 1 },
+      { id: 'group2a-aptitude', exam: 'group2a', slug: 'aptitude', name: 'Aptitude and Mental Ability', desc: 'Mental ability, Simplification, Ratio, Logical reasoning', ord: 2 },
+      { id: 'group2a-general-english', exam: 'group2a', slug: 'general-english', name: 'General English', desc: 'Grammar, Literature, Vocabulary, Comprehension', ord: 3 },
+      { id: 'group2a-general-tamil', exam: 'group2a', slug: 'general-tamil', name: 'General Tamil', desc: 'இலக்கணம், சொல்லகராதி, எழுதும் திறன், கலைச் சொற்கள், வாசித்தல், மொழிபெயர்ப்பு, இலக்கியம்', ord: 4 },
       { id: 'group4-general-studies', exam: 'group4', slug: 'general-studies', name: 'General Studies', desc: 'General Science, History, Polity, Economy, Geography, TN Heritage', ord: 1 },
       { id: 'group4-aptitude', exam: 'group4', slug: 'aptitude', name: 'Aptitude and Mental Ability', desc: 'Mental ability, Simplification, Ratio, Logical reasoning', ord: 2 },
-      { id: 'group4-general-tamil', exam: 'group4', slug: 'general-tamil', name: 'General Tamil', desc: 'இலக்கணம், இலக்கியம், தமிழ் அறிஞர்களும் தமிழ்த் தொண்டும்', ord: 3 },
+      { id: 'group4-general-tamil', exam: 'group4', slug: 'general-tamil', name: 'General Tamil', desc: 'இலக்கணம், சொல்லகராதி, எழுதும் திறன், கலைச் சொற்கள், வாசித்தல், மொழிபெயர்ப்பு, இலக்கியம்', ord: 3 },
       { id: 'group4-general-english', exam: 'group4', slug: 'general-english', name: 'General English', desc: 'Grammar, Literature, Vocabulary, Comprehension', ord: 4 },
     ];
 
@@ -81,11 +94,12 @@ export async function seedCompleteSyllabusData(): Promise<number> {
       unitCode: string,
       title: string,
       subjectName: string,
-      qCount: number
+      qCount: number,
+      description?: string
     ): Promise<number> {
       const q = await client.query(
         `SELECT id FROM syllabus_units 
-         WHERE exam_id = $1 AND (subject_id = $2 OR subject_id = $3) AND unit_number = $4`,
+         WHERE exam_id = $1 AND (subject_id = $2 OR subject_id = $3) AND unit_number = $4 AND standard_number IS NULL`,
         [examId, subjectSlug, `${examId}-${subjectSlug}`, unitNum]
       );
       if (q.rows.length > 0) {
@@ -93,16 +107,26 @@ export async function seedCompleteSyllabusData(): Promise<number> {
       }
       const ins = await client.query(
         `INSERT INTO syllabus_units (
-          exam_id, subject_id, unit_number, unit_code, title, subject_name,
-          question_count, display_order, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+          exam_id, subject_id, standard_number, unit_number, unit_code, title, subject_name,
+          description, question_count, display_order, is_active
+        ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, true)
         RETURNING id`,
-        [examId, subjectSlug, unitNum, unitCode || `Unit ${unitNum}`, title, subjectName || title, qCount || 15, unitNum]
+        [
+          examId,
+          subjectSlug,
+          unitNum,
+          unitCode || `Unit ${unitNum}`,
+          title,
+          subjectName || title,
+          description || title,
+          qCount || 15,
+          unitNum,
+        ]
       );
       return ins.rows[0].id;
     }
 
-    // Helper to insert or update lesson and topics
+    // Helper to insert or update lesson and lesson-specific focus areas
     async function syncLesson(
       unitDbId: number,
       examId: string,
@@ -113,17 +137,26 @@ export async function seedCompleteSyllabusData(): Promise<number> {
       order: number
     ): Promise<void> {
       const lessonId = lessonObj.id;
-      const lessonNumber = lessonObj.lessonNumber || String(order);
+      const lessonNumber = lessonObj.lessonNumber || lessonObj.lesson_number || String(order);
       const title = lessonObj.title;
       const term = lessonObj.term || 'Term 1';
-      const description = lessonObj.description || '';
+      const description = lessonObj.description || `Samacheer Kalvi Class ${standardNum} (${term}) — ${title}`;
       const status = lessonObj.status || 'Available';
+      const textbookTitle = lessonObj.textbook_title || `Samacheer Kalvi Class ${standardNum}`;
+      const textbookUnitNum = lessonObj.textbook_unit_number || String(lessonNumber).split('.')[0] || '1';
+      const textbookUnitTitle = lessonObj.textbook_unit_title || (subjectSlug === 'general-tamil' ? `இயல் ${textbookUnitNum} (${term})` : `Textbook Unit ${textbookUnitNum} (${term})`);
+      const matchedTopicsJson = JSON.stringify(lessonObj.matched_syllabus_topics || []);
+      const syllabusRef = lessonObj.syllabus_reference || null;
+      const pageRef = lessonObj.textbook_page_reference || `Class ${standardNum} • ${term} • Lesson ${lessonNumber}`;
 
       await client.query(`
         INSERT INTO syllabus_lessons (
           id, unit_id, exam_id, subject_id, standard_number, lesson_number,
-          title, term, description, status, display_order, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+          title, term, description, status, display_order, is_active,
+          textbook_title, textbook_unit_number, textbook_unit_title,
+          matched_topics, syllabus_reference, textbook_page_reference,
+          mapping_status, verification_status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12, $13, $14, $15::jsonb, $16, $17, 'FULLY MAPPED', 'VERIFIED')
         ON CONFLICT (id) DO UPDATE SET
           unit_id = EXCLUDED.unit_id,
           exam_id = EXCLUDED.exam_id,
@@ -132,8 +165,32 @@ export async function seedCompleteSyllabusData(): Promise<number> {
           lesson_number = EXCLUDED.lesson_number,
           title = COALESCE(syllabus_lessons.title, EXCLUDED.title),
           term = EXCLUDED.term,
+          textbook_title = COALESCE(syllabus_lessons.textbook_title, EXCLUDED.textbook_title),
+          textbook_unit_number = COALESCE(syllabus_lessons.textbook_unit_number, EXCLUDED.textbook_unit_number),
+          textbook_unit_title = COALESCE(syllabus_lessons.textbook_unit_title, EXCLUDED.textbook_unit_title),
+          matched_topics = CASE WHEN syllabus_lessons.matched_topics IS NULL OR syllabus_lessons.matched_topics = '[]'::jsonb THEN EXCLUDED.matched_topics ELSE syllabus_lessons.matched_topics END,
+          syllabus_reference = COALESCE(syllabus_lessons.syllabus_reference, EXCLUDED.syllabus_reference),
+          textbook_page_reference = COALESCE(syllabus_lessons.textbook_page_reference, EXCLUDED.textbook_page_reference),
           is_active = true
-      `, [lessonId, unitDbId, examId, subjectSlug, standardNum, lessonNumber, title, term, description, status, order]);
+      `, [
+        lessonId,
+        unitDbId,
+        examId,
+        subjectSlug,
+        standardNum,
+        lessonNumber,
+        title,
+        term,
+        description,
+        status,
+        order,
+        textbookTitle,
+        textbookUnitNum,
+        textbookUnitTitle,
+        matchedTopicsJson,
+        syllabusRef,
+        pageRef,
+      ]);
 
       totalLessonsSynced++;
 
@@ -141,91 +198,79 @@ export async function seedCompleteSyllabusData(): Promise<number> {
         let tOrd = 1;
         for (const top of topics) {
           const topName = typeof top === 'string' ? top : (top.name || top.topic_name);
+          const topRef = typeof top === 'object' && top !== null ? top.syllabus_reference : syllabusRef;
           if (!topName || topName.trim().length === 0) continue;
           await client.query(`
-            INSERT INTO syllabus_topics (lesson_id, unit_id, topic_name, display_order, is_active)
-            VALUES ($1, $2, $3, $4, true)
+            INSERT INTO syllabus_topics (lesson_id, unit_id, topic_name, syllabus_reference, display_order, is_active)
+            VALUES ($1, $2, $3, $4, $5, true)
             ON CONFLICT (lesson_id, topic_name) DO UPDATE SET
               unit_id = EXCLUDED.unit_id,
+              syllabus_reference = COALESCE(syllabus_topics.syllabus_reference, EXCLUDED.syllabus_reference),
               is_active = true
-          `, [lessonId, unitDbId, topName.trim(), tOrd++]);
+          `, [lessonId, unitDbId, topName.trim(), topRef || null, tOrd++]);
         }
       }
     }
 
-    // 3. GROUP 1 SYNC
-    const g1 = loadTsModule('../../../src/data/group1SyllabusData.ts');
-    const g1Class = loadTsModule('../../../src/data/group1ClassSyllabusData.ts');
+    // 3. Seed canonical units, textbook lessons, and lesson-specific Focus Areas across all 4 groups
+    const groupSubjectMatrix: Array<{ examId: string; subjects: string[]; standards: number[] }> = [
+      { examId: 'group1', subjects: ['general-studies', 'aptitude'], standards: [6, 7, 8, 9, 10, 11, 12] },
+      { examId: 'group2', subjects: ['general-studies', 'aptitude', 'general-english', 'general-tamil'], standards: [6, 7, 8, 9, 10, 11, 12] },
+      { examId: 'group2a', subjects: ['general-studies', 'aptitude', 'general-english', 'general-tamil'], standards: [6, 7, 8, 9, 10, 11, 12] },
+      { examId: 'group4', subjects: ['general-studies', 'aptitude', 'general-tamil', 'general-english'], standards: [6, 7, 8, 9, 10, 11, 12] },
+    ];
 
-    for (const u of (g1.group1GeneralStudiesUnits || [])) {
-      await getOrCreateUnit('group1', 'general-studies', u.id, u.unitNumber, u.title, u.tamilTitle, u.questionCount);
-    }
-    for (const u of (g1.group1AptitudeUnits || [])) {
-      await getOrCreateUnit('group1', 'aptitude', u.id, u.unitNumber, u.title, u.title, u.questionCount);
-    }
+    for (const groupEntry of groupSubjectMatrix) {
+      const { examId, subjects, standards } = groupEntry;
+      for (const subjectSlug of subjects) {
+        const canonicalUnits = AISyllabusEngineService.getCanonicalUnitsForSubject(examId, subjectSlug, standards);
+        for (const uDraft of canonicalUnits) {
+          const unitDesc = Array.isArray(uDraft.syllabus_topics) && uDraft.syllabus_topics.length > 0
+            ? uDraft.syllabus_topics.join(' • ')
+            : uDraft.title;
+          const unitDbId = await getOrCreateUnit(
+            examId,
+            subjectSlug,
+            uDraft.unit_number,
+            uDraft.unit_code,
+            uDraft.title,
+            uDraft.subject_name || uDraft.title,
+            15,
+            unitDesc
+          );
 
-    const g1Registry = g1Class.unitClassRegistry || {};
-    for (const [, block] of Object.entries<any>(g1Registry)) {
-      const unitDbId = await getOrCreateUnit('group1', 'general-studies', block.unitId, `Unit ${block.unitId}`, block.unitTitle, block.subjectName, 15);
-      const lessons = block.lessons || [];
-      const topics = block.topics || [];
-      const standardNum = block.classId || block.standardNumber || 6;
-      let ord = 1;
-      for (const l of lessons) {
-        await syncLesson(unitDbId, 'group1', 'general-studies', standardNum, l, topics, ord++);
-      }
-    }
+          // Group lessons by standard so display_order is 1..N per standard
+          const byStd = new Map<number, typeof uDraft.lessons>();
+          for (const l of uDraft.lessons || []) {
+            const list = byStd.get(l.standard_number) || [];
+            list.push(l);
+            byStd.set(l.standard_number, list);
+          }
 
-    // 4. GROUP 2 & 2A SYNC
-    const g2 = loadTsModule('../../../src/data/group2SyllabusData.ts');
-    const g2Class = loadTsModule('../../../src/data/group2ClassSyllabusData.ts');
-
-    for (const s of (g2.group2Subjects || [])) {
-      for (const u of (s.units || [])) {
-        await getOrCreateUnit('group2', s.id, u.id, u.unitNumber, u.title, u.tamilTitle || s.title, u.questionCount);
-      }
-    }
-
-    const g2Registry = g2Class.group2ClassRegistry || {};
-    for (const [, block] of Object.entries<any>(g2Registry)) {
-      const subjectSlug = block.subjectId || 'general-studies';
-      const unitNum = block.unitId;
-      const standardNum = block.classId || block.standardNumber || 6;
-      const unitDbId = await getOrCreateUnit('group2', subjectSlug, unitNum, block.unitNumber || `Unit ${unitNum}`, block.unitTitle, block.subjectTitle || block.subjectName, 15);
-      const lessons = block.lessons || [];
-      const topics = block.topics || [];
-      let ord = 1;
-      for (const l of lessons) {
-        await syncLesson(unitDbId, 'group2', subjectSlug, standardNum, l, topics, ord++);
-      }
-    }
-
-    // 5. GROUP 4 SYNC
-    const g4 = loadTsModule('../../../src/data/group4SyllabusData.ts');
-    const g4Class = loadTsModule('../../../src/data/group4ClassSyllabusData.ts');
-
-    for (const s of (g4.group4Subjects || [])) {
-      for (const u of (s.units || [])) {
-        await getOrCreateUnit('group4', s.id, u.id, u.unitNumber, u.title, u.tamilTitle || s.title, u.questionCount);
-      }
-    }
-
-    const g4Registry = g4Class.group4ClassRegistry || {};
-    for (const [, block] of Object.entries<any>(g4Registry)) {
-      const subjectSlug = block.subjectId || 'general-studies';
-      const unitNum = block.unitId;
-      const standardNum = block.classId || block.standardNumber || 6;
-      const unitDbId = await getOrCreateUnit('group4', subjectSlug, unitNum, block.unitNumber || `Unit ${unitNum}`, block.unitTitle, block.subjectTitle || block.subjectName, 15);
-      const lessons = block.lessons || [];
-      const topics = block.topics || [];
-      let ord = 1;
-      for (const l of lessons) {
-        await syncLesson(unitDbId, 'group4', subjectSlug, standardNum, l, topics, ord++);
+          for (const [stdNum, stdLessons] of byStd.entries()) {
+            let ord = 1;
+            for (const l of stdLessons) {
+              const deterministicId = `${examId}-${subjectSlug}-u${uDraft.unit_number}-s${stdNum}-l${String(l.lesson_number).replace(/[^a-zA-Z0-9]/g, '_')}`;
+              await syncLesson(
+                unitDbId,
+                examId,
+                subjectSlug,
+                stdNum,
+                {
+                  ...l,
+                  id: deterministicId,
+                },
+                l.topics || [],
+                ord++
+              );
+            }
+          }
+        }
       }
     }
 
     await client.query('COMMIT');
-    console.log(`[Seeder] Complete student syllabus sync done: ${totalLessonsSynced} lessons synced into PostgreSQL.`);
+    console.log(`[Seeder] Complete syllabus & focus areas sync done: ${totalLessonsSynced} lessons synced across Group 1, Group 2, Group 2A, and Group 4.`);
     return totalLessonsSynced;
   } catch (err: any) {
     await client.query('ROLLBACK');

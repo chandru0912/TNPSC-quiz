@@ -168,18 +168,35 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
           '';
         const authHeader: Record<string, string> = activeToken ? { Authorization: `Bearer ${activeToken}` } : {};
 
-        let res = await apiFetch(`/api/analytics/overview?range=${range}`, {
-          headers: authHeader,
-        });
+        const candidateEndpoints = [
+          `/api/analytics/overview?range=${range}`,
+          `/api/admin/analytics/overview?range=${range}`,
+          `/api/analytics?range=${range}`,
+          `/api/admin/overview?range=${range}`,
+        ];
 
-        // Robust fallback: If 404, attempt reverse proxy route /api/admin/analytics/overview
-        if (res.status === 404) {
-          const fallbackRes = await apiFetch(`/api/admin/analytics/overview?range=${range}`, {
-            headers: authHeader,
-          });
-          if (fallbackRes.ok) {
-            res = fallbackRes;
+        let res: Response | null = null;
+        let lastStatus: number = 0;
+
+        for (const endpoint of candidateEndpoints) {
+          try {
+            const candidateRes = await apiFetch(endpoint, { headers: authHeader });
+            if (candidateRes.ok) {
+              res = candidateRes;
+              break;
+            }
+            lastStatus = candidateRes.status;
+            if (candidateRes.status === 401 || candidateRes.status === 403) {
+              res = candidateRes;
+              break;
+            }
+          } catch {
+            // continue fallback candidate
           }
+        }
+
+        if (!res) {
+          throw new Error(`Failed to load analytics: HTTP ${lastStatus || 404}`);
         }
 
         if (res.status === 401 || res.status === 403) {

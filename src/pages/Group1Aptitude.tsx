@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { group1AptitudeUnits } from '../data/group1SyllabusData'
+import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import './Group1GeneralStudies.css'
 
 const Group1Aptitude = () => {
@@ -19,14 +20,17 @@ const Group1Aptitude = () => {
   const [units, setUnits] = useState(group1AptitudeUnits)
 
   useEffect(() => {
-    fetch('/api/study-management/units?examId=group1&subjectId=aptitude')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.units) && data.units.length > 0) {
-          setUnits((prev) => {
-            const staticMap = new Map(prev.map((u) => [u.id, u]))
-            return data.units.map((u: any) => {
-              const existing = staticMap.get(u.unit_number)
+    let isCancelled = false
+
+    const loadUnits = () => {
+      fetch('/api/study-management/units?examId=group1&subjectId=aptitude')
+        .then((res) => res.json())
+        .then((data) => {
+          if (isCancelled) return
+          if (data.success && Array.isArray(data.units) && data.units.length > 0) {
+            const staticMap = new Map(group1AptitudeUnits.map((u) => [u.id, u]))
+            const mapped = data.units.map((u: any) => {
+              const existing = staticMap.get(Number(u.unit_number))
               if (existing) {
                 return {
                   ...existing,
@@ -37,17 +41,28 @@ const Group1Aptitude = () => {
                 }
               }
               return {
-                id: u.unit_number,
+                id: Number(u.unit_number),
                 unitNumber: u.unit_code || `Unit ${u.unit_number}`,
                 title: u.title,
                 questionCount: u.question_count || 10,
                 topics: u.description ? [u.description] : [`Aptitude outline for ${u.title}`],
               }
             })
-          })
-        }
-      })
-      .catch(() => {})
+            setUnits(mapped)
+          }
+        })
+        .catch(() => {})
+    }
+
+    loadUnits()
+    const unsubscribe = dynamicSyllabusService.subscribe(() => {
+      loadUnits()
+    })
+
+    return () => {
+      isCancelled = true
+      unsubscribe()
+    }
   }, [])
 
   return (

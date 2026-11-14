@@ -55,7 +55,8 @@ router.get('/districts', (_req: Request, res: Response) => {
 });
 
 // 3. Analytics Overview (12 Cards with % Change)
-router.get('/overview', requireAdminAuth, async (req: Request, res: Response) => {
+// Support both /overview and direct root / on analytics router to prevent 404s
+router.get(['/overview', '/', ''], requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const range = (req.query.range as string) || '30d';
     const district = req.query.district as string;

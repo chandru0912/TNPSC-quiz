@@ -29,7 +29,7 @@
 .smm-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--admin-space-section, 24px);
   width: 100%;
   color: #f1f5f9;
   box-sizing: border-box;
@@ -88,10 +88,10 @@
   background: rgba(14, 22, 42, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  padding: 1.15rem 1.35rem;
+  padding: var(--admin-space-card-pad, 20px);
   display: flex;
   align-items: center;
-  gap: 1.15rem;
+  gap: 16px;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   transition: all 0.25s ease;
@@ -125,21 +125,22 @@
 .smm-filter-card {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  padding: 1.35rem 1.6rem;
+  gap: 18px;
+  padding: var(--admin-space-card-pad, 20px);
   border-radius: 16px;
   background: rgba(14, 22, 42, 0.75);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 215, 0, 0.2);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 20px rgba(255, 215, 0, 0.04);
+  box-sizing: border-box;
 }
 
 /* 3-Column Selectors Grid */
 .smm-selectors-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
+  gap: var(--admin-space-card-gap, 18px);
 }
 
 .smm-form-group {
@@ -611,7 +612,7 @@
 .smm-units-stack {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: var(--admin-space-card-gap, 18px);
 }
 
 .smm-unit-card {
@@ -639,12 +640,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.1rem 1.4rem;
+  padding: 18px var(--admin-space-card-pad, 20px);
   background: rgba(18, 28, 54, 0.5);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   cursor: pointer;
   user-select: none;
-  gap: 1.25rem;
+  gap: 18px;
   transition: background 0.2s ease;
 }
 
@@ -1522,6 +1523,7 @@
 @media (max-width: 768px) {
   .smm-selectors-grid {
     grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .smm-toolbar-row {
@@ -1534,18 +1536,22 @@
   }
 
   .smm-toolbar-actions {
-    justify-content: space-between;
+    justify-content: flex-start;
+    gap: 10px;
   }
 
   .smm-unit-row {
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.85rem;
+    padding: 14px 16px;
+    gap: 12px;
   }
 
   .smm-unit-controls {
     width: 100%;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .smm-lesson-row {
@@ -1557,6 +1563,8 @@
   .smm-lesson-controls {
     width: 100%;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .smm-topic-row {
@@ -2931,5 +2939,144 @@
   border-radius: 4px;
   white-space: nowrap;
 }
+
+/* ==========================================================================
+   AI SYLLABUS IMPORT REDESIGNED WORKFLOW STYLES
+   ========================================================================== */
+.smm-workflow-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.15rem 1.25rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.smm-workflow-section:hover {
+  border-color: rgba(168, 85, 247, 0.25);
+}
+
+.smm-workflow-section.is-active {
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow: 0 4px 20px rgba(168, 85, 247, 0.08);
+}
+
+.smm-wf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.smm-wf-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.smm-wf-step-pill {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.18rem 0.55rem;
+  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(245, 158, 11, 0.3));
+  color: #ffd700;
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  letter-spacing: 0.5px;
+}
+
+.smm-wf-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.smm-wf-desc {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.smm-pill-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.smm-pill-option-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 1rem;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.smm-pill-option-btn:hover {
+  background: rgba(51, 65, 85, 0.7);
+  border-color: rgba(168, 85, 247, 0.35);
+  color: #f8fafc;
+}
+
+.smm-pill-option-btn.selected {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(99, 102, 241, 0.25));
+  border-color: #a855f7;
+  color: #ffd700;
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.25);
+}
+
+.smm-file-card-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  flex-wrap: wrap;
+}
+
+.smm-file-card-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.smm-file-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.smm-wf-validation-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  color: #fbbf24;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 
 

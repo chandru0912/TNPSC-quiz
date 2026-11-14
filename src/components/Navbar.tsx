@@ -179,9 +179,19 @@ const Navbar = () => {
                     justifyContent: 'center',
                     fontSize: '0.72rem',
                     fontWeight: 800,
+                    overflow: 'hidden',
                   }}
                 >
-                  {student.fullName ? student.fullName.charAt(0).toUpperCase() : 'S'}
+                  {student.avatarUrl ? (
+                    <img
+                      src={student.avatarUrl}
+                      alt={student.fullName || 'Student'}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    student.fullName ? student.fullName.charAt(0).toUpperCase() : 'S'
+                  )}
                 </div>
                 <span className="nav-auth-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
                   {student.fullName.split(' ')[0]}
