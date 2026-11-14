@@ -233,7 +233,7 @@ export async function reconcileTextbooksWithDrive(options: { dryRun?: boolean } 
       if (alreadyLinked.rows.length > 0) continue;
 
       const cleanBookName = toBookNameWithoutExt(mat.file_name);
-      const matchRes = await client.query(
+      let matchRes = await client.query(
         `SELECT id, book_name FROM textbooks
          WHERE google_drive_file_id IS NULL
            AND (
@@ -257,6 +257,26 @@ export async function reconcileTextbooksWithDrive(options: { dryRun?: boolean } 
           mat.term || 'Full Year',
         ]
       );
+
+      // Fallback: match by exact byte-for-byte file_size + (standard, subject, term) when medium/filename differed
+      if (matchRes.rows.length === 0 && Number(mat.file_size || 0) > 0) {
+        matchRes = await client.query(
+          `SELECT id, book_name FROM textbooks
+           WHERE google_drive_file_id IS NULL
+             AND file_size = $1
+             AND standard = $2
+             AND LOWER(subject) = LOWER($3)
+             AND LOWER(COALESCE(term, 'Full Year')) = LOWER($4)
+           ORDER BY id ASC
+           LIMIT 1`,
+          [
+            Number(mat.file_size),
+            mat.standard || 6,
+            mat.subject || 'General Studies',
+            mat.term || 'Full Year',
+          ]
+        );
+      }
 
       if (matchRes.rows.length > 0) {
         const tb = matchRes.rows[0];
