@@ -1532,15 +1532,34 @@ const Admin = () => {
       let hasMore = true
       let iterations = 0
       let totalSucceeded = 0
-      while (hasMore && iterations < 200) {
+      while (hasMore && iterations < 2000) {
         iterations++
-        const res = await apiFetch('/api/drive/extract-all-pending?chunked=true&limit=1', {
-          method: 'POST',
-          headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
-        })
-        const json = await res.json()
-        if (!res.ok || json.status !== 'success') {
-          showToast('error', json.message || 'Batch extraction encountered issues.')
+        let res: Response | null = null
+        let json: any = null
+        let lastErr: any = null
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            res = await apiFetch('/api/drive/extract-all-pending?chunked=true&limit=1', {
+              method: 'POST',
+              headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+            })
+            json = await res.json()
+            if (res.ok && json.status === 'success') break
+            if (res.status >= 500 && attempt < 3) {
+              await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt - 1)))
+              continue
+            }
+            break
+          } catch (sliceErr: any) {
+            lastErr = sliceErr
+            if (attempt < 3) {
+              await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt - 1)))
+              continue
+            }
+          }
+        }
+        if (!res || !res.ok || json?.status !== 'success') {
+          showToast('error', json?.message || lastErr?.message || 'Batch extraction encountered issues.')
           break
         }
         totalSucceeded += Number(json.data?.succeeded || 0)

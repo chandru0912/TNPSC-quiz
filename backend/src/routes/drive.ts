@@ -570,10 +570,11 @@ router.post(['/extract/:id', '/materials/:id/extract'], requireAdminAuth, async 
     }
 
     const processAll = req.query.all === 'true' || req.body?.processAll === true;
+    const forceReExtract = req.query.force === 'true' || req.body?.force === true;
 
     const result = await extractAndPersistPdf({
       materialId,
-      forceReExtract: true,
+      forceReExtract,
       processAllPages: processAll,
     });
 
