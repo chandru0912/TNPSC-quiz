@@ -713,6 +713,27 @@ export async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_mcq_jobs_status ON mcq_generation_jobs (status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_mcq_jobs_admin ON mcq_generation_jobs (admin_id, created_at DESC);
 
+      ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS current_batch INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS total_batches INTEGER NOT NULL DEFAULT 1;
+
+      CREATE TABLE IF NOT EXISTS mcq_generation_batches (
+        batch_id VARCHAR(80) PRIMARY KEY,
+        job_id VARCHAR(64) NOT NULL REFERENCES mcq_generation_jobs(job_id) ON DELETE CASCADE,
+        batch_number INTEGER NOT NULL,
+        requested_count INTEGER NOT NULL,
+        generated_count INTEGER NOT NULL DEFAULT 0,
+        duplicate_count INTEGER NOT NULL DEFAULT 0,
+        invalid_count INTEGER NOT NULL DEFAULT 0,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING',
+        error_message TEXT,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (job_id, batch_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mcq_batches_job ON mcq_generation_batches (job_id, batch_number ASC);
+
       ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS api_key TEXT;
       ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'READY';
       ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS status_message TEXT;
@@ -1114,6 +1135,7 @@ export function ensureDatabaseSchema(): Promise<void> {
               to_regclass('public.students') AS t_students,
               to_regclass('public.syllabus_lessons') AS t_lessons,
               to_regclass('public.syllabus_topics') AS t_topics,
+              to_regclass('public.mcq_generation_batches') AS t_mcq_batches,
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'textbooks' AND column_name = 'google_drive_file_id'
@@ -1134,6 +1156,7 @@ export function ensureDatabaseSchema(): Promise<void> {
             row?.t_students &&
             row?.t_lessons &&
             row?.t_topics &&
+            row?.t_mcq_batches &&
             row?.has_tb_gdrive &&
             row?.has_tb_unit &&
             row?.has_pe_retry

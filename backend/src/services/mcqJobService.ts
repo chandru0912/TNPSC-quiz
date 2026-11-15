@@ -78,6 +78,8 @@ export interface McqJobSnapshot {
   duplicate_count: number;
   invalid_count: number;
   current_step: string | null;
+  current_batch: number;
+  total_batches: number;
   error_message: string | null;
   lease_active: boolean;
   created_at: string;
@@ -118,6 +120,8 @@ function rowToSnapshot(row: any): McqJobSnapshot {
     duplicate_count: Number(row.duplicate_count) || 0,
     invalid_count: Number(row.invalid_count) || 0,
     current_step: row.current_step || null,
+    current_batch: Number(row.current_batch) || 0,
+    total_batches: Math.max(1, Number(row.total_batches) || Math.ceil((Number(row.requested_question_count) || 10) / 10)),
     error_message: row.error_message || null,
     lease_active: leaseUntil > Date.now() && (row.status === 'QUEUED' || row.status === 'PROCESSING' || row.status === 'RETRYING'),
     created_at: new Date(row.created_at).toISOString(),
@@ -181,6 +185,25 @@ export class McqJobService {
           );
           CREATE INDEX IF NOT EXISTS idx_mcq_jobs_status ON mcq_generation_jobs (status, created_at DESC);
           CREATE INDEX IF NOT EXISTS idx_mcq_jobs_admin ON mcq_generation_jobs (admin_id, created_at DESC);
+          ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS current_batch INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS total_batches INTEGER NOT NULL DEFAULT 1;
+          CREATE TABLE IF NOT EXISTS mcq_generation_batches (
+            batch_id VARCHAR(80) PRIMARY KEY,
+            job_id VARCHAR(64) NOT NULL REFERENCES mcq_generation_jobs(job_id) ON DELETE CASCADE,
+            batch_number INTEGER NOT NULL,
+            requested_count INTEGER NOT NULL,
+            generated_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_count INTEGER NOT NULL DEFAULT 0,
+            invalid_count INTEGER NOT NULL DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            status VARCHAR(32) NOT NULL DEFAULT 'PROCESSING',
+            error_message TEXT,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (job_id, batch_number)
+          );
+          CREATE INDEX IF NOT EXISTS idx_mcq_batches_job ON mcq_generation_batches (job_id, batch_number ASC);
         `);
       })().catch((err) => {
         this.schemaReadyPromise = null;
@@ -220,19 +243,22 @@ export class McqJobService {
     let resolvedVolume: string | null = input.volume || null;
     let resolvedPages: number[] = [];
 
-    const mcqSelection = await resolveMcqSelection({
-      groupId: input.category,
-      subject: input.subject,
-      standard: Number(input.standard),
-      unitId: Number(input.unitId),
-      textbookId: input.textbookId,
-      materialId: input.gdriveMaterialId,
-      gdriveFileId: input.gdriveFileId,
-      term: input.term,
-      volume: input.volume,
-      lessonTitle: input.lessonTitle,
-      lessonNumber: input.lessonNumber,
-    });
+    const mcqSelection =
+      input.textbookMode === 'custom_text' && textbookText.length >= 50
+        ? null
+        : await resolveMcqSelection({
+            groupId: input.category,
+            subject: input.subject,
+            standard: Number(input.standard),
+            unitId: Number(input.unitId),
+            textbookId: input.textbookId,
+            materialId: input.gdriveMaterialId,
+            gdriveFileId: input.gdriveFileId,
+            term: input.term,
+            volume: input.volume,
+            lessonTitle: input.lessonTitle,
+            lessonNumber: input.lessonNumber,
+          });
 
     if (mcqSelection) {
       textbookText = mcqSelection.content;
@@ -288,6 +314,8 @@ export class McqJobService {
 
     const jobId = `mcq_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
     const subjectId = input.subjectId || normalizeSubjectKey(input.subject);
+    const batchCapacity = targetProviderName === 'gemini' ? 10 : 12;
+    const totalBatches = Math.max(1, Math.ceil(requestedCount / batchCapacity));
 
     const res = await pool.query(
       `INSERT INTO mcq_generation_jobs (
@@ -297,7 +325,7 @@ export class McqJobService {
         textbook_mode, textbook_id, gdrive_file_id, gdrive_material_id,
         textbook_name, source_pdf, source_pages, textbook_content_snapshot,
         status, progress, generated_count, failed_count, duplicate_count, invalid_count,
-        current_step
+        current_batch, total_batches, current_step
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13, $14,
@@ -305,7 +333,7 @@ export class McqJobService {
         $20, $21, $22, $23,
         $24, $25, $26::jsonb, $27,
         'QUEUED', 0, 0, 0, 0, 0,
-        'Queued for background generation'
+        0, $28, 'Queued for background generation'
       ) RETURNING *`,
       [
         jobId,
@@ -335,19 +363,74 @@ export class McqJobService {
         resolvedSourcePdf,
         JSON.stringify(resolvedPages),
         textbookText.slice(0, 60000),
+        totalBatches,
       ]
     );
 
     const snapshot = rowToSnapshot(res.rows[0]);
 
     // On persistent Node servers (Localhost), run the step loop asynchronously in-process.
-    // On Vercel serverless, the Global Admin Monitor drives /step synchronously per batch
-    // so no unawaited Promise is ever killed by function freeze.
+    // On Vercel serverless, dispatch the first worker step via signed internal HTTP call
+    // AND the Global Admin Monitor also drives /step if needed.
     if (!process.env.VERCEL) {
       this.kickLocalWorker(jobId);
+    } else {
+      await this.dispatchVercelWorkerStep(jobId);
     }
 
     return snapshot;
+  }
+
+  /**
+   * Generates a short-lived HMAC-SHA256 token for internal Vercel serverless step chaining.
+   */
+  static signInternalWorkerToken(jobId: string, expMs: number = Date.now() + 5 * 60 * 1000): string {
+    const secret = process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_2026';
+    const payload = `${jobId}.${expMs}`;
+    const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    return `${expMs}.${sig}`;
+  }
+
+  static verifyInternalWorkerToken(jobId: string, token: string): boolean {
+    try {
+      const [expStr, sig] = String(token || '').split('.');
+      const expMs = Number(expStr);
+      if (!Number.isFinite(expMs) || expMs < Date.now() || !sig) return false;
+      const secret = process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_2026';
+      const expected = crypto.createHmac('sha256', secret).update(`${jobId}.${expMs}`).digest('hex');
+      const a = Buffer.from(sig);
+      const b = Buffer.from(expected);
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Dispatches the next bounded batch step on Vercel Serverless via signed internal HTTP POST
+   * so generation continues server-side even if the Admin closes the browser.
+   */
+  static async dispatchVercelWorkerStep(jobId: string): Promise<void> {
+    const host =
+      process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+      process.env.VERCEL_URL ||
+      '';
+    if (!host) return;
+    const baseUrl = host.startsWith('http') ? host.replace(/\/+$/, '') : `https://${host}`;
+    const workerSig = this.signInternalWorkerToken(jobId);
+    try {
+      const reqPromise = fetch(`${baseUrl}/api/admin/mcq-generation/jobs/internal/step/${encodeURIComponent(jobId)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-mcq-worker-token': workerSig,
+        },
+      }).catch(() => {});
+      // Allow enough time for TLS + HTTP request bytes to flush to Vercel edge before returning
+      await Promise.race([reqPromise, new Promise((r) => setTimeout(r, 350))]);
+    } catch {
+      // Non-fatal: Global Admin Monitor / retry will also pick up any unleased active job
+    }
   }
 
   /**
@@ -428,8 +511,23 @@ export class McqJobService {
     const remaining = requestedCount - alreadyGenerated;
     const provider = (job.provider || 'gemini') as AIProviderName;
     const stepBatchSize = Math.min(provider === 'gemini' ? 10 : 12, remaining);
+    const batchNumber = (Number(job.current_batch) || 0) + 1;
+    const batchId = `${jobId}_b${batchNumber}`;
+    const totalBatches = Math.max(Number(job.total_batches) || 1, batchNumber);
     const selectedTopics: string[] = Array.isArray(job.selected_topics) ? job.selected_topics : [];
     const sourcePages: number[] = Array.isArray(job.source_pages) ? job.source_pages : [];
+
+    await pool.query(
+      `INSERT INTO mcq_generation_batches (
+        batch_id, job_id, batch_number, requested_count, status, started_at, updated_at
+      ) VALUES ($1, $2, $3, $4, 'PROCESSING', NOW(), NOW())
+      ON CONFLICT (job_id, batch_number) DO UPDATE SET
+        status = 'PROCESSING',
+        requested_count = EXCLUDED.requested_count,
+        error_message = NULL,
+        updated_at = NOW()`,
+      [batchId, jobId, batchNumber, stepBatchSize]
+    );
 
     try {
       const genResult = await generateMcqs({
@@ -537,9 +635,27 @@ export class McqJobService {
         const isDone = newTotal >= requestedCount;
         const progress = isDone ? 100 : Math.min(99, Math.round((newTotal / requestedCount) * 100));
         const nextStatus: McqJobStatus = isDone ? 'COMPLETED' : 'PROCESSING';
+        const remainingAfter = Math.max(0, requestedCount - newTotal);
+        const batchCapacity = provider === 'gemini' ? 10 : 12;
+        const updatedTotalBatches = isDone
+          ? batchNumber
+          : Math.max(totalBatches, batchNumber + Math.ceil(remainingAfter / batchCapacity));
         const nextStep = isDone
           ? `Completed: ${newTotal} questions saved to Staging`
-          : `Saved ${newTotal} / ${requestedCount} questions to Staging...`;
+          : `Batch ${batchNumber}/${updatedTotalBatches}: Saved ${newTotal} / ${requestedCount} questions to Staging...`;
+
+        await client.query(
+          `UPDATE mcq_generation_batches
+           SET generated_count = $2::integer,
+               duplicate_count = $3::integer,
+               invalid_count = $4::integer,
+               status = 'COMPLETED',
+               error_message = NULL,
+               completed_at = NOW(),
+               updated_at = NOW()
+           WHERE batch_id = $1`,
+          [batchId, insertedCount, genResult.duplicateCount || 0, genResult.invalidCount || 0]
+        );
 
         const upd = await client.query(
           `UPDATE mcq_generation_jobs
@@ -548,6 +664,8 @@ export class McqJobService {
                invalid_count = invalid_count + $4::integer,
                progress = $5::integer,
                status = $6::varchar(32),
+               current_batch = $9::integer,
+               total_batches = $10::integer,
                lease_until = NULL,
                worker_token = NULL,
                current_step = $7::varchar(255),
@@ -565,6 +683,8 @@ export class McqJobService {
             nextStatus,
             nextStep.slice(0, 255),
             isDone,
+            batchNumber,
+            updatedTotalBatches,
           ]
         );
 
@@ -585,6 +705,8 @@ export class McqJobService {
             itemsCount: newTotal,
             metadata: { jobId, source: 'background_job' },
           }).catch(() => {});
+        } else if (process.env.VERCEL) {
+          await this.dispatchVercelWorkerStep(jobId);
         }
 
         return upd.rows[0] ? rowToSnapshot(upd.rows[0]) : null;
@@ -600,8 +722,18 @@ export class McqJobService {
       const maxFailures = 5;
       const shouldFail = nextFailedCount >= maxFailures;
       const retryStepMsg = shouldFail
-        ? `Failed after ${nextFailedCount} batch errors`
-        : `Retrying after batch error (${nextFailedCount}/${maxFailures})...`;
+        ? `Failed at batch ${batchNumber} after ${nextFailedCount} errors`
+        : `Retrying batch ${batchNumber} after error (${nextFailedCount}/${maxFailures})...`;
+
+      await pool.query(
+        `UPDATE mcq_generation_batches
+         SET retry_count = retry_count + 1,
+             status = $2::varchar(32),
+             error_message = $3::text,
+             updated_at = NOW()
+         WHERE batch_id = $1`,
+        [batchId, shouldFail ? 'FAILED' : 'RETRYING', errMsg.slice(0, 1000)]
+      ).catch(() => {});
 
       const failRes = await pool.query(
         `UPDATE mcq_generation_jobs
@@ -621,6 +753,10 @@ export class McqJobService {
          RETURNING *`,
         [jobId, nextFailedCount, errMsg.slice(0, 1000), shouldFail, retryStepMsg.slice(0, 255)]
       );
+
+      if (!shouldFail && process.env.VERCEL && failRes.rows[0]?.status !== 'CANCELLED') {
+        await this.dispatchVercelWorkerStep(jobId);
+      }
 
       if (shouldFail) {
         await AILogsService.logGeneration({
@@ -688,6 +824,8 @@ export class McqJobService {
     const snap = rowToSnapshot(res.rows[0]);
     if (!process.env.VERCEL) {
       this.kickLocalWorker(jobId);
+    } else {
+      await this.dispatchVercelWorkerStep(jobId);
     }
     return snap;
   }

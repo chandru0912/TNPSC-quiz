@@ -17,6 +17,28 @@ import { AIProviderName } from '../services/ai/ai-provider.interface';
 
 const router = Router();
 
+/**
+ * POST /api/admin/mcq-generation/jobs/internal/step/:jobId
+ * Signed internal worker endpoint for Vercel serverless batch chaining (continues even if browser closes).
+ */
+router.post('/internal/step/:jobId', async (req, res: Response) => {
+  try {
+    const jobId = String(req.params.jobId || '');
+    const workerSig = String(req.headers['x-mcq-worker-token'] || '');
+    if (!McqJobService.verifyInternalWorkerToken(jobId, workerSig)) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired worker signature.' });
+    }
+    const job = await McqJobService.processNextStep(jobId);
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'MCQ generation job not found.' });
+    }
+    return res.status(200).json({ success: true, job });
+  } catch (err: any) {
+    console.error('[MCQ Jobs] Internal worker step error:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'Worker step failed.' });
+  }
+});
+
 router.use(requireAdminAuth);
 
 function getAdminId(req: AuthenticatedRequest): string {

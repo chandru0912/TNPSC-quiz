@@ -46,6 +46,8 @@ export interface McqGenerationJob {
   duplicate_count: number
   invalid_count: number
   current_step: string | null
+  current_batch?: number
+  total_batches?: number
   error_message: string | null
   lease_active: boolean
   created_at: string
@@ -296,15 +298,15 @@ export const McqBackgroundMonitor: React.FC<McqBackgroundMonitorProps> = ({
               )}
             </div>
             <div style={{ fontSize: '0.73rem', color: statusColor(primaryJob.status), fontWeight: 600 }}>
-              Status: {primaryJob.status === 'PROCESSING' ? 'Processing' : primaryJob.status === 'RETRYING' ? 'Retrying' : primaryJob.status === 'QUEUED' ? 'Queued' : primaryJob.status === 'COMPLETED' ? 'Completed' : primaryJob.status}
+              Status: {primaryJob.status === 'PROCESSING' ? 'Processing' : primaryJob.status === 'RETRYING' ? 'Retrying' : primaryJob.status === 'QUEUED' ? 'Queued' : primaryJob.status === 'COMPLETED' ? 'Completed' : primaryJob.status} • {primaryJob.provider === 'claude' ? 'Claude AI' : 'Gemini AI'}
             </div>
             <div style={{ fontSize: '0.72rem', color: '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {primaryJob.lesson_title}
             </div>
             <div style={{ fontSize: '0.72rem', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {primaryJob.status === 'COMPLETED'
-                ? `Generated: ${primaryJob.generated_count} Questions • Saved to: Staging`
-                : `Progress: ${primaryJob.generated_count} / ${primaryJob.requested_question_count} Questions (${primaryJob.progress}%)`}
+                ? `Generated: ${primaryJob.generated_count} / ${primaryJob.requested_question_count} • Saved to: Staging`
+                : `Generated: ${primaryJob.generated_count} / ${primaryJob.requested_question_count} (${primaryJob.progress}%) • Batch ${Math.max(1, primaryJob.current_batch || 0)}/${primaryJob.total_batches || 1}`}
             </div>
           </div>
         </button>
@@ -373,12 +375,15 @@ export const McqBackgroundMonitor: React.FC<McqBackgroundMonitorProps> = ({
                             {job.lesson_title}
                           </div>
                           <div style={{ fontSize: '0.76rem', color: '#94a3b8', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
-                            <span><Layers size={12} style={{ verticalAlign: 'middle' }} /> {job.group_id.toUpperCase()} • {job.subject} • Std {job.standard_id}</span>
+                            <span><Layers size={12} style={{ verticalAlign: 'middle' }} /> {job.group_id.toUpperCase()} • {job.subject} • Std {job.standard_id} • Unit {job.unit_id}</span>
                             <span><Cpu size={12} style={{ verticalAlign: 'middle' }} /> {job.provider.toUpperCase()} ({job.model || 'default'})</span>
                             <span><Clock size={12} style={{ verticalAlign: 'middle' }} /> {job.language.toUpperCase()} • {job.difficulty}</span>
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.15rem' }}>
-                            Job ID: <code>{job.job_id}</code>
+                          <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <span>Job ID: <code>{job.job_id}</code></span>
+                            <span>Batch: {job.current_batch || 0}/{job.total_batches || 1}</span>
+                            <span>Requested: {job.requested_question_count} • Generated: {job.generated_count} • Failed: {job.failed_count}</span>
+                            <span>Last Updated: {new Date(job.updated_at).toLocaleTimeString()}</span>
                           </div>
                         </div>
 
