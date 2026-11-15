@@ -446,6 +446,8 @@ export async function runMigration() {
       ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extraction_error TEXT;
       ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS extracted_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS google_drive_file_id VARCHAR(255);
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS unit INT;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS lesson TEXT;
       CREATE UNIQUE INDEX IF NOT EXISTS uq_textbooks_google_drive_file_id
         ON textbooks (google_drive_file_id)
         WHERE google_drive_file_id IS NOT NULL;
@@ -547,6 +549,10 @@ export async function runMigration() {
       ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS native_pages INT DEFAULT 0;
       ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS ocr_pages INT DEFAULT 0;
       ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS pdf_type VARCHAR(30) DEFAULT 'UNKNOWN';
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS max_retries INT DEFAULT 3;
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE pdf_extractions ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMP WITH TIME ZONE;
 
       -- 12. Safe Schema Widening Migration: Widen VARCHAR columns to TEXT
       -- Eliminates PostgreSQL error 22001 (value too long for type character varying(255))
@@ -1059,10 +1065,31 @@ export function ensureDatabaseSchema(): Promise<void> {
               to_regclass('public.study_notes') AS t_notes,
               to_regclass('public.students') AS t_students,
               to_regclass('public.syllabus_lessons') AS t_lessons,
-              to_regclass('public.syllabus_topics') AS t_topics
+              to_regclass('public.syllabus_topics') AS t_topics,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'textbooks' AND column_name = 'google_drive_file_id'
+              ) AS has_tb_gdrive,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'textbooks' AND column_name = 'unit'
+              ) AS has_tb_unit,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'pdf_extractions' AND column_name = 'retry_count'
+              ) AS has_pe_retry
           `);
           const row = check.rows[0];
-          if (row?.t_questions && row?.t_notes && row?.t_students && row?.t_lessons && row?.t_topics) {
+          if (
+            row?.t_questions &&
+            row?.t_notes &&
+            row?.t_students &&
+            row?.t_lessons &&
+            row?.t_topics &&
+            row?.has_tb_gdrive &&
+            row?.has_tb_unit &&
+            row?.has_pe_retry
+          ) {
             return;
           }
         } catch {

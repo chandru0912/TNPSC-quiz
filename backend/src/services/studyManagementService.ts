@@ -324,12 +324,16 @@ export class StudyManagementService {
       const checkGroup4TamilUnits = await pool.query(
         "SELECT COUNT(*)::int AS count FROM syllabus_units WHERE exam_id = 'group4' AND (subject_id = 'general-tamil' OR subject_id = 'group4-general-tamil')"
       );
+      const checkGeneralStudiesUnits = await pool.query(
+        "SELECT COUNT(*)::int AS count FROM syllabus_units WHERE subject_id IN ('general-studies', 'group1-general-studies', 'group2-general-studies', 'group2a-general-studies', 'group4-general-studies')"
+      );
       const checkLessons = await pool.query('SELECT COUNT(*)::int AS count FROM syllabus_lessons');
 
       if (
         checkGroup2aUnits.rows[0].count === 0 ||
         checkGroup4TamilUnits.rows[0].count === 0 ||
-        checkLessons.rows[0].count < 700
+        checkGeneralStudiesUnits.rows[0].count === 0 ||
+        checkLessons.rows[0].count < 1800
       ) {
         console.log('[StudyManagement] Syncing complete canonical syllabus & focus areas across Group 1, Group 2, Group 2A, and Group 4...');
         await seedCompleteSyllabusData();

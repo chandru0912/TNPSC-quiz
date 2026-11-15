@@ -10,6 +10,8 @@ dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') });
 
 import { google } from 'googleapis';
 import crypto from 'crypto';
+import fs from 'fs';
+import { Readable } from 'stream';
 import pool from '../db';
 import { getPdfParseClass, cleanText, normalizeTamilPdfText, isClass6TamilTextbook } from './pdfProcessor';
 import { CLASS_6_TAMIL_TERM_1_PAGES } from './class6TamilTerm1Corpus';
@@ -838,38 +840,95 @@ export async function getFileStream(
   const authClient = await getAuthenticatedClient();
   const drive = google.drive({ version: 'v3', auth: authClient });
 
-  // 1. Get metadata for content length
+  // 1. Get metadata for content length and mimeType
   const meta = await drive.files.get({
     fileId,
     fields: 'id, name, size, mimeType',
+    supportsAllDrives: true,
   });
 
   const totalSize = meta.data.size ? parseInt(String(meta.data.size), 10) : 0;
   const contentType = meta.data.mimeType || 'application/pdf';
 
-  // 2. Fetch the stream from Google Drive API
-  const requestHeaders: Record<string, string> = {};
+  // 2. Fetch the media stream directly with OAuth2 Bearer token so HTTP Range headers work reliably
+  const tokenRes = await authClient.getAccessToken();
+  const accessToken = tokenRes.token;
+  if (!accessToken) {
+    throw new Error('Failed to retrieve Google Drive access token for streaming.');
+  }
+
+  const requestHeaders: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+  };
   if (rangeHeader) {
     requestHeaders['Range'] = rangeHeader;
   }
 
-  const driveRes = await drive.files.get(
-    { fileId, alt: 'media' },
-    { responseType: 'stream', headers: requestHeaders }
-  );
+  const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+  const driveRes = await fetch(mediaUrl, {
+    method: 'GET',
+    headers: requestHeaders,
+  });
 
-  const statusCode = driveRes.status || (rangeHeader ? 206 : 200);
-  const contentRange = (driveRes.headers as any)['content-range'] || undefined;
-  const contentLength = (driveRes.headers as any)['content-length']
-    ? parseInt((driveRes.headers as any)['content-length'], 10)
-    : totalSize;
+  if (!driveRes.ok && driveRes.status !== 206) {
+    const errText = await driveRes.text().catch(() => '');
+    throw new Error(`Google Drive media stream failed (HTTP ${driveRes.status}): ${errText.slice(0, 200)}`);
+  }
+
+  const contentRange = driveRes.headers.get('content-range') || undefined;
+  const contentLengthHeader = driveRes.headers.get('content-length');
+  const contentLength = contentLengthHeader ? parseInt(contentLengthHeader, 10) : totalSize;
+  const statusCode = driveRes.status === 206 && contentRange ? 206 : 200;
+
+  if (!driveRes.body) {
+    throw new Error('Google Drive returned an empty response body for file stream.');
+  }
 
   return {
-    stream: driveRes.data,
+    stream: Readable.fromWeb(driveRes.body as any),
     contentLength,
     contentRange,
-    contentType,
+    contentType: driveRes.headers.get('content-type') || contentType,
     statusCode,
+  };
+}
+
+/**
+ * Uploads a local/temporary PDF file directly into the configured Google Drive folder.
+ */
+export async function uploadFileToDrive(params: {
+  filePath: string;
+  fileName: string;
+  mimeType?: string;
+}): Promise<{ id: string; name: string; size: number; folderId: string }> {
+  const authClient = await getAuthenticatedClient();
+  const folderId = await getOrCreateTargetFolder(authClient);
+  const drive = google.drive({ version: 'v3', auth: authClient });
+
+  const createRes = await drive.files.create({
+    requestBody: {
+      name: params.fileName,
+      parents: [folderId],
+      mimeType: params.mimeType || 'application/pdf',
+    },
+    media: {
+      mimeType: params.mimeType || 'application/pdf',
+      body: fs.createReadStream(params.filePath),
+    },
+    fields: 'id, name, size, mimeType',
+    supportsAllDrives: true,
+  });
+
+  const file = createRes.data;
+  if (!file.id) {
+    throw new Error('Google Drive did not return a file ID after upload.');
+  }
+
+  return {
+    id: file.id,
+    name: file.name || params.fileName,
+    size: file.size ? parseInt(String(file.size), 10) : fs.statSync(params.filePath).size,
+    folderId,
   };
 }
 
@@ -888,7 +947,7 @@ export async function getDriveFileBuffer(fileId: string): Promise<Buffer> {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
   const res = await drive.files.get(
-    { fileId, alt: 'media' },
+    { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'arraybuffer' }
   );
 

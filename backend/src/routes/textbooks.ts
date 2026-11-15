@@ -19,6 +19,11 @@ import {
   getOverallExtractionOverview,
 } from '../services/pdfExtractionService';
 import {
+  getFileStream,
+  getStoredTokens,
+  uploadFileToDrive,
+} from '../services/googleDriveService';
+import {
   TNPSC_GROUPS_LIST,
   STANDARDS_LIST,
   SAMACHEER_CATALOG,
@@ -178,6 +183,8 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
       bookName,
       replace = false,
       replaceId,
+      unit,
+      lesson,
     } = req.body;
 
     if (!subject || !String(subject).trim()) {
@@ -190,6 +197,8 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
     const cleanSubject = String(subject).trim();
     const cleanMedium = String(medium).trim().toLowerCase() === 'tamil' ? 'Tamil' : 'English';
     const cleanTerm = term && String(term).trim() ? String(term).trim() : 'Full Year';
+    const parsedUnit = unit != null && String(unit).trim() !== '' ? parseInt(String(unit), 10) : null;
+    const cleanLesson = lesson && String(lesson).trim() ? String(lesson).trim() : null;
     const cleanBookName = (bookName && String(bookName).trim())
       ? String(bookName).trim()
       : generateSamacheerBookName({
@@ -244,6 +253,36 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
 
     let textbookId: number;
 
+    let effectiveFilePath = uploadedFilePath;
+    let googleDriveFileId: string | null = null;
+    let driveFolderId: string | null = null;
+    const pdfFileName = cleanBookName.toLowerCase().endsWith('.pdf') ? cleanBookName : `${cleanBookName}.pdf`;
+
+    try {
+      const storedTokens = await getStoredTokens();
+      if (storedTokens?.refreshToken) {
+        const uploadedDrive = await uploadFileToDrive({
+          filePath: uploadedFilePath,
+          fileName: pdfFileName,
+          mimeType: 'application/pdf',
+        });
+        googleDriveFileId = uploadedDrive.id;
+        driveFolderId = uploadedDrive.folderId;
+        effectiveFilePath = `gdrive://${uploadedDrive.id}`;
+      }
+    } catch (driveErr: any) {
+      console.error('[Textbooks Upload] Google Drive upload failed:', driveErr.message);
+      if (process.env.VERCEL) {
+        if (fs.existsSync(uploadedFilePath)) {
+          try { fs.unlinkSync(uploadedFilePath); } catch {}
+        }
+        return res.status(502).json({
+          status: 'error',
+          message: `Google Drive upload failed: ${driveErr.message}`,
+        });
+      }
+    }
+
     if (existingRecord) {
       if (!shouldReplace) {
         // Clean up newly uploaded file to avoid orphaned files on disk
@@ -288,10 +327,13 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
              book_name = $6,
              file_path = $7,
              file_size = $8,
+             google_drive_file_id = COALESCE($9, google_drive_file_id),
+             unit = COALESCE($10, unit),
+             lesson = COALESCE($11, lesson),
              status = 'uploaded',
              error_message = NULL,
              updated_at = CURRENT_TIMESTAMP 
-         WHERE id = $9 
+         WHERE id = $12 
          RETURNING *`,
         [
           cleanGroupId,
@@ -300,8 +342,11 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
           cleanMedium,
           cleanTerm,
           cleanBookName,
-          uploadedFilePath,
+          effectiveFilePath,
           fileSize,
+          googleDriveFileId,
+          isNaN(Number(parsedUnit)) ? null : parsedUnit,
+          cleanLesson,
           existingRecord.id,
         ]
       );
@@ -309,8 +354,8 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
     } else {
       // Insert new textbook
       const insertRes = await pool.query(
-        `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_path, file_size, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'uploaded')
+        `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_path, file_size, google_drive_file_id, unit, lesson, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'uploaded')
          RETURNING *`,
         [
           cleanGroupId,
@@ -319,23 +364,77 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
           cleanMedium,
           cleanTerm,
           cleanBookName,
-          uploadedFilePath,
+          effectiveFilePath,
           fileSize,
+          googleDriveFileId,
+          isNaN(Number(parsedUnit)) ? null : parsedUnit,
+          cleanLesson,
         ]
       );
       textbookId = insertRes.rows[0].id;
     }
 
-    // Await PDF extraction and database indexing so the response always reflects the verified database state
-    await processTextbookPdf({
-      textbookId,
-      filePath: uploadedFilePath,
-      groupId: cleanGroupId,
-      standard: parsedStandard,
-      subject: cleanSubject,
-      medium: cleanMedium,
-      term: cleanTerm,
-    });
+    // Sync to google_drive_materials when uploaded to Google Drive
+    if (googleDriveFileId) {
+      await pool.query(
+        `INSERT INTO google_drive_materials (
+           file_name, original_file_name, mime_type, file_size,
+           google_drive_file_id, google_drive_folder_id,
+           tnpsc_group, subject, standard, medium, term, unit, lesson,
+           upload_status, sync_status, uploaded_by
+         ) VALUES ($1, $2, 'application/pdf', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'completed', 'ACTIVE', 'textbook-upload')
+         ON CONFLICT (google_drive_file_id) DO UPDATE SET
+           file_name = EXCLUDED.file_name,
+           file_size = EXCLUDED.file_size,
+           tnpsc_group = EXCLUDED.tnpsc_group,
+           subject = EXCLUDED.subject,
+           standard = EXCLUDED.standard,
+           medium = EXCLUDED.medium,
+           term = EXCLUDED.term,
+           unit = COALESCE(EXCLUDED.unit, google_drive_materials.unit),
+           lesson = COALESCE(EXCLUDED.lesson, google_drive_materials.lesson),
+           upload_status = 'completed',
+           sync_status = 'ACTIVE',
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          pdfFileName,
+          req.file.originalname || pdfFileName,
+          fileSize,
+          googleDriveFileId,
+          driveFolderId,
+          cleanGroupId,
+          cleanSubject,
+          parsedStandard,
+          cleanMedium,
+          cleanTerm,
+          isNaN(Number(parsedUnit)) ? 1 : parsedUnit,
+          cleanLesson,
+        ]
+      );
+    }
+
+    // Await PDF extraction locally; on Vercel run bounded extraction or skip temp cleanup until done
+    if (!process.env.VERCEL) {
+      await processTextbookPdf({
+        textbookId,
+        filePath: fs.existsSync(uploadedFilePath) ? uploadedFilePath : effectiveFilePath,
+        groupId: cleanGroupId,
+        standard: parsedStandard,
+        subject: cleanSubject,
+        medium: cleanMedium,
+        term: cleanTerm,
+      });
+    } else if (googleDriveFileId) {
+      await processAutomaticPdfExtraction({
+        textbookId,
+        maxDurationMs: 6500,
+        pageLimit: 5,
+      }).catch((e: any) => console.warn('[Textbooks Upload] Bounded extraction notice:', e.message));
+    }
+
+    if (googleDriveFileId && fs.existsSync(uploadedFilePath)) {
+      try { fs.unlinkSync(uploadedFilePath); } catch {}
+    }
 
     const finalRes = await pool.query(
       `SELECT status, page_count, error_message, file_size FROM textbooks WHERE id = $1`,
@@ -474,9 +573,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const query = `
-      SELECT id, group_id, standard, subject, medium, term, book_name, file_size, page_count, status, error_message,
+      SELECT id, group_id, standard, subject, medium, term, unit, lesson, book_name, file_size, page_count, status, error_message,
              pdf_type, total_pages, native_pages, ocr_pages, failed_pages, completion_percentage,
-             extraction_status, extraction_method, extracted_at, google_drive_file_id, created_at, updated_at
+             extraction_status, extraction_method, extracted_at, google_drive_file_id, file_path, created_at, updated_at
       FROM textbooks
       ${whereClause}
       ORDER BY standard ASC, subject ASC, id DESC
@@ -526,7 +625,11 @@ router.get('/', async (req: Request, res: Response) => {
         extractionStatus: r.extraction_status || (r.status === 'completed' && (r.total_pages > 0 || r.page_count > 0) ? 'COMPLETED' : 'PENDING'),
         extractionMethod: r.extraction_method,
         extractedAt: r.extracted_at,
-        googleDriveFileId: r.google_drive_file_id || null,
+        googleDriveFileId: r.google_drive_file_id || (String(r.file_path || '').startsWith('gdrive://') ? String(r.file_path).replace('gdrive://', '').trim() : null),
+        unit: r.unit ?? null,
+        lesson: r.lesson || null,
+        viewUrl: `/api/textbooks/${r.id}/view`,
+        downloadUrl: `/api/textbooks/${r.id}/download`,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
       })),
@@ -955,6 +1058,92 @@ router.post('/:id/reprocess', requireAdminAuth, async (req: Request, res: Respon
   } catch (error: any) {
     console.error('[Textbooks Route] Reprocess error:', error);
     return res.status(500).json({ status: 'error', message: 'Failed to initiate reprocessing.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/:id/view and /api/textbooks/:id/download
+ * Streams the textbook PDF from Google Drive (with HTTP Range support) or local fallback.
+ */
+router.get(['/:id/view', '/:id/download'], async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid textbook ID is required.' });
+    }
+
+    const tbRes = await pool.query(
+      `SELECT id, book_name, file_path, file_size, google_drive_file_id FROM textbooks WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (tbRes.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: `Textbook #${id} not found.` });
+    }
+
+    const tb = tbRes.rows[0];
+    const isDownload = req.path.endsWith('/download') || req.query.download === '1' || req.query.download === 'true';
+    const rawName = String(tb.book_name || `textbook_${id}`).replace(/\.pdf$/i, '');
+    const safeFileName = `${rawName}.pdf`;
+
+    let driveFileId: string | null = tb.google_drive_file_id || null;
+    if (!driveFileId && String(tb.file_path || '').startsWith('gdrive://')) {
+      driveFileId = String(tb.file_path).replace('gdrive://', '').trim();
+    }
+    if (!driveFileId) {
+      const matRes = await pool.query(
+        `SELECT google_drive_file_id FROM google_drive_materials
+         WHERE google_drive_file_id IS NOT NULL
+           AND (LOWER(file_name) = LOWER($1) OR LOWER(original_file_name) = LOWER($1))
+         LIMIT 1`,
+        [safeFileName]
+      );
+      if (matRes.rows.length > 0) {
+        driveFileId = matRes.rows[0].google_drive_file_id;
+      }
+    }
+
+    if (driveFileId) {
+      const rangeHeader = req.headers.range as string | undefined;
+      const fileResult = await getFileStream(driveFileId, rangeHeader);
+      res.status(fileResult.statusCode);
+      res.setHeader('Content-Type', fileResult.contentType || 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(safeFileName)}"`
+      );
+      res.setHeader('Accept-Ranges', 'bytes');
+      if (fileResult.contentLength) res.setHeader('Content-Length', String(fileResult.contentLength));
+      if (fileResult.contentRange) res.setHeader('Content-Range', fileResult.contentRange);
+
+      fileResult.stream.on('error', (streamErr: any) => {
+        console.error(`[TextbookView] Stream error for textbook #${id} (Drive ${driveFileId}):`, streamErr.message);
+        if (!res.headersSent) {
+          res.status(500).json({ status: 'error', message: 'Failed to stream PDF from Google Drive.' });
+        }
+      });
+      fileResult.stream.pipe(res);
+      return;
+    }
+
+    if (tb.file_path && !String(tb.file_path).startsWith('gdrive://') && fs.existsSync(tb.file_path)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(safeFileName)}"`
+      );
+      fs.createReadStream(tb.file_path).pipe(res);
+      return;
+    }
+
+    return res.status(404).json({
+      status: 'error',
+      message: `PDF file for textbook #${id} is not linked to Google Drive or present on disk.`,
+    });
+  } catch (err: any) {
+    console.error('[TextbookView] Error:', err.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ status: 'error', message: err.message || 'Failed to load textbook PDF.' });
+    }
   }
 });
 

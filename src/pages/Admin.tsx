@@ -41,6 +41,7 @@ import {
   Key,
   Cpu,
   UploadCloud,
+  Download,
   Target,
   Folder,
   Cloud,
@@ -128,6 +129,11 @@ interface TextbookItem {
   pageCount: number
   status: 'uploaded' | 'processing' | 'completed' | 'failed'
   errorMessage?: string | null
+  googleDriveFileId?: string | null
+  unit?: number | null
+  lesson?: string | null
+  viewUrl?: string
+  downloadUrl?: string
   createdAt?: string
   updatedAt?: string
   job?: {
@@ -474,6 +480,8 @@ const Admin = () => {
   const [tbSubject, setTbSubject] = useState<string>('Tamil')
   const [tbMedium, setTbMedium] = useState<TextbookMedium>('Tamil')
   const [tbTerm, setTbTerm] = useState<string>('Term 1')
+  const [tbUnit, setTbUnit] = useState<string>('')
+  const [tbLesson, setTbLesson] = useState<string>('')
   const [tbBookName, setTbBookName] = useState<string>(
     'Samacheer Kalvi 6th Standard - Tamil - Term 1 - Tamil Medium'
   )
@@ -1374,10 +1382,12 @@ const Admin = () => {
     notesPage,
   ])
 
-  // Fetch Textbooks
-  const fetchTextbooks = useCallback(async () => {
+  // Fetch Textbooks (supports silent background refresh without table blinking)
+  const fetchTextbooks = useCallback(async (silent = false) => {
     if (!token) return
-    setTextbooksLoading(true)
+    if (!silent) {
+      setTextbooksLoading(true)
+    }
     try {
       const params = new URLSearchParams()
       if (textbookGroupFilter !== 'all') params.set('group', textbookGroupFilter)
@@ -1399,15 +1409,11 @@ const Admin = () => {
     } catch (err) {
       console.error('Failed to fetch textbooks:', err)
     } finally {
-      setTextbooksLoading(false)
+      if (!silent) {
+        setTextbooksLoading(false)
+      }
     }
   }, [token, textbookGroupFilter, textbookStandardFilter, textbookSubjectFilter, textbookMediumFilter, textbookStatusFilter])
-
-  useEffect(() => {
-    if (token) {
-      fetchTextbooks()
-    }
-  }, [fetchTextbooks, token])
 
   // Check Google Drive Status
   const checkDriveStatus = useCallback(async () => {
@@ -2417,19 +2423,21 @@ const Admin = () => {
     }
   }, [fetchAllMetrics, token, adminSection, fetchAiProvidersStatus, fetchPromptsForProvider, promptProvider, selectedPromptType, fetchAiHistory, historyProviderFilter])
 
-  // Poll active processing jobs
-  useEffect(() => {
-    const hasActiveProcessing =
-      textbooksList.some((t) => t.status === 'processing' || t.status === 'uploaded')
+  // Poll active processing jobs silently without triggering table loading flicker
+  const hasActiveProcessingTextbooks = useMemo(
+    () => textbooksList.some((t) => t.status === 'processing' || t.status === 'uploaded'),
+    [textbooksList]
+  )
 
-    if (!hasActiveProcessing || !token) return
+  useEffect(() => {
+    if (rawPath !== '/admin/textbook-management' || !hasActiveProcessingTextbooks || !token) return
 
     const interval = setInterval(() => {
-      fetchTextbooks()
-    }, 2500)
+      fetchTextbooks(true)
+    }, 5000)
 
     return () => clearInterval(interval)
-  }, [textbooksList, token, fetchTextbooks])
+  }, [rawPath, hasActiveProcessingTextbooks, token, fetchTextbooks])
 
   // Cascading Handlers for Textbook Upload Modal (Samacheer Kalvi Catalog)
   const handleTbStandardChange = (newStd: StandardId) => {
@@ -2570,20 +2578,160 @@ const Admin = () => {
     }
 
     setTbUploading(true)
-    setTbUploadProgress(15)
+    setTbUploadProgress(10)
     setTbUploadError(null)
 
     try {
+      const effectiveReplaceId = replacingTextbookId || tbDuplicateInDb?.id || null
+      const shouldReplace = !!effectiveReplaceId
+
+      // Check Google Drive connection so large PDFs upload directly to Drive (bypassing Vercel 4.5MB limit)
+      let isDriveConnected = Boolean(driveStatus?.connected)
+      if (!isDriveConnected) {
+        try {
+          const stRes = await apiFetch('/api/drive/status')
+          const stJson = await stRes.json()
+          isDriveConnected = Boolean(stJson?.data?.connected)
+          if (stJson?.data) setDriveStatus(stJson.data)
+        } catch {
+          // ignore status check failure
+        }
+      }
+
+      if (isDriveConnected) {
+        const cleanFileName = tbBookName.trim().toLowerCase().endsWith('.pdf')
+          ? tbBookName.trim()
+          : `${tbBookName.trim()}.pdf`
+        const parsedStandardNum = parseInt(String(tbStandard).replace(/\D/g, ''), 10) || 6
+        const parsedUnitNum = tbUnit.trim() ? parseInt(tbUnit.trim(), 10) : 1
+
+        // 1. Initiate Google Drive resumable upload session
+        const initRes = await apiFetch('/api/drive/upload/initiate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            fileName: cleanFileName,
+            originalFileName: tbFile.name,
+            fileSize: tbFile.size,
+            mimeType: 'application/pdf',
+            group: tbGroup,
+            subject: tbSubject.trim(),
+            standard: parsedStandardNum,
+            medium: tbMedium,
+            term: tbTerm,
+            unit: isNaN(parsedUnitNum) ? 1 : parsedUnitNum,
+            lesson: tbLesson.trim() || undefined,
+            origin: window.location.origin,
+          }),
+        })
+        const { data: initJson, rawText: initRaw } = await parseApiResponse(initRes)
+        if (!initRes.ok || initJson?.status !== 'success' || !initJson?.data?.uploadUrl) {
+          const errMsg = classifyApiError(initRes, initJson, initRaw, 'POST /api/drive/upload/initiate')
+          setTbUploadError(errMsg)
+          showToast('error', errMsg)
+          return
+        }
+
+        const { uploadUrl, trackingId } = initJson.data
+        setTbUploadProgress(25)
+
+        // 2. Stream PDF directly to Google Drive via XHR with progress
+        const googleDriveFileId: string = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('PUT', uploadUrl, true)
+          xhr.setRequestHeader('Content-Type', 'application/pdf')
+          xhr.upload.onprogress = (evt) => {
+            if (evt.lengthComputable) {
+              const pct = 25 + Math.round((evt.loaded / evt.total) * 60)
+              setTbUploadProgress(Math.min(85, pct))
+            }
+          }
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const parsed = JSON.parse(xhr.responseText || '{}')
+                if (parsed?.id) {
+                  resolve(parsed.id)
+                  return
+                }
+              } catch {}
+              reject(new Error('Google Drive upload completed, but file ID was missing from response.'))
+            } else {
+              reject(new Error(`Google Drive upload failed (HTTP ${xhr.status}): ${xhr.responseText?.slice(0, 180) || 'Unknown error'}`))
+            }
+          }
+          xhr.onerror = () => reject(new Error('Network/CORS error while uploading PDF directly to Google Drive.'))
+          xhr.send(tbFile)
+        })
+
+        setTbUploadProgress(90)
+
+        // 3. Complete upload & sync Google Drive + Textbooks table in PostgreSQL
+        const completeRes = await apiFetch('/api/drive/upload/complete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            trackingId,
+            googleDriveFileId,
+            replaceId: effectiveReplaceId || undefined,
+            bookName: tbBookName.trim(),
+            medium: tbMedium,
+            unit: tbUnit.trim() ? parseInt(tbUnit.trim(), 10) : undefined,
+            lesson: tbLesson.trim() || undefined,
+          }),
+        })
+        const { data: compJson, rawText: compRaw } = await parseApiResponse(completeRes)
+        setTbUploadProgress(100)
+
+        if (!completeRes.ok || compJson?.status !== 'success') {
+          const errMsg = classifyApiError(completeRes, compJson, compRaw, 'POST /api/drive/upload/complete')
+          setTbUploadError(errMsg)
+          showToast('error', errMsg)
+          return
+        }
+
+        showToast(
+          'success',
+          effectiveReplaceId
+            ? `Textbook replaced and synced to Google Drive (${cleanFileName}).`
+            : `Textbook uploaded to Google Drive and synced to Textbook Management!`
+        )
+        setIsUploadTextbookModalOpen(false)
+        setReplacingTextbookId(null)
+        setTbFile(null)
+        setTbUnit('')
+        setTbLesson('')
+        setTbUploadProgress(0)
+        setTbIsCustomBookName(false)
+        fetchTextbooks()
+        fetchDriveMaterials()
+        return
+      }
+
+      // Fallback when Google Drive is not connected (local dev / small files <= 4MB)
+      if (tbFile.size > 4.2 * 1024 * 1024 && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        const msg = 'Google Drive is not connected. Please connect Google Drive first to upload PDFs larger than 4 MB on Vercel.'
+        setTbUploadError(msg)
+        showToast('error', msg)
+        return
+      }
+
       const formData = new FormData()
       formData.append('group', tbGroup)
       formData.append('standard', tbStandard)
       formData.append('subject', tbSubject.trim())
       formData.append('medium', tbMedium)
       formData.append('term', tbTerm)
+      if (tbUnit.trim()) formData.append('unit', tbUnit.trim())
+      if (tbLesson.trim()) formData.append('lesson', tbLesson.trim())
       formData.append('bookName', tbBookName.trim())
 
-      const effectiveReplaceId = replacingTextbookId || tbDuplicateInDb?.id || null
-      const shouldReplace = !!effectiveReplaceId
       formData.append('replace', shouldReplace ? 'true' : 'false')
       if (effectiveReplaceId) {
         formData.append('replaceId', String(effectiveReplaceId))
@@ -2638,6 +2786,8 @@ const Admin = () => {
       setIsUploadTextbookModalOpen(false)
       setReplacingTextbookId(null)
       setTbFile(null)
+      setTbUnit('')
+      setTbLesson('')
       setTbUploadProgress(0)
       setTbIsCustomBookName(false)
       fetchTextbooks()
@@ -4792,7 +4942,7 @@ const Admin = () => {
                   <UploadCloud size={16} />
                   <span>Upload Textbook PDF</span>
                 </button>
-                <button className="admin-btn admin-btn-secondary" onClick={fetchTextbooks} title="Refresh textbooks">
+                <button className="admin-btn admin-btn-secondary" onClick={() => fetchTextbooks(false)} title="Refresh textbooks">
                   <RefreshCw size={15} className={textbooksLoading ? 'spin-icon' : ''} />
                 </button>
               </div>
@@ -5020,7 +5170,7 @@ const Admin = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {textbooksLoading ? (
+                  {textbooksLoading && textbooksList.length === 0 ? (
                     <tr>
                       <td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
                         Loading textbooks...
@@ -5101,6 +5251,36 @@ const Admin = () => {
                           </td>
                           <td>
                             <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
+                              <button
+                                className="table-action-btn"
+                                title="Preview PDF"
+                                onClick={() =>
+                                  setViewingDriveMaterial({
+                                    id: tb.id,
+                                    fileName: tb.bookName.toLowerCase().endsWith('.pdf') ? tb.bookName : `${tb.bookName}.pdf`,
+                                    fileSize: tb.fileSize,
+                                    group: tb.groupId,
+                                    subject: tb.subject,
+                                    standard: tb.standard,
+                                    term: tb.term || undefined,
+                                    medium: tb.medium,
+                                    viewUrl: tb.viewUrl || `/api/textbooks/${tb.id}/view`,
+                                  })
+                                }
+                                style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}
+                              >
+                                <ExternalLink size={14} />
+                              </button>
+                              <a
+                                href={getApiUrl(tb.downloadUrl || `/api/textbooks/${tb.id}/download`)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="table-action-btn"
+                                title="Download PDF"
+                                style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', borderColor: 'rgba(16, 185, 129, 0.3)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                              >
+                                <Download size={14} />
+                              </a>
                               <button
                                 className="table-action-btn"
                                 title="View Details & Extracted Pages"
@@ -8477,6 +8657,34 @@ const Admin = () => {
                     </div>
                   </div>
 
+                  {/* 5b. Optional Unit & Lesson */}
+                  <div className="form-grid-2" style={{ marginBottom: '0.85rem' }}>
+                    <div className="form-field">
+                      <label>Unit Number (Optional)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        className="admin-auth-input"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        placeholder="e.g. 1"
+                        value={tbUnit}
+                        onChange={(e) => setTbUnit(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label>Lesson Title (Optional)</label>
+                      <input
+                        type="text"
+                        className="admin-auth-input"
+                        style={{ width: '100%', padding: '0.65rem' }}
+                        placeholder="e.g. Unit 1 - Chapter 1"
+                        value={tbLesson}
+                        onChange={(e) => setTbLesson(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
                   {/* 7. PDF Upload Dropzone */}
                   <div className="form-field" style={{ marginTop: '0.5rem' }}>
                     <label>7. PDF Textbook File * (Max 100MB)</label>
@@ -8709,7 +8917,41 @@ const Admin = () => {
                 )}
               </div>
 
-              <div className="admin-modal-footer">
+              <div className="admin-modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-primary"
+                    onClick={() => {
+                      const target = selectedTextbookDetail
+                      setSelectedTextbookDetail(null)
+                      setViewingDriveMaterial({
+                        id: target.id,
+                        fileName: target.bookName.toLowerCase().endsWith('.pdf') ? target.bookName : `${target.bookName}.pdf`,
+                        fileSize: target.fileSize,
+                        group: target.groupId,
+                        subject: target.subject,
+                        standard: target.standard,
+                        term: target.term || undefined,
+                        medium: target.medium,
+                        viewUrl: target.viewUrl || `/api/textbooks/${target.id}/view`,
+                      })
+                    }}
+                  >
+                    <ExternalLink size={15} />
+                    <span>Open PDF Viewer</span>
+                  </button>
+                  <a
+                    href={getApiUrl(selectedTextbookDetail.downloadUrl || `/api/textbooks/${selectedTextbookDetail.id}/download`)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="admin-btn admin-btn-secondary"
+                    style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                  >
+                    <Download size={15} />
+                    <span>Download PDF</span>
+                  </a>
+                </div>
                 <button className="admin-btn admin-btn-secondary" onClick={() => setSelectedTextbookDetail(null)}>
                   Close
                 </button>

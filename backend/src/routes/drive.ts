@@ -277,6 +277,7 @@ router.post('/upload/initiate', requireAdminAuth, async (req: AuthenticatedReque
       group = 'group1',
       subject,
       standard,
+      medium = 'Tamil',
       term = 'Term 1',
       unit = 1,
       lesson,
@@ -340,9 +341,9 @@ router.post('/upload/initiate', requireAdminAuth, async (req: AuthenticatedReque
       `INSERT INTO google_drive_materials (
         file_name, original_file_name, mime_type, file_size,
         google_drive_file_id, google_drive_folder_id,
-        tnpsc_group, subject, standard, term, unit, lesson, lesson_id,
+        tnpsc_group, subject, standard, medium, term, unit, lesson, lesson_id,
         upload_status, uploaded_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'initiating', $14)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'initiating', $15)
       RETURNING id, file_name, upload_status`,
       [
         cleanFileName,
@@ -354,6 +355,7 @@ router.post('/upload/initiate', requireAdminAuth, async (req: AuthenticatedReque
         group,
         subject || 'General Studies',
         parsedStandard,
+        medium || 'Tamil',
         term,
         parsedUnit,
         lesson || null,
@@ -390,7 +392,7 @@ router.post('/upload/initiate', requireAdminAuth, async (req: AuthenticatedReque
  */
 router.post('/upload/complete', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { trackingId, googleDriveFileId } = req.body;
+    const { trackingId, googleDriveFileId, replaceId, bookName, medium, unit, lesson } = req.body;
 
     if (!trackingId || !googleDriveFileId) {
       return res.status(400).json({
@@ -423,6 +425,73 @@ router.post('/upload/complete', requireAdminAuth, async (req: AuthenticatedReque
 
     const row = updateRes.rows[0];
 
+    // 3. Synchronize with `textbooks` table immediately so Textbook Management displays it
+    let syncedTextbookId: number | null = null;
+    try {
+      const tbBookName = String(bookName || row.file_name || 'TNPSC Textbook').replace(/\.pdf$/i, '').trim();
+      const tbGroup = row.tnpsc_group || 'group1';
+      const tbStandard = Number(row.standard) || 6;
+      const tbSubject = row.subject || 'General Studies';
+      const tbMedium = medium || row.medium || 'Tamil';
+      const tbTerm = row.term || 'Full Year';
+      const tbUnit = unit != null ? parseInt(String(unit), 10) : (row.unit != null ? Number(row.unit) : null);
+      const tbLesson = lesson || row.lesson || null;
+      const gdrivePath = `gdrive://${verified.id}`;
+      const parsedReplaceId = replaceId ? parseInt(String(replaceId), 10) : null;
+
+      if (parsedReplaceId && !isNaN(parsedReplaceId)) {
+        const repRes = await pool.query(
+          `UPDATE textbooks
+           SET group_id = $1, standard = $2, subject = $3, medium = $4, term = $5,
+               book_name = $6, file_path = $7, file_size = $8, google_drive_file_id = $9,
+               unit = COALESCE($10, unit), lesson = COALESCE($11, lesson),
+               status = 'uploaded', error_message = NULL, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $12
+           RETURNING id`,
+          [tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, tbBookName, gdrivePath, verified.size, verified.id, tbUnit, tbLesson, parsedReplaceId]
+        );
+        if (repRes.rows.length > 0) {
+          syncedTextbookId = repRes.rows[0].id;
+        }
+      }
+
+      if (!syncedTextbookId) {
+        const existingTb = await pool.query(
+          `SELECT id FROM textbooks
+           WHERE google_drive_file_id = $1
+              OR file_path = $2
+              OR (group_id = $3 AND standard = $4 AND LOWER(subject) = LOWER($5) AND medium = $6 AND term = $7 AND LOWER(book_name) = LOWER($8))
+           LIMIT 1`,
+          [verified.id, gdrivePath, tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, tbBookName]
+        );
+
+        if (existingTb.rows.length > 0) {
+          const updTb = await pool.query(
+            `UPDATE textbooks
+             SET file_path = $1, file_size = $2, google_drive_file_id = $3,
+                 unit = COALESCE($4, unit), lesson = COALESCE($5, lesson),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $6
+             RETURNING id`,
+            [gdrivePath, verified.size, verified.id, tbUnit, tbLesson, existingTb.rows[0].id]
+          );
+          syncedTextbookId = updTb.rows[0].id;
+        } else {
+          const insTb = await pool.query(
+            `INSERT INTO textbooks (
+              group_id, standard, subject, medium, term, book_name, file_path, file_size,
+              google_drive_file_id, unit, lesson, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'uploaded')
+            RETURNING id`,
+            [tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, tbBookName, gdrivePath, verified.size, verified.id, tbUnit, tbLesson]
+          );
+          syncedTextbookId = insTb.rows[0].id;
+        }
+      }
+    } catch (tbSyncErr: any) {
+      console.error(`[DriveUploadComplete] Failed to sync textbooks table for Drive file ${verified.id}:`, tbSyncErr.message);
+    }
+
     // Persist the durable job row first, then start a bounded pass. If Vercel terminates the
     // background work, the PENDING/PROCESSING row still lets Admin resume the exact page cursor.
     try {
@@ -431,26 +500,31 @@ router.post('/upload/complete', requireAdminAuth, async (req: AuthenticatedReque
       console.warn(`[DriveUploadComplete] Could not create extraction job for #${row.id}:`, jobErr.message);
     }
 
-    extractAndPersistPdf({
-      materialId: row.id,
-      googleDriveFileId: row.google_drive_file_id,
-      forceReExtract: true,
-      processAllPages: true,
-    }).catch((bgErr) => {
-      console.warn(`[DriveUploadComplete] Extraction notice for #${row.id}:`, bgErr.message);
-    });
+    if (!process.env.VERCEL) {
+      extractAndPersistPdf({
+        materialId: row.id,
+        textbookId: syncedTextbookId || undefined,
+        googleDriveFileId: row.google_drive_file_id,
+        forceReExtract: true,
+        processAllPages: true,
+      }).catch((bgErr) => {
+        console.warn(`[DriveUploadComplete] Extraction notice for #${row.id}:`, bgErr.message);
+      });
+    }
 
     return res.status(200).json({
       status: 'success',
       message: `PDF "${row.file_name}" successfully uploaded and verified in Google Drive!`,
       data: {
         id: row.id,
+        textbookId: syncedTextbookId,
         fileName: row.file_name,
         fileSize: row.file_size,
         googleDriveFileId: row.google_drive_file_id,
         group: row.tnpsc_group,
         subject: row.subject,
         standard: row.standard,
+        medium: row.medium,
         term: row.term,
         unit: row.unit,
         lesson: row.lesson,
@@ -1286,9 +1360,10 @@ router.get('/view/:id', async (req: Request, res: Response) => {
     // Set streaming headers
     res.status(fileResult.statusCode);
     res.setHeader('Content-Type', fileResult.contentType || 'application/pdf');
+    const isDownload = req.query.download === '1' || req.query.download === 'true';
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="${encodeURIComponent(material.file_name)}"`
+      `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(material.file_name)}"`
     );
     res.setHeader('Accept-Ranges', 'bytes');
 
