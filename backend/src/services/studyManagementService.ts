@@ -1790,45 +1790,75 @@ export class StudyManagementService {
     const titleTerm = (options?.lessonTitle || term).trim();
     const unitId = options?.unitId;
 
-    const res = await pool.query(
-      `SELECT t.*,
+    const baseSelect = `SELECT t.*,
               (SELECT COUNT(*)::int FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name)) as notes_count,
               (SELECT id FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name) LIMIT 1) as notes_id
-       FROM syllabus_topics t
-       WHERE (
-         t.lesson_id = $1
-         OR LOWER(t.lesson_id) = LOWER($1)
-         OR t.lesson_id IN (
-           SELECT id FROM syllabus_lessons 
-           WHERE id = $1 
-              OR LOWER(TRIM(title)) = LOWER(TRIM($1)) 
-              OR LOWER(TRIM(title)) = LOWER(TRIM($2))
-              OR ($3::int IS NOT NULL AND unit_id = $3 AND (LOWER(TRIM(title)) = LOWER(TRIM($1)) OR LOWER(TRIM(title)) = LOWER(TRIM($2))))
-         )
-         OR ($3::int IS NOT NULL AND t.unit_id = $3 AND (
-           t.lesson_id IN (
-             SELECT id FROM syllabus_lessons 
-             WHERE unit_id = $3 AND (LOWER(TRIM(title)) = LOWER(TRIM($1)) OR LOWER(TRIM(title)) = LOWER(TRIM($2)))
-           )
-         ))
-       )
-         AND t.is_active = true
-       ORDER BY 
+       FROM syllabus_topics t`;
+
+    const orderClause = `ORDER BY 
          CASE WHEN t.display_order > 0 THEN t.display_order ELSE 999999 END ASC,
          CASE 
            WHEN NULLIF(regexp_replace(regexp_replace(t.topic_name, '^[^0-9]+', ''), '[^0-9.]', '', 'g'), '') IS NOT NULL 
            THEN string_to_array(trim(both '.' from regexp_replace(t.topic_name, '[^0-9.]', '', 'g')), '.')::int[]
            ELSE ARRAY[999999]
          END ASC,
-         t.id ASC`,
-      [term, titleTerm, unitId || null]
-    );
-    return res.rows
-      .map((r) => ({
+         t.id ASC`;
+
+    // 1. Prefer exact lesson_id match so topics from other TNPSC groups with the same lesson title do not duplicate
+    let rows: any[] = [];
+    if (term) {
+      const exactRes = await pool.query(
+        `${baseSelect}
+         WHERE (t.lesson_id = $1 OR LOWER(t.lesson_id) = LOWER($1))
+           AND t.is_active = true
+         ${orderClause}`,
+        [term]
+      );
+      rows = exactRes.rows;
+    }
+
+    // 2. Fallback to lessonTitle match only if no exact lesson_id rows exist
+    if (rows.length === 0 && (term || titleTerm)) {
+      const fallbackRes = await pool.query(
+        `${baseSelect}
+         WHERE (
+           t.lesson_id IN (
+             SELECT id FROM syllabus_lessons 
+             WHERE id = $1 
+                OR LOWER(TRIM(title)) = LOWER(TRIM($1)) 
+                OR LOWER(TRIM(title)) = LOWER(TRIM($2))
+                OR ($3::int IS NOT NULL AND unit_id = $3 AND (LOWER(TRIM(title)) = LOWER(TRIM($1)) OR LOWER(TRIM(title)) = LOWER(TRIM($2))))
+           )
+           OR ($3::int IS NOT NULL AND t.unit_id = $3 AND (
+             t.lesson_id IN (
+               SELECT id FROM syllabus_lessons 
+               WHERE unit_id = $3 AND (LOWER(TRIM(title)) = LOWER(TRIM($1)) OR LOWER(TRIM(title)) = LOWER(TRIM($2)))
+             )
+           ))
+         )
+           AND t.is_active = true
+         ${orderClause}`,
+        [term, titleTerm, unitId || null]
+      );
+      rows = fallbackRes.rows;
+    }
+
+    // 3. Deduplicate by normalized topic_name while preserving order
+    const dedupedMap = new Map<string, TopicRecord>();
+    for (const r of rows) {
+      const normalizedKey = String(r.topic_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (!normalizedKey) continue;
+      const mapped: TopicRecord = {
         ...r,
         has_notes: (r.notes_count || 0) > 0,
-      }))
-      .sort(compareTopics);
+      };
+      const existing = dedupedMap.get(normalizedKey);
+      if (!existing || (mapped.has_notes && !existing.has_notes)) {
+        dedupedMap.set(normalizedKey, mapped);
+      }
+    }
+
+    return Array.from(dedupedMap.values()).sort(compareTopics);
   }
 
   static async createTopic(data: {

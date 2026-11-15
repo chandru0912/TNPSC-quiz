@@ -31,6 +31,49 @@ export function getLineAndColumn(text: string, position: number): { line: number
   return { line, column };
 }
 
+/**
+ * Safely removes trailing commas before '}' or ']' ONLY outside JSON string literals.
+ * Never alters commas inside question, option, or explanation text.
+ */
+function stripTrailingCommasOutsideStrings(input: string): string {
+  let out = '';
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inString) {
+      out += ch;
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+
+    if (ch === ',') {
+      let j = i + 1;
+      while (j < input.length && /\s/.test(input[j])) j++;
+      if (j < input.length && (input[j] === '}' || input[j] === ']')) {
+        continue; // Skip trailing comma outside string
+      }
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
 export function parseGeminiJsonResponse<T>(raw: string): T {
   if (!raw || !raw.trim()) {
     throw new Error('Received empty content from Google Gemini API.');
@@ -62,6 +105,16 @@ export function parseGeminiJsonResponse<T>(raw: string): T {
   try {
     return JSON.parse(cleaned) as T;
   } catch (parseError: any) {
+    // Safe fallback: strip only trailing commas outside string literals
+    try {
+      const safeCleaned = stripTrailingCommasOutsideStrings(cleaned);
+      if (safeCleaned !== cleaned) {
+        return JSON.parse(safeCleaned) as T;
+      }
+    } catch {
+      // Fall through to structured error reporting with original parseError
+    }
+
     const posMatch = parseError.message.match(/at position (\d+)/i);
     const position = posMatch ? parseInt(posMatch[1], 10) : 0;
     const { line, column } = getLineAndColumn(cleaned, position);

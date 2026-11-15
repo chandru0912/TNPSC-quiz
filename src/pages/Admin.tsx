@@ -64,6 +64,7 @@ import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../component
 import { ExtractedPagesModal } from '../components/ExtractedPagesModal'
 import { BulkPdfUploadModal } from '../components/BulkPdfUploadModal'
 import { CloudAiGeneratorModal, type CloudAiMode } from '../components/CloudAiGeneratorModal'
+import { McqBackgroundMonitor } from '../components/McqBackgroundMonitor'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { TamilStudyNotesRenderer } from '../components/TamilStudyNotesRenderer'
 import {
@@ -9290,6 +9291,21 @@ const Admin = () => {
           fetchQuestions()
           fetchNotes()
           fetchAllMetrics()
+        }}
+      />
+
+      {/* Global Persistent Background MCQ Generation Monitor */}
+      <McqBackgroundMonitor
+        token={token}
+        showToast={showToast}
+        onJobCompleted={() => {
+          fetchQuestions()
+          fetchAllMetrics()
+        }}
+        onNavigateToStaging={() => {
+          setIsCloudAiModalOpen(false)
+          navigate('/admin/question-bank')
+          setStatusFilter('staging')
         }}
       />
 

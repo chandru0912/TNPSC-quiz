@@ -663,7 +663,55 @@ export async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_ai_gen_logs_provider ON ai_generation_logs (provider, created_at DESC);
 
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50) DEFAULT 'claude';
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS generation_job_id VARCHAR(64);
       ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(50) DEFAULT 'claude';
+
+      CREATE TABLE IF NOT EXISTS mcq_generation_jobs (
+        job_id VARCHAR(64) PRIMARY KEY,
+        admin_id VARCHAR(120) NOT NULL,
+        provider VARCHAR(32) NOT NULL DEFAULT 'gemini',
+        model VARCHAR(120),
+        group_id VARCHAR(64) NOT NULL,
+        subject_id VARCHAR(120),
+        subject VARCHAR(255) NOT NULL,
+        standard_id INTEGER NOT NULL,
+        term_id VARCHAR(64),
+        volume VARCHAR(64),
+        unit_id INTEGER NOT NULL,
+        unit_title VARCHAR(255),
+        lesson_id VARCHAR(255),
+        lesson_title VARCHAR(500) NOT NULL,
+        lesson_number VARCHAR(64),
+        selected_topics JSONB NOT NULL DEFAULT '[]'::jsonb,
+        requested_question_count INTEGER NOT NULL,
+        difficulty VARCHAR(32) NOT NULL DEFAULT 'Mixed',
+        language VARCHAR(32) NOT NULL DEFAULT 'english',
+        textbook_mode VARCHAR(32),
+        textbook_id INTEGER,
+        gdrive_file_id VARCHAR(255),
+        gdrive_material_id INTEGER,
+        textbook_name VARCHAR(500),
+        source_pdf VARCHAR(500),
+        source_pages JSONB DEFAULT '[]'::jsonb,
+        textbook_content_snapshot TEXT,
+        status VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
+        progress INTEGER NOT NULL DEFAULT 0,
+        generated_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        duplicate_count INTEGER NOT NULL DEFAULT 0,
+        invalid_count INTEGER NOT NULL DEFAULT 0,
+        current_step VARCHAR(255),
+        error_message TEXT,
+        lease_until TIMESTAMP,
+        worker_token VARCHAR(64),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        started_at TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mcq_jobs_status ON mcq_generation_jobs (status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mcq_jobs_admin ON mcq_generation_jobs (admin_id, created_at DESC);
 
       ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS api_key TEXT;
       ALTER TABLE ai_provider_configs ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'READY';

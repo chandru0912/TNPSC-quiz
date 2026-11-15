@@ -29,6 +29,7 @@ import studentRouter from './routes/student';
 import analyticsRouter from './routes/analyticsRoutes';
 import studyManagementRouter from './routes/studyMaterialsManagementRoutes';
 import aiSyllabusImportRouter from './routes/aiSyllabusImportRoutes';
+import mcqGenerationJobsRouter from './routes/mcqGenerationJobs';
 import { AISyllabusJobService } from './services/aiSyllabusJobService';
 
 const app = express();
@@ -350,6 +351,12 @@ app.use('/api/api/textbooks', requireSchemaMiddleware, textbooksRouter);
 app.use('/api/ai', requireSchemaMiddleware, aiGenerationRouter);
 app.use('/ai', requireSchemaMiddleware, aiGenerationRouter);
 app.use('/api/api/ai', requireSchemaMiddleware, aiGenerationRouter);
+
+app.use(
+  ['/api/admin/mcq-generation/jobs', '/admin/mcq-generation/jobs', '/api/api/admin/mcq-generation/jobs'],
+  requireSchemaMiddleware,
+  mcqGenerationJobsRouter
+);
 
 app.use('/api/claude', requireSchemaMiddleware, claudeRouter);
 app.use('/claude', requireSchemaMiddleware, claudeRouter);

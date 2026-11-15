@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Sparkles,
@@ -664,12 +665,12 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
 
   if (!isOpen) return null
 
-  return (
+  return createPortal(
     <AnimatePresence>
       <div
         className="admin-modal-backdrop ai-modal-backdrop"
         onClick={(e) => {
-          if (e.target === e.currentTarget && !isNotesGenerating) {
+          if (e.target === e.currentTarget && !(aiMode === 'notes' && isNotesGenerating)) {
             onClose()
           }
         }}
@@ -699,7 +700,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                 onClick={onClose}
                 aria-label="Close generator modal"
                 title="Close Generator (Esc)"
-                disabled={isNotesGenerating}
+                disabled={aiMode === 'notes' && isNotesGenerating}
               >
                 <X size={20} strokeWidth={2.5} />
               </button>
@@ -1453,14 +1454,15 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
               type="button"
               className="admin-btn admin-btn-secondary"
               onClick={onClose}
-              disabled={isNotesGenerating}
+              disabled={aiMode === 'notes' && isNotesGenerating}
             >
               Close
             </button>
           </div>
         </motion.div>
       </div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   )
 }
 

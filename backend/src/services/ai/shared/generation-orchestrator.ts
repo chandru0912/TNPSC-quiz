@@ -5,6 +5,7 @@
  */
 
 import pool from '../../../db';
+import { SchemaType } from '@google/generative-ai';
 import { StandardizedMcqItem, toDatabaseQuestionPayload } from './mcq-schema';
 import { TextbookContentService, VerifiedTextbookContext } from './textbook-content.service';
 import { TopicExtractionService } from './topic-extraction.service';
@@ -184,6 +185,22 @@ export class GenerationOrchestrator {
           systemPrompt: systemPromptTemplate,
           maxTokens: Math.min(8192, Math.max(2048, requestedCount * 400)),
           temperature: 0.3,
+          responseFormat: 'json',
+          responseSchema: {
+            type: SchemaType.ARRAY,
+            items: {
+              type: SchemaType.OBJECT,
+              properties: {
+                question: { type: SchemaType.STRING },
+                options: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                correctAnswer: { type: SchemaType.STRING },
+                explanation: { type: SchemaType.STRING },
+                difficulty: { type: SchemaType.STRING },
+                topic: { type: SchemaType.STRING },
+              },
+              required: ['question', 'options', 'correctAnswer', 'explanation'],
+            },
+          },
         });
       }
     } catch (aiErr: any) {

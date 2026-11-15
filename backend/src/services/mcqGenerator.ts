@@ -9,9 +9,11 @@
  */
 
 import pool from '../db';
+import { SchemaType } from '@google/generative-ai';
 import { CloudAIService } from './cloudAi/cloudAiService';
 import { AIProviderFactory } from './ai/ai-provider.factory';
 import { AIProviderName } from './ai/ai-provider.interface';
+import { GeminiJsonParseError } from './ai/providers/gemini/gemini.validator';
 import {
   isSemanticallyDuplicate,
   isValidQuestionText,
@@ -198,6 +200,54 @@ export function validateMcqItem(rawQ: any): { valid: boolean; question?: Generat
   };
 }
 
+export const MCQ_RESPONSE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    questions: {
+      type: SchemaType.ARRAY,
+      description: 'List of TNPSC Multiple Choice Questions',
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          question: {
+            type: SchemaType.STRING,
+            description: 'Clear, complete MCQ question stem',
+          },
+          options: {
+            type: SchemaType.ARRAY,
+            description: 'Exactly 4 distinct answer options (A, B, C, D)',
+            items: {
+              type: SchemaType.STRING,
+            },
+          },
+          correctAnswer: {
+            type: SchemaType.INTEGER,
+            description: 'Zero-based index of the correct option: 0, 1, 2, or 3',
+          },
+          explanation: {
+            type: SchemaType.STRING,
+            description: 'Concise factual explanation grounded in the source textbook',
+          },
+          difficulty: {
+            type: SchemaType.STRING,
+            description: 'Easy, Medium, or Hard',
+          },
+          subject: {
+            type: SchemaType.STRING,
+            description: 'TNPSC subject name',
+          },
+          topic: {
+            type: SchemaType.STRING,
+            description: 'Specific lesson topic or subtopic',
+          },
+        },
+        required: ['question', 'options', 'correctAnswer', 'explanation'],
+      },
+    },
+  },
+  required: ['questions'],
+};
+
 /**
  * Generates exam-standard MCQs strictly grounded in Samacheer Kalvi textbook content.
  */
@@ -255,15 +305,16 @@ STRICT INSTRUCTIONS:
 7. Map every question to the given subject, unit, lesson, and topic.
 8. Output ONLY valid JSON: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Medium", "subject": "...", "topic": "..." } ] }`;
 
-  // We generate in batches (e.g. 15-25 per request) to prevent token truncation
-  const batchSize = Math.min(25, targetCount);
+  // Generate in bounded batches to prevent token truncation and stay within serverless timeouts
+  let batchSize = req.provider === 'gemini' ? Math.min(12, targetCount) : Math.min(20, targetCount);
   let attempts = 0;
-  const maxAttempts = Math.ceil(targetCount / batchSize) * 3 + 1;
+  const maxAttempts = Math.ceil(targetCount / Math.max(5, batchSize)) * 3 + 2;
 
   while (acceptedQuestions.length < targetCount && attempts < maxAttempts) {
     attempts++;
     const needed = targetCount - acceptedQuestions.length;
-    const currentBatchCount = Math.min(batchSize, needed + 5);
+    const extraBuffer = attempts > 1 && (totalDuplicatesDetected > 0 || totalInvalidDetected > 0) ? 2 : 0;
+    const currentBatchCount = Math.min(batchSize, needed + extraBuffer);
 
     const progressPct = Math.min(90, Math.round(20 + (acceptedQuestions.length / targetCount) * 70));
     onProgress?.(
@@ -313,7 +364,9 @@ Respond strictly in JSON:
         {
           systemPrompt,
           temperature: 0.25,
-          maxTokens: 6000,
+          maxTokens: 8192,
+          responseFormat: 'json',
+          ...(req.provider === 'gemini' ? { responseSchema: MCQ_RESPONSE_SCHEMA } : {}),
         }
       );
 
@@ -376,6 +429,10 @@ Respond strictly in JSON:
     } catch (err: any) {
       lastError = err instanceof Error ? err : new Error(String(err?.message || err));
       console.error(`[MCQ Generation] Batch attempt ${attempts} failed:`, lastError.message);
+      if (err instanceof GeminiJsonParseError || /invalid JSON/i.test(lastError.message)) {
+        // Reduce batch size on JSON syntax errors so the next retry outputs a smaller, cleaner payload
+        batchSize = Math.max(5, Math.floor(batchSize / 2));
+      }
     }
   }
 

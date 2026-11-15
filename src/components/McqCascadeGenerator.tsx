@@ -122,6 +122,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
 
   // Step 12: Execution & Progress State
   const [isGenerating, setIsGenerating] = useState(false)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [extractingMap, setExtractingMap] = useState<Record<string, boolean>>({})
   const [progress, setProgress] = useState<{ pct: number; step: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -279,11 +280,28 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
         .then((tList) => {
         if (!mounted || seq !== topicReqSeq.current) return
         if (tList.length > 0) {
-          const names = [...tList].sort(compareTopics).map((t) => t.topic_name)
+          const seen = new Set<string>()
+          const names = [...tList]
+            .sort(compareTopics)
+            .map((t) => String(t.topic_name || '').trim())
+            .filter((name) => {
+              const key = name.toLowerCase().replace(/\s+/g, ' ')
+              if (!key || seen.has(key)) return false
+              seen.add(key)
+              return true
+            })
           setAvailableTopics(names)
           setSelectedTopics(names)
         } else {
-          const staticTopics = (selectedLessonObj.topics || []).map((t: any) => typeof t === 'string' ? t : t.name)
+          const seen = new Set<string>()
+          const staticTopics = (selectedLessonObj.topics || [])
+            .map((t: any) => String(typeof t === 'string' ? t : t.name || '').trim())
+            .filter((name) => {
+              const key = name.toLowerCase().replace(/\s+/g, ' ')
+              if (!key || seen.has(key)) return false
+              seen.add(key)
+              return true
+            })
           setAvailableTopics(staticTopics)
           setSelectedTopics(staticTopics)
         }
@@ -352,12 +370,17 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
     setResult(null)
     setError(null)
 
-    // Extract syllabus topics strictly from the lesson structure
+    // Extract syllabus topics strictly from the lesson structure (deduplicated)
+    const seenTopics = new Set<string>()
     const topics: string[] = []
     if (Array.isArray(lesson.topics) && lesson.topics.length > 0) {
       lesson.topics.forEach((tp) => {
-        if (typeof tp === 'string') topics.push(tp)
-        else if (tp && typeof tp.name === 'string') topics.push(tp.name)
+        const name = String(typeof tp === 'string' ? tp : tp?.name || '').trim()
+        const key = name.toLowerCase().replace(/\s+/g, ' ')
+        if (name && !seenTopics.has(key)) {
+          seenTopics.add(key)
+          topics.push(name)
+        }
       })
     }
 
@@ -703,6 +726,110 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   // Generate MCQs with Claude AI or Gemini AI Execution
   // =========================================================================
 
+  const isMountedRef = React.useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  const pollJobUntilSettled = React.useCallback(
+    async (jobId: string, activeToken: string, fallbackSourceName?: string) => {
+      const pollStart = Date.now()
+      while (isMountedRef.current && Date.now() - pollStart < 15 * 60 * 1000) {
+        const statusRes = await apiFetch(`/api/admin/mcq-generation/jobs/${encodeURIComponent(jobId)}`, {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        }).catch(() => null)
+
+        if (statusRes && statusRes.ok) {
+          const statusBody = await statusRes.json().catch(() => null)
+          const latestJob = statusBody?.job
+          if (latestJob && isMountedRef.current) {
+            setProgress({
+              pct: Math.max(5, Number(latestJob.progress) || 0),
+              step:
+                latestJob.current_step ||
+                `${latestJob.status} (${latestJob.generated_count}/${latestJob.requested_question_count})`,
+            })
+
+            if (latestJob.status === 'COMPLETED') {
+              setActiveJobId(null)
+              setResult({
+                count: latestJob.generated_count,
+                sourceName: latestJob.textbook_name || fallbackSourceName || latestJob.lesson_title,
+                pages: [],
+                staged: true,
+                questions: [],
+              })
+              setProgress({
+                pct: 100,
+                step: `Completed: ${latestJob.generated_count} questions saved to Staging`,
+              })
+              showToast?.('success', `${latestJob.generated_count} lesson-grounded questions saved to Staging.`)
+              onRefreshData?.()
+              return
+            }
+
+            if (latestJob.status === 'FAILED') {
+              setActiveJobId(null)
+              setError(latestJob.error_message || 'Background MCQ generation job failed.')
+              return
+            }
+
+            if (latestJob.status === 'CANCELLED') {
+              setActiveJobId(null)
+              setError('MCQ generation job was cancelled.')
+              return
+            }
+          }
+        }
+
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+    },
+    [onRefreshData, showToast]
+  )
+
+  // Restore any active background job from PostgreSQL when reopening the generator modal or navigating back
+  useEffect(() => {
+    const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+    if (!activeToken) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiFetch('/api/admin/mcq-generation/jobs?active=true&limit=5', {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        })
+        if (!res.ok || cancelled) return
+        const data = await res.json().catch(() => null)
+        const activeJobs = Array.isArray(data?.jobs) ? data.jobs : []
+        if (activeJobs.length === 0 || cancelled) return
+
+        const preferredId = sessionStorage.getItem('tnpsc_last_mcq_job_id')
+        const targetJob =
+          (preferredId && activeJobs.find((j: any) => j.job_id === preferredId)) || activeJobs[0]
+        if (!targetJob || cancelled) return
+
+        setActiveJobId(targetJob.job_id)
+        setProgress({
+          pct: Math.max(5, Number(targetJob.progress) || 0),
+          step:
+            targetJob.current_step ||
+            `Resumed monitor for ${targetJob.lesson_title} (${targetJob.generated_count}/${targetJob.requested_question_count})`,
+        })
+        await pollJobUntilSettled(targetJob.job_id, activeToken, targetJob.textbook_name)
+      } catch {
+        // Non-fatal restore check
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [token, pollJobUntilSettled])
+
   const handleGenerate = async () => {
     const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
     if (!activeToken) {
@@ -750,77 +877,35 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
     }
 
     try {
-      const res = await apiFetch('/api/ai/generate?stream=true', {
+      const res = await apiFetch('/api/admin/mcq-generation/jobs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
           Authorization: `Bearer ${activeToken}`,
         },
-        body: JSON.stringify(payload),
-        timeoutMs: 0,
+        body: JSON.stringify({ ...payload, subjectId }),
       })
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body?.message || `Generation failed with HTTP ${res.status}.`)
-      }
-      if (!res.body) throw new Error('Streaming response is not available in this browser.')
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let completed: any = null
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const events = buffer.split('\n\n')
-        buffer = events.pop() || ''
-
-        for (const event of events) {
-          const line = event.split('\n').find((part) => part.startsWith('data:'))
-          if (!line) continue
-          let data: any
-          try {
-            data = JSON.parse(line.slice(5).trim())
-          } catch {
-            continue
-          }
-          if (data.type === 'progress') {
-            setProgress({
-              pct: Number(data.progressPercent || 0),
-              step: String(data.stepName || 'Generating...'),
-            })
-          } else if (data.type === 'complete') {
-            completed = data
-          } else if (data.type === 'error' || data.status === 'error') {
-            throw new Error(data.error || data.message || `${aiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} MCQ generation failed.`)
-          }
-        }
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || !body?.success || !body?.job) {
+        throw new Error(body?.message || `Failed to queue MCQ generation job (HTTP ${res.status}).`)
       }
 
-      if (!completed) throw new Error(`${aiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} did not return a completion event. Please try again.`)
-      const questions: GeneratedQuestion[] = Array.isArray(completed?.mcqs?.questions)
-        ? completed.mcqs.questions
-        : []
-      if (questions.length === 0) {
-        throw new Error(`${aiProvider === 'claude' ? 'Claude AI' : 'Gemini AI'} returned no verified questions for this lesson.`)
-      }
-
-      setResult({
-        count: questions.length,
-        sourceName: completed?.textbookUsed?.name || selectedTextbook.bookName,
-        pages: Array.isArray(completed?.textbookUsed?.relevantPages)
-          ? completed.textbookUsed.relevantPages
-          : [],
-        staged: completed?.mcqs?.status === 'staging',
-        questions,
+      const createdJob = body.job
+      sessionStorage.setItem('tnpsc_last_mcq_job_id', createdJob.job_id)
+      setActiveJobId(createdJob.job_id)
+      window.dispatchEvent(new CustomEvent('tnpsc:mcq-job-created', { detail: createdJob }))
+      setProgress({
+        pct: Math.max(5, Number(createdJob.progress) || 5),
+        step: `Background Job ${createdJob.job_id} queued (${createdJob.generated_count}/${createdJob.requested_question_count}). You can close this modal or switch pages safely.`,
       })
-      setProgress({ pct: 100, step: 'Completed' })
-      showToast?.('success', `${questions.length} lesson-grounded questions saved to Staging.`)
-      onRefreshData?.()
+      showToast?.(
+        'success',
+        `Background MCQ generation started (${createdJob.requested_question_count} questions). Generation will continue even if you close this modal.`
+      )
+
+      // Poll job status while modal stays open (unmounting modal NEVER cancels backend job)
+      await pollJobUntilSettled(createdJob.job_id, activeToken, selectedTextbook.bookName)
     } catch (err: any) {
       const message = err?.message || 'MCQ generation failed.'
       setError(message)
@@ -1068,11 +1153,11 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
                 overflowY: 'auto',
               }}
             >
-              {availableTopics.map((topicItem, tIdx) => {
+              {availableTopics.map((topicItem) => {
                 const isSelected = selectedTopics.includes(topicItem)
                 return (
                   <button
-                    key={`${tIdx}-${topicItem}`}
+                    key={topicItem}
                     type="button"
                     onClick={() => handleToggleTopic(topicItem)}
                     style={{
@@ -1616,7 +1701,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
       </div>
 
       {/* Real-time Progress Bar */}
-      {isGenerating && progress && (
+      {(isGenerating || activeJobId) && progress && (
         <div
           style={{
             marginTop: '1rem',

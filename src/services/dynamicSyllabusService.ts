@@ -425,8 +425,15 @@ export const dynamicSyllabusService = {
       const res = await fetch(`/api/syllabus/topics?${q.toString()}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.topics) && data.topics.length > 0) {
-        cache.topics.set(cacheKey, data.topics);
-        return data.topics;
+        const seen = new Set<string>();
+        const uniqueTopics = data.topics.filter((t: DynamicTopic) => {
+          const key = String(t.topic_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        cache.topics.set(cacheKey, uniqueTopics);
+        return uniqueTopics;
       }
     } catch (err) {
       console.warn(`[DynamicSyllabus] Failed to fetch topics for ${lId || lTitle}:`, err);
