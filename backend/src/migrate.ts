@@ -758,29 +758,14 @@ export async function runMigration() {
         mobile VARCHAR(20),
         password_hash VARCHAR(255) NOT NULL,
         target_group VARCHAR(50) NOT NULL DEFAULT 'group4',
-        preferred_language VARCHAR(10) NOT NULL DEFAULT 'en',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
-      ALTER TABLE students ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(10) NOT NULL DEFAULT 'en';
+      ALTER TABLE students DROP COLUMN IF EXISTS preferred_language;
       CREATE INDEX IF NOT EXISTS idx_students_email ON students (email);
       CREATE INDEX IF NOT EXISTS idx_students_target_group ON students (target_group);
 
-      CREATE TABLE IF NOT EXISTS question_translations (
-        id SERIAL PRIMARY KEY,
-        question_id INT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-        language VARCHAR(10) NOT NULL,
-        question_text TEXT NOT NULL,
-        options JSONB NOT NULL,
-        explanation TEXT DEFAULT '',
-        tag VARCHAR(255),
-        approved BOOLEAN NOT NULL DEFAULT TRUE,
-        provider VARCHAR(50),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT unique_question_translation UNIQUE (question_id, language)
-      );
-      CREATE INDEX IF NOT EXISTS idx_question_translations_qid_lang ON question_translations (question_id, language);
+      DROP TABLE IF EXISTS question_translations;
 
       CREATE TABLE IF NOT EXISTS study_sessions (
         id SERIAL PRIMARY KEY,
@@ -1154,7 +1139,6 @@ export function ensureDatabaseSchema(): Promise<void> {
               to_regclass('public.syllabus_lessons') AS t_lessons,
               to_regclass('public.syllabus_topics') AS t_topics,
               to_regclass('public.mcq_generation_batches') AS t_mcq_batches,
-              to_regclass('public.question_translations') AS t_q_translations,
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'textbooks' AND column_name = 'google_drive_file_id'
@@ -1166,11 +1150,7 @@ export function ensureDatabaseSchema(): Promise<void> {
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'pdf_extractions' AND column_name = 'retry_count'
-              ) AS has_pe_retry,
-              EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'students' AND column_name = 'preferred_language'
-              ) AS has_student_lang
+              ) AS has_pe_retry
           `);
           const row = check.rows[0];
           if (
@@ -1180,11 +1160,9 @@ export function ensureDatabaseSchema(): Promise<void> {
             row?.t_lessons &&
             row?.t_topics &&
             row?.t_mcq_batches &&
-            row?.t_q_translations &&
             row?.has_tb_gdrive &&
             row?.has_tb_unit &&
-            row?.has_pe_retry &&
-            row?.has_student_lang
+            row?.has_pe_retry
           ) {
             return;
           }

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { FileText, Calendar, Eye, Download, X, Award, CheckCircle, BookOpen } from 'lucide-react'
 import { useScrollLock } from '../hooks/useScrollLock'
-import { useLanguage } from '../context/LanguageContext'
 import './PreviousPapers.css'
 
 interface PaperItem {
@@ -15,7 +14,6 @@ interface PaperItem {
 }
 
 const PreviousPapers = () => {
-  const { isTamil } = useLanguage()
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'group1' | 'group2_2a' | 'group4'>('all')
   const [previewPaper, setPreviewPaper] = useState<PaperItem | null>(null)
 
@@ -23,10 +21,10 @@ const PreviousPapers = () => {
   useScrollLock(Boolean(previewPaper))
 
   const categories = [
-    { id: 'all' as const, name: isTamil ? 'அனைத்து வினாத்தாள்கள்' : 'All Papers' },
-    { id: 'group1' as const, name: isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1' },
-    { id: 'group2_2a' as const, name: isTamil ? 'TNPSC குரூப் 2 & 2A' : 'TNPSC Group 2 & 2A' },
-    { id: 'group4' as const, name: isTamil ? 'TNPSC குரூப் 4' : 'TNPSC Group 4' },
+    { id: 'all' as const, name: 'All Papers' },
+    { id: 'group1' as const, name: 'TNPSC Group 1' },
+    { id: 'group2_2a' as const, name: 'TNPSC Group 2 & 2A' },
+    { id: 'group4' as const, name: 'TNPSC Group 4' },
   ]
 
   const papers: PaperItem[] = [
@@ -123,21 +121,11 @@ const PreviousPapers = () => {
           <h1 className="papers-title">
             <FileText size={32} />
             <span>
-              {isTamil ? (
-                <>
-                  முந்தைய ஆண்டு <span className="gradient-text">வினாத்தாள்கள்</span>
-                </>
-              ) : (
-                <>
-                  Previous Year <span className="gradient-text">Papers</span>
-                </>
-              )}
+              Previous Year <span className="gradient-text">Papers</span>
             </span>
           </h1>
           <p className="papers-subtitle">
-            {isTamil
-              ? 'குரூப் 1, குரூப் 2 & 2A மற்றும் குரூப் 4 தேர்வுகளின் தீர்க்கப்பட்ட முந்தைய ஆண்டு வினாத்தாள்களைப் பதிவிறக்கிப் பயிற்சி செய்க'
-              : 'Download and practice with actual solved TNPSC papers organized across Group 1, Group 2 & 2A, and Group 4'}
+            Download and practice with actual solved TNPSC papers organized across Group 1, Group 2 & 2A, and Group 4
           </p>
         </motion.div>
 
@@ -156,11 +144,11 @@ const PreviousPapers = () => {
 
         <div className="papers-table glass">
           <div className="papers-table-header">
-            <div className="table-col">{isTamil ? 'ஆண்டு' : 'Year'}</div>
-            <div className="table-col">{isTamil ? 'தேர்வுப் பிரிவு' : 'Exam Stream'}</div>
-            <div className="table-col">{isTamil ? 'பாடங்கள் & விவரங்கள்' : 'Subjects & Paper Details'}</div>
-            <div className="table-col">{isTamil ? 'வினாக்கள்' : 'Questions'}</div>
-            <div className="table-col">{isTamil ? 'செயல்கள்' : 'Actions'}</div>
+            <div className="table-col">Year</div>
+            <div className="table-col">Exam Stream</div>
+            <div className="table-col">Subjects & Paper Details</div>
+            <div className="table-col">Questions</div>
+            <div className="table-col">Actions</div>
           </div>
           <AnimatePresence mode="wait">
             {filteredPapers.map((paper, index) => (

@@ -21,15 +21,6 @@ import {
   getGroup2UnitLessonCount,
   type Group2Lesson,
 } from '../data/group2SyllabusData'
-import { useLanguage } from '../context/LanguageContext'
-import {
-  translateLessonTitle,
-  translateTopic,
-  translateUnitNumber,
-  translateUnitTitle,
-  translateSubjectName,
-} from '../utils/bilingualSyllabus'
-import { translateQuestionItem } from '../utils/languageData'
 import { apiFetch } from '../utils/api'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { compareLessons } from '../utils/naturalSort'
@@ -38,8 +29,7 @@ import './Group1Lessons.css'
 const Group2Lessons = () => {
   const { subjectId, unitId } = useParams<{ subjectId: string; unitId: string }>()
   const navigate = useNavigate()
-  const { language, isTamil } = useLanguage()
-
+  
   const activeSubjectId = subjectId || 'general-studies'
   const parsedUnitId = parseInt(unitId || '1', 10)
 
@@ -210,15 +200,13 @@ const Group2Lessons = () => {
       <div className="lessons-page">
         <div className="lessons-container">
           <div className="empty-state glass">
-            <h2>{isTamil ? 'அலகு கிடைக்கவில்லை' : 'Unit Not Found'}</h2>
+            <h2>{'Unit Not Found'}</h2>
             <p>
-              {isTamil
-                ? 'கோரப்பட்ட TNPSC குரூப் 2 & 2A பாடத்திட்ட அலகு இல்லை.'
-                : 'The requested TNPSC Group 2 & 2A syllabus unit does not exist.'}
+              {'The requested TNPSC Group 2 & 2A syllabus unit does not exist.'}
             </p>
             <Link to="/materials?group=group2_2a" className="btn btn-primary" style={{ marginTop: '1rem' }}>
               <ArrowLeft size={16} />
-              <span>{isTamil ? 'குரூப் 2 & 2A பகுதிக்குத் திரும்பு' : 'Back to Group 2 & 2A'}</span>
+              <span>{'Back to Group 2 & 2A'}</span>
             </Link>
           </div>
         </div>
@@ -253,19 +241,19 @@ const Group2Lessons = () => {
       <div className="lessons-container">
         {/* Breadcrumb Navigation */}
         <div className="lessons-breadcrumb">
-          <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
+          <Link to="/">{'Home'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials?group=group2_2a">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
+          <Link to="/materials?group=group2_2a">{'Study Materials'}</Link>
           <ChevronRight size={14} />
           <Link to={`/materials/group2/${subject.id}`}>
-            {isTamil ? (subject.tamilTitle || translateSubjectName(subject.title, language)) : subject.title}
+            {subject.title}
           </Link>
           <ChevronRight size={14} />
           <Link to={`/materials/group2/${subject.id}/unit/${unit.id}`}>
-            {translateUnitNumber(unit.unitNumber, language)}
+            {unit.unitNumber}
           </Link>
           <ChevronRight size={14} />
-          <span className="active">{isTamil ? 'பாடங்கள் & குறிப்புகள்' : 'Lessons & Notes'}</span>
+          <span className="active">{'Lessons & Notes'}</span>
         </div>
 
         {/* Back Link and Language Switch */}
@@ -273,9 +261,7 @@ const Group2Lessons = () => {
           <Link to={`/materials/group2/${subject.id}/unit/${unit.id}`} className="back-btn glass">
             <ArrowLeft size={16} />
             <span>
-              {isTamil
-                ? `${translateUnitNumber(unit.unitNumber, language)} பாடத்திட்டத்திற்குத் திரும்பு`
-                : `Back to ${unit.unitNumber} Syllabus`}
+              {`Back to ${unit.unitNumber} Syllabus`}
             </span>
           </Link>
         </div>
@@ -288,21 +274,19 @@ const Group2Lessons = () => {
           transition={{ duration: 0.5 }}
         >
           <div className="lessons-title-row">
-            <span className="unit-number-pill">{translateUnitNumber(unit.unitNumber, language)}</span>
+            <span className="unit-number-pill">{unit.unitNumber}</span>
             <span className="unit-q-count">
-              {unit.questionCount} {isTamil ? 'வினாக்கள்' : 'Questions'}
+              {unit.questionCount} {'Questions'}
             </span>
           </div>
 
           <h1 className="lessons-title">
-            {isTamil ? (unit.tamilTitle || translateUnitTitle(unit.id, unit.title, language)) : unit.title} —{' '}
-            <span className="gradient-text">{isTamil ? 'பாடங்கள் & குறிப்புகள்' : 'Lessons & Notes'}</span>
+            {unit.title} —{' '}
+            <span className="gradient-text">{'Lessons & Notes'}</span>
           </h1>
 
           <p className="lessons-subtitle">
-            {isTamil
-              ? `${chapterCount} அத்தியாயங்கள் (${lessonCount} மொத்தப் பாடங்கள்) வழியாக அமைக்கப்பட்ட பாடத்திட்ட வரிசை. அதிகாரப்பூர்வ TNPSC குரூப் 2 & 2A முதல்நிலை அறிவிக்கையின்படி (குறியீடு: 495) கட்டமைக்கப்பட்டுள்ளது.`
-              : `Organized syllabus sequence across ${chapterCount} chapters (${lessonCount} total lessons). Structured according to the official TNPSC Group 2 & 2A Preliminary notification (Code: 495).`}
+            {`Organized syllabus sequence across ${chapterCount} chapters (${lessonCount} total lessons). Structured according to the official TNPSC Group 2 & 2A Preliminary notification (Code: 495).`}
           </p>
         </motion.div>
 
@@ -319,16 +303,16 @@ const Group2Lessons = () => {
               <div className="chapter-block-head">
                 <div className="chapter-block-title-row">
                   <span className="chapter-pill">
-                    {isTamil ? `அத்தியாயம் ${chapter.chapterNumber}` : `Chapter ${chapter.chapterNumber}`}
+                    {`Chapter ${chapter.chapterNumber}`}
                   </span>
                   <span className="chapter-lesson-badge">
-                    {chapter.lessons.length} {isTamil ? 'பாடங்கள்' : 'Lessons'}
+                    {chapter.lessons.length} {'Lessons'}
                   </span>
                 </div>
                 <h3 className="chapter-block-title">
-                  {isTamil ? (chapter.tamilTitle || translateLessonTitle(chapter.title, language)) : chapter.title}
+                  {chapter.title}
                 </h3>
-                {chapter.tamilTitle && !isTamil && <span className="chapter-block-tamil">{chapter.tamilTitle}</span>}
+                {chapter.tamilTitle && <span className="chapter-block-tamil">{chapter.tamilTitle}</span>}
               </div>
 
               <div className="lessons-table">
@@ -338,15 +322,15 @@ const Group2Lessons = () => {
                       <span className="lesson-idx">{lesson.lessonNumber}</span>
                       <div className="lesson-info">
                         <span className="lesson-title-text">
-                          {isTamil ? (lesson.tamilTitle || translateLessonTitle(lesson.title, language)) : lesson.title}
+                          {lesson.title}
                         </span>
-                        {lesson.tamilTitle && !isTamil && (
+                        {lesson.tamilTitle && (
                           <span className="lesson-tamil-text">{lesson.tamilTitle}</span>
                         )}
                         <div className="lesson-concepts-row">
                           {lesson.keyConcepts.map((c, cIdx) => (
                             <span key={cIdx} className="lesson-tag">
-                              {translateTopic(c, language)}
+                              {c}
                             </span>
                           ))}
                         </div>
@@ -356,17 +340,17 @@ const Group2Lessons = () => {
                     <div className="lesson-right">
                       <span className="lesson-time-chip">
                         <Clock size={13} />
-                        {isTamil ? lesson.duration.replace(/min/i, 'நிமிடம்') : lesson.duration}
+                        {lesson.duration}
                       </span>
                       <button
                         type="button"
                         className="lesson-btn"
                         onClick={() =>
-                          navigate(`/study-notes/group2_2a/subject/${subject.id}/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${isTamil ? 'tamil' : 'english'}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${(lesson as any).term ? `&term=${encodeURIComponent((lesson as any).term)}` : ''}`)
+                          navigate(`/study-notes/group2_2a/subject/${subject.id}/unit/${unit.id}/lesson/${encodeURIComponent(lesson.title)}?chapter=${encodeURIComponent(chapter.title)}&chapterNum=${chapter.chapterNumber}&lang=${'english'}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${(lesson as any).term ? `&term=${encodeURIComponent((lesson as any).term)}` : ''}`)
                         }
                       >
                         <BookOpen size={14} />
-                        <span>{isTamil ? 'பாடக் குறிப்புகள் படிக்க' : 'Read Study Notes'}</span>
+                        <span>{'Read Study Notes'}</span>
                       </button>
                       <button
                         type="button"
@@ -377,7 +361,7 @@ const Group2Lessons = () => {
                         }
                       >
                         <FileQuestion size={14} />
-                        <span>{isTamil ? 'பயிற்சி வினாக்கள்' : 'Practice MCQs'}</span>
+                        <span>{'Practice MCQs'}</span>
                       </button>
                     </div>
                   </div>
@@ -402,14 +386,10 @@ const Group2Lessons = () => {
                 <div className="modal-head">
                   <div className="modal-title-group">
                     <span className="modal-code-pill">
-                      {isTamil
-                        ? `பாடம் ${activeLesson.lesson.lessonNumber} • அத்தியாயம் ${activeLesson.chapterNumber}`
-                        : `Lesson ${activeLesson.lesson.lessonNumber} • Chapter ${activeLesson.chapterNumber}`}
+                      {`Lesson ${activeLesson.lesson.lessonNumber} • Chapter ${activeLesson.chapterNumber}`}
                     </span>
                     <h3 className="modal-title">
-                      {isTamil
-                        ? (activeLesson.lesson.tamilTitle || translateLessonTitle(activeLesson.lesson.title, language))
-                        : activeLesson.lesson.title}
+                      {activeLesson.lesson.title}
                     </h3>
                   </div>
                   <button
@@ -428,7 +408,7 @@ const Group2Lessons = () => {
                     onClick={() => setModalTab('notes')}
                   >
                     <BookOpen size={15} />
-                    <span>{isTamil ? '📖 பாடக் குறிப்புகள்' : '📖 Study Notes'}</span>
+                    <span>{'📖 Study Notes'}</span>
                   </button>
                   <button
                     className={`g2-modal-tab-btn ${modalTab === 'quiz' ? 'active' : ''}`}
@@ -436,9 +416,7 @@ const Group2Lessons = () => {
                   >
                     <Sparkles size={15} />
                     <span>
-                      {isTamil
-                        ? `📝 பயிற்சி வினாக்கள் (${activeLesson.lesson.practiceQuestions.length})`
-                        : `📝 Practice MCQs (${activeLesson.lesson.practiceQuestions.length})`}
+                      {`📝 Practice MCQs (${activeLesson.lesson.practiceQuestions.length})`}
                     </span>
                   </button>
                 </div>
@@ -448,12 +426,12 @@ const Group2Lessons = () => {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       <div className="modal-scope-section">
                         <span className="modal-section-title">
-                          {isTamil ? 'அதிகாரப்பூர்வ பாடத்திட்ட எல்லை' : 'Official Syllabus Scope'}
+                          {'Official Syllabus Scope'}
                         </span>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.4rem' }}>
                           {activeLesson.lesson.keyConcepts.map((k, idx) => (
                             <span key={idx} className="g2-concept-pill-large">
-                              {translateTopic(k, language)}
+                              {k}
                             </span>
                           ))}
                         </div>
@@ -461,11 +439,11 @@ const Group2Lessons = () => {
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         <span className="modal-section-title">
-                          {isTamil ? 'விரிவான பாட உள்ளடக்கம்' : 'Detailed Study Coverage'}
+                          {'Detailed Study Coverage'}
                         </span>
                         {activeLesson.lesson.studyNotes.map((note, idx) => (
                           <div key={idx} className="g2-note-card">
-                            <p style={{ margin: 0 }}>{translateTopic(note, language)}</p>
+                            <p style={{ margin: 0 }}>{note}</p>
                           </div>
                         ))}
                       </div>
@@ -476,8 +454,7 @@ const Group2Lessons = () => {
                         const userAnswer = quizAnswers[q.id]
                         const isAnswered = userAnswer !== undefined
                         const isCorrect = isAnswered && userAnswer === q.correctAnswer
-                        const translatedQ = translateQuestionItem(
-                          {
+                        const translatedQ = {
                             id: q.id,
                             category: 'group2_2a',
                             tag: `${unit.unitNumber} • ${activeLesson.lesson.title}`,
@@ -485,15 +462,13 @@ const Group2Lessons = () => {
                             options: q.options,
                             correctAnswer: q.correctAnswer,
                             explanation: q.explanation,
-                          },
-                          language
-                        )
+                          }
 
                         return (
                           <div key={q.id} className="g2-q-item">
                             <div className="g2-q-header">
                               <span className="g2-q-num">
-                                {isTamil ? `வினா ${qIndex + 1}` : `Q${qIndex + 1}`}
+                                {`Q${qIndex + 1}`}
                               </span>
                               <div className="g2-q-text">{translatedQ.question}</div>
                             </div>
@@ -537,8 +512,8 @@ const Group2Lessons = () => {
                               <div className="g2-explanation-box">
                                 <span className="g2-explanation-label">
                                   {isCorrect
-                                    ? (isTamil ? '✓ சரியான விடை!' : '✓ Correct Answer!')
-                                    : (isTamil ? '✗ விளக்கம்:' : '✗ Explanation:')}
+                                    ? ('✓ Correct Answer!')
+                                    : ('✗ Explanation:')}
                                 </span>
                                 <p className="g2-explanation-text">{translatedQ.explanation}</p>
                               </div>
@@ -557,14 +532,12 @@ const Group2Lessons = () => {
                   {modalTab === 'notes' ? (
                     <>
                       <button className="btn btn-secondary" onClick={() => setActiveLesson(null)}>
-                        <span>{isTamil ? 'மூடு' : 'Close'}</span>
+                        <span>{'Close'}</span>
                       </button>
                       <button className="btn btn-primary" onClick={() => setModalTab('quiz')}>
                         <FileQuestion size={16} />
                         <span>
-                          {isTamil
-                            ? `பயிற்சி வினாக்களைத் தொடங்க (${activeLesson.lesson.practiceQuestions.length})`
-                            : `Practice Related MCQs (${activeLesson.lesson.practiceQuestions.length})`}
+                          {`Practice Related MCQs (${activeLesson.lesson.practiceQuestions.length})`}
                         </span>
                       </button>
                     </>
@@ -575,11 +548,11 @@ const Group2Lessons = () => {
                         onClick={() => handleResetQuiz(activeLesson.lesson)}
                       >
                         <RotateCcw size={15} />
-                        <span>{isTamil ? 'வினாடி-வினாவை மீட்டமை' : 'Reset Quiz'}</span>
+                        <span>{'Reset Quiz'}</span>
                       </button>
                       <button className="btn btn-primary" onClick={() => setModalTab('notes')}>
                         <BookOpen size={16} />
-                        <span>{isTamil ? 'குறிப்புகளுக்குத் திரும்பு' : 'Back to Notes'}</span>
+                        <span>{'Back to Notes'}</span>
                       </button>
                     </>
                   )}

@@ -6,7 +6,6 @@ import Navbar from './components/Navbar'
 import { initSpatialTilt } from './utils/spatialTilt'
 import StudentDashboardLayout from './layouts/StudentDashboardLayout'
 import StudentPreviewBanner from './components/StudentPreviewBanner'
-import { LanguageProvider } from './context/LanguageContext'
 import { StudentAuthProvider } from './context/StudentAuthContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import './App.css'
@@ -254,10 +253,8 @@ function App() {
     <ErrorBoundary fallbackTitle="Application Error" fallbackMessage="The application encountered an unexpected error. Click Retry to restore.">
       <Router>
         <StudentAuthProvider>
-          <LanguageProvider>
-            <ScrollToTop />
-            <AppShell />
-          </LanguageProvider>
+          <ScrollToTop />
+          <AppShell />
         </StudentAuthProvider>
       </Router>
     </ErrorBoundary>

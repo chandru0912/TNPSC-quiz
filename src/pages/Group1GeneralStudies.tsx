@@ -25,7 +25,6 @@ import {
 } from '../data/group1SyllabusData'
 import { standardClasses } from '../data/group1ClassSyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
-import { useLanguage } from '../context/LanguageContext'
 import './Group1GeneralStudies.css'
 
 const unitIcons: Record<number, any> = {
@@ -39,8 +38,7 @@ const unitIcons: Record<number, any> = {
 
 const Group1GeneralStudies = () => {
   const navigate = useNavigate()
-  const { isTamil } = useLanguage()
-  const [units, setUnits] = useState(group1GeneralStudiesUnits)
+    const [units, setUnits] = useState(group1GeneralStudiesUnits)
 
   // Dynamically merge units from Study Materials Management database
   useEffect(() => {
@@ -102,18 +100,18 @@ const Group1GeneralStudies = () => {
       <div className="gs-container">
         {/* Breadcrumb Navigation */}
         <div className="gs-breadcrumb">
-          <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
+          <Link to="/">{'Home'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
+          <Link to="/materials">{'Study Materials'}</Link>
           <ChevronRight size={14} />
-          <span className="active">{isTamil ? 'குரூப் 1 பொது அறிவு' : 'TNPSC Group 1 General Studies'}</span>
+          <span className="active">{'TNPSC Group 1 General Studies'}</span>
         </div>
 
         {/* Back Link & Language Switch */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
           <Link to="/materials" className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? 'அனைத்து பிரிவுகளுக்கும் திரும்பு' : 'Back to All Categories'}</span>
+            <span>{'Back to All Categories'}</span>
           </Link>
         </div>
 
@@ -127,20 +125,18 @@ const Group1GeneralStudies = () => {
           <div className="gs-badge-row">
             <span className="gs-badge">
               <Sparkles size={14} />
-              {isTamil ? 'TNPSC குரூப் 1 முதல்நிலைத் தேர்வு' : 'TNPSC Group 1 Preliminary Examination'}
+              {'TNPSC Group 1 Preliminary Examination'}
             </span>
-            <span className="gs-code-badge">{isTamil ? 'பாடத்திட்டக் குறியீடு: 497' : 'Syllabus Code: 497'}</span>
-            <span className="gs-badge">{isTamil ? 'பட்டப்படிப்புத் தரம்' : 'Degree Standard'}</span>
+            <span className="gs-code-badge">{'Syllabus Code: 497'}</span>
+            <span className="gs-badge">{'Degree Standard'}</span>
           </div>
 
           <h1 className="gs-title">
-            {isTamil ? 'பகுதி A: பொது அறிவு' : 'Part A: General Studies'}{' '}
-            <span className="gradient-text">({totalQuestions} {isTamil ? 'வினாக்கள்' : 'Questions'})</span>
+            {'Part A: General Studies'}{' '}
+            <span className="gradient-text">({totalQuestions} {'Questions'})</span>
           </h1>
           <p className="gs-subtitle">
-            {isTamil
-              ? 'அதிகாரப்பூர்வ TNPSC பாடத்திட்ட கட்டமைப்பு. 6 அலகுகள், முக்கிய அத்தியாயங்கள் மற்றும் வகுப்பு வாரியான சமச்சீர் கல்வி பாடக்குறிப்புகள்.'
-              : 'Authoritative syllabus structure from the official TNPSC notification. Explore all 6 distinct curated Units, master core chapters, and track lesson-wise progress.'}
+            {'Authoritative syllabus structure from the official TNPSC notification. Explore all 6 distinct curated Units, master core chapters, and track lesson-wise progress.'}
           </p>
         </motion.div>
 
@@ -283,7 +279,7 @@ const Group1GeneralStudies = () => {
                 </div>
 
                 <div className="unit-topics-preview">
-                  <span className="unit-topics-heading">{isTamil ? 'பாடத்திட்ட வரையறை:' : 'Official Syllabus Scope:'}</span>
+                  <span className="unit-topics-heading">{'Official Syllabus Scope:'}</span>
                   <p className="unit-topics-snippet">
                     {unit.officialSyllabusTopics.slice(0, 3).join(' • ')}...
                   </p>
@@ -293,13 +289,13 @@ const Group1GeneralStudies = () => {
                   <div className="unit-metric">
                     <BookOpen size={16} />
                     <span>
-                      <strong className="unit-metric-bold">{chapterCount}</strong> {isTamil ? 'அத்தியாயங்கள்' : 'Chapters'}
+                      <strong className="unit-metric-bold">{chapterCount}</strong> {'Chapters'}
                     </span>
                   </div>
                   <div className="unit-metric">
                     <Layers size={16} />
                     <span>
-                      <strong className="unit-metric-bold">{lessonCount}</strong> {isTamil ? 'பாடங்கள்' : 'Lessons'}
+                      <strong className="unit-metric-bold">{lessonCount}</strong> {'Lessons'}
                     </span>
                   </div>
                 </div>
@@ -311,7 +307,7 @@ const Group1GeneralStudies = () => {
                   <div className="unit-class-selector-header">
                     <div className="unit-class-selector-title">
                       <GraduationCap size={14} />
-                      <span>{isTamil ? 'வகுப்பைத் தேர்ந்தெடுக்க (6 முதல் 12 வரை):' : 'Select Class (6th to 12th Standard):'}</span>
+                      <span>{'Select Class (6th to 12th Standard):'}</span>
                     </div>
                   </div>
 
@@ -334,7 +330,7 @@ const Group1GeneralStudies = () => {
                 </div>
 
                 <div className="unit-btn">
-                  <span>{isTamil ? `${unit.unitNumber} முழு பாடத்திட்டத்தைக் காண்க` : `Explore Full ${unit.unitNumber} Syllabus`}</span>
+                  <span>{`Explore Full ${unit.unitNumber} Syllabus`}</span>
                   <ChevronRight size={16} />
                 </div>
               </motion.div>

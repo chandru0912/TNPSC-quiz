@@ -14,7 +14,6 @@ import {
   Filter,
 } from 'lucide-react';
 import { useStudentAuth } from '../context/StudentAuthContext';
-import { useLanguage } from '../context/LanguageContext';
 import { apiFetch } from '../utils/api';
 import './MarkList.css';
 
@@ -34,7 +33,6 @@ interface ScorecardRecord {
 
 export const MarkList: React.FC = () => {
   const { token } = useStudentAuth();
-  const { isTamil } = useLanguage();
   const [filter, setFilter] = useState<'all' | 'mock_test' | 'lesson_quiz' | 'subject_practice'>('all');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [metrics, setMetrics] = useState({
@@ -194,15 +192,13 @@ export const MarkList: React.FC = () => {
           </div>
           <div>
             <div className="mark-list-eyebrow">
-              <span>{isTamil ? 'TNPSC கல்விச் செயல்திறன்' : 'TNPSC Academic Performance'}</span>
+              <span>TNPSC Academic Performance</span>
               <span className="mark-list-dot">•</span>
-              <span className="text-gold">{isTamil ? 'நேரலை மதிப்பெண் பதிவேடு' : 'Live Scorecard Ledger'}</span>
+              <span className="text-gold">Live Scorecard Ledger</span>
             </div>
-            <h1 className="mark-list-title">{isTamil ? 'மதிப்பெண் பட்டியல் & மதிப்பீடுகள்' : 'Mark List & Scorecards'}</h1>
+            <h1 className="mark-list-title">Mark List & Scorecards</h1>
             <p className="mark-list-subtitle">
-              {isTamil
-                ? 'மாதிரித் தேர்வு மதிப்பெண்கள், பாடம் வாரியான மதிப்பீடுகள் மற்றும் செயல்திறன் வரலாறு.'
-                : 'Detailed assessment records, mock test marks, and lesson-wise evaluation history.'}
+              Detailed assessment records, mock test marks, and lesson-wise evaluation history.
             </p>
           </div>
         </div>
@@ -211,10 +207,10 @@ export const MarkList: React.FC = () => {
           type="button"
           className="mark-list-refresh-btn"
           onClick={() => fetchScorecards()}
-          title={isTamil ? 'மதிப்பெண்களைப் புதுப்பி' : 'Refresh Marks'}
+          title="Refresh Marks"
         >
           <RotateCcw size={16} className={isLoading ? 'spinning' : ''} />
-          <span>{isTamil ? 'புதுப்பி' : 'Refresh'}</span>
+          <span>Refresh</span>
         </button>
       </motion.div>
 

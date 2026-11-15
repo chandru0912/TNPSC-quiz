@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch, getApiUrl } from '../utils/api'
-import { useLanguage } from '../context/LanguageContext'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import './SchoolMaterials.css'
 
@@ -83,7 +82,6 @@ function isTextbookEnabled(status?: string): boolean {
 const SchoolMaterials = () => {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { isTamil } = useLanguage()
 
   const initialStdParam = searchParams.get('standard')
   const initialStd =
@@ -316,7 +314,7 @@ const SchoolMaterials = () => {
           >
             <button type="button" className="back-btn" onClick={handleBack}>
               <ArrowLeft size={20} />
-              <span>{isTamil ? 'வகுப்புகளுக்குத் திரும்பு' : 'Back to Standards'}</span>
+              <span>Back to Standards</span>
             </button>
 
             <div className="library-header-row">
@@ -324,15 +322,11 @@ const SchoolMaterials = () => {
                 <h1 className="school-title">
                   <GraduationCap size={28} />
                   <span>
-                    {isTamil
-                      ? `${selectedStandard}-ஆம் வகுப்பு பாடநூல் நூலகம்`
-                      : `${selectedStandard}th Standard — Textbook Library`}
+                    {`${selectedStandard}th Standard — Textbook Library`}
                   </span>
                 </h1>
                 <p className="school-subtitle">
-                  {isTamil
-                    ? 'பாடம் மற்றும் பருவம் வாரியாக சமச்சீர் கல்வி பாடநூல் PDF-களைப் படிக்கவும் அல்லது பதிவிறக்கவும்'
-                    : 'All available subjects displayed side-by-side with Term-wise PDFs for instant reading & download'}
+                  All available subjects displayed side-by-side with Term-wise PDFs for instant reading & download
                 </p>
               </div>
 

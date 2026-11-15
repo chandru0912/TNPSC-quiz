@@ -23,7 +23,6 @@ import {
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
-import { useLanguage } from '../context/LanguageContext'
 import './StudyMaterialsPractice.css'
 
 interface StudyMaterialQuestionItem {
@@ -77,9 +76,6 @@ export const StudyMaterialsPractice: React.FC = () => {
   const unitId = parseInt(routeParams.unitId || searchParams.get('unitId') || '1', 10) || 1
   const lessonIdParam = routeParams.lessonId || searchParams.get('lessonId') || ''
   const lessonTitleParam = searchParams.get('lesson') || searchParams.get('lessonTitle') || ''
-
-  const { isTamil } = useLanguage()
-  const selectedLanguage: 'tamil' | 'english' = isTamil ? 'tamil' : 'english'
 
   // Live Questions State
   const [questions, setQuestions] = useState<StudyMaterialQuestionItem[]>([])
@@ -396,27 +392,22 @@ export const StudyMaterialsPractice: React.FC = () => {
             </div>
             <h2 className="sm-empty-title">Loading Practice MCQs...</h2>
             <p className="sm-empty-desc">
-              Retrieving verified textbook practice questions for {displayLessonTitle} in{' '}
-              {selectedLanguage === 'tamil' ? 'Tamil' : 'English'}.
+              Retrieving verified textbook practice questions for {displayLessonTitle}.
             </p>
           </div>
         )}
 
-        {/* 4. Empty State: No questions available in selected language */}
+        {/* 4. Empty State: No questions available */}
         {!isLoading && questions.length === 0 && (
           <div className="sm-empty-card">
             <div className="sm-empty-icon-box">
               <HelpCircle size={32} />
             </div>
             <h2 className="sm-empty-title">
-              {selectedLanguage === 'tamil'
-                ? 'இப்பாடத்திற்குத் தமிழில் வினாக்கள் இன்னும் சேர்க்கப்படவில்லை'
-                : 'No Practice MCQs Available in English for this Lesson'}
+              No Practice MCQs Available for this Lesson
             </h2>
             <p className="sm-empty-desc">
-              {selectedLanguage === 'tamil'
-                ? `"${displayLessonTitle}" பாடத்திற்கான வினாக்கள் தயாரிக்கப்பட்டு வருகின்றன. ஆங்கில வழியில் வினாக்கள் உள்ளதா என்று சோதிக்கலாம் அல்லது வேறு பாடத்தைத் தேர்ந்தெடுக்கலாம்.`
-                : `Practice questions for "${displayLessonTitle}" in English are currently being curated. Try switching to Tamil or exploring other syllabus lessons.`}
+              {`Practice questions for "${displayLessonTitle}" are currently being curated.`}
             </p>
             {fetchError && (
               <p style={{ color: '#ef4444', fontSize: '0.85rem', marginTop: '0.25rem' }}>{fetchError}</p>
@@ -424,7 +415,7 @@ export const StudyMaterialsPractice: React.FC = () => {
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
               <button className="sm-nav-btn" onClick={handleBackToStandard}>
                 <ArrowLeft size={15} />
-                <span>{isTamil ? 'பாடப் பட்டியலுக்குத் திரும்பு' : 'Back to Lessons List'}</span>
+                <span>Back to Lessons List</span>
               </button>
             </div>
           </div>
@@ -519,16 +510,14 @@ export const StudyMaterialsPractice: React.FC = () => {
                           <>
                             <CheckCircle2 size={18} />
                             <span>
-                              {isTamil ? 'சரியான விடை!' : 'Correct Answer!'}
+                              Correct Answer!
                             </span>
                           </>
                         ) : (
                           <>
                             <XCircle size={18} />
                             <span>
-                              {isTamil
-                                ? `தவறான விடை. சரியான விடை: விருப்பம் ${['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]} (${activeQuestion.options[activeQuestion.correctAnswer] || ''})`
-                                : `Incorrect Answer. Correct Answer: Option ${['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]} (${activeQuestion.options[activeQuestion.correctAnswer] || ''})`}
+                              {`Incorrect Answer. Correct Answer: Option ${['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]} (${activeQuestion.options[activeQuestion.correctAnswer] || ''})`}
                             </span>
                           </>
                         )}
@@ -552,29 +541,25 @@ export const StudyMaterialsPractice: React.FC = () => {
                       >
                         <BookOpen size={13} />
                         <span>
-                          {showExplanation
-                            ? isTamil ? 'விளக்கத்தை மறை' : 'Hide Explanation'
-                            : isTamil ? 'விளக்கத்தைக் காண்க' : 'View Explanation'}
+                          {showExplanation ? 'Hide Explanation' : 'View Explanation'}
                         </span>
                       </button>
                     </div>
                     {showExplanation && (
                       <div className="sm-feedback-explanation" style={{ marginTop: '0.65rem' }}>
                         <div style={{ marginBottom: '0.35rem', fontSize: '0.86rem', color: '#34d399', fontWeight: 600 }}>
-                          {isTamil ? 'சரியான விடை:' : 'Correct Answer:'}{' '}
+                          Correct Answer:{' '}
                           {['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]}.{' '}
                           {activeQuestion.options[activeQuestion.correctAnswer] || ''}
                         </div>
                         {activeQuestion.explanation && activeQuestion.explanation.trim().length > 0 ? (
                           <p style={{ whiteSpace: 'pre-line', lineHeight: 1.65 }}>
-                            <strong>{isTamil ? 'விளக்கம்:' : 'Explanation:'}</strong>{' '}
+                            <strong>Explanation:</strong>{' '}
                             {activeQuestion.explanation}
                           </p>
                         ) : (
                           <p style={{ color: '#94a3b8' }}>
-                            {isTamil
-                              ? 'இந்த வினாவிற்குத் தமிழ் விளக்கம் இன்னும் கிடைக்கவில்லை.'
-                              : 'Detailed explanation is not yet recorded for this question.'}
+                            Detailed explanation is not yet recorded for this question.
                           </p>
                         )}
                       </div>

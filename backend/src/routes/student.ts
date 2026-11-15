@@ -34,7 +34,6 @@ function formatStudentResponse(row: any) {
     email: row.email,
     mobile: row.mobile ?? null,
     targetGroup: row.target_group || 'group4',
-    preferredLanguage: row.preferred_language === 'ta' ? 'ta' : 'en',
     avatarUrl: row.avatar_url ?? null,
     authProvider: row.auth_provider || 'email',
     emailVerified: Boolean(row.email_verified),
@@ -674,7 +673,7 @@ router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
   try {
     const studentId = req.studentUser!.studentId;
     const studentRes = await pool.query(
-      `SELECT id, full_name, email, mobile, target_group, preferred_language, avatar_url, auth_provider,
+      `SELECT id, full_name, email, mobile, target_group, avatar_url, auth_provider,
               email_verified, onboarding_completed, role, created_at, updated_at
        FROM students
        WHERE id = $1`,
@@ -698,7 +697,7 @@ router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
 router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
     const studentId = req.studentUser!.studentId;
-    const { fullName, mobile, targetGroup, onboardingCompleted, preferredLanguage } = req.body;
+    const { fullName, mobile, targetGroup, onboardingCompleted } = req.body;
 
     // Read-only server guard: never alter student database records during admin preview mode
     if (req.studentUser?.isPreview) {
@@ -711,7 +710,6 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
           email: req.studentUser.email,
           mobile: mobile !== undefined ? (mobile ? String(mobile).trim() : null) : null,
           targetGroup: targetGroup ? normalizeTargetGroup(targetGroup) : req.studentUser.targetGroup,
-          preferredLanguage: preferredLanguage === 'ta' ? 'ta' : 'en',
           onboardingCompleted: true,
           role: 'student',
           updatedAt: new Date().toISOString(),
@@ -739,10 +737,6 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
       updates.push(`onboarding_completed = $${pIdx++}`);
       values.push(onboardingCompleted);
     }
-    if (preferredLanguage === 'en' || preferredLanguage === 'ta') {
-      updates.push(`preferred_language = $${pIdx++}`);
-      values.push(preferredLanguage);
-    }
 
     if (updates.length === 0) {
       return res.status(400).json({ status: 'error', message: 'No valid update fields provided.' });
@@ -755,7 +749,7 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
       UPDATE students
       SET ${updates.join(', ')}
       WHERE id = $${pIdx}
-      RETURNING id, full_name, email, mobile, target_group, preferred_language, avatar_url, auth_provider,
+      RETURNING id, full_name, email, mobile, target_group, avatar_url, auth_provider,
                 email_verified, onboarding_completed, role, created_at, updated_at
     `;
 

@@ -15,8 +15,6 @@ import {
 import { group1AptitudeUnits, type AptitudeUnit } from '../data/group1SyllabusData'
 import { standardClasses } from '../data/group1ClassSyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
-import { useLanguage } from '../context/LanguageContext'
-import { translateTopic } from '../utils/bilingualSyllabus'
 import './Group1GeneralStudies.css'
 
 interface MergedAptitudeUnit extends AptitudeUnit {
@@ -26,8 +24,7 @@ interface MergedAptitudeUnit extends AptitudeUnit {
 
 const Group1Aptitude = () => {
   const navigate = useNavigate()
-  const { language, isTamil } = useLanguage()
-  const [units, setUnits] = useState<MergedAptitudeUnit[]>(group1AptitudeUnits)
+    const [units, setUnits] = useState<MergedAptitudeUnit[]>(group1AptitudeUnits)
 
   useEffect(() => {
     let isCancelled = false
@@ -88,12 +85,12 @@ const Group1Aptitude = () => {
       <div className="gs-container">
         {/* Breadcrumb Navigation */}
         <div className="gs-breadcrumb">
-          <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
+          <Link to="/">{'Home'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
+          <Link to="/materials">{'Study Materials'}</Link>
           <ChevronRight size={14} />
           <span className="active">
-            {isTamil ? 'குரூப் 1 திறனறிவும் மனக்கணக்கு நுண்ணறிவும்' : 'TNPSC Group 1 Aptitude & Mental Ability'}
+            {'TNPSC Group 1 Aptitude & Mental Ability'}
           </span>
         </div>
 
@@ -101,7 +98,7 @@ const Group1Aptitude = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
           <Link to="/materials" className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? 'அனைத்து பிரிவுகளுக்கும் திரும்பு' : 'Back to All Categories'}</span>
+            <span>{'Back to All Categories'}</span>
           </Link>
         </div>
 
@@ -115,20 +112,18 @@ const Group1Aptitude = () => {
           <div className="gs-badge-row">
             <span className="gs-badge">
               <Sparkles size={14} />
-              {isTamil ? 'TNPSC குரூப் 1 முதல்நிலைத் தேர்வு' : 'TNPSC Group 1 Preliminary Examination'}
+              {'TNPSC Group 1 Preliminary Examination'}
             </span>
-            <span className="gs-code-badge">{isTamil ? 'பாடத்திட்டக் குறியீடு: 497' : 'Syllabus Code: 497'}</span>
-            <span className="gs-badge">{isTamil ? 'SSLC தரம் (10th Standard)' : 'SSLC Standard (10th Standard)'}</span>
+            <span className="gs-code-badge">{'Syllabus Code: 497'}</span>
+            <span className="gs-badge">{'SSLC Standard (10th Standard)'}</span>
           </div>
 
           <h1 className="gs-title">
-            {isTamil ? 'பகுதி B: திறனறிவும் மனக்கணக்கு நுண்ணறிவும்' : 'Part B: Aptitude and Mental Ability'}{' '}
-            <span className="gradient-text">({totalQuestions} {isTamil ? 'வினாக்கள்' : 'Questions'})</span>
+            {'Part B: Aptitude and Mental Ability'}{' '}
+            <span className="gradient-text">({totalQuestions} {'Questions'})</span>
           </h1>
           <p className="gs-subtitle">
-            {isTamil
-              ? 'அதிகாரப்பூர்வ TNPSC பாடத்திட்ட கட்டமைப்பு. கணிதம் மற்றும் தர்க்கவியல் அலகுகள், வகுப்பு வாரியான சமச்சீர் கல்வி பாடங்கள் மற்றும் பயிற்சி வினாக்கள்.'
-              : 'Official Part B syllabus from the TNPSC notification. Explore Unit I & Unit II, Samacheer Kalvi class-wise lessons (6th to 12th Standard), study notes, and topic MCQs.'}
+            {'Official Part B syllabus from the TNPSC notification. Explore Unit I & Unit II, Samacheer Kalvi class-wise lessons (6th to 12th Standard), study notes, and topic MCQs.'}
           </p>
         </motion.div>
 
@@ -140,7 +135,7 @@ const Group1Aptitude = () => {
             </div>
             <div className="gs-hud-info">
               <span className="gs-hud-value">{totalQuestions}</span>
-              <span className="gs-hud-label">{isTamil ? 'மொத்த வினாக்கள்' : 'Total Questions'}</span>
+              <span className="gs-hud-label">{'Total Questions'}</span>
             </div>
           </div>
 
@@ -149,8 +144,8 @@ const Group1Aptitude = () => {
               <Layers size={22} />
             </div>
             <div className="gs-hud-info">
-              <span className="gs-hud-value">{units.length} {isTamil ? 'அலகுகள்' : 'Units'}</span>
-              <span className="gs-hud-label">{isTamil ? 'பாடத்திட்ட அலகுகள்' : 'Syllabus Units'}</span>
+              <span className="gs-hud-value">{units.length} {'Units'}</span>
+              <span className="gs-hud-label">{'Syllabus Units'}</span>
             </div>
           </div>
 
@@ -160,7 +155,7 @@ const Group1Aptitude = () => {
             </div>
             <div className="gs-hud-info">
               <span className="gs-hud-value">{totalLessons > 0 ? totalLessons : '100+'}</span>
-              <span className="gs-hud-label">{isTamil ? 'பாடநூல் பாடங்கள்' : 'Mapped Lessons'}</span>
+              <span className="gs-hud-label">{'Mapped Lessons'}</span>
             </div>
           </div>
 
@@ -169,8 +164,8 @@ const Group1Aptitude = () => {
               <GraduationCap size={22} />
             </div>
             <div className="gs-hud-info">
-              <span className="gs-hud-value">7 {isTamil ? 'வகுப்புகள்' : 'Classes'}</span>
-              <span className="gs-hud-label">{isTamil ? '6 முதல் 12 வரை' : '6th to 12th Standard'}</span>
+              <span className="gs-hud-value">7 {'Classes'}</span>
+              <span className="gs-hud-label">{'6th to 12th Standard'}</span>
             </div>
           </div>
         </div>
@@ -181,18 +176,16 @@ const Group1Aptitude = () => {
             <div className="classes-heading-group">
               <div className="classes-title-badge">
                 <GraduationCap size={18} />
-                <span>{isTamil ? 'சமச்சீர் கல்வி பள்ளிப் பாடநூல் தொகுப்பு' : 'Samacheer Kalvi School Textbook Mapping'}</span>
+                <span>{'Samacheer Kalvi School Textbook Mapping'}</span>
               </div>
               <h2 className="classes-main-heading">
-                {isTamil ? 'வகுப்புகள்: 6 முதல் 12 ஆம் வகுப்பு வரை' : 'Classes: 6th to 12th Standard'}
+                {'Classes: 6th to 12th Standard'}
               </h2>
               <p className="classes-subheading">
-                {isTamil
-                  ? 'சமச்சீர் கல்வி கணிதம் மற்றும் திறனறிவுப் பாடங்களைக் காண கீழே உள்ள வகுப்பைத் தேர்ந்தெடுக்கவும் அல்லது அலகின் கீழ் உள்ள வகுப்பைக் கிளிக் செய்யவும்.'
-                  : 'Click any standard below to view Samacheer Kalvi aptitude textbook lessons, or select a standard directly under any Unit card below.'}
+                {'Click any standard below to view Samacheer Kalvi aptitude textbook lessons, or select a standard directly under any Unit card below.'}
               </p>
             </div>
-            <span className="classes-count-badge">7 {isTamil ? 'வகுப்புகள்' : 'Standards'}</span>
+            <span className="classes-count-badge">7 {'Standards'}</span>
           </div>
 
           <div className="class-cards-grid">
@@ -217,12 +210,12 @@ const Group1Aptitude = () => {
                   </div>
                   <h3 className="class-card-title">{cls.label}</h3>
                   <p className="class-card-desc">
-                    {isTamil ? `அலகு 1 முதல் ${units.length} வரை` : `Units 1 to ${units.length} mapped textbook lessons`}
+                    {`Units 1 to ${units.length} mapped textbook lessons`}
                   </p>
                 </div>
 
                 <div className="class-card-cta">
-                  <span>{isTamil ? 'வகுப்பைக் காண்க' : 'Explore Class'}</span>
+                  <span>{'Explore Class'}</span>
                   <ChevronRight size={14} />
                 </div>
               </motion.div>
@@ -234,15 +227,13 @@ const Group1Aptitude = () => {
         <div className="units-section-header">
           <div className="units-header-left">
             <h2 className="units-section-title">
-              {isTamil ? 'திறனறிவு & மனக்கணக்கு அலகுகள் (SSLC தரம்)' : 'Aptitude & Mental Ability Units (SSLC Standard)'}
+              {'Aptitude & Mental Ability Units (SSLC Standard)'}
             </h2>
             <p className="units-section-sub">
-              {isTamil
-                ? 'ஒவ்வொரு அலகிலும் 6 முதல் 12 ஆம் வகுப்பு வரையிலான பாடங்கள், குறிப்புகள் மற்றும் பயிற்சி வினாக்கள் உள்ளன.'
-                : 'Each unit maps Samacheer Kalvi standards (6th to 12th) with lessons, focus areas, study notes, and MCQ practice.'}
+              {'Each unit maps Samacheer Kalvi standards (6th to 12th) with lessons, focus areas, study notes, and MCQ practice.'}
             </p>
           </div>
-          <span className="units-total-badge">{units.length} {isTamil ? 'அதிகாரப்பூர்வ அலகுகள்' : 'Official Units'}</span>
+          <span className="units-total-badge">{units.length} {'Official Units'}</span>
         </div>
 
         {/* Units Grid with Standard Selectors */}
@@ -264,7 +255,7 @@ const Group1Aptitude = () => {
                 <div className="unit-top-row">
                   <span className="unit-number-pill">{unit.unitNumber}</span>
                   <span className="unit-q-count">
-                    {unit.questionCount} {isTamil ? 'வினாக்கள்' : 'Questions'}
+                    {unit.questionCount} {'Questions'}
                   </span>
                 </div>
 
@@ -282,10 +273,10 @@ const Group1Aptitude = () => {
 
                 <div className="unit-topics-preview">
                   <span className="unit-topics-heading">
-                    {isTamil ? 'அதிகாரப்பூர்வ பாடத்திட்ட எல்லை:' : 'Official Syllabus Scope:'}
+                    {'Official Syllabus Scope:'}
                   </span>
                   <p className="unit-topics-snippet">
-                    {unit.topics.slice(0, 4).map((t) => translateTopic(t, language)).join(' • ')}
+                    {unit.topics.slice(0, 4).map((t) => t).join(' • ')}
                     {unit.topics.length > 4 ? '...' : ''}
                   </p>
                 </div>
@@ -295,14 +286,14 @@ const Group1Aptitude = () => {
                     <FileQuestion size={16} />
                     <span>
                       <strong className="unit-metric-bold">{unit.questionCount}</strong>{' '}
-                      {isTamil ? 'மதிப்பெண் வினாக்கள்' : 'Objective Marks'}
+                      {'Objective Marks'}
                     </span>
                   </div>
                   <div className="unit-metric">
                     <Layers size={16} />
                     <span>
                       <strong className="unit-metric-bold">{lessonCount}</strong>{' '}
-                      {isTamil ? 'பாடங்கள்' : 'Lessons'}
+                      {'Lessons'}
                     </span>
                   </div>
                 </div>
@@ -315,7 +306,7 @@ const Group1Aptitude = () => {
                   <div className="unit-class-selector-header">
                     <div className="unit-class-selector-title">
                       <GraduationCap size={14} />
-                      <span>{isTamil ? 'வகுப்பைத் தேர்ந்தெடுக்க (6 முதல் 12 வரை):' : 'Select Class (6th to 12th Standard):'}</span>
+                      <span>{'Select Class (6th to 12th Standard):'}</span>
                     </div>
                   </div>
 
@@ -339,7 +330,7 @@ const Group1Aptitude = () => {
 
                 <div className="unit-btn">
                   <span>
-                    {isTamil ? `${unit.unitNumber} முழு பாடத்திட்டத்தைக் காண்க` : `Explore Full ${unit.unitNumber} Syllabus`}
+                    {`Explore Full ${unit.unitNumber} Syllabus`}
                   </span>
                   <ChevronRight size={16} />
                 </div>
@@ -352,16 +343,14 @@ const Group1Aptitude = () => {
         <div className="unit-action-strip glass" style={{ marginTop: '1.5rem' }}>
           <div className="action-strip-info">
             <span className="action-strip-title">
-              {isTamil ? 'பொது அறிவு பாடத்திட்டத்தைத் தேடுகிறீர்களா?' : 'Looking for General Studies?'}
+              {'Looking for General Studies?'}
             </span>
             <span className="action-strip-sub">
-              {isTamil
-                ? 'TNPSC குரூப் 1 பொது அறிவு 6 அலகுகளையும் (175 வினாக்கள்) அணுகவும்.'
-                : 'Access the complete 6 Units of General Studies (175 Questions) for TNPSC Group 1.'}
+              {'Access the complete 6 Units of General Studies (175 Questions) for TNPSC Group 1.'}
             </span>
           </div>
           <Link to="/materials/group1/general-studies" className="btn btn-primary">
-            <span>{isTamil ? 'பொது அறிவு (175 வினாக்கள்)' : 'Explore General Studies (175 Qs)'}</span>
+            <span>{'Explore General Studies (175 Qs)'}</span>
             <ChevronRight size={18} />
           </Link>
         </div>

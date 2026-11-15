@@ -18,8 +18,6 @@ import {
   X,
 } from 'lucide-react';
 import { useStudentAuth } from '../context/StudentAuthContext';
-import { useLanguage } from '../context/LanguageContext';
-import LanguageSwitch from './LanguageSwitch';
 import './StudentSidebar.css';
 
 interface StudentSidebarProps {
@@ -35,30 +33,29 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
 }) => {
   const location = useLocation();
   const { student, isAuthenticated, logout } = useStudentAuth();
-  const { isTamil } = useLanguage();
 
-  const userName = student?.fullName || (isTamil ? 'மாணவர்' : 'Student Aspirant');
+  const userName = student?.fullName || 'Student Aspirant';
   const userGroup =
     student?.targetGroup === 'group1'
-      ? (isTamil ? 'குரூப் 1 தேர்வர்' : 'Group 1 Aspirant')
+      ? 'Group 1 Aspirant'
       : student?.targetGroup === 'group2a'
-        ? (isTamil ? 'குரூப் 2A தேர்வர்' : 'Group 2A Aspirant')
+        ? 'Group 2A Aspirant'
         : student?.targetGroup === 'group2'
-          ? (isTamil ? 'குரூப் 2 & 2A தேர்வர்' : 'Group 2 & 2A Aspirant')
-          : (isTamil ? 'குரூப் 4 & VAO தேர்வர்' : 'Group 4 & VAO Aspirant');
+          ? 'Group 2 & 2A Aspirant'
+          : 'Group 4 & VAO Aspirant';
 
   const userInitial = userName.trim().charAt(0).toUpperCase() || 'S';
 
   // 8 Required Learning Navigation Items
   const navItems = [
-    { label: isTamil ? 'முகப்பு' : 'Overview', to: '/dashboard', icon: LayoutDashboard },
-    { label: isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials', to: '/materials', icon: BookOpen },
-    { label: isTamil ? 'பாடநூல் நூலகம்' : 'Textbook Library', to: '/school-materials', icon: ListChecks },
-    { label: isTamil ? 'பயிற்சி வினாக்கள்' : 'MCQ Practice', to: '/practice', icon: FileText },
-    { label: isTamil ? 'மாதிரித் தேர்வுகள்' : 'Mock Tests', to: '/mock-tests', icon: GraduationCap },
-    { label: isTamil ? 'முந்தைய ஆண்டு வினாக்கள்' : 'Previous Year Questions', to: '/previous-papers', icon: Archive },
-    { label: isTamil ? 'மதிப்பெண் பட்டியல்' : 'Mark List', to: '/mark-list', icon: Award },
-    { label: isTamil ? 'முன்னேற்றப் பதிவேடு' : 'Progress Tracker', to: '/progress-tracker', icon: TrendingUp },
+    { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
+    { label: 'Study Materials', to: '/materials', icon: BookOpen },
+    { label: 'Textbook Library', to: '/school-materials', icon: ListChecks },
+    { label: 'MCQ Practice', to: '/practice', icon: FileText },
+    { label: 'Mock Tests', to: '/mock-tests', icon: GraduationCap },
+    { label: 'Previous Year Questions', to: '/previous-papers', icon: Archive },
+    { label: 'Mark List', to: '/mark-list', icon: Award },
+    { label: 'Progress Tracker', to: '/progress-tracker', icon: TrendingUp },
   ];
 
   const isLinkActive = (to: string): boolean => {
@@ -128,14 +125,9 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
         </div>
       </div>
 
-      {/* Global Language Selector (Single centralized switch for entire Student Dashboard) */}
-      <div style={{ padding: '0 0.25rem 0.75rem', display: 'flex', justifyContent: 'center' }}>
-        <LanguageSwitch variant="inline" />
-      </div>
-
       {/* 3. Navigation List (Section: LEARNING) */}
       <nav className="student-sidebar-nav" aria-label="Student Learning Navigation">
-        <span className="student-sidebar-nav-label">{isTamil ? 'கற்றல்' : 'LEARNING'}</span>
+        <span className="student-sidebar-nav-label">LEARNING</span>
         <div className="student-sidebar-links-list">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -165,12 +157,10 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
         </div>
         <div className="student-streak-content">
           <div className="student-streak-value">
-            {isTamil ? `${streakCount} நாள் தொடர்ச்சி` : `${streakCount} day streak`}
+            {`${streakCount} day streak`}
           </div>
           <div className="student-streak-desc">
-            {isTamil
-              ? (streakCount > 0 ? 'தினசரி பயிற்சியைத் தொடருங்கள்!' : 'இன்று ஒரு பயிற்சியைத் தொடங்குங்கள்!')
-              : (streakCount > 0 ? 'Keep the daily momentum going!' : 'Complete an activity today to start!')}
+            {streakCount > 0 ? 'Keep the daily momentum going!' : 'Complete an activity today to start!'}
           </div>
         </div>
       </div>
@@ -187,18 +177,18 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
             className="student-footer-action logout"
           >
             <LogOut size={16} />
-            <span>{isTamil ? 'வெளியேறு' : 'Logout'}</span>
+            <span>Logout</span>
           </button>
         ) : (
           <Link to="/login" className="student-footer-action login" onClick={handleLinkClick}>
             <User size={16} />
-            <span>{isTamil ? 'உள்நுழை / பதிவு செய்' : 'Sign In / Register'}</span>
+            <span>Sign In / Register</span>
           </Link>
         )}
 
         <Link to="/" className="student-footer-action home" onClick={handleLinkClick}>
           <ArrowLeft size={16} />
-          <span>{isTamil ? 'முகப்புப் பக்கம்' : 'Back to Home'}</span>
+          <span>Back to Home</span>
         </Link>
       </div>
     </div>

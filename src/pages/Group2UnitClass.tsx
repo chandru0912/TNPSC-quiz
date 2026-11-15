@@ -35,15 +35,6 @@ import { normalizeMatchedTopics } from '../utils/syllabusNormalize'
 import { getGroup2SubjectById } from '../data/group2SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
-import { useLanguage } from '../context/LanguageContext'
-import {
-  translateTopic,
-  translateLesson,
-  translateClassTitle,
-  translateUnitTitle,
-  translateUnitNumber,
-} from '../utils/bilingualSyllabus'
-import { translateQuestionItem } from '../utils/languageData'
 import './Group1UnitClass.css'
 import './Group1Lessons.css'
 
@@ -64,8 +55,7 @@ const Group2UnitClass = () => {
     classId: string
   }>()
   const navigate = useNavigate()
-  const { language, isTamil } = useLanguage()
-
+  
   const activeSubjectId = subjectId || 'general-studies'
   const parsedUnitId = parseInt(unitId || '1', 10)
   const parsedClassId = parseInt(classId || '6', 10)
@@ -176,13 +166,9 @@ const Group2UnitClass = () => {
   const activeUnit = availableUnits.find((u) => u.id === parsedUnitId)
   const displayUnitNumber = activeUnit
     ? activeUnit.unitNumber
-    : isTamil
-    ? translateUnitNumber(data.unitNumber, language)
     : data.unitNumber
   const displayUnitTitle = activeUnit
     ? activeUnit.title
-    : isTamil
-    ? translateUnitTitle(data.unitId, data.unitTitle, language)
     : data.unitTitle
 
   const formatUnitButtonLabel = (u: { id: number; unitNumber: string; title: string }) => {
@@ -312,8 +298,7 @@ const Group2UnitClass = () => {
         data.unitTitle,
         data.classTitle,
         data.subjectName,
-        activeModalLesson,
-        language
+        activeModalLesson
       )
     : null
 
@@ -334,16 +319,16 @@ const Group2UnitClass = () => {
       <div className="unit-class-container">
         {/* Breadcrumb Navigation */}
         <div className="unit-class-breadcrumb">
-          <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
+          <Link to="/">{'Home'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials?group=group2_2a">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
+          <Link to="/materials?group=group2_2a">{'Study Materials'}</Link>
           <ChevronRight size={14} />
           <Link to={`/materials/group2/${activeSubjectId}`}>
             {subject?.title || data.subjectTitle}
           </Link>
           <ChevronRight size={14} />
           <span className="active">
-            {displayUnitNumber} – {displayUnitTitle} ({isTamil ? translateClassTitle(data.classId, language) : data.classTitle})
+            {displayUnitNumber} – {displayUnitTitle} ({data.classTitle})
           </span>
         </div>
 
@@ -351,7 +336,7 @@ const Group2UnitClass = () => {
         <div className="unit-class-top-bar">
           <Link to={`/materials/group2/${activeSubjectId}`} className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? 'பிரிவுக்குத் திரும்பு' : `Back to ${subject?.title || 'General Studies'}`}</span>
+            <span>{`Back to ${subject?.title || 'General Studies'}`}</span>
           </Link>
 
           <Link
@@ -360,9 +345,7 @@ const Group2UnitClass = () => {
           >
             <BookOpen size={16} />
             <span>
-              {isTamil
-                ? `${displayUnitNumber} முழு பாடத்திட்டத்தைக் காண்க`
-                : `View Full ${displayUnitNumber} Syllabus`}
+              {`View Full ${displayUnitNumber} Syllabus`}
             </span>
           </Link>
         </div>
@@ -384,10 +367,10 @@ const Group2UnitClass = () => {
             </span>
             <span className="hero-badge hero-badge-purple">
               <GraduationCap size={14} />
-              {isTamil ? translateClassTitle(data.classId, language) : data.classTitle}
+              {data.classTitle}
             </span>
             <span className="hero-badge hero-badge-sub">
-              {isTamil ? 'சமச்சீர் கல்வி' : 'Samacheer Kalvi'}
+              {'Samacheer Kalvi'}
             </span>
           </div>
 
@@ -399,13 +382,11 @@ const Group2UnitClass = () => {
               <h1 className="unit-class-hero-title">
                 {displayUnitNumber}: {displayUnitTitle} –{' '}
                 <span className="gold-text">
-                  {isTamil ? translateClassTitle(data.classId, language) : data.classTitle}
+                  {data.classTitle}
                 </span>
               </h1>
               <p className="unit-class-hero-sub">
-                {isTamil
-                  ? 'தமிழ்நாடு அரசு தேர்வு ஆணையம் (TNPSC) குரூப் 2 & 2A முதல்நிலைத் தேர்வுப் பாடத்திட்டத்திற்குரிய அதிகாரப்பூர்வ சமச்சீர் கல்வி பாடங்கள்.'
-                  : 'Official Samacheer Kalvi Tamil Nadu State Board textbook curriculum aligned with TNPSC Preliminary Syllabus (Code: 495).'}
+                {'Official Samacheer Kalvi Tamil Nadu State Board textbook curriculum aligned with TNPSC Preliminary Syllabus (Code: 495).'}
               </p>
             </div>
           </div>
@@ -414,7 +395,7 @@ const Group2UnitClass = () => {
           <div className="switchers-wrapper glass">
             {/* Standard Switcher (6th to 12th) */}
             <div className="switcher-row">
-              <span className="switcher-label">{isTamil ? 'வகுப்பைத் தேர்ந்தெடுக்க:' : 'Select Standard:'}</span>
+              <span className="switcher-label">{'Select Standard:'}</span>
               <div className="switcher-pills">
                 {standardClasses.map((cls) => {
                   const isActive = cls.id === parsedClassId
@@ -428,7 +409,7 @@ const Group2UnitClass = () => {
                         )
                       }
                     >
-                      {isTamil ? translateClassTitle(cls.id, language) : cls.label}
+                      {cls.label}
                     </button>
                   )
                 })}
@@ -437,7 +418,7 @@ const Group2UnitClass = () => {
 
             {/* Unit Switcher */}
             <div className="switcher-row">
-              <span className="switcher-label">{isTamil ? 'அலகைத் தேர்ந்தெடுக்க:' : 'Select Unit:'}</span>
+              <span className="switcher-label">{'Select Unit:'}</span>
               <div className="switcher-pills">
                 {availableUnits.map((u) => {
                   const isActive = u.id === parsedUnitId
@@ -474,13 +455,11 @@ const Group2UnitClass = () => {
               <div className="topics-box-title">
                 <BookOpen size={18} />
                 <span>
-                  {isTamil
-                    ? `பாடநூல் பாடத்திட்டம் & முக்கியப் பகுதிகள் (${translateClassTitle(data.classId, language)})`
-                    : `Textbook Syllabus & Focus Areas (${data.classTitle})`}
+                  {`Textbook Syllabus & Focus Areas (${data.classTitle})`}
                 </span>
               </div>
               <span className="topics-count-badge">
-                {dynamicFocusAreas.length} {isTamil ? 'முக்கியத் தலைப்புகள்' : 'Focus Areas'}
+                {dynamicFocusAreas.length} {'Focus Areas'}
               </span>
             </div>
 
@@ -489,11 +468,11 @@ const Group2UnitClass = () => {
                 <div key={idx} className="topic-chip" title={item.lessonTitle ? `Lesson ${item.lessonNumber}: ${item.lessonTitle}` : undefined}>
                   <span className="topic-chip-num">{idx + 1}</span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span className="topic-chip-text">{translateTopic(item.text, language)}</span>
+                    <span className="topic-chip-text">{item.text}</span>
                     {(item.lessonNumber || item.textbookUnit) && (
                       <span style={{ fontSize: '0.7rem', color: 'rgba(255, 215, 0, 0.78)', fontWeight: 500 }}>
                         {item.textbookUnit ? `${item.textbookUnit} • ` : ''}
-                        {item.lessonNumber ? `${isTamil ? 'பாடம்' : 'Lesson'} ${item.lessonNumber}` : ''}
+                        {item.lessonNumber ? `${'Lesson'} ${item.lessonNumber}` : ''}
                       </span>
                     )}
                   </div>
@@ -508,20 +487,16 @@ const Group2UnitClass = () => {
           <div className="section-head-bar">
             <div>
               <h2 className="section-title">
-                {isTamil
-                  ? `${translateClassTitle(data.classId, language)}க்கான பாடங்கள்`
-                  : `Curated Lessons for ${data.classTitle}`}
+                {`Curated Lessons for ${data.classTitle}`}
               </h2>
               <p className="section-sub">
-                {isTamil
-                  ? `${displayUnitTitle} பாடத்திட்டத்திற்குரிய சமச்சீர் கல்வி பாடங்கள்`
-                  : `Samacheer Kalvi school textbook chapters mapped to ${displayUnitTitle}`}
+                {`Samacheer Kalvi school textbook chapters mapped to ${displayUnitTitle}`}
               </p>
             </div>
             {hasLessons && (
               <span className="lessons-count-pill">
                 <Layers size={14} />
-                {lessons.length} {isTamil ? 'பாடங்கள் உள்ளன' : 'Lessons Available'}
+                {lessons.length} {'Lessons Available'}
               </span>
             )}
           </div>
@@ -529,7 +504,7 @@ const Group2UnitClass = () => {
           {hasLessons ? (
             <div className="lessons-grid">
               {lessons.map((lesson: any, index: number) => {
-                const translated = translateLesson(lesson, language)
+                const translated = lesson
                 const practiceUrl = `/study-materials/practice/${activeExamId}/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
                 const lessonTopics: Array<{ topic_name: string }> = Array.isArray(lesson.topics) ? lesson.topics : []
 
@@ -543,7 +518,7 @@ const Group2UnitClass = () => {
                   >
                     <div className="lesson-top-meta">
                       <span className="lesson-num-badge">
-                        {isTamil ? `பாடம் ${translated.lessonNumber}` : `Lesson ${translated.lessonNumber}`}
+                        {`Lesson ${translated.lessonNumber}`}
                       </span>
                       {translated.term && <span className="lesson-term-badge">{translated.term}</span>}
                       {lesson.textbookUnitTitle && (
@@ -566,7 +541,7 @@ const Group2UnitClass = () => {
                     {lessonTopics.length > 0 && (
                       <div style={{ margin: '0.5rem 0 0.75rem', padding: '0.6rem 0.75rem', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.45)', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
                         <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#fbbf24', marginBottom: '0.35rem' }}>
-                          {isTamil ? 'முக்கியப் பாடப்பகுதிகள் (Focus Areas):' : 'Focus Areas:'}
+                          {'Focus Areas:'}
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                           {lessonTopics.slice(0, 4).map((ft, ftIdx) => (
@@ -593,19 +568,19 @@ const Group2UnitClass = () => {
                         className="lesson-read-btn"
                         onClick={() => {
                           const lessonTitle = translated?.title || lesson.title
-                          navigate(`/study-notes/group2_2a/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${lesson.term ? `&term=${encodeURIComponent(lesson.term)}` : ''}`)
+                          navigate(`/study-notes/group2_2a/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${lesson.term ? `&term=${encodeURIComponent(lesson.term)}` : ''}`)
                         }}
-                        title={isTamil ? 'பாடக் குறிப்புகளைப் படிக்க' : 'Read Study Notes'}
+                        title={'Read Study Notes'}
                       >
                         <FileQuestion size={15} />
-                        <span>{isTamil ? 'பாடக்குறிப்புகளைப் படிக்க' : 'Read Study Notes'}</span>
+                        <span>{'Read Study Notes'}</span>
                       </button>
                       <Link
                         to={practiceUrl}
                         className="lesson-practice-btn"
                         title="Practice MCQs for this lesson"
                       >
-                        <span>{isTamil ? 'பயிற்சி வினாக்கள்' : 'Practice MCQs'}</span>
+                        <span>{'Practice MCQs'}</span>
                         <ChevronRight size={14} />
                       </Link>
                     </div>
@@ -859,10 +834,10 @@ const Group2UnitClass = () => {
                         }}
                       >
                         <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                          {isTamil ? 'பதிலளித்தவை:' : 'Answered:'} <strong>{answeredCount}</strong> {isTamil ? 'இல்' : 'of'} <strong>{totalQuestions}</strong>
+                          {'Answered:'} <strong>{answeredCount}</strong> {'of'} <strong>{totalQuestions}</strong>
                         </span>
                         <span style={{ fontSize: '0.875rem', color: 'var(--gold-primary)', fontWeight: 700 }}>
-                          {isTamil ? 'தற்போதைய மதிப்பெண்:' : 'Current Score:'} {correctCount}/{answeredCount} ({answeredCount > 0 ? scorePercent : 0}%)
+                          {'Current Score:'} {correctCount}/{answeredCount} ({answeredCount > 0 ? scorePercent : 0}%)
                         </span>
                       </div>
 
@@ -871,8 +846,7 @@ const Group2UnitClass = () => {
                           const userAnswer = selectedAnswers[q.id]
                           const isAnswered = userAnswer !== undefined
                           const isCorrect = isAnswered && userAnswer === q.correctAnswer
-                          const translatedQ = translateQuestionItem(
-                            {
+                          const translatedQ = {
                               id: q.id,
                               category: 'group2_2a',
                               tag: `${data.unitNumber} • ${activeModalLesson.title}`,
@@ -880,9 +854,7 @@ const Group2UnitClass = () => {
                               options: q.options,
                               correctAnswer: q.correctAnswer,
                               explanation: q.explanation,
-                            },
-                            language
-                          )
+                            }
 
                           return (
                             <div
@@ -908,7 +880,7 @@ const Group2UnitClass = () => {
                                     fontSize: '0.8rem',
                                   }}
                                 >
-                                  {isTamil ? `வினா ${qIndex + 1}` : `Q${qIndex + 1}`}
+                                  {`Q${qIndex + 1}`}
                                 </span>
                                 <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.95rem' }}>
                                   {translatedQ.question}
@@ -1001,8 +973,8 @@ const Group2UnitClass = () => {
                                     }}
                                   >
                                     {isCorrect
-                                      ? (isTamil ? '✓ சரியான விடை!' : '✓ Correct Answer!')
-                                      : (isTamil ? '✗ விளக்கம்:' : '✗ Incorrect Explanation:')}
+                                      ? ('✓ Correct Answer!')
+                                      : ('✗ Incorrect Explanation:')}
                                   </div>
                                   <p style={{ margin: 0, fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
                                     {translatedQ.explanation}
@@ -1014,7 +986,7 @@ const Group2UnitClass = () => {
                         })
                       ) : (
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', margin: '2rem 0' }}>
-                          {isTamil ? 'இப்பாடத்திற்கான பயிற்சி வினாக்கள் விரைவில் சேர்க்கப்படும்.' : 'Practice questions for this lesson will be available soon.'}
+                          {'Practice questions for this lesson will be available soon.'}
                         </p>
                       )}
 

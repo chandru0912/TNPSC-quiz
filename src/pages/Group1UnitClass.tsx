@@ -35,17 +35,6 @@ import { normalizeMatchedTopics } from '../utils/syllabusNormalize'
 import { group1GeneralStudiesUnits, group1AptitudeUnits } from '../data/group1SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
-import { useLanguage } from '../context/LanguageContext'
-import {
-  translateTopic,
-  translateLesson,
-  translateLessonTitle,
-  translateClassTitle,
-  translateUnitTitle,
-  translateUnitNumber,
-  translateTerm,
-  translateSubjectName,
-} from '../utils/bilingualSyllabus'
 import './Group1UnitClass.css'
 
 const unitIcons: Record<number, any> = {
@@ -61,8 +50,7 @@ const Group1UnitClass = () => {
   const { unitId, classId } = useParams<{ unitId: string; classId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { language, isTamil } = useLanguage()
-
+  
   const parsedUnitId = parseInt(unitId || '1', 10)
   const parsedClassId = parseInt(classId || '6', 10)
 
@@ -71,11 +59,7 @@ const Group1UnitClass = () => {
   const subjectHomePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1/general-studies'
   const subjectBasePath = isAptitude ? '/materials/group1/aptitude' : '/materials/group1'
   const subjectLabel = isAptitude
-    ? isTamil
-      ? 'திறனறிவும் மனக்கணக்கும்'
-      : 'Aptitude & Mental Ability'
-    : isTamil
-    ? 'பொது அறிவு'
+    ? 'Aptitude & Mental Ability'
     : 'General Studies'
 
   const gsData = getUnitClassData(parsedUnitId, parsedClassId)
@@ -194,13 +178,9 @@ const Group1UnitClass = () => {
   const activeUnit = availableUnits.find((u) => u.id === parsedUnitId)
   const displayUnitNumber = activeUnit
     ? activeUnit.unitNumber
-    : isTamil
-    ? translateUnitNumber(data.unitNumber, language)
     : data.unitNumber
   const displayUnitTitle = activeUnit
     ? activeUnit.title
-    : isTamil
-    ? translateUnitTitle(data.unitId, data.unitTitle, language)
     : data.unitTitle
 
   const formatUnitButtonLabel = (u: { id: number; unitNumber: string; title: string }) => {
@@ -321,8 +301,7 @@ const Group1UnitClass = () => {
         data.unitTitle,
         data.classTitle,
         data.subjectName,
-        activeReadingLesson,
-        language
+        activeReadingLesson
       )
     : null
 
@@ -333,14 +312,14 @@ const Group1UnitClass = () => {
       <div className="unit-class-container">
         {/* Breadcrumb Navigation */}
         <div className="unit-class-breadcrumb">
-          <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
+          <Link to="/">{'Home'}</Link>
           <ChevronRight size={14} />
-          <Link to="/materials">{isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials'}</Link>
+          <Link to="/materials">{'Study Materials'}</Link>
           <ChevronRight size={14} />
           <Link to={subjectHomePath}>{subjectLabel}</Link>
           <ChevronRight size={14} />
           <span className="active">
-            {displayUnitNumber} – {displayUnitTitle} ({isTamil ? translateClassTitle(data.classId, language) : data.classTitle})
+            {displayUnitNumber} – {displayUnitTitle} ({data.classTitle})
           </span>
         </div>
 
@@ -348,15 +327,13 @@ const Group1UnitClass = () => {
         <div className="unit-class-top-bar">
           <Link to={subjectHomePath} className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? `${subjectLabel} பகுதிக்குத் திரும்பு` : `Back to ${subjectLabel}`}</span>
+            <span>{`Back to ${subjectLabel}`}</span>
           </Link>
 
           <Link to={`${subjectBasePath}/unit/${parsedUnitId}`} className="back-btn glass">
             <BookOpen size={16} />
             <span>
-              {isTamil
-                ? `${displayUnitNumber} முழு பாடத்திட்டத்தைக் காண்க`
-                : `View Full ${displayUnitNumber} Syllabus`}
+              {`View Full ${displayUnitNumber} Syllabus`}
             </span>
           </Link>
         </div>
@@ -371,17 +348,17 @@ const Group1UnitClass = () => {
           <div className="unit-class-hero-badges">
             <span className="hero-badge hero-badge-gold">
               <Sparkles size={13} />
-              {isTamil ? `TNPSC குரூப் 1 ${subjectLabel}` : `TNPSC Group 1 ${subjectLabel}`}
+              {`TNPSC Group 1 ${subjectLabel}`}
             </span>
             <span className="hero-badge hero-badge-cyan">
               {displayUnitNumber}
             </span>
             <span className="hero-badge hero-badge-purple">
               <GraduationCap size={14} />
-              {isTamil ? translateClassTitle(data.classId, language) : data.classTitle}
+              {data.classTitle}
             </span>
             <span className="hero-badge hero-badge-sub">
-              {isTamil ? 'சமச்சீர் கல்வி' : 'Samacheer Kalvi'}
+              {'Samacheer Kalvi'}
             </span>
           </div>
 
@@ -393,13 +370,11 @@ const Group1UnitClass = () => {
               <h1 className="unit-class-hero-title">
                 {displayUnitNumber}: {displayUnitTitle} –{' '}
                 <span className="gold-text">
-                  {isTamil ? translateClassTitle(data.classId, language) : data.classTitle}
+                  {data.classTitle}
                 </span>
               </h1>
               <p className="unit-class-hero-sub">
-                {isTamil
-                  ? 'தமிழ்நாடு அரசு தேர்வு ஆணையம் (TNPSC) குரூப் 1 முதல்நிலைத் தேர்வுப் பாடத்திட்டத்திற்குரிய அதிகாரப்பூர்வ சமச்சீர் கல்வி பாடங்கள்.'
-                  : 'Official Samacheer Kalvi Tamil Nadu State Board textbook curriculum aligned with TNPSC Preliminary Syllabus (Code: 497).'}
+                {'Official Samacheer Kalvi Tamil Nadu State Board textbook curriculum aligned with TNPSC Preliminary Syllabus (Code: 497).'}
               </p>
             </div>
           </div>
@@ -408,7 +383,7 @@ const Group1UnitClass = () => {
           <div className="switchers-wrapper glass">
             {/* Standard Switcher (6th to 12th) */}
             <div className="switcher-row">
-              <span className="switcher-label">{isTamil ? 'வகுப்பைத் தேர்ந்தெடுக்க:' : 'Select Standard:'}</span>
+              <span className="switcher-label">{'Select Standard:'}</span>
               <div className="switcher-pills">
                 {standardClasses.map((cls) => {
                   const isActive = cls.id === parsedClassId
@@ -418,7 +393,7 @@ const Group1UnitClass = () => {
                       className={`switcher-pill ${isActive ? 'active' : ''}`}
                       onClick={() => navigate(`${subjectBasePath}/unit/${parsedUnitId}/class/${cls.id}`)}
                     >
-                      {isTamil ? translateClassTitle(cls.id, language) : cls.label}
+                      {cls.label}
                     </button>
                   )
                 })}
@@ -427,7 +402,7 @@ const Group1UnitClass = () => {
 
             {/* Unit Switcher */}
             <div className="switcher-row">
-              <span className="switcher-label">{isTamil ? 'அலகைத் தேர்ந்தெடுக்க:' : 'Select Unit:'}</span>
+              <span className="switcher-label">{'Select Unit:'}</span>
               <div className="switcher-pills">
                 {availableUnits.map((u) => {
                   const isActive = u.id === parsedUnitId
@@ -460,13 +435,11 @@ const Group1UnitClass = () => {
               <div className="topics-box-title">
                 <BookOpen size={18} />
                 <span>
-                  {isTamil
-                    ? `பாடநூல் பாடத்திட்டம் & முக்கியப் பகுதிகள் (${translateClassTitle(data.classId, language)})`
-                    : `Textbook Syllabus & Focus Areas (${data.classTitle})`}
+                  {`Textbook Syllabus & Focus Areas (${data.classTitle})`}
                 </span>
               </div>
               <span className="topics-count-badge">
-                {dynamicFocusAreas.length} {isTamil ? 'முக்கியத் தலைப்புகள்' : 'Focus Areas'}
+                {dynamicFocusAreas.length} {'Focus Areas'}
               </span>
             </div>
 
@@ -475,11 +448,11 @@ const Group1UnitClass = () => {
                 <div key={idx} className="topic-chip" title={item.lessonTitle ? `Lesson ${item.lessonNumber}: ${item.lessonTitle}` : undefined}>
                   <span className="topic-chip-num">{idx + 1}</span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span className="topic-chip-text">{translateTopic(item.text, language)}</span>
+                    <span className="topic-chip-text">{item.text}</span>
                     {(item.lessonNumber || item.textbookUnit) && (
                       <span style={{ fontSize: '0.7rem', color: 'rgba(255, 215, 0, 0.78)', fontWeight: 500 }}>
                         {item.textbookUnit ? `${item.textbookUnit} • ` : ''}
-                        {item.lessonNumber ? `${isTamil ? 'பாடம்' : 'Lesson'} ${item.lessonNumber}` : ''}
+                        {item.lessonNumber ? `${'Lesson'} ${item.lessonNumber}` : ''}
                       </span>
                     )}
                   </div>
@@ -494,20 +467,16 @@ const Group1UnitClass = () => {
           <div className="section-head-bar">
             <div>
               <h2 className="section-title">
-                {isTamil
-                  ? `${translateClassTitle(data.classId, language)}க்கான பாடங்கள்`
-                  : `Curated Lessons for ${data.classTitle}`}
+                {`Curated Lessons for ${data.classTitle}`}
               </h2>
               <p className="section-sub">
-                {isTamil
-                  ? `${displayUnitTitle} பாடத்திட்டத்திற்குரிய சமச்சீர் கல்வி பாடங்கள்`
-                  : `Samacheer Kalvi school textbook chapters mapped to ${displayUnitTitle}`}
+                {`Samacheer Kalvi school textbook chapters mapped to ${displayUnitTitle}`}
               </p>
             </div>
             {hasLessons && (
               <span className="lessons-count-pill">
                 <Layers size={14} />
-                {lessons.length} {isTamil ? 'பாடங்கள் உள்ளன' : 'Lessons Available'}
+                {lessons.length} {'Lessons Available'}
               </span>
             )}
           </div>
@@ -515,7 +484,7 @@ const Group1UnitClass = () => {
           {hasLessons ? (
             <div className="lessons-grid">
               {lessons.map((lesson: any, index: number) => {
-                const translated = translateLesson(lesson, language)
+                const translated = lesson
                 const practiceUrl = `/study-materials/practice/group1/${activeSubjectId}/${data.classId}/${data.unitId}/${encodeURIComponent(lesson.id || '')}?lessonTitle=${encodeURIComponent(lesson.title)}`
                 const lessonTopics: Array<{ topic_name: string }> = Array.isArray(lesson.topics) ? lesson.topics : []
 
@@ -529,7 +498,7 @@ const Group1UnitClass = () => {
                   >
                     <div className="lesson-top-meta">
                       <span className="lesson-num-badge">
-                        {isTamil ? `பாடம் ${translated.lessonNumber}` : `Lesson ${translated.lessonNumber}`}
+                        {`Lesson ${translated.lessonNumber}`}
                       </span>
                       {translated.term && <span className="lesson-term-badge">{translated.term}</span>}
                       {lesson.textbookUnitTitle && (
@@ -552,7 +521,7 @@ const Group1UnitClass = () => {
                     {lessonTopics.length > 0 && (
                       <div style={{ margin: '0.5rem 0 0.75rem', padding: '0.6rem 0.75rem', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.45)', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
                         <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#fbbf24', marginBottom: '0.35rem' }}>
-                          {isTamil ? 'முக்கியப் பாடப்பகுதிகள் (Focus Areas):' : 'Focus Areas:'}
+                          {'Focus Areas:'}
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                           {lessonTopics.slice(0, 4).map((ft, ftIdx) => (
@@ -579,15 +548,15 @@ const Group1UnitClass = () => {
                         className="lesson-read-btn"
                         onClick={() => {
                           const lessonTitle = translated?.title || lesson.title
-                          navigate(`/study-notes/group1/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${isTamil ? 'tamil' : 'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${lesson.term ? `&term=${encodeURIComponent(lesson.term)}` : ''}`)
+                          navigate(`/study-notes/group1/subject/${activeSubjectId}/unit/${parsedUnitId}/lesson/${encodeURIComponent(lessonTitle)}?lang=${'english'}${parsedClassId ? `&classId=${parsedClassId}` : ''}${lesson.id ? `&lessonId=${encodeURIComponent(lesson.id)}` : ''}${lesson.lessonNumber ? `&lessonNumber=${encodeURIComponent(lesson.lessonNumber)}` : ''}${lesson.term ? `&term=${encodeURIComponent(lesson.term)}` : ''}`)
                         }}
-                        title={isTamil ? 'பாடக் குறிப்புகளைப் படிக்க' : 'Read Study Notes'}
+                        title={'Read Study Notes'}
                       >
                         <BookMarked size={15} />
-                        <span>{isTamil ? 'பாடக்குறிப்புகளைப் படிக்க' : 'Read Study Notes'}</span>
+                        <span>{'Read Study Notes'}</span>
                       </button>
                       <Link to={practiceUrl} className="lesson-practice-btn" title="Practice MCQs for this lesson">
-                        <span>{isTamil ? 'பயிற்சி வினாக்கள்' : 'Practice MCQs'}</span>
+                        <span>{'Practice MCQs'}</span>
                         <ChevronRight size={14} />
                       </Link>
                     </div>
@@ -605,21 +574,15 @@ const Group1UnitClass = () => {
               <div className="empty-icon-circle">
                 <Clock size={32} />
               </div>
-              <h3 className="empty-heading">{isTamil ? 'பாடக்குறிப்புகள் விரைவில் வரும்.' : 'Lessons coming soon.'}</h3>
+              <h3 className="empty-heading">{'Lessons coming soon.'}</h3>
               <p className="empty-subtext">
-                {isTamil ? (
-                  <>
-                    <strong>{data.unitTitle} ({data.classTitle})</strong>-க்கான சமச்சீர் கல்வி பாடக்குறிப்புகளும் வினாக்களும் அதிகாரப்பூர்வ TNPSC குரூப் 1 பாடத்திட்டத்தின்படி தயாரிப்பில் உள்ளன.
-                  </>
-                ) : (
-                  <>
+                {<>
                     Comprehensive Samacheer Kalvi lesson notes and chapter-wise question banks for{' '}
                     <strong>
                       {data.unitTitle} ({data.classTitle})
                     </strong>{' '}
                     are currently being curated by subject experts according to the official TNPSC Group 1 syllabus.
-                  </>
-                )}
+                  </>}
               </p>
               <div className="empty-actions">
                 <Link
@@ -627,11 +590,11 @@ const Group1UnitClass = () => {
                   className="btn btn-primary"
                 >
                   <FileQuestion size={16} />
-                  <span>{isTamil ? `${subjectLabel} வினாக்களைப் பயிற்சி செய்க` : `Practice ${subjectLabel} MCQs`}</span>
+                  <span>{`Practice ${subjectLabel} MCQs`}</span>
                 </Link>
                 <Link to={subjectHomePath} className="btn btn-secondary">
                   <ArrowLeft size={16} />
-                  <span>{isTamil ? 'வேறொரு வகுப்பைத் தேர்ந்தெடுக்க' : 'Choose Another Standard'}</span>
+                  <span>{'Choose Another Standard'}</span>
                 </Link>
               </div>
             </motion.div>
@@ -642,7 +605,7 @@ const Group1UnitClass = () => {
         <div className="unit-class-footer-nav">
           <Link to={subjectHomePath} className="back-btn glass">
             <ArrowLeft size={16} />
-            <span>{isTamil ? `${subjectLabel} முதன்மைப் பக்கத்திற்குத் திரும்பு` : `Back to ${subjectLabel} Main Page`}</span>
+            <span>{`Back to ${subjectLabel} Main Page`}</span>
           </Link>
         </div>
       </div>
@@ -667,20 +630,18 @@ const Group1UnitClass = () => {
                   <div className="slide-meta-badge-row">
                     <span className="slide-pill-gold">
                       <GraduationCap size={13} />
-                      {isTamil ? translateClassTitle(activeDeck.classTitle, language) : activeDeck.classTitle}{' '}
-                      {activeDeck.term ? `• ${translateTerm(activeDeck.term, language)}` : ''}
+                      {activeDeck.classTitle}{' '}
+                      {activeDeck.term ? `• ${activeDeck.term}` : ''}
                     </span>
                     <span className="slide-pill-cyan">
-                      {isTamil ? translateUnitNumber(activeDeck.unitNumber, language) : activeDeck.unitNumber}
+                      {activeDeck.unitNumber}
                     </span>
                     <span className="slide-pill-muted">
-                      {isTamil ? translateSubjectName(activeDeck.subjectName, language) : activeDeck.subjectName}
+                      {activeDeck.subjectName}
                     </span>
                   </div>
                   <h2 className="slide-modal-lesson-title">
-                    {isTamil
-                      ? `பாடம் ${activeReadingLesson.lessonNumber}: ${translateLessonTitle(activeReadingLesson.title, language)}`
-                      : `Lesson ${activeReadingLesson.lessonNumber}: ${activeReadingLesson.title}`}
+                    {`Lesson ${activeReadingLesson.lessonNumber}: ${activeReadingLesson.title}`}
                   </h2>
                 </div>
 
@@ -706,9 +667,7 @@ const Group1UnitClass = () => {
                 <div className="slide-counter-info">
                   <span className="slide-badge-active">{currentSlide.badge}</span>
                   <span className="slide-counter-text">
-                    {isTamil
-                      ? `தாள் ${currentSlideIndex + 1} / ${activeDeck.slides.length}`
-                      : `Slide ${currentSlideIndex + 1} of ${activeDeck.slides.length}`}
+                    {`Slide ${currentSlideIndex + 1} of ${activeDeck.slides.length}`}
                   </span>
                 </div>
 
@@ -778,7 +737,7 @@ const Group1UnitClass = () => {
                         <div className="slide-fact-box">
                           <Lightbulb size={20} className="fact-box-icon" />
                           <div className="fact-box-text">
-                            <strong>{isTamil ? 'முக்கியத் தேர்வுப் புள்ளி:' : 'High-Yield Takeaway:'}</strong> {currentSlide.content.factBox}
+                            <strong>{'High-Yield Takeaway:'}</strong> {currentSlide.content.factBox}
                           </div>
                         </div>
                       )}
@@ -796,13 +755,13 @@ const Group1UnitClass = () => {
                     onClick={() => setCurrentSlideIndex((prev) => Math.max(prev - 1, 0))}
                   >
                     <ChevronLeft size={16} />
-                    <span>{isTamil ? 'முந்தைய தாள்' : 'Previous Slide'}</span>
+                    <span>{'Previous Slide'}</span>
                   </button>
                 </div>
 
                 <div className="footer-center">
                   <span className="keyboard-tip">
-                    {isTamil ? 'குறிப்பு: ◄ ► அம்பு விசைகளைப் பயன்படுத்தி தாள்களை மாற்றலாம்' : 'Tip: Use ◄ ► arrow keys to switch slides'}
+                    {'Tip: Use ◄ ► arrow keys to switch slides'}
                   </span>
                 </div>
 
@@ -812,7 +771,7 @@ const Group1UnitClass = () => {
                       className="slide-nav-btn btn-next"
                       onClick={() => setCurrentSlideIndex((prev) => Math.min(prev + 1, activeDeck.slides.length - 1))}
                     >
-                      <span>{isTamil ? 'அடுத்த தாள்' : 'Next Slide'}</span>
+                      <span>{'Next Slide'}</span>
                       <ChevronRight size={16} />
                     </button>
                   ) : (
@@ -826,7 +785,7 @@ const Group1UnitClass = () => {
                       }}
                     >
                       <Award size={16} />
-                      <span>{isTamil ? 'பயிற்சி வினாக்களைத் தொடங்குக' : 'Finish & Practice MCQs'}</span>
+                      <span>{'Finish & Practice MCQs'}</span>
                     </button>
                   )}
                 </div>

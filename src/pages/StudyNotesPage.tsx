@@ -14,7 +14,6 @@ import {
   ChevronUp,
   ChevronDown,
 } from 'lucide-react'
-import { useLanguage } from '../context/LanguageContext'
 import { apiFetch } from '../utils/api'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
@@ -298,7 +297,6 @@ const StudyNotesPage: React.FC = () => {
   }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { isTamil } = useLanguage()
 
   const rawTitle = lessonTitle || searchParams.get('lessonTitle') || ''
   const decodedLessonTitle = decodeURIComponent(rawTitle)
@@ -559,23 +557,23 @@ const StudyNotesPage: React.FC = () => {
   }, [fetchLessonQuestions])
 
   const groupDisplayName = useMemo(() => {
-    if (normalizedCategory === 'group1') return isTamil ? 'TNPSC குரூப் 1' : 'TNPSC Group 1'
-    if (normalizedCategory === 'group4_vao') return isTamil ? 'TNPSC குரூப் 4 & VAO' : 'TNPSC Group 4 & VAO'
-    return isTamil ? 'TNPSC குரூப் 2, 2A' : 'TNPSC Group 2, 2A'
-  }, [normalizedCategory, isTamil])
+    if (normalizedCategory === 'group1') return 'TNPSC Group 1'
+    if (normalizedCategory === 'group4_vao') return 'TNPSC Group 4 & VAO'
+    return 'TNPSC Group 2, 2A'
+  }, [normalizedCategory])
 
   const subjectDisplayName = useMemo(() => {
     const s = effectiveSubject.toLowerCase()
-    if (s.includes('tamil')) return isTamil ? 'பொதுத் தமிழ்' : 'General Tamil'
-    if (s.includes('english')) return isTamil ? 'பொது ஆங்கிலம்' : 'General English'
-    if (s.includes('aptitude')) return isTamil ? 'திறனறிவும் மனக்கணக்கும்' : 'Aptitude & Mental Ability'
-    return isTamil ? 'பொது அறிவியல் & பொது அறிவு' : 'General Studies'
-  }, [effectiveSubject, isTamil])
+    if (s.includes('tamil')) return 'General Tamil'
+    if (s.includes('english')) return 'General English'
+    if (s.includes('aptitude')) return 'Aptitude & Mental Ability'
+    return 'General Studies'
+  }, [effectiveSubject])
 
   const classDisplayName = useMemo(() => {
     if (!effectiveClassId) return null
-    return isTamil ? `${effectiveClassId}-ஆம் வகுப்பு` : `${effectiveClassId}th Standard`
-  }, [effectiveClassId, isTamil])
+    return `${effectiveClassId}th Standard`
+  }, [effectiveClassId])
 
   const handleBack = () => {
     if (window.history.length > 2) {
@@ -662,14 +660,14 @@ const StudyNotesPage: React.FC = () => {
       id: `sec-${sec.number}-${idx}`,
       topicOrder: sec.number || idx + 1,
       topicId: canonicalLessonId ? `${canonicalLessonId}-t${sec.number || idx + 1}` : undefined,
-      topicTitle: isTamil ? (sec.titleTa || sec.titleEn) : (sec.titleEn || sec.titleTa),
+      topicTitle: sec.titleEn || sec.titleTa,
       subtopics: sec.bullets || [],
       content: sec.rawText,
       noteFormat: masterNote.noteFormat || activeFormat,
       tableData: sec.tableData,
       bullets: sec.bullets,
     }))
-  }, [filteredNotes, activeFormat, canonicalLessonId, isTamil])
+  }, [filteredNotes, activeFormat, canonicalLessonId])
 
   const filteredTopics = useMemo(() => {
     if (!topicSearch.trim()) return displayTopics
@@ -694,9 +692,9 @@ const StudyNotesPage: React.FC = () => {
         <div className="study-notes-hero-content">
           {/* Breadcrumb Bar */}
           <nav className="study-notes-breadcrumb" aria-label="Breadcrumb">
-            <Link to="/">{isTamil ? 'முகப்பு' : 'Home'}</Link>
+            <Link to="/">Home</Link>
             <span className="study-notes-breadcrumb-sep">/</span>
-            <Link to="/materials/group2/general-tamil">{isTamil ? 'பாடத்திட்டம்' : 'Study Materials'}</Link>
+            <Link to="/materials/group2/general-tamil">Study Materials</Link>
             <span className="study-notes-breadcrumb-sep">/</span>
             <span>{groupDisplayName}</span>
             <span className="study-notes-breadcrumb-sep">/</span>
@@ -710,7 +708,7 @@ const StudyNotesPage: React.FC = () => {
             {unitId && (
               <>
                 <span className="study-notes-breadcrumb-sep">/</span>
-                <span>{isTamil ? `அலகு ${unitId}` : `Unit ${unitId}`}</span>
+                <span>{`Unit ${unitId}`}</span>
               </>
             )}
             <span className="study-notes-breadcrumb-sep">/</span>
@@ -727,12 +725,12 @@ const StudyNotesPage: React.FC = () => {
             <div className="study-notes-actions-left">
               <button className="study-btn study-btn-secondary" onClick={handleBack}>
                 <ArrowLeft size={16} />
-                <span>{isTamil ? 'பாடத்திற்குத் திரும்பு' : 'Back to Lesson'}</span>
+                <span>Back to Lesson</span>
               </button>
 
               <button className="study-btn study-btn-primary" onClick={handlePracticeClick}>
                 <HelpCircle size={16} />
-                <span>{isTamil ? 'இப்பாட வினாக்களைப் பயிற்சி செய்க' : 'Practice Lesson MCQs'}</span>
+                <span>Practice Lesson MCQs</span>
               </button>
             </div>
 
@@ -745,14 +743,14 @@ const StudyNotesPage: React.FC = () => {
                     onClick={() => setActiveFormat('short')}
                     title="View concise exam-oriented revision notes"
                   >
-                    <span>⚡ {isTamil ? 'சுருக்கக் குறிப்புகள்' : 'Short Notes'}</span>
+                    <span>⚡ Short Notes</span>
                   </button>
                   <button
                     className={`study-lang-pill ${activeFormat === 'full' ? 'active' : ''}`}
                     onClick={() => setActiveFormat('full')}
                     title="View comprehensive detailed textbook notes"
                   >
-                    <span>📖 {isTamil ? 'முழுப் பாடம்' : 'Full Notes'}</span>
+                    <span>📖 Full Notes</span>
                   </button>
                 </div>
               )}
@@ -764,7 +762,7 @@ const StudyNotesPage: React.FC = () => {
                   onClick={() => setSelectedLang('all')}
                   title="View all notes"
                 >
-                  {isTamil ? 'அனைத்தும்' : 'All'}
+                  All
                 </button>
                 <button
                   className={`study-lang-pill ${selectedLang === 'tamil' ? 'active' : ''}`}
@@ -795,13 +793,13 @@ const StudyNotesPage: React.FC = () => {
                   title="View Official Textbook PDF from Google Drive"
                 >
                   <BookOpen size={15} />
-                  <span>{isTamil ? 'பாடநூல் PDF' : 'Official PDF'}</span>
+                  <span>Official PDF</span>
                 </button>
               )}
 
               <button className="study-btn study-btn-secondary" onClick={() => window.print()} title="Print or Save PDF">
                 <Printer size={15} />
-                <span>{isTamil ? 'அச்சிடு' : 'Print'}</span>
+                <span>Print</span>
               </button>
             </div>
           </div>
@@ -814,7 +812,7 @@ const StudyNotesPage: React.FC = () => {
           <div className="study-quick-nav">
             {displayTopics.map((t) => (
               <a key={t.id} href={`#topic-${t.topicOrder}`} className="study-quick-pill">
-                <span>{isTamil ? `§ தலைப்பு ${t.topicOrder}: ${t.topicTitle}` : `§ Topic ${t.topicOrder}: ${t.topicTitle}`}</span>
+                <span>{`§ Topic ${t.topicOrder}: ${t.topicTitle}`}</span>
               </a>
             ))}
           </div>
@@ -826,42 +824,38 @@ const StudyNotesPage: React.FC = () => {
         {loading ? (
           <div className="study-state-card glass">
             <Loader2 size={42} className="study-state-icon animate-spin" />
-            <h2 className="study-state-title">{isTamil ? 'பாடக் குறிப்புகள் ஏற்றப்படுகிறது...' : 'Loading Study Notes...'}</h2>
+            <h2 className="study-state-title">Loading Study Notes...</h2>
             <p className="study-state-desc">
-              {isTamil
-                ? 'அதிகாரப்பூர்வ சமச்சீர் கல்வி பாடநூல் அடிப்படையிலான முழுமையான பாடக் குறிப்புகள் மீட்டெடுக்கப்படுகின்றன.'
-                : 'Retrieving official Samacheer Kalvi complete syllabus study notes.'}
+              Retrieving official Samacheer Kalvi complete syllabus study notes.
             </p>
           </div>
         ) : error ? (
           <div className="study-state-card glass">
             <AlertCircle size={44} style={{ color: '#ef4444', margin: '0 auto 1.25rem' }} />
             <h2 className="study-state-title" style={{ color: '#ef4444' }}>
-              {isTamil ? 'ஏற்றுவதில் பிழை ஏற்பட்டது' : 'Failed to Load Study Notes'}
+              Failed to Load Study Notes
             </h2>
             <p className="study-state-desc">{error}</p>
             <button className="study-btn study-btn-primary" onClick={fetchNotes} style={{ margin: '0 auto' }}>
               <RotateCcw size={15} />
-              <span>{isTamil ? 'மீண்டும் முயற்சிக்க' : 'Retry'}</span>
+              <span>Retry</span>
             </button>
           </div>
         ) : displayTopics.length === 0 ? (
           <div className="study-state-card glass">
             <BookOpen size={50} style={{ opacity: 0.45, margin: '0 auto 1.25rem', color: '#ffd700' }} />
-            <h2 className="study-state-title">{isTamil ? 'பாடக் குறிப்புகள் கிடைக்கவில்லை' : 'No Study Notes Available'}</h2>
+            <h2 className="study-state-title">No Study Notes Available</h2>
             <p className="study-state-desc">
-              {isTamil
-                ? `இந்த பாடத்திற்கான (${decodedLessonTitle}) பாடக் குறிப்புகள் கிடைக்கவில்லை. கையேடு குறிப்புகளை உருவாக்கவும்.`
-                : `No Study Notes Available. Please generate notes manually for "${decodedLessonTitle}".`}
+              {`No Study Notes Available. Please generate notes manually for "${decodedLessonTitle}".`}
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button className="study-btn study-btn-secondary" onClick={handleBack}>
                 <ArrowLeft size={15} />
-                <span>{isTamil ? 'பாடப் பட்டியலுக்குத் திரும்பு' : 'Back to Lessons'}</span>
+                <span>Back to Lessons</span>
               </button>
               <button className="study-btn study-btn-primary" onClick={handlePracticeClick}>
                 <HelpCircle size={15} />
-                <span>{isTamil ? 'பயிற்சி வினாக்களைத் தொடங்க' : 'Practice Lesson MCQs'}</span>
+                <span>Practice Lesson MCQs</span>
               </button>
             </div>
           </div>
@@ -871,9 +865,7 @@ const StudyNotesPage: React.FC = () => {
             <div className="study-topic-search-wrap">
               <div className="study-topic-count-summary">
                 <span>
-                  {isTamil
-                    ? `அதிகாரப்பூர்வ பாடத்திட்டப் பிரிவுகள்: ${filteredTopics.length} / ${displayTopics.length} தலைப்புகள்`
-                    : `Syllabus Topic Alignment: ${filteredTopics.length} of ${displayTopics.length} Topics`}
+                  {`Syllabus Topic Alignment: ${filteredTopics.length} of ${displayTopics.length} Topics`}
                 </span>
               </div>
               <div className="study-topic-search-box">
@@ -881,7 +873,7 @@ const StudyNotesPage: React.FC = () => {
                 <input
                   type="text"
                   className="study-topic-search-input"
-                  placeholder={isTamil ? 'தலைப்பைத் தேடுக...' : 'Search topics in lesson...'}
+                  placeholder="Search topics in lesson..."
                   value={topicSearch}
                   onChange={(e) => setTopicSearch(e.target.value)}
                 />
@@ -909,7 +901,7 @@ const StudyNotesPage: React.FC = () => {
                   <header className="study-section-header">
                     <div className="study-section-title-wrap">
                       <span className="study-topic-order-badge">
-                        {isTamil ? `தலைப்பு ${topicItem.topicOrder}` : `Topic ${topicItem.topicOrder}`}
+                        {`Topic ${topicItem.topicOrder}`}
                       </span>
                       <h2 className="study-section-title">
                         {topicItem.topicTitle}
@@ -918,13 +910,11 @@ const StudyNotesPage: React.FC = () => {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <span className="study-meta-pill study-meta-pill-gold">
-                        {topicItem.noteFormat === 'full'
-                          ? (isTamil ? '📖 முழுப் பாடம்' : '📖 Full Notes')
-                          : (isTamil ? '⚡ சுருக்கக் குறிப்பு' : '⚡ Short Notes')}
+                        {topicItem.noteFormat === 'full' ? '📖 Full Notes' : '⚡ Short Notes'}
                       </span>
                       {topicItem.tableData && (
                         <span className="study-section-count-badge">
-                          {topicItem.tableData.rows.length} {isTamil ? 'வரிசைகள்' : 'Rows'}
+                          {topicItem.tableData.rows.length} Rows
                         </span>
                       )}
                     </div>
@@ -934,7 +924,7 @@ const StudyNotesPage: React.FC = () => {
                   {topicItem.subtopics && topicItem.subtopics.length > 0 && (
                     <div className="study-subtopics-list">
                       <span className="study-subtopics-label">
-                        {isTamil ? 'துணைத் தலைப்புகள்:' : 'Subtopics:'}
+                        Subtopics:
                       </span>
                       {topicItem.subtopics.map((st, sIdx) => (
                         <span key={sIdx} className="study-subtopic-tag">
@@ -964,7 +954,7 @@ const StudyNotesPage: React.FC = () => {
                       style={{ color: '#ffd700', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
                     >
                       <ChevronUp size={14} />
-                      <span>{isTamil ? 'மேலே செல்க' : 'Top'}</span>
+                      <span>Top</span>
                     </a>
                   </footer>
                 </section>
@@ -979,18 +969,18 @@ const StudyNotesPage: React.FC = () => {
             <header className="study-section-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
               <div className="study-section-title-wrap">
                 <span className="study-topic-order-badge" style={{ background: 'linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,165,0,0.2))', color: '#ffd700', borderColor: 'rgba(255,215,0,0.4)' }}>
-                  {isTamil ? 'வினா வங்கி' : 'Question Bank'}
+                  Question Bank
                 </span>
                 <h2 className="study-section-title" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                  <span>{isTamil ? 'பாட மாதிரி வினாக்கள்' : 'Lesson Practice Questions'}</span>
+                  <span>Lesson Practice Questions</span>
                   <span className="study-meta-pill study-meta-pill-gold" style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}>
                     {loadingQuestions ? (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                         <Loader2 size={12} className="animate-spin" />
-                        {isTamil ? 'ஏற்றுகிறது...' : 'Loading...'}
+                        Loading...
                       </span>
                     ) : (
-                      `${lessonQuestions.length} ${isTamil ? 'வினாக்கள் உள்ளன' : 'Available Questions'}`
+                      `${lessonQuestions.length} Available Questions`
                     )}
                   </span>
                 </h2>
@@ -1001,7 +991,7 @@ const StudyNotesPage: React.FC = () => {
                 style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
               >
                 <HelpCircle size={15} />
-                <span>{isTamil ? 'ஊடாடும் பயிற்சி தேர்வு' : 'Take Interactive Quiz'}</span>
+                <span>Take Interactive Quiz</span>
               </button>
             </header>
 
@@ -1102,7 +1092,7 @@ const StudyNotesPage: React.FC = () => {
                       }}
                     >
                       {expandedQuestionId === q.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      <span>{expandedQuestionId === q.id ? (isTamil ? 'விளக்கத்தை மறை' : 'Hide Explanation') : (isTamil ? 'விடை & விளக்கம் காண்க' : 'Show Answer & Explanation')}</span>
+                      <span>{expandedQuestionId === q.id ? 'Hide Explanation' : 'Show Answer & Explanation'}</span>
                     </button>
                     {q.sourceReference && (
                       <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)' }}>
@@ -1114,7 +1104,7 @@ const StudyNotesPage: React.FC = () => {
                   {expandedQuestionId === q.id && (
                     <div style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', background: 'rgba(16, 185, 129, 0.08)', borderLeft: '3px solid #10b981', borderRadius: '4px' }}>
                       <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#10b981', marginBottom: '0.25rem' }}>
-                        {isTamil ? 'சரியான விடை:' : 'Correct Answer:'} {String.fromCharCode(65 + (q.correctAnswer ?? 0))}
+                        Correct Answer: {String.fromCharCode(65 + (q.correctAnswer ?? 0))}
                       </div>
                       {q.explanation && (
                         <p style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.85)', lineHeight: '1.5', margin: 0 }}>
@@ -1134,7 +1124,7 @@ const StudyNotesPage: React.FC = () => {
                     style={{ margin: '0 auto' }}
                   >
                     <HelpCircle size={15} />
-                    <span>{isTamil ? `அனைத்து ${lessonQuestions.length} வினாக்களையும் பயிற்சி செய்ய` : `Practice All ${lessonQuestions.length} Questions`}</span>
+                    <span>{`Practice All ${lessonQuestions.length} Questions`}</span>
                   </button>
                 </div>
               )}
