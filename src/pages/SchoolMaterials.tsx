@@ -260,11 +260,11 @@ const SchoolMaterials = () => {
     })
 
     return orderedSubjects.map((subject) => {
-      // Tamil is a common subject independent of the selected textbook medium:
-      // always show the original Tamil textbook PDFs in both English & Tamil Medium views.
-      const isCommonTamilSubject = subject === 'Tamil'
+      // Tamil and English are common subjects independent of the selected textbook medium:
+      // always show all available Tamil and English textbook PDFs in both English & Tamil Medium views.
+      const isCommonSubject = subject === 'Tamil' || subject === 'English'
       const mediumBooks = textbooks.filter(
-        (tb) => tb.subject === subject && (isCommonTamilSubject || tb.medium === selectedMedium)
+        (tb) => tb.subject === subject && (isCommonSubject || tb.medium === selectedMedium)
       )
 
       const termMap = new Map<string, TextbookRecord[]>()
@@ -281,7 +281,7 @@ const SchoolMaterials = () => {
 
       return {
         subject,
-        isCommonSubject: isCommonTamilSubject,
+        isCommonSubject,
         totalForMedium: mediumBooks.length,
         terms,
       }
@@ -379,7 +379,7 @@ const SchoolMaterials = () => {
               <div className="library-summary-strip">
                 <span>
                   Showing <strong>{totalVisiblePdfs}</strong> PDF
-                  {totalVisiblePdfs === 1 ? '' : 's'} ({selectedMedium} Medium + Common Tamil) across{' '}
+                  {totalVisiblePdfs === 1 ? '' : 's'} ({selectedMedium} Medium + Common Tamil &amp; English) across{' '}
                   <strong>{subjectColumns.length}</strong> subject
                   {subjectColumns.length === 1 ? '' : 's'}
                 </span>
@@ -403,7 +403,7 @@ const SchoolMaterials = () => {
                           <h2 className="subject-column-title">{col.subject}</h2>
                           <span className="subject-column-count">
                             {col.isCommonSubject
-                              ? `${col.totalForMedium} Common Tamil PDF${col.totalForMedium === 1 ? '' : 's'}`
+                              ? `${col.totalForMedium} Common ${col.subject} PDF${col.totalForMedium === 1 ? '' : 's'}`
                               : `${col.totalForMedium} ${selectedMedium} Medium PDF${col.totalForMedium === 1 ? '' : 's'}`}
                           </span>
                         </div>
@@ -414,7 +414,7 @@ const SchoolMaterials = () => {
                       {col.terms.length === 0 ? (
                         <div className="subject-empty-medium">
                           {col.isCommonSubject ? (
-                            'No Tamil textbook PDFs available for this standard yet.'
+                            `No ${col.subject} textbook PDFs available for this standard yet.`
                           ) : (
                             <>
                               No {selectedMedium} Medium PDFs available for {col.subject}.
