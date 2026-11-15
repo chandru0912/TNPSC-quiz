@@ -253,8 +253,8 @@ const Dashboard = () => {
       meta: isTamil ? `${data.metrics.materialsStudied}/${data.metrics.targetMaterials} அத்தியாயங்கள்` : `${data.metrics.materialsStudied}/${data.metrics.targetMaterials} chapters`,
     },
     {
-      title: isTamil ? 'பாடம் வாரியான வினாக்கள்' : 'Lesson-wise Questions',
-      description: isTamil ? 'ஒவ்வொரு பாடத்திற்கும் பிறகு உடனடி பயிற்சி.' : 'Practice after every lesson you finish.',
+      title: isTamil ? 'பாடநூல் நூலகம்' : 'Textbook Library',
+      description: isTamil ? '6 முதல் 12-ஆம் வகுப்பு வரையிலான சமச்சீர் கல்வி பாடநூல்கள்.' : '6th – 12th Samacheer Kalvi textbook PDFs.',
       to: '/school-materials',
       icon: ListChecks,
       meta: isTamil ? '6-ஆம் – 12-ஆம் வகுப்பு' : '6th – 12th std',

@@ -53,7 +53,7 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
   const navItems = [
     { label: isTamil ? 'முகப்பு' : 'Overview', to: '/dashboard', icon: LayoutDashboard },
     { label: isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials', to: '/materials', icon: BookOpen },
-    { label: isTamil ? 'பாடம் வாரியான வினாக்கள்' : 'Lesson-wise Questions', to: '/school-materials', icon: ListChecks },
+    { label: isTamil ? 'பாடநூல் நூலகம்' : 'Textbook Library', to: '/school-materials', icon: ListChecks },
     { label: isTamil ? 'பயிற்சி வினாக்கள்' : 'MCQ Practice', to: '/practice', icon: FileText },
     { label: isTamil ? 'மாதிரித் தேர்வுகள்' : 'Mock Tests', to: '/mock-tests', icon: GraduationCap },
     { label: isTamil ? 'முந்தைய ஆண்டு வினாக்கள்' : 'Previous Year Questions', to: '/previous-papers', icon: Archive },

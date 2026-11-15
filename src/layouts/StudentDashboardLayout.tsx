@@ -42,10 +42,15 @@ export const StudentDashboardLayout: React.FC = () => {
         ? { title: 'பாடக்குறிப்புகள்', category: 'பாடத்திட்டம் & பாடநூல்கள்' }
         : { title: 'Study Materials', category: 'Syllabus & Textbooks' };
     }
-    if (p.startsWith('/school-materials') || p.startsWith('/study-materials/practice')) {
+    if (p.startsWith('/school-materials')) {
       return isTamil
-        ? { title: 'பாடம் வாரியான வினாக்கள்', category: 'வகுப்பு வாரியான பயிற்சி' }
-        : { title: 'Lesson-wise Questions', category: 'Standard-wise Practice' };
+        ? { title: 'பாடநூல் நூலகம்', category: 'சமச்சீர் கல்வி பாடநூல்கள்' }
+        : { title: 'Textbook Library', category: 'Samacheer Kalvi PDFs' };
+    }
+    if (p.startsWith('/study-materials/practice')) {
+      return isTamil
+        ? { title: 'பாடம் வாரியான பயிற்சி', category: 'வகுப்பு வாரியான வினாக்கள்' }
+        : { title: 'Lesson-wise Practice', category: 'Standard-wise Practice' };
     }
     if (p.startsWith('/practice')) {
       return isTamil
