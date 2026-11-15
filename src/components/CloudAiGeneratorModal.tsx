@@ -35,6 +35,7 @@ export interface CloudAiGeneratorModalProps {
   fetchTextbooks?: () => void
   showToast?: (type: 'success' | 'error', text: string) => void
   onRefreshData?: () => void
+  onNavigateToStaging?: (jobId?: string) => void
 }
 
 export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
@@ -46,6 +47,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
   fetchTextbooks: _fetchTextbooks,
   showToast,
   onRefreshData,
+  onNavigateToStaging,
 }) => {
   const [aiMode, setAiMode] = useState<CloudAiMode>(initialMode)
 
@@ -843,6 +845,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
                 token={token}
                 showToast={showToast}
                 onRefreshData={onRefreshData}
+                onNavigateToStaging={onNavigateToStaging}
               />
             )}
 

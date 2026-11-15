@@ -314,7 +314,7 @@ export class McqJobService {
 
     const jobId = `mcq_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
     const subjectId = input.subjectId || normalizeSubjectKey(input.subject);
-    const batchCapacity = targetProviderName === 'gemini' ? 10 : 12;
+    const batchCapacity = 20;
     const totalBatches = Math.max(1, Math.ceil(requestedCount / batchCapacity));
 
     const res = await pool.query(
@@ -447,7 +447,7 @@ export class McqJobService {
           if (!snap || snap.status === 'COMPLETED' || snap.status === 'FAILED' || snap.status === 'CANCELLED') {
             break;
           }
-          await new Promise((r) => setTimeout(r, 250));
+          await new Promise((r) => setTimeout(r, 50));
         }
       } catch (err) {
         console.error(`[McqJobService] Local worker loop error for ${jobId}:`, err);
@@ -510,7 +510,8 @@ export class McqJobService {
 
     const remaining = requestedCount - alreadyGenerated;
     const provider = (job.provider || 'gemini') as AIProviderName;
-    const stepBatchSize = Math.min(provider === 'gemini' ? 10 : 12, remaining);
+    const batchCapacity = (Number(job.failed_count) || 0) > 0 ? 12 : 20;
+    const stepBatchSize = Math.min(batchCapacity, remaining);
     const batchNumber = (Number(job.current_batch) || 0) + 1;
     const batchId = `${jobId}_b${batchNumber}`;
     const totalBatches = Math.max(Number(job.total_batches) || 1, batchNumber);
@@ -574,27 +575,24 @@ export class McqJobService {
 
         const currentCount = Number(lockCheck.rows[0].generated_count) || 0;
         const stillNeeded = Math.max(0, requestedCount - currentCount);
+        const questionsToSave = batchQuestions.slice(0, stillNeeded);
 
-        for (const q of batchQuestions.slice(0, stillNeeded)) {
-          const ins = await client.query(
-            `INSERT INTO questions (
-              category, exam_group_id, unit_id, class_id, standard_id, subject, subject_id,
-              lesson_title, lesson_number, lesson_id,
-              topic, difficulty, question_text, options, correct_answer,
-              explanation, status, source_reference, target_system,
-              language, option_a, option_b, option_c, option_d,
-              term, volume, source_pdf, source_page, textbook_id, ai_provider, generation_job_id
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7,
-              $8, $9, $10,
-              $11, $12, $13, $14, $15,
-              $16, 'staging', $17, 'study_materials',
-              $18, $19, $20, $21, $22,
-              $23, $24, $25, $26, $27, $28, $29
-            )
-            ON CONFLICT (lesson_title, question_text) DO NOTHING
-            RETURNING id`,
-            [
+        if (questionsToSave.length > 0) {
+          const colsPerRow = 29;
+          const valuesClauses: string[] = [];
+          const flatParams: any[] = [];
+
+          questionsToSave.forEach((q, idx) => {
+            const o = idx * colsPerRow;
+            valuesClauses.push(
+              `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7}, ` +
+                `$${o + 8}, $${o + 9}, $${o + 10}, ` +
+                `$${o + 11}, $${o + 12}, $${o + 13}, $${o + 14}, $${o + 15}, ` +
+                `$${o + 16}, 'staging', $${o + 17}, 'study_materials', ` +
+                `$${o + 18}, $${o + 19}, $${o + 20}, $${o + 21}, $${o + 22}, ` +
+                `$${o + 23}, $${o + 24}, $${o + 25}, $${o + 26}, $${o + 27}, $${o + 28}, $${o + 29})`
+            );
+            flatParams.push(
               q.category,
               job.group_id,
               q.unitId,
@@ -623,12 +621,24 @@ export class McqJobService {
               sourcePages[0] ?? null,
               job.textbook_id != null ? Number(job.textbook_id) : null,
               provider,
-              jobId,
-            ]
+              jobId
+            );
+          });
+
+          const ins = await client.query(
+            `INSERT INTO questions (
+              category, exam_group_id, unit_id, class_id, standard_id, subject, subject_id,
+              lesson_title, lesson_number, lesson_id,
+              topic, difficulty, question_text, options, correct_answer,
+              explanation, status, source_reference, target_system,
+              language, option_a, option_b, option_c, option_d,
+              term, volume, source_pdf, source_page, textbook_id, ai_provider, generation_job_id
+            ) VALUES ${valuesClauses.join(', ')}
+            ON CONFLICT (lesson_title, question_text) DO NOTHING
+            RETURNING id`,
+            flatParams
           );
-          if ((ins.rowCount ?? 0) > 0) {
-            insertedCount++;
-          }
+          insertedCount = ins.rowCount ?? 0;
         }
 
         const newTotal = currentCount + insertedCount;
@@ -636,7 +646,6 @@ export class McqJobService {
         const progress = isDone ? 100 : Math.min(99, Math.round((newTotal / requestedCount) * 100));
         const nextStatus: McqJobStatus = isDone ? 'COMPLETED' : 'PROCESSING';
         const remainingAfter = Math.max(0, requestedCount - newTotal);
-        const batchCapacity = provider === 'gemini' ? 10 : 12;
         const updatedTotalBatches = isDone
           ? batchNumber
           : Math.max(totalBatches, batchNumber + Math.ceil(remainingAfter / batchCapacity));

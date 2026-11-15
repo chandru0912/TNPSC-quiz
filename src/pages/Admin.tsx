@@ -9292,6 +9292,11 @@ const Admin = () => {
           fetchNotes()
           fetchAllMetrics()
         }}
+        onNavigateToStaging={() => {
+          setIsCloudAiModalOpen(false)
+          navigate('/admin/question-bank')
+          setStatusFilter('staging')
+        }}
       />
 
       {/* Global Persistent Background MCQ Generation Monitor */}

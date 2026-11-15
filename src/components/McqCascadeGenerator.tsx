@@ -67,18 +67,32 @@ export interface GenerationResult {
   pages: number[]
   staged: boolean
   questions: GeneratedQuestion[]
+  jobId?: string
+  requestedCount?: number
+  generatedCount?: number
+  failedCount?: number
+  provider?: string
+  groupLabel?: string
+  subject?: string
+  standard?: number
+  unitLabel?: string
+  lessonTitle?: string
+  medium?: string
+  status?: string
 }
 
 export interface McqCascadeGeneratorProps {
   token: string | null
   showToast?: (type: 'success' | 'error', text: string) => void
   onRefreshData?: () => void
+  onNavigateToStaging?: (jobId?: string) => void
 }
 
 export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   token,
   showToast,
   onRefreshData,
+  onNavigateToStaging,
 }) => {
   // =========================================================================
   // Dropdown States: Synchronized with Study Notes Generation
@@ -90,7 +104,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   // 6. Lesson Title (6th field)
   // =========================================================================
 
-  const [groupId, setGroupId] = useState<GroupId>('group4')
+  const [groupId, setGroupId] = useState<GroupId>('group1')
   const [subjectId, setSubjectId] = useState('general-studies')
   const [standard, setStandard] = useState(6)
   const [term, setTerm] = useState('Term 1')
@@ -605,9 +619,9 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
       })
   }
 
-  // Initial load on mount
+  // Initial load on mount (Default: TNPSC Group 1)
   useEffect(() => {
-    const effGroup: 'group1' | 'group2' | 'group4' = 'group4'
+    const effGroup: 'group1' | 'group2' | 'group4' = 'group1'
     const nextSubjects = getSubjectsForGroup(effGroup)
     const nextSub = nextSubjects[0]?.id || 'general-studies'
     const nextStandards = getStandardsForSubject(effGroup, nextSub)
@@ -619,7 +633,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
     const nextLessons = getLessonsForSelection(effGroup, nextSub, nextStd, nextUnit, nextTerm)
     const nextLesson = nextLessons[0]
 
-    setGroupId('group4')
+    setGroupId('group1')
     setSubjectId(nextSub)
     setStandard(nextStd)
     setTerm(nextTerm)
@@ -635,7 +649,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
       }
       setAvailableTopics(topics.length > 0 ? topics : [nextLesson.title])
       setSelectedTopics(topics.length > 0 ? topics : [nextLesson.title])
-      loadTextbooks('group4', nextSub, nextStd, nextUnit, nextTerm, nextLesson.id, nextLesson.title)
+      loadTextbooks('group1', nextSub, nextStd, nextUnit, nextTerm, nextLesson.id, nextLesson.title)
     }
 
     const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
@@ -755,12 +769,27 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
 
             if (latestJob.status === 'COMPLETED') {
               setActiveJobId(null)
+              const groupLabel =
+                TNPSC_GROUPS.find((g) => g.id === latestJob.group_id)?.name ||
+                String(latestJob.group_id || '').toUpperCase()
               setResult({
                 count: latestJob.generated_count,
                 sourceName: latestJob.textbook_name || fallbackSourceName || latestJob.lesson_title,
                 pages: [],
                 staged: true,
                 questions: [],
+                jobId: latestJob.job_id,
+                requestedCount: latestJob.requested_question_count,
+                generatedCount: latestJob.generated_count,
+                failedCount: latestJob.failed_count || 0,
+                provider: latestJob.provider === 'claude' ? 'Claude AI' : 'Gemini AI',
+                groupLabel,
+                subject: latestJob.subject,
+                standard: latestJob.standard_id,
+                unitLabel: latestJob.unit_title ? `Unit ${latestJob.unit_id} - ${latestJob.unit_title}` : `Unit ${latestJob.unit_id}`,
+                lessonTitle: latestJob.lesson_title,
+                medium: latestJob.language === 'tamil' ? 'Tamil Medium' : 'English Medium',
+                status: latestJob.generated_count < latestJob.requested_question_count ? 'Partial Success (Saved to Staging)' : 'Completed & Saved to Staging',
               })
               setProgress({
                 pct: 100,
@@ -785,7 +814,7 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
           }
         }
 
-        await new Promise((r) => setTimeout(r, 2000))
+        await new Promise((r) => setTimeout(r, 1200))
       }
     },
     [onRefreshData, showToast]
@@ -1743,9 +1772,16 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
         </div>
       )}
 
-      {/* Generation Results Preview */}
+      {/* Generation Results Preview (Inline Staging Success Panel — No Auto-Redirect) */}
       {result && (
-        <div className="ai-section-box" style={{ marginTop: '1rem' }}>
+        <div
+          className="ai-section-box"
+          style={{
+            marginTop: '1rem',
+            border: '1px solid rgba(34, 197, 94, 0.45)',
+            background: 'rgba(20, 83, 45, 0.22)',
+          }}
+        >
           <div
             style={{
               display: 'flex',
@@ -1753,22 +1789,94 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
               alignItems: 'center',
               color: '#86efac',
               fontWeight: 700,
+              fontSize: '1rem',
             }}
           >
-            <CheckCircle size={18} />
+            <CheckCircle size={20} />
             <span>
-              {result.count} questions {result.staged ? 'saved to Staging' : 'generated for review'}
+              ✓ {result.count} Questions {result.staged ? 'Saved to Staging' : 'Generated for Review'}
             </span>
           </div>
           <div
             style={{
-              fontSize: '0.78rem',
-              color: 'var(--text-muted)',
-              marginTop: '0.3rem',
+              fontSize: '0.82rem',
+              color: '#cbd5e1',
+              marginTop: '0.35rem',
             }}
           >
-            Source Textbook: {result.sourceName}
+            Source Textbook: <strong>{result.sourceName}</strong>
+            {result.medium ? ` (${result.medium})` : ''}
             {result.pages.length ? ` • PDF pages ${result.pages.join(', ')}` : ''}
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+              gap: '0.55rem',
+              marginTop: '0.8rem',
+              padding: '0.75rem',
+              borderRadius: '8px',
+              background: 'rgba(15, 23, 42, 0.55)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              fontSize: '0.78rem',
+              color: '#cbd5e1',
+            }}
+          >
+            <div><span style={{ color: '#94a3b8' }}>Requested:</span> <strong>{result.requestedCount ?? result.count}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>Generated:</span> <strong style={{ color: '#86efac' }}>{result.generatedCount ?? result.count}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>Saved to Staging:</span> <strong style={{ color: '#86efac' }}>{result.count}</strong></div>
+            <div><span style={{ color: '#94a3b8' }}>Failed:</span> <strong style={{ color: (result.failedCount || 0) > 0 ? '#fca5a5' : '#cbd5e1' }}>{result.failedCount ?? 0}</strong></div>
+            {result.groupLabel && <div><span style={{ color: '#94a3b8' }}>TNPSC Group:</span> <strong>{result.groupLabel}</strong></div>}
+            {result.subject && <div><span style={{ color: '#94a3b8' }}>Subject:</span> <strong>{result.subject}</strong></div>}
+            {result.standard != null && <div><span style={{ color: '#94a3b8' }}>Standard:</span> <strong>Class {result.standard}</strong></div>}
+            {result.unitLabel && <div><span style={{ color: '#94a3b8' }}>Unit:</span> <strong>{result.unitLabel}</strong></div>}
+            {result.lessonTitle && <div style={{ gridColumn: '1 / -1' }}><span style={{ color: '#94a3b8' }}>Lesson:</span> <strong>{result.lessonTitle}</strong></div>}
+            <div><span style={{ color: '#94a3b8' }}>Status:</span> <strong style={{ color: '#86efac' }}>{result.status || 'Completed & Saved to Staging'}</strong></div>
+            {result.provider && <div><span style={{ color: '#94a3b8' }}>AI Provider:</span> <strong>{result.provider}</strong></div>}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '0.6rem',
+              marginTop: '0.85rem',
+            }}
+          >
+            {onNavigateToStaging && (
+              <button
+                type="button"
+                className="admin-btn admin-btn-primary"
+                onClick={() => onNavigateToStaging(result.jobId)}
+                style={{ padding: '0.5rem 0.95rem', fontSize: '0.82rem' }}
+              >
+                View Staging Questions ({result.count})
+              </button>
+            )}
+            <button
+              type="button"
+              className="admin-btn admin-btn-secondary"
+              onClick={() => {
+                setResult(null)
+                setProgress(null)
+                setError(null)
+                setActiveJobId(null)
+              }}
+              style={{ padding: '0.5rem 0.95rem', fontSize: '0.82rem' }}
+            >
+              Generate Again
+            </button>
+            <button
+              type="button"
+              className="admin-btn admin-btn-secondary"
+              onClick={() => {
+                showToast?.('success', 'Remaining on MCQ Generator. Your saved questions are ready in Staging.')
+              }}
+              style={{ padding: '0.5rem 0.95rem', fontSize: '0.82rem' }}
+            >
+              Stay on Generator
+            </button>
           </div>
           <div
             style={{
