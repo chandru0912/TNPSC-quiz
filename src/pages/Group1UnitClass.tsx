@@ -36,7 +36,6 @@ import { group1GeneralStudiesUnits, group1AptitudeUnits } from '../data/group1Sy
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateTopic,
   translateLesson,
@@ -351,8 +350,6 @@ const Group1UnitClass = () => {
             <ArrowLeft size={16} />
             <span>{isTamil ? `${subjectLabel} பகுதிக்குத் திரும்பு` : `Back to ${subjectLabel}`}</span>
           </Link>
-
-          <LanguageSwitch variant="inline" forceVisible={true} />
 
           <Link to={`${subjectBasePath}/unit/${parsedUnitId}`} className="back-btn glass">
             <BookOpen size={16} />

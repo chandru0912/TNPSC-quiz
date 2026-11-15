@@ -32,7 +32,6 @@ import { standardClasses } from '../data/group2ClassSyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { compareLessons } from '../utils/naturalSort'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateTopic,
   translateLessonTitle,
@@ -206,8 +205,6 @@ const Group2UnitDetail = () => {
             <ArrowLeft size={16} />
             <span>{isTamil ? 'அனைத்து அலகுகளுக்கும் திரும்பு' : `Back to ${subject.title} Units`}</span>
           </Link>
-
-          <LanguageSwitch />
         </div>
 
         {/* Unit Hero Banner */}

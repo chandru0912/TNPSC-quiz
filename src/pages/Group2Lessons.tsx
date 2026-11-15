@@ -22,7 +22,6 @@ import {
   type Group2Lesson,
 } from '../data/group2SyllabusData'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateLessonTitle,
   translateTopic,
@@ -279,8 +278,6 @@ const Group2Lessons = () => {
                 : `Back to ${unit.unitNumber} Syllabus`}
             </span>
           </Link>
-
-          <LanguageSwitch />
         </div>
 
         {/* Header */}

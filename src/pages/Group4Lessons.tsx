@@ -23,7 +23,6 @@ import {
   type Group4Lesson,
 } from '../data/group4SyllabusData'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateLessonTitle,
   translateTopic,
@@ -291,8 +290,6 @@ const Group4Lessons = () => {
                 : `Back to ${unit.unitNumber} Syllabus`}
             </span>
           </Link>
-
-          <LanguageSwitch />
         </div>
 
         {/* Header */}

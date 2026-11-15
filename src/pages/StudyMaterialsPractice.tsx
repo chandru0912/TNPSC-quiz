@@ -14,8 +14,6 @@ import {
   Sparkles,
   Layers,
   GraduationCap,
-  Globe,
-  Check,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import {
@@ -25,6 +23,8 @@ import {
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
+import { useLanguage } from '../context/LanguageContext'
+import { useTranslatedQuestions } from '../hooks/useTranslatedQuestions'
 import './StudyMaterialsPractice.css'
 
 interface StudyMaterialQuestionItem {
@@ -79,8 +79,9 @@ export const StudyMaterialsPractice: React.FC = () => {
   const lessonIdParam = routeParams.lessonId || searchParams.get('lessonId') || ''
   const lessonTitleParam = searchParams.get('lesson') || searchParams.get('lessonTitle') || ''
 
-  // Language state (defaults to Tamil; user can toggle between Tamil and English)
-  const [selectedLanguage, setSelectedLanguage] = useState<'tamil' | 'english'>('tamil')
+  // Global language state from Student Dashboard selector
+  const { language, isTamil } = useLanguage()
+  const selectedLanguage: 'tamil' | 'english' = isTamil ? 'tamil' : 'english'
 
   // Live Questions State
   const [questions, setQuestions] = useState<StudyMaterialQuestionItem[]>([])
@@ -221,8 +222,24 @@ export const StudyMaterialsPractice: React.FC = () => {
     selectedLanguage,
   ])
 
-  // Current Active Question
-  const activeQuestion = questions[currentIndex]
+  const { translatedMap } = useTranslatedQuestions(questions, language)
+
+  // Current Active Question (overlay cached Tamil translation when global language is Tamil)
+  const rawActiveQuestion = questions[currentIndex]
+  const dbTranslation =
+    language === 'ta' && rawActiveQuestion && typeof rawActiveQuestion.id === 'number'
+      ? translatedMap[rawActiveQuestion.id]
+      : undefined
+  const activeQuestion = rawActiveQuestion
+    ? dbTranslation
+      ? {
+          ...rawActiveQuestion,
+          question: dbTranslation.question,
+          options: dbTranslation.options,
+          explanation: dbTranslation.explanation || rawActiveQuestion.explanation,
+        }
+      : rawActiveQuestion
+    : undefined
 
   // Handle Option Select
   const handleSelectOption = (index: number) => {
@@ -344,26 +361,6 @@ export const StudyMaterialsPractice: React.FC = () => {
               <span>Back to Study Materials</span>
             </button>
           </div>
-
-          {/* Language Toggle (Tamil / English) */}
-          <div className="sm-lang-toggle-bar" role="group" aria-label="Language Toggle">
-            <button
-              className={`sm-lang-btn ${selectedLanguage === 'tamil' ? 'active' : ''}`}
-              onClick={() => setSelectedLanguage('tamil')}
-              title="தமிழ் வழியில் வினாக்களைப் பயிற்சி செய்க"
-            >
-              <span>தமிழ்</span>
-              {selectedLanguage === 'tamil' && <Check size={14} />}
-            </button>
-            <button
-              className={`sm-lang-btn ${selectedLanguage === 'english' ? 'active' : ''}`}
-              onClick={() => setSelectedLanguage('english')}
-              title="Practice MCQs in English medium"
-            >
-              <span>English</span>
-              {selectedLanguage === 'english' && <Check size={14} />}
-            </button>
-          </div>
         </div>
 
         {/* 2. Page Information HUD Card */}
@@ -451,20 +448,9 @@ export const StudyMaterialsPractice: React.FC = () => {
               <p style={{ color: '#ef4444', fontSize: '0.85rem', marginTop: '0.25rem' }}>{fetchError}</p>
             )}
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-              <button
-                className="sm-nav-btn sm-nav-btn-gold"
-                onClick={() =>
-                  setSelectedLanguage(selectedLanguage === 'tamil' ? 'english' : 'tamil')
-                }
-              >
-                <Globe size={15} />
-                <span>
-                  Switch to {selectedLanguage === 'tamil' ? 'English Medium' : 'தமிழ் வழி'}
-                </span>
-              </button>
               <button className="sm-nav-btn" onClick={handleBackToStandard}>
                 <ArrowLeft size={15} />
-                <span>Back to Lessons List</span>
+                <span>{isTamil ? 'பாடப் பட்டியலுக்குத் திரும்பு' : 'Back to Lessons List'}</span>
               </button>
             </div>
           </div>

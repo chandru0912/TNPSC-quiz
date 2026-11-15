@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { GraduationCap, Clock, FileText, Users, Play, Star } from 'lucide-react'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import { BILINGUAL_MOCK_TESTS, UI_TRANSLATIONS } from '../utils/languageData'
 import './MockTests.css'
 
@@ -67,7 +66,6 @@ const MockTests = () => {
                 )}
               </span>
             </h1>
-            <LanguageSwitch variant="section" forceVisible={true} />
           </div>
           <p className="mocktests-subtitle">{t.pageSubtitle}</p>
         </motion.div>

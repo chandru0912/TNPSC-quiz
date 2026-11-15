@@ -10,16 +10,9 @@ interface LanguageSwitchProps {
 
 export const LanguageSwitch = ({
   variant = 'inline',
-  forceVisible = false,
   className = '',
 }: LanguageSwitchProps) => {
-  const { language, setLanguage, isScopedSection } = useLanguage()
-
-  // Strictly enforce user requirement:
-  // "Tamil / English language switch only for these three sections: Study Materials, MCQ Questions, Mock Test."
-  if (!isScopedSection && !forceVisible) {
-    return null
-  }
+  const { language, setLanguage } = useLanguage()
 
   return (
     <div

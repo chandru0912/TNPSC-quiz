@@ -20,7 +20,6 @@ import {
   group1AptitudeUnits,
 } from '../data/group1SyllabusData'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import { UI_TRANSLATIONS } from '../utils/languageData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { apiFetch } from '../utils/api'
@@ -172,7 +171,6 @@ const StudyMaterials = () => {
                 )}
               </span>
             </h1>
-            <LanguageSwitch variant="section" forceVisible={true} />
           </div>
           <p className="materials-subtitle">{t.pageSubtitle}</p>
         </motion.div>

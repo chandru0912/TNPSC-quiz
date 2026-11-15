@@ -27,7 +27,6 @@ import {
 import { standardClasses } from '../data/group2ClassSyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateTopic,
   translateClassTitle,
@@ -146,8 +145,6 @@ const Group2SubjectDetail = () => {
             <ArrowLeft size={16} />
             <span>{isTamil ? 'பாடக்குறிப்புகளுக்குத் திரும்பு' : 'Back to Study Materials'}</span>
           </Link>
-
-          <LanguageSwitch />
         </div>
 
         {/* Subject Navigation Tabs (Order: General Studies, Aptitude and Mental Ability, General English, General Tamil) */}

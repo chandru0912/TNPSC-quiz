@@ -33,7 +33,6 @@ import { normalizeMatchedTopics } from '../utils/syllabusNormalize'
 import { getGroup4SubjectById } from '../data/group4SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateTopic,
   translateLesson,
@@ -320,8 +319,6 @@ const Group4UnitClass = () => {
               <span>{isTamil ? `முழு பாடத்திட்டம் (${displayUnitNumber})` : `View Full ${displayUnitNumber} Syllabus`}</span>
             </Link>
           </div>
-
-          <LanguageSwitch />
         </div>
 
         {/* Hero Card */}

@@ -8,6 +8,10 @@ import {
   resolveCorrectAnswerIndex,
   ExistingDbQuestionRecord,
 } from '../services/questionValidator';
+import {
+  applyCachedTranslations,
+  translateAndCacheQuestions,
+} from '../services/questionTranslationService';
 
 const router = Router();
 
@@ -80,6 +84,38 @@ export function mapRowToQuestion(row: any): QuestionDTO {
     verificationStatus: row.verification_status || 'needs_review',
   };
 }
+
+/**
+ * POST /api/questions/translate (Public Student Endpoint)
+ * Translates and caches requested question IDs into 'ta' (or returns canonical 'en').
+ * Never duplicates questions or alters IDs / correctAnswer indices.
+ */
+router.post('/translate', async (req: Request, res: Response) => {
+  try {
+    const rawIds = Array.isArray(req.body?.questionIds) ? req.body.questionIds : [];
+    const rawLang = String(req.body?.targetLanguage || req.body?.language || 'ta').toLowerCase().trim();
+    const targetLanguage: 'en' | 'ta' = rawLang === 'en' || rawLang === 'english' ? 'en' : 'ta';
+
+    if (rawIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'questionIds array is required.' });
+    }
+
+    const translations = await translateAndCacheQuestions(rawIds, targetLanguage);
+    return res.status(200).json({
+      status: 'success',
+      language: targetLanguage,
+      count: translations.length,
+      data: translations,
+    });
+  } catch (error: any) {
+    console.error('[Question Translate Endpoint Error]:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to translate questions',
+      error: error.message,
+    });
+  }
+});
 
 /**
  * GET /api/questions (Public Endpoint for Students)
@@ -198,7 +234,11 @@ router.get('/', async (req: Request, res: Response) => {
     const dataValues = [...values, safeLimit, safeOffset];
     const dataResult = await pool.query(dataQuery, dataValues);
 
-    const questions = dataResult.rows.map(mapRowToQuestion);
+    let questions = dataResult.rows.map(mapRowToQuestion);
+    const reqLang = String(req.query.lang || req.query.language || 'en').toLowerCase().trim();
+    if (reqLang === 'ta' || reqLang === 'tamil') {
+      questions = await applyCachedTranslations(questions, 'ta');
+    }
 
     res.status(200).json({
       status: 'success',

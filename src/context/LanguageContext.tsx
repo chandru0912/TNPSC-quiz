@@ -15,12 +15,6 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 const STORAGE_KEY = 'tnpsc_language_pref'
 
-// Scoped sections where bilingual switch is active:
-// 1. Study Materials (/materials, /materials/...)
-// 2. MCQ Questions (/practice, /practice/...)
-// 3. Mock Test (/mock-tests, /mock-tests/...)
-const SCOPED_SECTION_PREFIXES = ['/materials', '/practice', '/mock-tests']
-
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const location = useLocation()
 
@@ -35,13 +29,38 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     return 'en'
   })
 
-  // Detect if user is currently inside one of the three designated sections
+  // Global language selector is active across the entire Student Dashboard
   const isScopedSection = useMemo(() => {
     const path = location.pathname.toLowerCase()
-    return SCOPED_SECTION_PREFIXES.some((prefix) => path.startsWith(prefix))
+    return !path.startsWith('/admin')
   }, [location.pathname])
 
-  // Sync to localStorage and HTML lang tag whenever language updates
+  // Sync preferred language from student profile on mount if logged in and no explicit local override
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (location.pathname.toLowerCase().startsWith('/admin')) return
+    const token = localStorage.getItem('student_token')
+    if (!token) return
+    const hasLocal = localStorage.getItem(STORAGE_KEY)
+    if (hasLocal === 'en' || hasLocal === 'ta') return
+
+    fetch('/api/student/profile', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const pref = data?.student?.preferredLanguage
+        if (pref === 'en' || pref === 'ta') {
+          setLanguageState(pref)
+          try {
+            localStorage.setItem(STORAGE_KEY, pref)
+          } catch {}
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Sync to localStorage, HTML lang tag, and authenticated student profile whenever language updates
   const setLanguage = (lang: Language) => {
     setLanguageState(lang)
     try {
@@ -49,6 +68,19 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     } catch {}
     if (typeof document !== 'undefined') {
       document.documentElement.lang = lang
+    }
+    if (typeof window !== 'undefined' && !location.pathname.toLowerCase().startsWith('/admin')) {
+      const token = localStorage.getItem('student_token')
+      if (token) {
+        fetch('/api/student/profile', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ preferredLanguage: lang }),
+        }).catch(() => {})
+      }
     }
   }
 

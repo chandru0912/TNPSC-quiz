@@ -16,6 +16,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { useStudentAuth } from '../context/StudentAuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { apiFetch } from '../utils/api';
 import './ProgressTracker.css';
 
@@ -38,6 +39,7 @@ interface UnitMastery {
 
 export const ProgressTracker: React.FC = () => {
   const { token } = useStudentAuth();
+  const { isTamil } = useLanguage();
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [metrics, setMetrics] = useState({
     totalStudyHours: 0,
@@ -133,13 +135,15 @@ export const ProgressTracker: React.FC = () => {
           </div>
           <div>
             <div className="tracker-eyebrow">
-              <span>Syllabus Telemetry & Analytics</span>
+              <span>{isTamil ? 'பாடத்திட்டப் பகுப்பாய்வு' : 'Syllabus Telemetry & Analytics'}</span>
               <span className="tracker-dot">•</span>
-              <span className="text-gold">Live Progress</span>
+              <span className="text-gold">{isTamil ? 'நேரலை முன்னேற்றம்' : 'Live Progress'}</span>
             </div>
-            <h1 className="tracker-title">Preparation Progress Tracker</h1>
+            <h1 className="tracker-title">{isTamil ? 'தயாரிப்பு முன்னேற்றப் பதிவேடு' : 'Preparation Progress Tracker'}</h1>
             <p className="tracker-subtitle">
-              Comprehensive syllabus coverage across Samacheer Kalvi textbooks (6th–12th) and TNPSC Units.
+              {isTamil
+                ? 'சமச்சீர் கல்வி பாடநூல்கள் (6–12ஆம் வகுப்பு) மற்றும் TNPSC அலகுகளின் முழுமையான தேர்ச்சி நிலவரம்.'
+                : 'Comprehensive syllabus coverage across Samacheer Kalvi textbooks (6th–12th) and TNPSC Units.'}
             </p>
           </div>
         </div>
@@ -148,10 +152,10 @@ export const ProgressTracker: React.FC = () => {
           type="button"
           className="tracker-refresh-btn"
           onClick={() => fetchTrackerStats()}
-          title="Refresh Progress"
+          title={isTamil ? 'முன்னேற்றத்தைப் புதுப்பி' : 'Refresh Progress'}
         >
           <RotateCcw size={16} className={isRefreshing ? 'spinning' : ''} />
-          <span>Refresh</span>
+          <span>{isTamil ? 'புதுப்பி' : 'Refresh'}</span>
         </button>
       </motion.div>
 
@@ -162,9 +166,9 @@ export const ProgressTracker: React.FC = () => {
             <Clock size={18} />
           </div>
           <div>
-            <span className="tracker-summary-label">Total Study Time</span>
+            <span className="tracker-summary-label">{isTamil ? 'மொத்த படிப்பு நேரம்' : 'Total Study Time'}</span>
             <div className="tracker-summary-val">
-              {metrics.totalStudyHours} <span className="tracker-summary-unit">hrs</span>
+              {metrics.totalStudyHours} <span className="tracker-summary-unit">{isTamil ? 'மணி' : 'hrs'}</span>
             </div>
           </div>
         </div>
@@ -176,7 +180,7 @@ export const ProgressTracker: React.FC = () => {
             <Zap size={18} />
           </div>
           <div>
-            <span className="tracker-summary-label">Questions Solved</span>
+            <span className="tracker-summary-label">{isTamil ? 'தீர்க்கப்பட்ட வினாக்கள்' : 'Questions Solved'}</span>
             <div className="tracker-summary-val">
               {metrics.totalQuestionsSolved.toLocaleString()}{' '}
               <span className="tracker-summary-unit">/ {metrics.targetQuestions.toLocaleString()}</span>
@@ -191,7 +195,7 @@ export const ProgressTracker: React.FC = () => {
             <Target size={18} />
           </div>
           <div>
-            <span className="tracker-summary-label">Overall Accuracy</span>
+            <span className="tracker-summary-label">{isTamil ? 'மொத்த துல்லியம்' : 'Overall Accuracy'}</span>
             <div className="tracker-summary-val">
               {metrics.overallAccuracy}
               <span className="tracker-summary-unit">%</span>
@@ -206,9 +210,9 @@ export const ProgressTracker: React.FC = () => {
             <Flame size={18} />
           </div>
           <div>
-            <span className="tracker-summary-label">Active Streak</span>
+            <span className="tracker-summary-label">{isTamil ? 'தொடர்ச்சி நாட்கள்' : 'Active Streak'}</span>
             <div className="tracker-summary-val">
-              {metrics.currentStreak} <span className="tracker-summary-unit">days</span>
+              {metrics.currentStreak} <span className="tracker-summary-unit">{isTamil ? 'நாட்கள்' : 'days'}</span>
             </div>
           </div>
         </div>

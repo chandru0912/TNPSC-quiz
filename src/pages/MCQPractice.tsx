@@ -20,9 +20,9 @@ import {
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import { translateQuestionItem } from '../utils/languageData'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
+import { useTranslatedQuestions } from '../hooks/useTranslatedQuestions'
 import './MCQPractice.css'
 
 interface QuestionItem {
@@ -231,12 +231,25 @@ const MCQPractice = () => {
 
   // Pure database questions (all mock fallback questions completely removed)
   const filteredQuestions: QuestionItem[] = dbQuestions
+  const { translatedMap } = useTranslatedQuestions(filteredQuestions, language)
 
   // Safe fallback if index exceeds filtered questions
   const activeQuestionIndex = Math.min(currentQuestion, Math.max(0, filteredQuestions.length - 1))
   const rawQuestion = filteredQuestions[activeQuestionIndex]
+  const dbTranslation =
+    language === 'ta' && rawQuestion && typeof rawQuestion.id === 'number'
+      ? translatedMap[rawQuestion.id]
+      : undefined
   const questionItem: QuestionItem | null = rawQuestion
-    ? translateQuestionItem(rawQuestion, language)
+    ? dbTranslation
+      ? {
+          ...rawQuestion,
+          question: dbTranslation.question,
+          options: dbTranslation.options,
+          explanation: dbTranslation.explanation || rawQuestion.explanation,
+          tag: dbTranslation.tag || rawQuestion.tag,
+        }
+      : translateQuestionItem(rawQuestion, language)
     : null
 
   const handleGroupSelect = (group: string) => {
@@ -465,8 +478,6 @@ const MCQPractice = () => {
               </button>
             ) : null}
           </div>
-
-          <LanguageSwitch variant="section" forceVisible={true} />
         </div>
 
         <motion.div

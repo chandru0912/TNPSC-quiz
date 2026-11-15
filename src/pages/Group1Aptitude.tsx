@@ -16,7 +16,6 @@ import { group1AptitudeUnits, type AptitudeUnit } from '../data/group1SyllabusDa
 import { standardClasses } from '../data/group1ClassSyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import { translateTopic } from '../utils/bilingualSyllabus'
 import './Group1GeneralStudies.css'
 
@@ -104,7 +103,6 @@ const Group1Aptitude = () => {
             <ArrowLeft size={16} />
             <span>{isTamil ? 'அனைத்து பிரிவுகளுக்கும் திரும்பு' : 'Back to All Categories'}</span>
           </Link>
-          <LanguageSwitch variant="inline" forceVisible={true} />
         </div>
 
         {/* Header */}

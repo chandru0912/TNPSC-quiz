@@ -5,10 +5,12 @@ import { motion } from 'framer-motion'
 import { BookOpen, ChevronRight, GraduationCap, ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../utils/api'
+import { useLanguage } from '../context/LanguageContext'
 import './SchoolMaterials.css'
 
 const SchoolMaterials = () => {
   const navigate = useNavigate()
+  const { isTamil } = useLanguage()
   const [selectedStandard, setSelectedStandard] = useState<number | null>(null)
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null)
   const [selectedLesson, setSelectedLesson] = useState<number | null>(null)
@@ -186,13 +188,15 @@ const SchoolMaterials = () => {
           <motion.div className="school-header" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <button className="back-btn" onClick={handleBack}>
               <ArrowLeft size={20} />
-              <span>Back to Lessons</span>
+              <span>{isTamil ? 'பாடங்களுக்குத் திரும்பு' : 'Back to Lessons'}</span>
             </button>
             <h1 className="school-title">
               <BookOpen size={28} />
-              <span>Lesson {selectedLesson} - Questions</span>
+              <span>{isTamil ? `பாடம் ${selectedLesson} - வினாக்கள்` : `Lesson ${selectedLesson} - Questions`}</span>
             </h1>
-            <p className="school-subtitle">Question {currentQuestion + 1} of {questions.length}</p>
+            <p className="school-subtitle">
+              {isTamil ? `வினா ${currentQuestion + 1} / ${questions.length}` : `Question ${currentQuestion + 1} of ${questions.length}`}
+            </p>
           </motion.div>
 
           <motion.div className="question-card school-question-card glass" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
@@ -251,13 +255,13 @@ const SchoolMaterials = () => {
           <motion.div className="school-header" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <button className="back-btn" onClick={handleBack}>
               <ArrowLeft size={20} />
-              <span>Back to Subjects</span>
+              <span>{isTamil ? 'பாடங்களுக்குத் திரும்பு' : 'Back to Subjects'}</span>
             </button>
             <h1 className="school-title">
               <BookOpen size={28} />
-              <span>{selectedStandard}th Standard - {selectedSubject}</span>
+              <span>{isTamil ? `${selectedStandard}-ஆம் வகுப்பு - ${selectedSubject}` : `${selectedStandard}th Standard - ${selectedSubject}`}</span>
             </h1>
-            <p className="school-subtitle">Lesson-wise Questions</p>
+            <p className="school-subtitle">{isTamil ? 'பாடம் வாரியான வினாக்கள்' : 'Lesson-wise Questions'}</p>
           </motion.div>
 
           <div className="lessons-list">
@@ -295,13 +299,15 @@ const SchoolMaterials = () => {
           <motion.div className="school-header" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <button className="back-btn" onClick={handleBack}>
               <ArrowLeft size={20} />
-              <span>Back to Standards</span>
+              <span>{isTamil ? 'வகுப்புகளுக்குத் திரும்பு' : 'Back to Standards'}</span>
             </button>
             <h1 className="school-title">
               <GraduationCap size={28} />
-              <span>{selectedStandard}th Standard</span>
+              <span>{isTamil ? `${selectedStandard}-ஆம் வகுப்பு` : `${selectedStandard}th Standard`}</span>
             </h1>
-            <p className="school-subtitle">Select a subject to view lesson-wise questions</p>
+            <p className="school-subtitle">
+              {isTamil ? 'பாடம் வாரியான வினாக்களைக் காண பாடத்தைத் தேர்ந்தெடுக்கவும்' : 'Select a subject to view lesson-wise questions'}
+            </p>
           </motion.div>
 
           <div className="subjects-grid school-subjects">

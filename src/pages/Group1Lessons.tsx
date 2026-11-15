@@ -17,7 +17,6 @@ import {
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { compareLessons } from '../utils/naturalSort'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateLessonTitle,
   translateLessonDescription,
@@ -197,8 +196,6 @@ const Group1Lessons = () => {
             <ArrowLeft size={16} />
             <span>{isTamil ? `பாடத்திட்டத்திற்குத் திரும்பு (${translateUnitNumber(unit.unitNumber, language)})` : `Back to ${unit.unitNumber} Syllabus`}</span>
           </Link>
-
-          <LanguageSwitch />
         </div>
 
         {/* Header */}

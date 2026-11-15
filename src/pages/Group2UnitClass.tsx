@@ -36,7 +36,6 @@ import { getGroup2SubjectById } from '../data/group2SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonNotes, type LessonNotesDeck } from '../data/studyNotesData'
 import { useLanguage } from '../context/LanguageContext'
-import LanguageSwitch from '../components/LanguageSwitch'
 import {
   translateTopic,
   translateLesson,
@@ -354,8 +353,6 @@ const Group2UnitClass = () => {
             <ArrowLeft size={16} />
             <span>{isTamil ? 'பிரிவுக்குத் திரும்பு' : `Back to ${subject?.title || 'General Studies'}`}</span>
           </Link>
-
-          <LanguageSwitch variant="inline" forceVisible={true} />
 
           <Link
             to={`/materials/group2/${activeSubjectId}/unit/${parsedUnitId}`}

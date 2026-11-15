@@ -5,6 +5,7 @@ import { StudentSidebar } from '../components/StudentSidebar';
 import TargetGroupOnboardingModal from '../components/TargetGroupOnboardingModal';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useStudentAuth } from '../context/StudentAuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useScrollLock } from '../hooks/useScrollLock';
 import './StudentDashboardLayout.css';
 
@@ -13,6 +14,7 @@ export const StudentDashboardLayout: React.FC = () => {
   const location = useLocation();
   const mainViewportRef = useRef<HTMLDivElement>(null);
   const { student } = useStudentAuth();
+  const { isTamil } = useLanguage();
 
   // Lock background scroll when mobile sidebar drawer is active
   useScrollLock(mobileSidebarOpen);
@@ -30,17 +32,54 @@ export const StudentDashboardLayout: React.FC = () => {
   // Derive human-readable active section title for mobile header
   const getPageTitle = (): { title: string; category: string } => {
     const p = location.pathname.toLowerCase();
-    if (p === '/dashboard') return { title: 'My Dashboard', category: 'Overview & Telemetry' };
-    if (p.startsWith('/materials')) return { title: 'Study Materials', category: 'Syllabus & Textbooks' };
-    if (p.startsWith('/school-materials') || p.startsWith('/study-materials/practice'))
-      return { title: 'Lesson-wise Questions', category: 'Standard-wise Practice' };
-    if (p.startsWith('/practice')) return { title: 'MCQ Practice', category: 'Objective Question Bank' };
-    if (p.startsWith('/mock-tests')) return { title: 'Mock Tests', category: 'Full Exam Simulations' };
-    if (p.startsWith('/previous-papers')) return { title: 'Previous Year Papers', category: 'Past Solved Papers' };
-    if (p.startsWith('/mark-list')) return { title: 'Mark List', category: 'Scorecards & Evaluation' };
-    if (p.startsWith('/progress-tracker')) return { title: 'Progress Tracker', category: 'Syllabus Mastery' };
-    if (p.startsWith('/study-notes')) return { title: 'Study Notes', category: 'Bilingual Lesson Notes' };
-    return { title: 'Study Hub', category: 'Student Portal' };
+    if (p === '/dashboard') {
+      return isTamil
+        ? { title: 'என் முகப்பு', category: 'கண்ணோட்டம் & செயல்பாடு' }
+        : { title: 'My Dashboard', category: 'Overview & Telemetry' };
+    }
+    if (p.startsWith('/materials')) {
+      return isTamil
+        ? { title: 'பாடக்குறிப்புகள்', category: 'பாடத்திட்டம் & பாடநூல்கள்' }
+        : { title: 'Study Materials', category: 'Syllabus & Textbooks' };
+    }
+    if (p.startsWith('/school-materials') || p.startsWith('/study-materials/practice')) {
+      return isTamil
+        ? { title: 'பாடம் வாரியான வினாக்கள்', category: 'வகுப்பு வாரியான பயிற்சி' }
+        : { title: 'Lesson-wise Questions', category: 'Standard-wise Practice' };
+    }
+    if (p.startsWith('/practice')) {
+      return isTamil
+        ? { title: 'பயிற்சி வினாக்கள்', category: 'கொள்குறி வினா வங்கி' }
+        : { title: 'MCQ Practice', category: 'Objective Question Bank' };
+    }
+    if (p.startsWith('/mock-tests')) {
+      return isTamil
+        ? { title: 'மாதிரித் தேர்வுகள்', category: 'முழுத் தேர்வுப் பயிற்சி' }
+        : { title: 'Mock Tests', category: 'Full Exam Simulations' };
+    }
+    if (p.startsWith('/previous-papers')) {
+      return isTamil
+        ? { title: 'முந்தைய ஆண்டு வினாக்கள்', category: 'தீர்க்கப்பட்ட வினாத்தாள்கள்' }
+        : { title: 'Previous Year Papers', category: 'Past Solved Papers' };
+    }
+    if (p.startsWith('/mark-list')) {
+      return isTamil
+        ? { title: 'மதிப்பெண் பட்டியல்', category: 'மதிப்பெண்கள் & மதிப்பீடு' }
+        : { title: 'Mark List', category: 'Scorecards & Evaluation' };
+    }
+    if (p.startsWith('/progress-tracker')) {
+      return isTamil
+        ? { title: 'முன்னேற்றப் பதிவேடு', category: 'பாடத்திட்ட தேர்ச்சி' }
+        : { title: 'Progress Tracker', category: 'Syllabus Mastery' };
+    }
+    if (p.startsWith('/study-notes')) {
+      return isTamil
+        ? { title: 'பாடக் குறிப்புகள்', category: 'இருமொழிப் பாடக்குறிப்புகள்' }
+        : { title: 'Study Notes', category: 'Bilingual Lesson Notes' };
+    }
+    return isTamil
+      ? { title: 'கற்றல் மையம்', category: 'மாணவர் தளம்' }
+      : { title: 'Study Hub', category: 'Student Portal' };
   };
 
   const { title: currentTitle, category: currentCategory } = getPageTitle();

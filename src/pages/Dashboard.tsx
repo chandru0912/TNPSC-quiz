@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import './Dashboard.css'
 import { useStudentAuth } from '../context/StudentAuthContext'
+import { useLanguage } from '../context/LanguageContext'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { apiFetch } from '../utils/api'
 import { CloudAiGeneratorModal } from '../components/CloudAiGeneratorModal'
@@ -232,65 +233,66 @@ const Dashboard = () => {
     return () => clearInterval(pollInterval)
   }, [fetchDashboardStats])
 
-  const userName = student?.fullName || data.student.fullName || 'Student'
+  const { isTamil } = useLanguage()
+  const userName = student?.fullName || data.student.fullName || (isTamil ? 'மாணவர்' : 'Student')
   const userGroup =
     student?.targetGroup === 'group1'
-      ? 'Group 1 Aspirant'
+      ? (isTamil ? 'குரூப் 1 தேர்வர்' : 'Group 1 Aspirant')
       : student?.targetGroup === 'group2a'
-        ? 'Group 2A Aspirant'
+        ? (isTamil ? 'குரூப் 2A தேர்வர்' : 'Group 2A Aspirant')
         : student?.targetGroup === 'group2'
-          ? 'Group 2 & 2A Aspirant'
-          : 'Group 4 & VAO Aspirant'
+          ? (isTamil ? 'குரூப் 2 & 2A தேர்வர்' : 'Group 2 & 2A Aspirant')
+          : (isTamil ? 'குரூப் 4 & VAO தேர்வர்' : 'Group 4 & VAO Aspirant')
 
   const featureCards = [
     {
-      title: 'Study Materials',
-      description: 'Standard-wise notes and syllabus coverage.',
+      title: isTamil ? 'பாடக்குறிப்புகள்' : 'Study Materials',
+      description: isTamil ? 'வகுப்பு வாரியான குறிப்புகள் மற்றும் பாடத்திட்டம்.' : 'Standard-wise notes and syllabus coverage.',
       to: '/materials',
       icon: BookOpen,
-      meta: `${data.metrics.materialsStudied}/${data.metrics.targetMaterials} chapters`,
+      meta: isTamil ? `${data.metrics.materialsStudied}/${data.metrics.targetMaterials} அத்தியாயங்கள்` : `${data.metrics.materialsStudied}/${data.metrics.targetMaterials} chapters`,
     },
     {
-      title: 'Lesson-wise Questions',
-      description: 'Practice after every lesson you finish.',
+      title: isTamil ? 'பாடம் வாரியான வினாக்கள்' : 'Lesson-wise Questions',
+      description: isTamil ? 'ஒவ்வொரு பாடத்திற்கும் பிறகு உடனடி பயிற்சி.' : 'Practice after every lesson you finish.',
       to: '/school-materials',
       icon: ListChecks,
-      meta: '6th – 12th std',
+      meta: isTamil ? '6-ஆம் – 12-ஆம் வகுப்பு' : '6th – 12th std',
     },
     {
-      title: 'MCQ Practice',
-      description: 'Topic-wise objective questions with answers.',
+      title: isTamil ? 'பயிற்சி வினாக்கள்' : 'MCQ Practice',
+      description: isTamil ? 'தலைப்பு வாரியான கொள்குறி வினாக்கள் & விளக்கங்கள்.' : 'Topic-wise objective questions with answers.',
       to: '/practice',
       icon: FileText,
-      meta: `${data.metrics.totalQuestionsSolved} solved`,
+      meta: isTamil ? `${data.metrics.totalQuestionsSolved} தீர்க்கப்பட்டவை` : `${data.metrics.totalQuestionsSolved} solved`,
     },
     {
-      title: 'Mock Tests',
-      description: 'Full-length tests with real exam timing.',
+      title: isTamil ? 'மாதிரித் தேர்வுகள்' : 'Mock Tests',
+      description: isTamil ? 'உண்மையான தேர்வு நேரத்துடன் முழு மாதிரித் தேர்வுகள்.' : 'Full-length tests with real exam timing.',
       to: '/mock-tests',
       icon: GraduationCap,
-      meta: `${data.metrics.mockTestsCompleted} completed`,
+      meta: isTamil ? `${data.metrics.mockTestsCompleted} முடிந்தது` : `${data.metrics.mockTestsCompleted} completed`,
     },
     {
-      title: 'Previous Year Questions',
-      description: 'Solved papers from past TNPSC exams.',
+      title: isTamil ? 'முந்தைய ஆண்டு வினாக்கள்' : 'Previous Year Questions',
+      description: isTamil ? 'கடந்த TNPSC தேர்வுகளின் தீர்க்கப்பட்ட வினாத்தாள்கள்.' : 'Solved papers from past TNPSC exams.',
       to: '/previous-papers',
       icon: Archive,
       meta: '2015 – 2025',
     },
     {
-      title: 'Progress Tracker',
-      description: 'See accuracy, streaks and weak areas.',
+      title: isTamil ? 'முன்னேற்றப் பதிவேடு' : 'Progress Tracker',
+      description: isTamil ? 'துல்லியம், தொடர்ச்சி மற்றும் மேம்படுத்த வேண்டிய பகுதிகள்.' : 'See accuracy, streaks and weak areas.',
       to: '/progress-tracker',
       icon: TrendingUp,
-      meta: 'Updated live',
+      meta: isTamil ? 'நேரலைப் புதுப்பிப்பு' : 'Updated live',
     },
     {
-      title: 'Mark List',
-      description: 'Exam scorecards, marks obtained & evaluation.',
+      title: isTamil ? 'மதிப்பெண் பட்டியல்' : 'Mark List',
+      description: isTamil ? 'தேர்வு மதிப்பெண்கள் & செயல்திறன் மதிப்பீடு.' : 'Exam scorecards, marks obtained & evaluation.',
       to: '/mark-list',
       icon: Award,
-      meta: 'All Assessments',
+      meta: isTamil ? 'அனைத்துத் தேர்வுகளும்' : 'All Assessments',
     },
   ]
 
@@ -312,10 +314,18 @@ const Dashboard = () => {
         >
           <div className="dash-header-left">
             <div>
-              <p className="dash-eyebrow">Study Dashboard</p>
-              <h1 className="dash-title">My Dashboard</h1>
+              <p className="dash-eyebrow">{isTamil ? 'கற்றல் முகப்பு' : 'Study Dashboard'}</p>
+              <h1 className="dash-title">{isTamil ? 'என் முகப்பு' : 'My Dashboard'}</h1>
               <p className="dash-subtitle">
-                Welcome back, <span className="dash-user-highlight">{userName}</span> ({userGroup}) • Your TNPSC preparation, tracked live.
+                {isTamil ? (
+                  <>
+                    நல்வரவு, <span className="dash-user-highlight">{userName}</span> ({userGroup}) • உங்கள் TNPSC தயாரிப்பு நேரலையில் கண்காணிக்கப்படுகிறது.
+                  </>
+                ) : (
+                  <>
+                    Welcome back, <span className="dash-user-highlight">{userName}</span> ({userGroup}) • Your TNPSC preparation, tracked live.
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -323,7 +333,7 @@ const Dashboard = () => {
             <DateCalendarPopover />
             <div className="dash-chip dash-chip-gold">
               <Flame size={16} />
-              <span>{data.metrics.currentStreak} day streak</span>
+              <span>{isTamil ? `${data.metrics.currentStreak} நாள் தொடர்ச்சி` : `${data.metrics.currentStreak} day streak`}</span>
             </div>
             <button
               type="button"
@@ -399,10 +409,10 @@ const Dashboard = () => {
               <Clock size={16} />
             </div>
             <div className="dash-summary-info">
-              <span className="dash-summary-label">Total Study Time</span>
+              <span className="dash-summary-label">{isTamil ? 'மொத்த படிப்பு நேரம்' : 'Total Study Time'}</span>
               <span className="dash-summary-val">
                 {data.metrics.totalStudyHours}{' '}
-                <span className="dash-summary-unit">hrs</span>
+                <span className="dash-summary-unit">{isTamil ? 'மணி' : 'hrs'}</span>
               </span>
             </div>
           </div>
@@ -412,7 +422,7 @@ const Dashboard = () => {
               <Zap size={16} />
             </div>
             <div className="dash-summary-info">
-              <span className="dash-summary-label">Questions Solved</span>
+              <span className="dash-summary-label">{isTamil ? 'தீர்க்கப்பட்ட வினாக்கள்' : 'Questions Solved'}</span>
               <span className="dash-summary-val">
                 {data.metrics.totalQuestionsSolved ?? 0}{' '}
                 <span className="dash-summary-unit">/ {Number(data.metrics.targetQuestions ?? 2500).toLocaleString()}</span>
@@ -425,7 +435,7 @@ const Dashboard = () => {
               <Target size={16} />
             </div>
             <div className="dash-summary-info">
-              <span className="dash-summary-label">Overall Accuracy</span>
+              <span className="dash-summary-label">{isTamil ? 'மொத்த துல்லியம்' : 'Overall Accuracy'}</span>
               <span className="dash-summary-val">{data.metrics.overallAccuracy}%</span>
             </div>
           </div>
@@ -534,11 +544,13 @@ const Dashboard = () => {
         <section className="dash-section">
           <div className="dash-section-head">
             <div>
-              <h2 className="dash-section-title">Start learning</h2>
-              <p className="dash-section-sub">Everything you need for TNPSC, one tap away.</p>
+              <h2 className="dash-section-title">{isTamil ? 'கற்றலைத் தொடங்குக' : 'Start learning'}</h2>
+              <p className="dash-section-sub">
+                {isTamil ? 'TNPSC தேர்வுக்குத் தேவையான அனைத்தும் ஒரே இடத்தில்.' : 'Everything you need for TNPSC, one tap away.'}
+              </p>
             </div>
             <span className="dash-section-tag">
-              <Zap size={14} /> Live Practice Modules
+              <Zap size={14} /> {isTamil ? 'நேரலைப் பயிற்சித் தொகுதிகள்' : 'Live Practice Modules'}
             </span>
           </div>
 
