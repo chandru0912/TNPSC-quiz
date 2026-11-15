@@ -12,6 +12,10 @@ import {
   applyCachedTranslations,
   translateAndCacheQuestions,
 } from '../services/questionTranslationService';
+import {
+  generateTextbookGroundedExplanations,
+  applyExplanationToDatabase,
+} from '../services/explanationGeneratorService';
 
 const router = Router();
 
@@ -114,6 +118,101 @@ router.post('/translate', async (req: Request, res: Response) => {
       message: 'Failed to translate questions',
       error: error.message,
     });
+  }
+});
+
+/**
+ * GET /api/questions/admin/missing-explanations (Admin Protected)
+ * Identifies existing MCQs without detailed explanations so admins can generate & review them.
+ */
+router.get('/admin/missing-explanations', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50), 200);
+    const result = await pool.query(
+      `SELECT id, category, subject, class_id, unit_id, lesson_title, topic,
+              question_text, explanation, source_reference, status
+       FROM questions
+       WHERE explanation IS NULL OR TRIM(explanation) = '' OR LENGTH(TRIM(explanation)) < 25
+       ORDER BY id DESC
+       LIMIT $1`,
+      [limit]
+    );
+    return res.status(200).json({
+      status: 'success',
+      count: result.rows.length,
+      data: result.rows,
+    });
+  } catch (error: any) {
+    console.error('[Missing Explanations Error]:', error);
+    return res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+/**
+ * POST /api/questions/admin/generate-explanations (Admin Protected)
+ * Generates textbook-grounded English & Tamil explanations for specified question IDs.
+ * Supports previewOnly=true so admin can review before updating published content.
+ */
+router.post('/admin/generate-explanations', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const questionIds = Array.isArray(req.body?.questionIds) ? req.body.questionIds : [];
+    const previewOnly = req.body?.previewOnly !== false;
+
+    if (questionIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'questionIds array is required.' });
+    }
+
+    const generated = await generateTextbookGroundedExplanations(questionIds, {
+      applyToDatabase: !previewOnly,
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      previewOnly,
+      count: generated.length,
+      data: generated,
+    });
+  } catch (error: any) {
+    console.error('[Generate Explanations Error]:', error);
+    return res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+/**
+ * POST /api/questions/admin/apply-explanations (Admin Protected)
+ * Saves admin-reviewed English & Tamil explanations against existing question IDs.
+ */
+router.post('/admin/apply-explanations', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const items = Array.isArray(req.body?.explanations) ? req.body.explanations : [];
+    if (items.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'explanations array is required.' });
+    }
+
+    let updatedCount = 0;
+    for (const item of items) {
+      const qid = Number(item?.questionId);
+      const explanationEn = String(item?.explanationEn || '').trim();
+      if (!Number.isInteger(qid) || qid <= 0 || !explanationEn) continue;
+
+      await applyExplanationToDatabase({
+        questionId: qid,
+        explanationEn,
+        explanationTa: item?.explanationTa ? String(item.explanationTa).trim() : undefined,
+        sourceReference: item?.sourceReference ? String(item.sourceReference).trim() : undefined,
+        textbookId: item?.textbookId ? Number(item.textbookId) : null,
+        sourcePage: item?.sourcePage ? Number(item.sourcePage) : null,
+      });
+      updatedCount++;
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      updatedCount,
+    });
+  } catch (error: any) {
+    console.error('[Apply Explanations Error]:', error);
+    return res.status(500).json({ status: 'error', message: error.message });
   }
 });
 

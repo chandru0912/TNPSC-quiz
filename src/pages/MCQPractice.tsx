@@ -43,6 +43,7 @@ interface QuestionItem {
   correctAnswer: number
   explanation: string
   sourceReference?: string
+  sourcePage?: number | null
 }
 
 const MCQPractice = () => {
@@ -131,6 +132,7 @@ const MCQPractice = () => {
   const [currentQuestion, setCurrentQuestion] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
   const [showResult, setShowResult] = useState(false)
+  const [showExplanation, setShowExplanation] = useState(false)
   const [score, setScore] = useState(0)
   const [answeredQuestions, setAnsweredQuestions] = useState(0)
   const [isQuizCompleted, setIsQuizCompleted] = useState(false)
@@ -262,6 +264,11 @@ const MCQPractice = () => {
   const activeQuestionIndex = Math.min(currentQuestion, Math.max(0, filteredQuestions.length - 1))
   const { translatedMap, isTranslating, translatedCount, totalTranslatableCount } =
     useTranslatedQuestions(filteredQuestions, questionLang, activeQuestionIndex)
+
+  // Collapse explanation when navigating to a different question; auto-open in review mode
+  useEffect(() => {
+    setShowExplanation(isReviewMode)
+  }, [activeQuestionIndex, isReviewMode])
 
   const rawQuestion = filteredQuestions[activeQuestionIndex]
   const dbTranslation =
@@ -947,31 +954,69 @@ const MCQPractice = () => {
                   animate={{ opacity: 1, height: 'auto' }}
                   transition={{ duration: 0.3 }}
                 >
-                  <div className="explanation-header">
-                    <span className="explanation-status">
-                      {selectedAnswer === questionItem.correctAnswer
-                        ? (isTamil ? 'சரியான விடை!' : 'Correct!')
-                        : (isTamil ? 'தவறான விடை' : 'Incorrect')}
-                    </span>
-                    <span className="correct-answer-label">
-                      {isTamil
-                        ? `சரியான விடை: விருப்பம் ${String.fromCharCode(65 + questionItem.correctAnswer)}`
-                        : `Correct Answer: Option ${String.fromCharCode(65 + questionItem.correctAnswer)}`}
-                    </span>
-                  </div>
-                  <p className="explanation-text">{questionItem.explanation}</p>
-                  {questionItem.sourceReference && (
-                    <div
+                  <div className="explanation-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <span className="explanation-status">
+                        {selectedAnswer === questionItem.correctAnswer
+                          ? (questionLang === 'ta' ? 'சரியான விடை!' : 'Correct!')
+                          : (questionLang === 'ta' ? 'தவறான விடை' : 'Incorrect')}
+                      </span>
+                      <span className="correct-answer-label">
+                        {questionLang === 'ta'
+                          ? `சரியான விடை: விருப்பம் ${String.fromCharCode(65 + questionItem.correctAnswer)}`
+                          : `Correct Answer: Option ${String.fromCharCode(65 + questionItem.correctAnswer)}`}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowExplanation((prev) => !prev)}
+                      className="btn btn-secondary btn-sm"
                       style={{
-                        marginTop: '0.75rem',
-                        fontSize: '0.85rem',
-                        color: '#94a3b8',
-                        borderTop: '1px dashed rgba(255,255,255,0.1)',
-                        paddingTop: '0.5rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        padding: '0.35rem 0.75rem',
+                        fontSize: '0.82rem',
                       }}
                     >
-                      <strong style={{ color: '#38bdf8' }}>{isTamil ? 'பாடநூல் ஆதாரம்:' : 'Source Reference:'}</strong>{' '}
-                      {questionItem.sourceReference}
+                      <BookOpen size={14} />
+                      <span>
+                        {showExplanation
+                          ? (questionLang === 'ta' ? 'விளக்கத்தை மறை' : 'Hide Explanation')
+                          : (questionLang === 'ta' ? 'விளக்கத்தைக் காண்க' : 'View Explanation')}
+                      </span>
+                    </button>
+                  </div>
+
+                  {showExplanation && (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <p className="explanation-text">
+                        {questionItem.explanation && questionItem.explanation.trim().length > 0
+                          ? questionItem.explanation
+                          : (questionLang === 'ta'
+                              ? 'இந்த வினாவிற்கு விரிவான பாடநூல் விளக்கம் இன்னும் சேர்க்கப்படவில்லை.'
+                              : 'Detailed textbook explanation is not yet recorded for this question.')}
+                      </p>
+                      {(questionItem.sourceReference || questionItem.sourcePage) && (
+                        <div
+                          style={{
+                            marginTop: '0.75rem',
+                            fontSize: '0.85rem',
+                            color: '#94a3b8',
+                            borderTop: '1px dashed rgba(255,255,255,0.1)',
+                            paddingTop: '0.5rem',
+                          }}
+                        >
+                          <strong style={{ color: '#38bdf8' }}>
+                            {questionLang === 'ta' ? 'பாடநூல் ஆதாரம்:' : 'Textbook Source:'}
+                          </strong>{' '}
+                          {questionItem.sourceReference || 'Samacheer Kalvi Textbook'}
+                          {questionItem.sourcePage && !String(questionItem.sourceReference || '').toLowerCase().includes('page')
+                            ? ` • Page ${questionItem.sourcePage}`
+                            : ''}
+                        </div>
+                      )}
                     </div>
                   )}
                 </motion.div>

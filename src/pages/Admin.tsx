@@ -274,6 +274,22 @@ const Admin = () => {
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [isBulkPublishModalOpen, setIsBulkPublishModalOpen] = useState(false)
   const [isBulkPublishing, setIsBulkPublishing] = useState(false)
+  const [isGeneratingExplanations, setIsGeneratingExplanations] = useState(false)
+  const [isApplyingExplanations, setIsApplyingExplanations] = useState(false)
+  const [isExplanationReviewModalOpen, setIsExplanationReviewModalOpen] = useState(false)
+  const [explanationPreviewItems, setExplanationPreviewItems] = useState<Array<{
+    questionId: number
+    question: string
+    correctOptionLetter: string
+    correctOptionText: string
+    explanationEn: string
+    explanationTa: string
+    sourceReference: string
+    textbookId: number | null
+    sourcePage: number | null
+    hasSufficientTextbookContent: boolean
+    limitationNote?: string
+  }>>([])
 
   // Only explicitly selected STAGING questions are eligible for bulk publishing.
   const selectedStagingIds = questions
@@ -3168,6 +3184,72 @@ const Admin = () => {
     }
   }
 
+  const handleGenerateExplanations = async () => {
+    if (!token || isGeneratingExplanations) return
+    const targetIds =
+      selectedQuestionIds.size > 0
+        ? Array.from(selectedQuestionIds).slice(0, 20)
+        : questions
+            .filter((q) => !q.explanation || q.explanation.trim().length < 25)
+            .slice(0, 20)
+            .map((q) => q.id)
+
+    if (targetIds.length === 0) {
+      showToast('error', 'Select questions or ensure there are visible questions missing explanations.')
+      return
+    }
+
+    setIsGeneratingExplanations(true)
+    try {
+      const res = await apiFetch('/api/questions/admin/generate-explanations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ questionIds: targetIds, previewOnly: true }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        showToast('error', data.message || 'Failed to generate textbook explanations')
+        return
+      }
+      const items = Array.isArray(data.data) ? data.data : []
+      if (items.length === 0) {
+        showToast('error', 'No explanations could be generated for the selected questions.')
+        return
+      }
+      setExplanationPreviewItems(items)
+      setIsExplanationReviewModalOpen(true)
+    } catch {
+      showToast('error', 'Network error while generating textbook explanations')
+    } finally {
+      setIsGeneratingExplanations(false)
+    }
+  }
+
+  const handleApplyExplanations = async () => {
+    if (!token || explanationPreviewItems.length === 0 || isApplyingExplanations) return
+    setIsApplyingExplanations(true)
+    try {
+      const res = await apiFetch('/api/questions/admin/apply-explanations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ explanations: explanationPreviewItems }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        showToast('error', data.message || 'Failed to save explanations')
+        return
+      }
+      showToast('success', `Saved textbook-grounded explanations for ${data.updatedCount ?? explanationPreviewItems.length} question(s).`)
+      setIsExplanationReviewModalOpen(false)
+      setExplanationPreviewItems([])
+      fetchQuestions()
+    } catch {
+      showToast('error', 'Network error while saving explanations')
+    } finally {
+      setIsApplyingExplanations(false)
+    }
+  }
+
   // Selection helpers for Study Notes
   const toggleSelectNote = (id: number) => {
     setSelectedNoteIds((prev) => {
@@ -4762,6 +4844,14 @@ const Admin = () => {
                 )}
                 <button className="admin-btn admin-btn-secondary" onClick={toggleSelectAllVisible} disabled={questions.length === 0}>
                   {selectedQuestionIds.size === questions.length && questions.length > 0 ? 'Deselect All Visible' : 'Select All Visible'}
+                </button>
+                <button
+                  className="admin-btn admin-btn-secondary"
+                  onClick={handleGenerateExplanations}
+                  disabled={questions.length === 0 || isGeneratingExplanations}
+                  title="Generate textbook-grounded English & Tamil explanations for selected or missing-explanation MCQs (preview before saving)"
+                >
+                  <span>{isGeneratingExplanations ? 'Generating Explanations...' : '📚 Generate Explanations'}</span>
                 </button>
                 <button
                   className="admin-btn admin-bulk-publish-btn"
@@ -8130,12 +8220,90 @@ const Admin = () => {
                   Cancel
                 </button>
                 <button
+                  className="admin-btn admin-btn-secondary"
+                  onClick={handleGenerateExplanations}
+                  disabled={questions.length === 0 || isGeneratingExplanations}
+                  title="Generate textbook-grounded English & Tamil explanations for selected or missing-explanation MCQs (preview before saving)"
+                >
+                  <span>{isGeneratingExplanations ? 'Generating Explanations...' : '📚 Generate Explanations'}</span>
+                </button>
+                <button
                   className="admin-btn admin-bulk-publish-btn"
                   onClick={handleBulkPublish}
                   disabled={isBulkPublishing || selectedStagingIds.length === 0}
                 >
                   {isBulkPublishing ? <RefreshCw size={16} className="spin-icon" /> : <CheckCircle size={16} />}
                   <span>{isBulkPublishing ? 'Publishing...' : 'Confirm & Publish'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Textbook Explanation Review Modal */}
+      <AnimatePresence>
+        {isExplanationReviewModalOpen && (
+          <div className="admin-modal-backdrop">
+            <motion.div
+              className="admin-modal"
+              style={{ maxWidth: '860px', width: '95%', maxHeight: '85vh', overflowY: 'auto' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <div className="admin-modal-header">
+                <h2 className="admin-modal-title">Review Textbook-Grounded Explanations ({explanationPreviewItems.length})</h2>
+                <button className="admin-modal-close" onClick={() => setIsExplanationReviewModalOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="admin-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ fontSize: '0.88rem', opacity: 0.85, margin: 0 }}>
+                  Review the generated English and Tamil explanations and verified textbook references below before saving to the Question Bank.
+                </p>
+                {explanationPreviewItems.map((item) => (
+                  <div
+                    key={item.questionId}
+                    style={{
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: '10px',
+                      padding: '0.9rem',
+                      background: 'rgba(255,255,255,0.03)',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, marginBottom: '0.35rem', fontSize: '0.92rem' }}>
+                      #{item.questionId}: {item.question}
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#34d399', marginBottom: '0.45rem' }}>
+                      Verified Answer: Option {item.correctOptionLetter} ({item.correctOptionText})
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#38bdf8', marginBottom: '0.5rem' }}>
+                      Source: {item.sourceReference}
+                      {!item.hasSufficientTextbookContent && item.limitationNote ? ` — ⚠ ${item.limitationNote}` : ''}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', marginBottom: '0.45rem' }}>
+                      <strong>English:</strong> {item.explanationEn}
+                    </div>
+                    {item.explanationTa && (
+                      <div style={{ fontSize: '0.85rem', opacity: 0.92 }}>
+                        <strong>தமிழ்:</strong> {item.explanationTa}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="admin-modal-footer">
+                <button className="admin-btn admin-btn-secondary" onClick={() => setIsExplanationReviewModalOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="admin-btn admin-btn-primary"
+                  onClick={handleApplyExplanations}
+                  disabled={isApplyingExplanations}
+                >
+                  {isApplyingExplanations ? <RefreshCw size={16} className="spin-icon" /> : <CheckCircle size={16} />}
+                  <span>{isApplyingExplanations ? 'Saving...' : 'Approve & Save Explanations'}</span>
                 </button>
               </div>
             </motion.div>
