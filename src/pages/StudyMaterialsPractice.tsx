@@ -14,6 +14,7 @@ import {
   Sparkles,
   Layers,
   GraduationCap,
+  Languages,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import {
@@ -79,9 +80,26 @@ export const StudyMaterialsPractice: React.FC = () => {
   const lessonIdParam = routeParams.lessonId || searchParams.get('lessonId') || ''
   const lessonTitleParam = searchParams.get('lesson') || searchParams.get('lessonTitle') || ''
 
-  // Global language state from Student Dashboard selector
-  const { language, isTamil } = useLanguage()
-  const selectedLanguage: 'tamil' | 'english' = isTamil ? 'tamil' : 'english'
+  const { isTamil } = useLanguage()
+
+  // Independent MCQ Question Display Language (completely separate from Global Website Language)
+  const [questionLang, setQuestionLang] = useState<'en' | 'ta'>(() => {
+    try {
+      const saved = localStorage.getItem('mcq_question_language')
+      if (saved === 'en' || saved === 'ta') return saved
+    } catch {}
+    return 'en'
+  })
+
+  const handleQuestionLangChange = (nextLang: 'en' | 'ta') => {
+    if (nextLang === questionLang) return
+    setQuestionLang(nextLang)
+    try {
+      localStorage.setItem('mcq_question_language', nextLang)
+    } catch {}
+  }
+
+  const selectedLanguage: 'tamil' | 'english' = questionLang === 'ta' ? 'tamil' : 'english'
 
   // Live Questions State
   const [questions, setQuestions] = useState<StudyMaterialQuestionItem[]>([])
@@ -220,12 +238,13 @@ export const StudyMaterialsPractice: React.FC = () => {
     displayLessonTitle,
   ])
 
-  const { translatedMap } = useTranslatedQuestions(questions, language)
+  const { translatedMap, isTranslating, translatedCount, totalTranslatableCount } =
+    useTranslatedQuestions(questions, questionLang, currentIndex)
 
-  // Current Active Question (overlay cached Tamil translation when global language is Tamil)
+  // Current Active Question (overlay cached Tamil translation when questionLang is Tamil)
   const rawActiveQuestion = questions[currentIndex]
   const dbTranslation =
-    language === 'ta' && rawActiveQuestion && typeof rawActiveQuestion.id === 'number'
+    questionLang === 'ta' && rawActiveQuestion && typeof rawActiveQuestion.id === 'number'
       ? translatedMap[rawActiveQuestion.id]
       : undefined
   const activeQuestion = rawActiveQuestion
@@ -402,11 +421,55 @@ export const StudyMaterialsPractice: React.FC = () => {
                 <span className="sm-stat-number">{questions.length}</span>
                 <span className="sm-stat-label">Questions</span>
               </div>
-              <div className="sm-stat-box">
-                <span className="sm-stat-number" style={{ color: '#38bdf8' }}>
-                  {selectedLanguage === 'tamil' ? 'தமிழ்' : 'English'}
+              <div className="sm-stat-box" style={{ minWidth: '175px' }}>
+                <div
+                  role="radiogroup"
+                  aria-label="Question Language"
+                  style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'center' }}
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={questionLang === 'en'}
+                    onClick={() => handleQuestionLangChange('en')}
+                    style={{
+                      padding: '0.32rem 0.65rem',
+                      borderRadius: '8px',
+                      border: questionLang === 'en' ? '1px solid rgba(56, 189, 248, 0.7)' : '1px solid rgba(255,255,255,0.12)',
+                      background: questionLang === 'en' ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.6)',
+                      color: questionLang === 'en' ? '#38bdf8' : '#94a3b8',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    English
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={questionLang === 'ta'}
+                    onClick={() => handleQuestionLangChange('ta')}
+                    style={{
+                      padding: '0.32rem 0.65rem',
+                      borderRadius: '8px',
+                      border: questionLang === 'ta' ? '1px solid rgba(255, 215, 0, 0.7)' : '1px solid rgba(255,255,255,0.12)',
+                      background: questionLang === 'ta' ? 'rgba(255, 215, 0, 0.2)' : 'rgba(15, 23, 42, 0.6)',
+                      color: questionLang === 'ta' ? '#ffd700' : '#94a3b8',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    தமிழ்
+                  </button>
+                </div>
+                <span className="sm-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.25rem' }}>
+                  <Languages size={12} />
+                  {questionLang === 'ta' && isTranslating
+                    ? `Translating (${translatedCount}/${totalTranslatableCount})`
+                    : 'Question Language'}
                 </span>
-                <span className="sm-stat-label">Language</span>
               </div>
             </div>
           </div>
@@ -675,7 +738,16 @@ export const StudyMaterialsPractice: React.FC = () => {
                 <h3 style={{ color: '#ffffff', fontSize: '1.2rem', marginBottom: '0.5rem' }}>
                   Complete Question Review ({questions.length} Questions):
                 </h3>
-                {questions.map((q, idx) => {
+                {questions.map((rawQ, idx) => {
+                  const tr = questionLang === 'ta' && typeof rawQ.id === 'number' ? translatedMap[rawQ.id] : undefined
+                  const q = tr
+                    ? {
+                        ...rawQ,
+                        question: tr.question,
+                        options: tr.options,
+                        explanation: tr.explanation || rawQ.explanation,
+                      }
+                    : rawQ
                   const ans = userAnswers[idx]
                   return (
                     <div

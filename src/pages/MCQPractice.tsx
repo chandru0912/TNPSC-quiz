@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -50,34 +50,22 @@ const MCQPractice = () => {
   useStudyTimeTracker()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { language, isTamil } = useLanguage()
+  const { isTamil } = useLanguage()
 
-  // Question Display Language (defaults to global Student Dashboard language; student can override locally)
-  const [questionLang, setQuestionLang] = useState<'en' | 'ta'>(() => {
+  // Independent MCQ Question Display Language (completely separate from Global Website Language)
+  const [mcqQuestionLanguage, setMcqQuestionLanguage] = useState<'en' | 'ta'>(() => {
     try {
-      const saved = localStorage.getItem('tnpsc_mcq_question_lang')
+      const saved = localStorage.getItem('mcq_question_language')
       if (saved === 'en' || saved === 'ta') return saved
     } catch {}
-    return language
+    return 'en'
   })
-  const prevGlobalLangRef = useRef<'en' | 'ta'>(language)
-
-  // Sync question display language only when global dashboard language actively changes
-  useEffect(() => {
-    if (prevGlobalLangRef.current !== language) {
-      prevGlobalLangRef.current = language
-      setQuestionLang(language)
-      try {
-        localStorage.setItem('tnpsc_mcq_question_lang', language)
-      } catch {}
-    }
-  }, [language])
 
   const handleQuestionLangChange = (lang: 'en' | 'ta') => {
-    if (lang === questionLang) return
-    setQuestionLang(lang)
+    if (lang === mcqQuestionLanguage) return
+    setMcqQuestionLanguage(lang)
     try {
-      localStorage.setItem('tnpsc_mcq_question_lang', lang)
+      localStorage.setItem('mcq_question_language', lang)
     } catch {}
   }
 
@@ -267,7 +255,7 @@ const MCQPractice = () => {
   // Safe fallback if index exceeds filtered questions
   const activeQuestionIndex = Math.min(currentQuestion, Math.max(0, filteredQuestions.length - 1))
   const { translatedMap, isTranslating, translatedCount, totalTranslatableCount } =
-    useTranslatedQuestions(filteredQuestions, questionLang, activeQuestionIndex)
+    useTranslatedQuestions(filteredQuestions, mcqQuestionLanguage, activeQuestionIndex)
 
   // Collapse explanation when navigating to a different question; auto-open in review mode
   useEffect(() => {
@@ -276,11 +264,11 @@ const MCQPractice = () => {
 
   const rawQuestion = filteredQuestions[activeQuestionIndex]
   const dbTranslation =
-    questionLang === 'ta' && rawQuestion && typeof rawQuestion.id === 'number'
+    mcqQuestionLanguage === 'ta' && rawQuestion && typeof rawQuestion.id === 'number'
       ? translatedMap[rawQuestion.id]
       : undefined
   const questionItem: QuestionItem | null = rawQuestion
-    ? questionLang === 'en'
+    ? mcqQuestionLanguage === 'en'
       ? rawQuestion
       : dbTranslation
         ? {
@@ -637,7 +625,7 @@ const MCQPractice = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', fontWeight: 600 }}>
             <Languages size={17} style={{ color: 'var(--gold-primary, #f59e0b)' }} />
             <span>{isTamil ? 'வினா மொழி:' : 'Question Language:'}</span>
-            {questionLang === 'ta' && isTranslating && totalTranslatableCount > 0 && (
+            {mcqQuestionLanguage === 'ta' && isTranslating && totalTranslatableCount > 0 && (
               <span style={{ fontSize: '0.78rem', opacity: 0.78, fontWeight: 500 }}>
                 ({isTamil ? `தமிழில் மொழிபெயர்க்கிறது ${translatedCount}/${totalTranslatableCount}...` : `Translating ${translatedCount}/${totalTranslatableCount}...`})
               </span>
@@ -647,15 +635,15 @@ const MCQPractice = () => {
             <button
               type="button"
               role="radio"
-              aria-checked={questionLang === 'en'}
+              aria-checked={mcqQuestionLanguage === 'en'}
               onClick={() => handleQuestionLangChange('en')}
               style={{
                 padding: '0.35rem 0.85rem',
                 borderRadius: '8px',
-                border: questionLang === 'en' ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.14)',
-                background: questionLang === 'en' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.04)',
-                color: questionLang === 'en' ? '#fbbf24' : 'inherit',
-                fontWeight: questionLang === 'en' ? 700 : 500,
+                border: mcqQuestionLanguage === 'en' ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.14)',
+                background: mcqQuestionLanguage === 'en' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.04)',
+                color: mcqQuestionLanguage === 'en' ? '#fbbf24' : 'inherit',
+                fontWeight: mcqQuestionLanguage === 'en' ? 700 : 500,
                 fontSize: '0.84rem',
                 cursor: 'pointer',
               }}
@@ -665,15 +653,15 @@ const MCQPractice = () => {
             <button
               type="button"
               role="radio"
-              aria-checked={questionLang === 'ta'}
+              aria-checked={mcqQuestionLanguage === 'ta'}
               onClick={() => handleQuestionLangChange('ta')}
               style={{
                 padding: '0.35rem 0.85rem',
                 borderRadius: '8px',
-                border: questionLang === 'ta' ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.14)',
-                background: questionLang === 'ta' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.04)',
-                color: questionLang === 'ta' ? '#fbbf24' : 'inherit',
-                fontWeight: questionLang === 'ta' ? 700 : 500,
+                border: mcqQuestionLanguage === 'ta' ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.14)',
+                background: mcqQuestionLanguage === 'ta' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.04)',
+                color: mcqQuestionLanguage === 'ta' ? '#fbbf24' : 'inherit',
+                fontWeight: mcqQuestionLanguage === 'ta' ? 700 : 500,
                 fontSize: '0.84rem',
                 cursor: 'pointer',
               }}
@@ -962,11 +950,11 @@ const MCQPractice = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                       <span className="explanation-status">
                         {selectedAnswer === questionItem.correctAnswer
-                          ? (questionLang === 'ta' ? 'சரியான விடை!' : 'Correct!')
-                          : (questionLang === 'ta' ? 'தவறான விடை' : 'Incorrect')}
+                          ? (mcqQuestionLanguage === 'ta' ? 'சரியான விடை!' : 'Correct!')
+                          : (mcqQuestionLanguage === 'ta' ? 'தவறான விடை' : 'Incorrect')}
                       </span>
                       <span className="correct-answer-label">
-                        {questionLang === 'ta'
+                        {mcqQuestionLanguage === 'ta'
                           ? `சரியான விடை: விருப்பம் ${String.fromCharCode(65 + questionItem.correctAnswer)}`
                           : `Correct Answer: Option ${String.fromCharCode(65 + questionItem.correctAnswer)}`}
                       </span>
@@ -987,8 +975,8 @@ const MCQPractice = () => {
                       <BookOpen size={14} />
                       <span>
                         {showExplanation
-                          ? (questionLang === 'ta' ? 'விளக்கத்தை மறை' : 'Hide Explanation')
-                          : (questionLang === 'ta' ? 'விளக்கத்தைக் காண்க' : 'View Explanation')}
+                          ? (mcqQuestionLanguage === 'ta' ? 'விளக்கத்தை மறை' : 'Hide Explanation')
+                          : (mcqQuestionLanguage === 'ta' ? 'விளக்கத்தைக் காண்க' : 'View Explanation')}
                       </span>
                     </button>
                   </div>
@@ -998,7 +986,7 @@ const MCQPractice = () => {
                       <p className="explanation-text" style={{ whiteSpace: 'pre-line', lineHeight: 1.65 }}>
                         {questionItem.explanation && questionItem.explanation.trim().length > 0
                           ? questionItem.explanation
-                          : (questionLang === 'ta'
+                          : (mcqQuestionLanguage === 'ta'
                               ? 'இந்த வினாவிற்கு விரிவான பாடநூல் விளக்கம் இன்னும் சேர்க்கப்படவில்லை.'
                               : 'Detailed textbook explanation is not yet recorded for this question.')}
                       </p>
@@ -1013,7 +1001,7 @@ const MCQPractice = () => {
                           }}
                         >
                           <strong style={{ color: '#38bdf8' }}>
-                            {questionLang === 'ta' ? 'பாடநூல் ஆதாரம்:' : 'Textbook Source:'}
+                            {mcqQuestionLanguage === 'ta' ? 'பாடநூல் ஆதாரம்:' : 'Textbook Source:'}
                           </strong>{' '}
                           {questionItem.sourceReference || 'Samacheer Kalvi Textbook'}
                           {questionItem.sourcePage && !String(questionItem.sourceReference || '').toLowerCase().includes('page')
