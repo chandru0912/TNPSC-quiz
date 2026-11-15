@@ -403,37 +403,4 @@ export async function applyExplanationToDatabase(params: {
      WHERE id = $6`,
     [explanationEn, sourceReference || '', textbookId ?? null, sourcePage ?? null, verificationStatus, questionId]
   );
-
-  if (explanationTa && explanationTa.trim()) {
-    const qRowRes = await pool.query(
-      `SELECT question_text, options FROM questions WHERE id = $1`,
-      [questionId]
-    );
-    if (qRowRes.rows.length > 0) {
-      const qRow = qRowRes.rows[0];
-      const existingTa = await pool.query(
-        `SELECT question_text, options FROM question_translations WHERE question_id = $1 AND language = 'ta'`,
-        [questionId]
-      );
-      const qTextTa = existingTa.rows[0]?.question_text || qRow.question_text;
-      const optsTa = existingTa.rows[0]?.options || qRow.options;
-
-      await pool.query(
-        `INSERT INTO question_translations (
-           question_id, language, question_text, options, explanation, approved, provider, updated_at
-         ) VALUES ($1, 'ta', $2, $3::jsonb, $4, TRUE, $5, CURRENT_TIMESTAMP)
-         ON CONFLICT (question_id, language) DO UPDATE SET
-           explanation = EXCLUDED.explanation,
-           provider = COALESCE(EXCLUDED.provider, question_translations.provider),
-           updated_at = CURRENT_TIMESTAMP`,
-        [
-          questionId,
-          qTextTa,
-          typeof optsTa === 'string' ? optsTa : JSON.stringify(optsTa),
-          explanationTa.trim(),
-          providerName || 'textbook-rag',
-        ]
-      );
-    }
-  }
 }

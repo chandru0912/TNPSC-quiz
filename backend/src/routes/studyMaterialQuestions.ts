@@ -9,7 +9,6 @@ import {
   ExistingDbQuestionRecord,
 } from '../services/questionValidator';
 import { mapRowToQuestion, QuestionDTO } from './questions';
-import { applyCachedTranslations } from '../services/questionTranslationService';
 
 const router = Router();
 
@@ -134,11 +133,7 @@ router.get('/', async (req: Request, res: Response) => {
     const dataValues = [...values, safeLimit, safeOffset];
     const dataResult = await pool.query(dataQuery, dataValues);
 
-    let questions: QuestionDTO[] = dataResult.rows.map(mapRowToQuestion);
-    const cleanLang = String(language || '').trim().toLowerCase();
-    if (cleanLang === 'ta' || cleanLang === 'tamil') {
-      questions = await applyCachedTranslations(questions, 'ta');
-    }
+    const questions: QuestionDTO[] = dataResult.rows.map(mapRowToQuestion);
 
     return res.status(200).json({
       status: 'success',
