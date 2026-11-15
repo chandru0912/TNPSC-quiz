@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   FileText,
@@ -27,6 +27,7 @@ export interface GoogleDriveMaterialItem {
   lesson?: string;
   lessonId?: string;
   viewUrl?: string;
+  downloadUrl?: string;
   uploadStatus?: string;
   createdAt?: string;
   applicableGroups?: string[];
@@ -62,10 +63,16 @@ export const GoogleDrivePdfViewer: React.FC<GoogleDrivePdfViewerProps> = ({
   const [hasError, setHasError] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
+  useEffect(() => {
+    setIsLoading(true);
+    setHasError(false);
+  }, [material?.id, material?.viewUrl]);
+
   if (!isOpen || !material) return null;
 
   const rawViewUrl = material.viewUrl || `/api/drive/view/${material.id}`;
   const fullPdfUrl = getApiUrl(rawViewUrl);
+  const fullDownloadUrl = getApiUrl(material.downloadUrl || rawViewUrl);
 
   const formatFileSize = (bytes?: number): string => {
     if (!bytes) return '';
@@ -99,6 +106,7 @@ export const GoogleDrivePdfViewer: React.FC<GoogleDrivePdfViewerProps> = ({
                 {material.standard ? <span>Class {material.standard}</span> : null}
                 {material.subject ? <span>• {material.subject}</span> : null}
                 {material.term ? <span>• {material.term}</span> : null}
+                {material.totalPages ? <span>• {material.totalPages} Pages</span> : null}
                 {material.fileSize ? <span>• {formatFileSize(material.fileSize)}</span> : null}
               </p>
             </div>
@@ -117,7 +125,7 @@ export const GoogleDrivePdfViewer: React.FC<GoogleDrivePdfViewerProps> = ({
             </a>
 
             <a
-              href={fullPdfUrl}
+              href={fullDownloadUrl}
               download={material.fileName}
               className="gdrive-pdf-btn gdrive-pdf-btn-gold"
               title="Save or Download PDF"

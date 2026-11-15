@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { X, Check, BookOpen, ShieldCheck } from 'lucide-react'
 import type { ClassifiedPdfMetadata } from '../../backend/src/services/bulkClassificationService'
 import {
@@ -22,15 +22,22 @@ export const ClassificationEditModal: React.FC<ClassificationEditModalProps> = (
   onClose,
   onSave,
 }) => {
-  if (!isOpen || !item) return null
-
-  const [standard, setStandard] = useState<StandardId>(item.standard)
-  const [subject, setSubject] = useState<string>(item.subject)
-  const [medium, setMedium] = useState<'Tamil' | 'English'>(item.medium)
-  const [term, setTerm] = useState<string>(item.term)
+  const [standard, setStandard] = useState<StandardId>(item?.standard ?? STANDARDS_LIST[0].id)
+  const [subject, setSubject] = useState<string>(item?.subject ?? '')
+  const [medium, setMedium] = useState<'Tamil' | 'English'>(item?.medium ?? 'English')
+  const [term, setTerm] = useState<string>(item?.term ?? 'Term 1')
   const [applicableGroups, setApplicableGroups] = useState<Array<'group1' | 'group2' | 'group4'>>(
-    item.applicableGroups || [item.primaryGroup || 'group1']
+    item?.applicableGroups || [item?.primaryGroup || 'group1']
   )
+
+  useEffect(() => {
+    if (!item) return
+    setStandard(item.standard)
+    setSubject(item.subject)
+    setMedium(item.medium)
+    setTerm(item.term)
+    setApplicableGroups(item.applicableGroups || [item.primaryGroup || 'group1'])
+  }, [item])
 
   const availableSubjects = useMemo(() => {
     return getSubjectsForStandard(standard)
@@ -43,6 +50,8 @@ export const ClassificationEditModal: React.FC<ClassificationEditModalProps> = (
   const availableTerms = useMemo(() => {
     return getAllowedTerms(standard, subject)
   }, [standard, subject])
+
+  if (!isOpen || !item) return null
 
   const handleGroupToggle = (group: 'group1' | 'group2' | 'group4') => {
     if (applicableGroups.includes(group)) {

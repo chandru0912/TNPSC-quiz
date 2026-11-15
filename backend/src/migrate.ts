@@ -273,6 +273,31 @@ export async function runMigration() {
       END $$;
     `);
 
+    // Independent MCQ translation cache: one row per question + target language.
+    // Original questions remain the single canonical question bank; only display text is stored here.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mcq_question_translations (
+        id SERIAL PRIMARY KEY,
+        question_id INT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+        translation_language VARCHAR(8) NOT NULL DEFAULT 'ta',
+        translated_question TEXT NOT NULL,
+        translated_option_a TEXT NOT NULL,
+        translated_option_b TEXT NOT NULL,
+        translated_option_c TEXT NOT NULL,
+        translated_option_d TEXT NOT NULL,
+        translated_explanation TEXT NOT NULL DEFAULT '',
+        source_content_hash VARCHAR(64) NOT NULL,
+        translation_status VARCHAR(20) NOT NULL DEFAULT 'approved',
+        provider VARCHAR(50),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uq_mcq_translation_question_language UNIQUE (question_id, translation_language)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mcq_translations_lookup
+      ON mcq_question_translations (question_id, translation_language, translation_status);
+    `);
+
     // Backfill existing questions: set study_materials for textbook-grounded or lesson-mapped questions
     await client.query(`
       UPDATE questions
@@ -1139,6 +1164,7 @@ export function ensureDatabaseSchema(): Promise<void> {
               to_regclass('public.syllabus_lessons') AS t_lessons,
               to_regclass('public.syllabus_topics') AS t_topics,
               to_regclass('public.mcq_generation_batches') AS t_mcq_batches,
+              to_regclass('public.mcq_question_translations') AS t_mcq_translations,
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'textbooks' AND column_name = 'google_drive_file_id'
@@ -1160,6 +1186,7 @@ export function ensureDatabaseSchema(): Promise<void> {
             row?.t_lessons &&
             row?.t_topics &&
             row?.t_mcq_batches &&
+            row?.t_mcq_translations &&
             row?.has_tb_gdrive &&
             row?.has_tb_unit &&
             row?.has_pe_retry

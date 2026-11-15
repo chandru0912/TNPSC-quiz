@@ -9,6 +9,11 @@ import {
   ExistingDbQuestionRecord,
 } from '../services/questionValidator';
 import { mapRowToQuestion, QuestionDTO } from './questions';
+import {
+  MAX_TRANSLATION_IDS,
+  normalizeQuestionIds,
+  translateStudyMaterialQuestions,
+} from '../services/mcqTranslationService';
 
 const router = Router();
 
@@ -32,7 +37,6 @@ router.get('/', async (req: Request, res: Response) => {
       lessonId,
       lesson,
       lessonTitle,
-      language = 'tamil',
       limit = '300',
       offset = '0',
     } = req.query;
@@ -325,6 +329,56 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       status: 'error',
       message: 'Failed to retrieve Study Materials questions',
       error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/study-materials/questions/translate (Public Student Endpoint)
+ * Returns validated Tamil display translations for existing Study Materials question IDs.
+ * Only the translation cache is written; original questions, options and correct answers are never modified.
+ * English is intentionally not served here: students receive the original canonical English row directly.
+ */
+router.post('/translate', async (req: Request, res: Response) => {
+  try {
+    const rawLanguage = String(req.body?.targetLanguage || req.body?.language || 'ta').trim().toLowerCase();
+    if (!['ta', 'tamil'].includes(rawLanguage)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Only Tamil (ta) translation is supported. English questions are served from the original question bank.',
+      });
+    }
+
+    const rawIds = req.body?.questionIds;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'A non-empty questionIds array is required.' });
+    }
+    if (rawIds.length > MAX_TRANSLATION_IDS) {
+      return res.status(400).json({
+        status: 'error',
+        message: `A maximum of ${MAX_TRANSLATION_IDS} question IDs can be translated per request.`,
+      });
+    }
+
+    const questionIds = normalizeQuestionIds(rawIds);
+    if (questionIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'All question IDs must be positive integers.' });
+    }
+
+    const result = await translateStudyMaterialQuestions(questionIds);
+    return res.status(200).json({
+      status: 'success',
+      language: 'ta',
+      count: result.translations.length,
+      data: result.translations,
+      failedIds: result.failures.map((failure) => failure.questionId),
+      errors: result.failures,
+    });
+  } catch (error: any) {
+    console.error('[Study Materials Translation Error]:', error?.message || error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to translate study material questions. Please retry.',
     });
   }
 });

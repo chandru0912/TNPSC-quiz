@@ -84,8 +84,6 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
   onUploadSuccess,
   singleUploadProps,
 }) => {
-  if (!isOpen) return null
-
   // Tab mode: 'bulk' or 'single'
   const [activeTab, setActiveTab] = useState<'bulk' | 'single'>('bulk')
 
@@ -622,6 +620,8 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
   const failedCount = items.filter((i) => i.status === 'failed').length
   const uploadingCount = items.filter((i) => i.status === 'uploading' || i.status === 'retrying').length
   const pendingCount = items.filter((i) => i.status === 'pending' || i.status === 'analyzing' || i.status === 'classified').length
+
+  if (!isOpen) return null
 
   return (
     <>

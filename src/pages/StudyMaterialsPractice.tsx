@@ -14,6 +14,7 @@ import {
   Sparkles,
   Layers,
   GraduationCap,
+  Languages,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import {
@@ -23,6 +24,7 @@ import {
   type LessonItem,
 } from '../data/unifiedSyllabusRegistry'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
+import { useMcqTranslations } from '../hooks/useMcqTranslations'
 import './StudyMaterialsPractice.css'
 
 interface StudyMaterialQuestionItem {
@@ -92,6 +94,7 @@ export const StudyMaterialsPractice: React.FC = () => {
   const [isQuizCompleted, setIsQuizCompleted] = useState<boolean>(false)
   const [isReviewMode, setIsReviewMode] = useState<boolean>(false)
   const [showExplanation, setShowExplanation] = useState<boolean>(true)
+  const [questionLang, setQuestionLang] = useState<'en' | 'ta'>('en')
 
   // 1. Resolve Hierarchy Metadata from authoritative registry
   const availableSubjects = getSubjectsForGroup(normalizedGroup)
@@ -108,7 +111,7 @@ export const StudyMaterialsPractice: React.FC = () => {
   const matchedLesson: LessonItem | undefined =
     availableLessons.find(
       (l) => (lessonIdParam && l.id === lessonIdParam) ||
-             (lessonTitleParam && l.title.trim().toLowerCase() === lessonTitleParam.trim().toLowerCase())
+        (lessonTitleParam && l.title.trim().toLowerCase() === lessonTitleParam.trim().toLowerCase())
     )
   const resolvedLesson: LessonItem | undefined = matchedLesson || (lessonTitleParam || lessonIdParam ? undefined : availableLessons[0])
 
@@ -215,7 +218,29 @@ export const StudyMaterialsPractice: React.FC = () => {
     displayLessonTitle,
   ])
 
-  const activeQuestion = questions[currentIndex]
+  const {
+    translations,
+    failedIds,
+    isTranslating,
+    translatedCount,
+    retry: retryTranslation,
+  } = useMcqTranslations(questions, questionLang, currentIndex)
+
+  const rawActiveQuestion = questions[currentIndex]
+  const activeTranslation =
+    questionLang === 'ta' && rawActiveQuestion ? translations[rawActiveQuestion.id] : undefined
+  const activeQuestion = useMemo(() => {
+    if (!rawActiveQuestion) return undefined
+    if (questionLang !== 'ta' || !activeTranslation) return rawActiveQuestion
+    return {
+      ...rawActiveQuestion,
+      question: activeTranslation.question,
+      options: activeTranslation.options,
+      explanation: activeTranslation.explanation,
+    }
+  }, [rawActiveQuestion, questionLang, activeTranslation])
+  const isWaitingForTamilTranslation =
+    questionLang === 'ta' && Boolean(rawActiveQuestion) && !activeTranslation
 
   // Handle Option Select
   const handleSelectOption = (index: number) => {
@@ -424,6 +449,63 @@ export const StudyMaterialsPractice: React.FC = () => {
         {/* 5. Active Practice Question Section */}
         {!isLoading && questions.length > 0 && !isQuizCompleted && activeQuestion && (
           <div className="sm-question-container">
+            {/* Independent Question Language Selector (English default | தமிழ்) */}
+            <div className="sm-question-lang-bar" role="region" aria-label="Question Language">
+              <span className="sm-question-lang-label">
+                <Languages size={15} />
+                <span>Question Language</span>
+              </span>
+              <div className="sm-lang-toggle-bar" role="group" aria-label="Select Question Language">
+                <button
+                  type="button"
+                  className={`sm-lang-btn ${questionLang === 'en' ? 'active' : ''}`}
+                  onClick={() => setQuestionLang('en')}
+                  aria-pressed={questionLang === 'en'}
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  className={`sm-lang-btn ${questionLang === 'ta' ? 'active' : ''}`}
+                  onClick={() => setQuestionLang('ta')}
+                  aria-pressed={questionLang === 'ta'}
+                >
+                  தமிழ்
+                </button>
+              </div>
+              {questionLang === 'ta' && (
+                <span className="sm-lang-progress">
+                  {isTranslating
+                    ? `தமிழில் மொழிபெயர்க்கப்படுகிறது... (${translatedCount}/${questions.length})`
+                    : `${translatedCount}/${questions.length} தமிழ்`}
+                </span>
+              )}
+            </div>
+
+            {questionLang === 'ta' && !activeTranslation && (
+              <div
+                className={`sm-translation-banner ${failedIds.includes(activeQuestion.id) || (!isTranslating && failedIds.length > 0) ? 'error' : ''}`}
+                role="status"
+                aria-live="polite"
+              >
+                <span>
+                  {isTranslating
+                    ? 'இந்தக் கேள்வி தமிழில் மொழிபெயர்க்கப்படுகிறது... (தற்காலிகமாக ஆங்கில மூலக் கேள்வி காட்டப்படுகிறது)'
+                    : 'தமிழ் மொழிபெயர்ப்பு தற்போது கிடைக்கவில்லை. மூல ஆங்கிலக் கேள்வி பாதுகாப்பாகக் காட்டப்படுகிறது.'}
+                </span>
+                {!isTranslating && (
+                  <button
+                    type="button"
+                    className="sm-translation-retry"
+                    onClick={retryTranslation}
+                  >
+                    <RotateCcw size={13} />
+                    <span>மீண்டும் முயற்சிக்கவும் / Retry</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Progress Header Card */}
             <div className="sm-progress-card">
               <div className="sm-progress-header">
@@ -495,11 +577,10 @@ export const StudyMaterialsPractice: React.FC = () => {
               <AnimatePresence>
                 {isAnswerSubmitted && (
                   <motion.div
-                    className={`sm-feedback-card ${
-                      selectedOption === activeQuestion.correctAnswer
-                        ? 'correct-card'
-                        : 'incorrect-card'
-                    }`}
+                    className={`sm-feedback-card ${selectedOption === activeQuestion.correctAnswer
+                      ? 'correct-card'
+                      : 'incorrect-card'
+                      }`}
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
@@ -510,14 +591,18 @@ export const StudyMaterialsPractice: React.FC = () => {
                           <>
                             <CheckCircle2 size={18} />
                             <span>
-                              Correct Answer!
+                              {questionLang === 'ta' && !isWaitingForTamilTranslation
+                                ? 'சரியான விடை!'
+                                : 'Correct Answer!'}
                             </span>
                           </>
                         ) : (
                           <>
                             <XCircle size={18} />
                             <span>
-                              {`Incorrect Answer. Correct Answer: Option ${['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]} (${activeQuestion.options[activeQuestion.correctAnswer] || ''})`}
+                              {questionLang === 'ta' && !isWaitingForTamilTranslation
+                                ? `தவறான விடை. சரியான விடை: விருப்பம் ${['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]} (${activeQuestion.options[activeQuestion.correctAnswer] || ''})`
+                                : `Incorrect Answer. Correct Answer: Option ${['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]} (${activeQuestion.options[activeQuestion.correctAnswer] || ''})`}
                             </span>
                           </>
                         )}
@@ -541,26 +626,56 @@ export const StudyMaterialsPractice: React.FC = () => {
                       >
                         <BookOpen size={13} />
                         <span>
-                          {showExplanation ? 'Hide Explanation' : 'View Explanation'}
+                          {questionLang === 'ta'
+                            ? showExplanation
+                              ? 'விளக்கத்தை மறை'
+                              : 'விளக்கத்தைக் காண்க'
+                            : showExplanation
+                              ? 'Hide Explanation'
+                              : 'View Explanation'}
                         </span>
                       </button>
                     </div>
                     {showExplanation && (
                       <div className="sm-feedback-explanation" style={{ marginTop: '0.65rem' }}>
-                        <div style={{ marginBottom: '0.35rem', fontSize: '0.86rem', color: '#34d399', fontWeight: 600 }}>
-                          Correct Answer:{' '}
-                          {['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]}.{' '}
-                          {activeQuestion.options[activeQuestion.correctAnswer] || ''}
-                        </div>
-                        {activeQuestion.explanation && activeQuestion.explanation.trim().length > 0 ? (
-                          <p style={{ whiteSpace: 'pre-line', lineHeight: 1.65 }}>
-                            <strong>Explanation:</strong>{' '}
-                            {activeQuestion.explanation}
-                          </p>
+                        {isWaitingForTamilTranslation ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <p style={{ color: '#94a3b8', margin: 0 }}>
+                              {isTranslating
+                                ? 'விளக்கம் தமிழில் மொழிபெயர்க்கப்படுகிறது...'
+                                : 'தமிழ் விளக்கம் தற்போது கிடைக்கவில்லை. மீண்டும் முயற்சிக்கவும்.'}
+                            </p>
+                            {!isTranslating && (
+                              <button
+                                type="button"
+                                className="sm-translation-retry"
+                                onClick={retryTranslation}
+                              >
+                                <RotateCcw size={13} />
+                                <span>Retry</span>
+                              </button>
+                            )}
+                          </div>
                         ) : (
-                          <p style={{ color: '#94a3b8' }}>
-                            Detailed explanation is not yet recorded for this question.
-                          </p>
+                          <>
+                            <div style={{ marginBottom: '0.35rem', fontSize: '0.86rem', color: '#34d399', fontWeight: 600 }}>
+                              {questionLang === 'ta' ? 'சரியான விடை:' : 'Correct Answer:'}{' '}
+                              {['A', 'B', 'C', 'D'][activeQuestion.correctAnswer]}.{' '}
+                              {activeQuestion.options[activeQuestion.correctAnswer] || ''}
+                            </div>
+                            {activeQuestion.explanation && activeQuestion.explanation.trim().length > 0 ? (
+                              <p style={{ whiteSpace: 'pre-line', lineHeight: 1.65 }}>
+                                <strong>{questionLang === 'ta' ? 'விளக்கம்:' : 'Explanation:'}</strong>{' '}
+                                {activeQuestion.explanation}
+                              </p>
+                            ) : (
+                              <p style={{ color: '#94a3b8' }}>
+                                {questionLang === 'ta'
+                                  ? 'இந்தக் கேள்விக்கான விரிவான விளக்கம் இன்னும் பதிவு செய்யப்படவில்லை.'
+                                  : 'Detailed explanation is not yet recorded for this question.'}
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                     )}
@@ -681,11 +796,40 @@ export const StudyMaterialsPractice: React.FC = () => {
             {/* Review Mode List */}
             {isReviewMode && (
               <div style={{ width: '100%', marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'left' }}>
+                <div className="sm-question-lang-bar" role="region" aria-label="Question Language">
+                  <span className="sm-question-lang-label">
+                    <Languages size={15} />
+                    <span>Question Language</span>
+                  </span>
+                  <div className="sm-lang-toggle-bar" role="group" aria-label="Select Question Language">
+                    <button
+                      type="button"
+                      className={`sm-lang-btn ${questionLang === 'en' ? 'active' : ''}`}
+                      onClick={() => setQuestionLang('en')}
+                      aria-pressed={questionLang === 'en'}
+                    >
+                      English
+                    </button>
+                    <button
+                      type="button"
+                      className={`sm-lang-btn ${questionLang === 'ta' ? 'active' : ''}`}
+                      onClick={() => setQuestionLang('ta')}
+                      aria-pressed={questionLang === 'ta'}
+                    >
+                      தமிழ்
+                    </button>
+                  </div>
+                </div>
                 <h3 style={{ color: '#ffffff', fontSize: '1.2rem', marginBottom: '0.5rem' }}>
                   Complete Question Review ({questions.length} Questions):
                 </h3>
-                {questions.map((q, idx) => {
+                {questions.map((rawQ, idx) => {
                   const ans = userAnswers[idx]
+                  const t = questionLang === 'ta' ? translations[rawQ.id] : undefined
+                  const q = t
+                    ? { ...rawQ, question: t.question, options: t.options, explanation: t.explanation }
+                    : rawQ
+                  const waitingTamil = questionLang === 'ta' && !t
                   return (
                     <div
                       key={q.id}
@@ -729,10 +873,18 @@ export const StudyMaterialsPractice: React.FC = () => {
                           </div>
                         ))}
                       </div>
-                      {q.explanation && (
-                        <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#cbd5e1' }}>
-                          <strong>Explanation:</strong> {q.explanation}
+                      {waitingTamil ? (
+                        <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#94a3b8' }}>
+                          {isTranslating
+                            ? 'விளக்கம் தமிழில் மொழிபெயர்க்கப்படுகிறது...'
+                            : 'தமிழ் விளக்கம் தற்போது கிடைக்கவில்லை.'}
                         </p>
+                      ) : (
+                        q.explanation && (
+                          <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#cbd5e1', whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+                            <strong>{questionLang === 'ta' ? 'விளக்கம்:' : 'Explanation:'}</strong> {q.explanation}
+                          </p>
+                        )
                       )}
                     </div>
                   )
