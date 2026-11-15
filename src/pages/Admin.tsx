@@ -705,7 +705,7 @@ const Admin = () => {
   const [statusFilter, setStatusFilter] = useState('all')
   const [difficultyFilter, setDifficultyFilter] = useState('all')
   const [page, setPage] = useState(1)
-  const pageSize = 50
+  const pageSize = 100
 
   useEffect(() => {
     const timer = setTimeout(() => {

@@ -302,7 +302,7 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       difficulty,
       category,
       topic,
-      limit = '50',
+      limit = '100',
       offset = '0',
     } = req.query;
 
@@ -401,7 +401,7 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     }
 
     const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(' AND ')}` : '';
-    const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 50), 200);
+    const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 100), 200);
     const safeOffset = Math.max(0, parseInt(offset as string, 10) || 0);
 
     // Dynamic Metrics matching target system
