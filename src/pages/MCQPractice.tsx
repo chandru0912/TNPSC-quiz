@@ -17,6 +17,7 @@ import {
   Award,
   Trophy,
   BarChart2,
+  Languages,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { useLanguage } from '../context/LanguageContext'
@@ -49,6 +50,31 @@ const MCQPractice = () => {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { language, isTamil } = useLanguage()
+
+  // Question Display Language (defaults to global Student Dashboard language; student can override locally)
+  const [questionLang, setQuestionLang] = useState<'en' | 'ta'>(() => {
+    try {
+      const saved = localStorage.getItem('tnpsc_mcq_question_lang')
+      if (saved === 'en' || saved === 'ta') return saved
+    } catch {}
+    return language
+  })
+
+  // Sync question display language when global dashboard language changes
+  useEffect(() => {
+    setQuestionLang(language)
+    try {
+      localStorage.setItem('tnpsc_mcq_question_lang', language)
+    } catch {}
+  }, [language])
+
+  const handleQuestionLangChange = (lang: 'en' | 'ta') => {
+    if (lang === questionLang) return
+    setQuestionLang(lang)
+    try {
+      localStorage.setItem('tnpsc_mcq_question_lang', lang)
+    } catch {}
+  }
 
   const urlGroup = searchParams.get('group')
   const urlSubjectId = searchParams.get('subjectId') || 'general-studies'
@@ -231,25 +257,29 @@ const MCQPractice = () => {
 
   // Pure database questions (all mock fallback questions completely removed)
   const filteredQuestions: QuestionItem[] = dbQuestions
-  const { translatedMap } = useTranslatedQuestions(filteredQuestions, language)
 
   // Safe fallback if index exceeds filtered questions
   const activeQuestionIndex = Math.min(currentQuestion, Math.max(0, filteredQuestions.length - 1))
+  const { translatedMap, isTranslating, translatedCount, totalTranslatableCount } =
+    useTranslatedQuestions(filteredQuestions, questionLang, activeQuestionIndex)
+
   const rawQuestion = filteredQuestions[activeQuestionIndex]
   const dbTranslation =
-    language === 'ta' && rawQuestion && typeof rawQuestion.id === 'number'
+    questionLang === 'ta' && rawQuestion && typeof rawQuestion.id === 'number'
       ? translatedMap[rawQuestion.id]
       : undefined
   const questionItem: QuestionItem | null = rawQuestion
-    ? dbTranslation
-      ? {
-          ...rawQuestion,
-          question: dbTranslation.question,
-          options: dbTranslation.options,
-          explanation: dbTranslation.explanation || rawQuestion.explanation,
-          tag: dbTranslation.tag || rawQuestion.tag,
-        }
-      : translateQuestionItem(rawQuestion, language)
+    ? questionLang === 'en'
+      ? rawQuestion
+      : dbTranslation
+        ? {
+            ...rawQuestion,
+            question: dbTranslation.question,
+            options: dbTranslation.options,
+            explanation: dbTranslation.explanation || rawQuestion.explanation,
+            tag: dbTranslation.tag || rawQuestion.tag,
+          }
+        : translateQuestionItem(rawQuestion, 'ta')
     : null
 
   const handleGroupSelect = (group: string) => {
@@ -577,6 +607,69 @@ const MCQPractice = () => {
               </button>
             )
           })}
+        </div>
+
+        {/* Question Display Language Selector (Above Question Progress) */}
+        <div
+          className="glass"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            padding: '0.65rem 1rem',
+            borderRadius: '12px',
+            marginBottom: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', fontWeight: 600 }}>
+            <Languages size={17} style={{ color: 'var(--gold-primary, #f59e0b)' }} />
+            <span>{isTamil ? 'வினா மொழி:' : 'Question Language:'}</span>
+            {questionLang === 'ta' && isTranslating && totalTranslatableCount > 0 && (
+              <span style={{ fontSize: '0.78rem', opacity: 0.78, fontWeight: 500 }}>
+                ({isTamil ? `தமிழில் மொழிபெயர்க்கிறது ${translatedCount}/${totalTranslatableCount}...` : `Translating ${translatedCount}/${totalTranslatableCount}...`})
+              </span>
+            )}
+          </div>
+          <div role="radiogroup" aria-label="Question Display Language" style={{ display: 'flex', gap: '0.4rem' }}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={questionLang === 'en'}
+              onClick={() => handleQuestionLangChange('en')}
+              style={{
+                padding: '0.35rem 0.85rem',
+                borderRadius: '8px',
+                border: questionLang === 'en' ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.14)',
+                background: questionLang === 'en' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.04)',
+                color: questionLang === 'en' ? '#fbbf24' : 'inherit',
+                fontWeight: questionLang === 'en' ? 700 : 500,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+              }}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={questionLang === 'ta'}
+              onClick={() => handleQuestionLangChange('ta')}
+              style={{
+                padding: '0.35rem 0.85rem',
+                borderRadius: '8px',
+                border: questionLang === 'ta' ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.14)',
+                background: questionLang === 'ta' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.04)',
+                color: questionLang === 'ta' ? '#fbbf24' : 'inherit',
+                fontWeight: questionLang === 'ta' ? 700 : 500,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+              }}
+            >
+              தமிழ் (Tamil)
+            </button>
+          </div>
         </div>
 
         {/* Stats HUD */}

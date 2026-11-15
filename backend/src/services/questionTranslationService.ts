@@ -255,8 +255,9 @@ STRICT RULES:
 1. Return ONLY a JSON object with a "translations" array.
 2. Preserve each item's exact "id" number.
 3. Preserve the EXACT order and count of "options" (do NOT shuffle or reorder options, so the correct answer index remains identical).
-4. Keep technical terms, years, constitutional articles, and scientific formulas accurate in Tamil.
-5. Translate "question", every item in "options", and "explanation".
+4. Keep scientific symbols, mathematical formulas, SI units, numbers, years, constitutional articles, and standard abbreviations accurate.
+5. Use formal academic Tamil educational terminology consistent with Samacheer Kalvi textbooks.
+6. Translate "question", every item in "options", and "explanation".
 
 Input JSON:
 ${JSON.stringify(batch)}
