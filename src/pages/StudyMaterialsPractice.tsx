@@ -178,7 +178,6 @@ export const StudyMaterialsPractice: React.FC = () => {
         queryParams.set('unitId', unitId.toString())
         if (displayLessonId) queryParams.set('lessonId', displayLessonId)
         if (displayLessonTitle) queryParams.set('lessonTitle', displayLessonTitle)
-        queryParams.set('language', selectedLanguage)
         queryParams.set('limit', '300')
 
         const res = await apiFetch(`/api/study-materials/questions?${queryParams.toString()}`)
@@ -219,7 +218,6 @@ export const StudyMaterialsPractice: React.FC = () => {
     unitId,
     displayLessonId,
     displayLessonTitle,
-    selectedLanguage,
   ])
 
   const { translatedMap } = useTranslatedQuestions(questions, language)

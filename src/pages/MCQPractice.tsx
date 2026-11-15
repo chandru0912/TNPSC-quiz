@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -60,13 +60,17 @@ const MCQPractice = () => {
     } catch {}
     return language
   })
+  const prevGlobalLangRef = useRef<'en' | 'ta'>(language)
 
-  // Sync question display language when global dashboard language changes
+  // Sync question display language only when global dashboard language actively changes
   useEffect(() => {
-    setQuestionLang(language)
-    try {
-      localStorage.setItem('tnpsc_mcq_question_lang', language)
-    } catch {}
+    if (prevGlobalLangRef.current !== language) {
+      prevGlobalLangRef.current = language
+      setQuestionLang(language)
+      try {
+        localStorage.setItem('tnpsc_mcq_question_lang', language)
+      } catch {}
+    }
   }, [language])
 
   const handleQuestionLangChange = (lang: 'en' | 'ta') => {
@@ -674,7 +678,7 @@ const MCQPractice = () => {
                 cursor: 'pointer',
               }}
             >
-              தமிழ் (Tamil)
+              தமிழ்
             </button>
           </div>
         </div>

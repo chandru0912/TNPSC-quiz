@@ -9,6 +9,7 @@ import {
   ExistingDbQuestionRecord,
 } from '../services/questionValidator';
 import { mapRowToQuestion, QuestionDTO } from './questions';
+import { applyCachedTranslations } from '../services/questionTranslationService';
 
 const router = Router();
 
@@ -113,16 +114,8 @@ router.get('/', async (req: Request, res: Response) => {
       paramIndex += 2;
     }
 
-    // 6. Strict Language Filter
-    if (language && typeof language === 'string') {
-      const cleanLang = language.trim().toLowerCase();
-      if (cleanLang === 'english') {
-        queryConditions.push(`LOWER(language) = 'english'`);
-      } else {
-        // Tamil is default; also accommodates legacy rows where language is null
-        queryConditions.push(`(LOWER(language) = 'tamil' OR language IS NULL)`);
-      }
-    }
+    // Unified Question Bank: do NOT split English and Tamil into separate MCQ collections.
+    // Display language is handled via cached translations on the same Question ID.
 
     const whereClause = `WHERE ${queryConditions.join(' AND ')}`;
     const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 300), 500);
@@ -141,7 +134,11 @@ router.get('/', async (req: Request, res: Response) => {
     const dataValues = [...values, safeLimit, safeOffset];
     const dataResult = await pool.query(dataQuery, dataValues);
 
-    const questions: QuestionDTO[] = dataResult.rows.map(mapRowToQuestion);
+    let questions: QuestionDTO[] = dataResult.rows.map(mapRowToQuestion);
+    const cleanLang = String(language || '').trim().toLowerCase();
+    if (cleanLang === 'ta' || cleanLang === 'tamil') {
+      questions = await applyCachedTranslations(questions, 'ta');
+    }
 
     return res.status(200).json({
       status: 'success',
