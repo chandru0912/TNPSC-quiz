@@ -2,6 +2,13 @@ import pool from '../db';
 import { AIProviderFactory } from './ai/ai-provider.factory';
 import { retrieveRelevantTextbookContent, TextbookChunk } from './textbookRag';
 
+export interface StructuredExplanationFields {
+  approach: string;
+  stepByStep: string;
+  correctOptionReasoning: string;
+  incorrectOptionsReasoning: string;
+}
+
 export interface GeneratedExplanationResult {
   questionId: number;
   question: string;
@@ -13,18 +20,57 @@ export interface GeneratedExplanationResult {
   textbookId: number | null;
   sourcePage: number | null;
   hasSufficientTextbookContent: boolean;
+  needsAdminReview: boolean;
   limitationNote?: string;
 }
 
 /**
- * Fallback keyword search across textbook_content when lesson/topic RAG returns sparse results.
+ * Formats structured explanation sections into a clean, readable educational block.
  */
-async function searchTextbookByQuestionKeywords(
+function formatStructuredExplanation(
+  sections: StructuredExplanationFields,
+  lang: 'en' | 'ta',
+  sourceRef: string
+): string {
+  if (lang === 'ta') {
+    return [
+      `அணுகுமுறை: ${sections.approach}`,
+      `படிப்படியான தீர்வு:\n${sections.stepByStep}`,
+      `சரியான விருப்பம்: ${sections.correctOptionReasoning}`,
+      `மற்ற விருப்பங்கள் தவறானதற்கான காரணம்:\n${sections.incorrectOptionsReasoning}`,
+      `பாடநூல் ஆதாரம்: ${sourceRef}`,
+    ]
+      .filter((p) => p.trim().length > 0)
+      .join('\n\n');
+  }
+
+  return [
+    `Approach: ${sections.approach}`,
+    `Step-by-step Solution:\n${sections.stepByStep}`,
+    `Correct Option: ${sections.correctOptionReasoning}`,
+    `Why Other Options Are Incorrect:\n${sections.incorrectOptionsReasoning}`,
+    `Textbook Source Reference: ${sourceRef}`,
+  ]
+    .filter((p) => p.trim().length > 0)
+    .join('\n\n');
+}
+
+/**
+ * Strictly scoped keyword fallback within the SAME standard, subject, and lesson/unit
+ * so unrelated textbook lessons are never used.
+ */
+async function searchSameLessonTextbookChunks(
   standard: number | null,
   subject: string,
+  unitId: number | null,
+  lessonTitle: string | null,
   questionText: string,
   correctOptionText: string
 ): Promise<TextbookChunk[]> {
+  if (!standard || (!unitId && !lessonTitle)) {
+    return [];
+  }
+
   const combined = `${questionText} ${correctOptionText}`
     .toLowerCase()
     .replace(/[^a-zA-Z0-9\u0B80-\u0BFF\s]/g, ' ')
@@ -34,14 +80,28 @@ async function searchTextbookByQuestionKeywords(
   const keywords = Array.from(new Set(combined)).slice(0, 6);
   if (keywords.length === 0) return [];
 
-  const likeConditions = keywords.map((_, idx) => `LOWER(tc.content) LIKE $${idx + 2}`);
-  const params: any[] = [subject.toLowerCase(), ...keywords.map((k) => `%${k}%`)];
+  const params: any[] = [subject.toLowerCase(), standard];
+  const conditions: string[] = [
+    `LOWER(tb.subject) LIKE '%' || $1 || '%'`,
+    `tb.standard = $2`,
+  ];
 
-  let stdFilter = '';
-  if (standard && Number.isFinite(standard)) {
-    params.push(standard);
-    stdFilter = `AND tb.standard = $${params.length}`;
+  if (lessonTitle && lessonTitle.trim()) {
+    params.push(`%${lessonTitle.trim().toLowerCase()}%`);
+    if (unitId) {
+      params.push(unitId);
+      conditions.push(`(LOWER(COALESCE(tc.lesson_title, '')) LIKE $${params.length - 1} OR tc.unit_id = $${params.length})`);
+    } else {
+      conditions.push(`LOWER(COALESCE(tc.lesson_title, '')) LIKE $${params.length}`);
+    }
+  } else if (unitId) {
+    params.push(unitId);
+    conditions.push(`tc.unit_id = $${params.length}`);
   }
+
+  const kwStartIdx = params.length + 1;
+  const likeConditions = keywords.map((_, idx) => `LOWER(tc.content) LIKE $${kwStartIdx + idx}`);
+  params.push(...keywords.map((k) => `%${k}%`));
 
   const sql = `
     SELECT
@@ -55,8 +115,7 @@ async function searchTextbookByQuestionKeywords(
       tc.is_ocr
     FROM textbook_content tc
     JOIN textbooks tb ON tb.id = tc.textbook_id
-    WHERE LOWER(tb.subject) LIKE '%' || $1 || '%'
-      ${stdFilter}
+    WHERE ${conditions.join(' AND ')}
       AND (${likeConditions.join(' OR ')})
     ORDER BY tc.page_number ASC
     LIMIT 4
@@ -81,7 +140,7 @@ async function searchTextbookByQuestionKeywords(
 }
 
 /**
- * Generates textbook-grounded English & Tamil explanations for existing MCQs
+ * Generates structured, textbook-grounded English & Tamil explanations for existing MCQs
  * without modifying question IDs, options, or correct answers.
  */
 export async function generateTextbookGroundedExplanations(
@@ -127,8 +186,8 @@ export async function generateTextbookGroundedExplanations(
     const standard = row.class_id ? Number(row.class_id) : 10;
     const subject = String(row.subject || 'General Studies');
 
-    // 1. Retrieve relevant textbook content from Textbook Management (RAG)
-    let retrieval = await retrieveRelevantTextbookContent({
+    // 1. Retrieve relevant textbook content strictly by syllabus mapping
+    const retrieval = await retrieveRelevantTextbookContent({
       groupId: row.category,
       standard,
       subject,
@@ -141,9 +200,11 @@ export async function generateTextbookGroundedExplanations(
 
     let chunks = retrieval.chunks;
     if (chunks.length === 0) {
-      chunks = await searchTextbookByQuestionKeywords(
+      chunks = await searchSameLessonTextbookChunks(
         row.class_id ? Number(row.class_id) : null,
         subject,
+        row.unit_id ? Number(row.unit_id) : null,
+        row.lesson_title || null,
         row.question_text,
         correctText
       );
@@ -151,21 +212,46 @@ export async function generateTextbookGroundedExplanations(
 
     const hasSufficientTextbookContent = chunks.length > 0;
     const primaryChunk = chunks[0] || null;
-    const verifiedTextbookId = retrieval.textbookId || primaryChunk?.textbookId || (row.textbook_id ? Number(row.textbook_id) : null);
-    const verifiedBookName = retrieval.bookName || primaryChunk?.bookName || null;
-    const verifiedPages = Array.from(new Set(chunks.map((c) => c.pageNumber).filter((p) => Number.isFinite(p) && p > 0)));
+    const verifiedTextbookId =
+      retrieval.textbookId || primaryChunk?.textbookId || (row.textbook_id ? Number(row.textbook_id) : null);
+
+    // Fetch verified textbook metadata (term, book_name, standard, subject)
+    let tbMeta: { bookName?: string; term?: string | null; standard?: number; subject?: string } = {};
+    if (verifiedTextbookId) {
+      try {
+        const tbRes = await pool.query(
+          `SELECT book_name, term, standard, subject FROM textbooks WHERE id = $1`,
+          [verifiedTextbookId]
+        );
+        if (tbRes.rows.length > 0) {
+          tbMeta = {
+            bookName: tbRes.rows[0].book_name,
+            term: tbRes.rows[0].term,
+            standard: tbRes.rows[0].standard,
+            subject: tbRes.rows[0].subject,
+          };
+        }
+      } catch {}
+    }
+
+    const verifiedBookName = tbMeta.bookName || retrieval.bookName || primaryChunk?.bookName || null;
+    const verifiedPages = Array.from(
+      new Set(chunks.map((c) => c.pageNumber).filter((p) => Number.isFinite(p) && p > 0))
+    );
     const primaryPage = verifiedPages[0] ?? (row.source_page ? Number(row.source_page) : null);
 
-    // Construct verified source reference ONLY from real retrieved textbook records (never invented)
+    // Build verified source reference ONLY from real syllabus & retrieved textbook metadata
     const refParts: string[] = [];
     if (verifiedBookName) refParts.push(verifiedBookName);
-    else refParts.push(`Samacheer Kalvi ${row.class_id ? `${row.class_id}th Std ` : ''}${subject}`);
+    refParts.push(`Standard ${tbMeta.standard || standard}`);
+    refParts.push(tbMeta.subject || subject);
+    if (tbMeta.term) refParts.push(tbMeta.term);
     if (row.unit_id) refParts.push(`Unit ${row.unit_id}`);
-    if (row.lesson_title) refParts.push(row.lesson_title);
+    if (row.lesson_title) refParts.push(`Lesson: ${row.lesson_title}`);
     if (verifiedPages.length > 0) {
       refParts.push(`Page${verifiedPages.length > 1 ? 's' : ''} ${verifiedPages.slice(0, 3).join(', ')}`);
     } else if (!hasSufficientTextbookContent) {
-      refParts.push('Supporting curriculum reference (no indexed textbook page matched)');
+      refParts.push('Textbook page evidence unavailable — pending Admin Review');
     }
     const verifiedSourceRef = refParts.join(' • ');
 
@@ -174,54 +260,76 @@ export async function generateTextbookGroundedExplanations(
           .slice(0, 4)
           .map((c) => `[Book: ${c.bookName} | Page ${c.pageNumber}]\n${c.content.slice(0, 1400)}`)
           .join('\n\n---\n\n')
-      : 'NO MATCHING EXTRACTED TEXTBOOK PAGES FOUND IN DATABASE.';
+      : 'NO MATCHING EXTRACTED TEXTBOOK PAGES FOUND FOR THIS SYLLABUS LESSON.';
 
-    const prompt = `You are a Samacheer Kalvi & TNPSC subject expert generating a textbook-grounded explanation for an existing MCQ.
+    const incorrectOptionsList = opts
+      .map((o, i) => ({ letter: String.fromCharCode(65 + i), text: o, index: i }))
+      .filter((o) => o.index !== correctIdx);
+
+    const prompt = `You are a Samacheer Kalvi & TNPSC subject expert generating a strictly textbook-grounded structured explanation for an existing MCQ.
 
 QUESTION (ID ${row.id}):
 ${row.question_text}
 
-OPTIONS:
+ALL OPTIONS:
 ${opts.map((o, i) => `${String.fromCharCode(65 + i)}) ${o}`).join('\n')}
 
-VERIFIED CORRECT ANSWER:
+VERIFIED CORRECT ANSWER (MUST BE SUPPORTED):
 Option ${correctLetter}: ${correctText}
+
+INCORRECT OPTIONS TO ADDRESS:
+${incorrectOptionsList.map((o) => `${o.letter}) ${o.text}`).join('\n')}
 
 RETRIEVED SAMACHEER KALVI TEXTBOOK CONTENT:
 ${textbookContextText}
 
-INSTRUCTIONS:
-1. Explain clearly WHY Option ${correctLetter} ("${correctText}") is the correct answer.
-2. Explain the underlying concept and include relevant facts from the retrieved textbook content.
-3. Use clear, concise educational language (3-5 sentences). Avoid generic filler phrases.
-4. NEVER invent textbook names or page numbers. Only cite facts present in the retrieved textbook content or verified curriculum knowledge (and if textbook content was not found, note that textbook coverage was limited).
-5. Provide BOTH:
-   - "explanationEn": Detailed explanation in English.
-   - "explanationTa": Accurate academic Tamil translation/explanation using Samacheer Kalvi terminology.
+STRICT RULES:
+1. Base your explanation on the retrieved Samacheer Kalvi textbook content above.
+2. Verify and explain why Option ${correctLetter} ("${correctText}") is correct.
+3. Explain WHY each incorrect option (${incorrectOptionsList.map((o) => o.letter).join(', ')}) is incorrect.
+4. NEVER invent facts, textbook names, or page numbers. If textbook content is missing or insufficient, state only verified core educational reasoning without fabricating textbook citations.
+5. Return structured fields in BOTH English ("en") and Samacheer Kalvi academic Tamil ("ta"):
+   - "approach": Brief problem-solving or conceptual approach.
+   - "stepByStep": Clear numbered/logical steps leading to the answer.
+   - "correctOptionReasoning": Why Option ${correctLetter} is correct with textbook facts.
+   - "incorrectOptionsReasoning": Bullet/line explanation of why each of the other 3 options is wrong.
 
 Return ONLY valid JSON:
 {
-  "explanationEn": "...",
-  "explanationTa": "..."
+  "en": {
+    "approach": "...",
+    "stepByStep": "...",
+    "correctOptionReasoning": "...",
+    "incorrectOptionsReasoning": "..."
+  },
+  "ta": {
+    "approach": "...",
+    "stepByStep": "...",
+    "correctOptionReasoning": "...",
+    "incorrectOptionsReasoning": "..."
+  }
 }`;
 
     const aiOut = await provider.generateJson<{
-      explanationEn?: string;
-      explanationTa?: string;
+      en?: StructuredExplanationFields;
+      ta?: StructuredExplanationFields;
     }>(prompt, {
       systemPrompt: 'You are an expert TNPSC educator. Output strict valid JSON only.',
       temperature: 0.2,
-      maxTokens: 1500,
+      maxTokens: 2500,
       responseFormat: 'json',
       timeoutMs: 25000,
     });
 
-    const explanationEn = String(aiOut?.explanationEn || '').trim();
-    const explanationTa = String(aiOut?.explanationTa || '').trim();
-
-    if (!explanationEn) {
+    if (!aiOut?.en?.correctOptionReasoning) {
       continue;
     }
+
+    const explanationEn = formatStructuredExplanation(aiOut.en, 'en', verifiedSourceRef);
+    const explanationTa = aiOut.ta?.correctOptionReasoning
+      ? formatStructuredExplanation(aiOut.ta, 'ta', verifiedSourceRef)
+      : '';
+    const needsAdminReview = !hasSufficientTextbookContent;
 
     if (options.applyToDatabase) {
       await applyExplanationToDatabase({
@@ -232,6 +340,7 @@ Return ONLY valid JSON:
         textbookId: verifiedTextbookId,
         sourcePage: primaryPage,
         providerName: provider.name,
+        needsAdminReview,
       });
     }
 
@@ -246,9 +355,10 @@ Return ONLY valid JSON:
       textbookId: verifiedTextbookId,
       sourcePage: primaryPage,
       hasSufficientTextbookContent,
-      limitationNote: hasSufficientTextbookContent
-        ? undefined
-        : 'No indexed textbook pages matched this question; generated with verified supporting context.',
+      needsAdminReview,
+      limitationNote: needsAdminReview
+        ? 'Textbook evidence unavailable for this lesson — marked for Admin Review.'
+        : undefined,
     });
   }
 
@@ -267,8 +377,20 @@ export async function applyExplanationToDatabase(params: {
   textbookId?: number | null;
   sourcePage?: number | null;
   providerName?: string;
+  needsAdminReview?: boolean;
 }): Promise<void> {
-  const { questionId, explanationEn, explanationTa, sourceReference, textbookId, sourcePage, providerName } = params;
+  const {
+    questionId,
+    explanationEn,
+    explanationTa,
+    sourceReference,
+    textbookId,
+    sourcePage,
+    providerName,
+    needsAdminReview,
+  } = params;
+
+  const verificationStatus = needsAdminReview ? 'needs_review' : 'verified';
 
   await pool.query(
     `UPDATE questions
@@ -276,9 +398,10 @@ export async function applyExplanationToDatabase(params: {
          source_reference = COALESCE(NULLIF($2, ''), source_reference),
          textbook_id = COALESCE($3, textbook_id),
          source_page = COALESCE($4, source_page),
+         verification_status = $5,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $5`,
-    [explanationEn, sourceReference || '', textbookId ?? null, sourcePage ?? null, questionId]
+     WHERE id = $6`,
+    [explanationEn, sourceReference || '', textbookId ?? null, sourcePage ?? null, verificationStatus, questionId]
   );
 
   if (explanationTa && explanationTa.trim()) {

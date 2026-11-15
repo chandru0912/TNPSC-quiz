@@ -991,7 +991,7 @@ const MCQPractice = () => {
 
                   {showExplanation && (
                     <div style={{ marginTop: '0.75rem' }}>
-                      <p className="explanation-text">
+                      <p className="explanation-text" style={{ whiteSpace: 'pre-line', lineHeight: 1.65 }}>
                         {questionItem.explanation && questionItem.explanation.trim().length > 0
                           ? questionItem.explanation
                           : (questionLang === 'ta'

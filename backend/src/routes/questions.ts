@@ -202,6 +202,7 @@ router.post('/admin/apply-explanations', requireAdminAuth, async (req: Request, 
         sourceReference: item?.sourceReference ? String(item.sourceReference).trim() : undefined,
         textbookId: item?.textbookId ? Number(item.textbookId) : null,
         sourcePage: item?.sourcePage ? Number(item.sourcePage) : null,
+        needsAdminReview: Boolean(item?.needsAdminReview),
       });
       updatedCount++;
     }
