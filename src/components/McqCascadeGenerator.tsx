@@ -130,9 +130,9 @@ export const McqCascadeGenerator: React.FC<McqCascadeGeneratorProps> = ({
   const [geminiStatusInfo, setGeminiStatusInfo] = useState<{ configured: boolean; connected: boolean; model?: string; status?: string } | null>(null)
 
   // Steps 9, 10, 11: Generation Settings
-  const [questionCount, setQuestionCount] = useState(25)
-  const [difficulty, setDifficulty] = useState<Difficulty>('Medium')
-  const [language, setLanguage] = useState<Language>('tamil')
+  const [questionCount, setQuestionCount] = useState(100)
+  const [difficulty, setDifficulty] = useState<Difficulty>('Mixed')
+  const [language, setLanguage] = useState<Language>('english')
 
   // Step 12: Execution & Progress State
   const [isGenerating, setIsGenerating] = useState(false)
