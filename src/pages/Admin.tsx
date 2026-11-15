@@ -700,14 +700,26 @@ const Admin = () => {
   // Filter Bar state (reuses cascading syllabus logic)
   const [targetSystemFilter, setTargetSystemFilter] = useState<'study_materials' | 'main_practice'>('study_materials')
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [difficultyFilter, setDifficultyFilter] = useState('all')
   const [page, setPage] = useState(1)
   const pageSize = 50
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const handleQbCascadeChange = useCallback(() => {
+    setPage(1)
+  }, [])
+
   const qbSyllabusCascade = useSyllabusCascade({
     allowAll: true,
-    onChange: () => setPage(1),
+    onChange: handleQbCascadeChange,
   })
   const {
     groupId: groupFilter,
@@ -718,6 +730,8 @@ const Admin = () => {
     selectedSubjectObj: qbSelectedSubjectObj,
     selectedLessonObj: qbSelectedLessonObj,
   } = qbSyllabusCascade
+  const qbSubjectName = qbSelectedSubjectObj?.name || ''
+  const qbLessonId = qbSelectedLessonObj?.id || ''
 
   // Modals state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -1199,23 +1213,31 @@ const Admin = () => {
     }
   }, [token])
 
+  const questionsAbortRef = useRef<AbortController | null>(null)
+  const questionsReqSeqRef = useRef(0)
+
   // Fetch Questions (supports all 5 AI Generator syllabus filters + status, difficulty, search)
   const fetchQuestions = useCallback(async () => {
     if (!token) return
+    questionsAbortRef.current?.abort()
+    const controller = new AbortController()
+    questionsAbortRef.current = controller
+    const reqSeq = ++questionsReqSeqRef.current
+
     setIsLoading(true)
     try {
       const params = new URLSearchParams()
-      if (searchQuery.trim()) params.set('search', searchQuery.trim())
+      if (debouncedSearchQuery.trim()) params.set('search', debouncedSearchQuery.trim())
       if (groupFilter !== 'all') params.set('category', groupFilter)
       if (subjectFilter !== 'all') {
-        params.set('subject', qbSelectedSubjectObj?.name || subjectFilter)
+        params.set('subject', qbSubjectName || subjectFilter)
       }
       if (standardFilter !== 'all') params.set('classId', String(standardFilter))
       if (unitFilter !== 'all') params.set('unitId', String(unitFilter))
       if (lessonFilter !== 'all' && lessonFilter.trim()) {
         params.set('lessonTitle', lessonFilter.trim())
-        if (qbSelectedLessonObj?.id) {
-          params.set('lessonId', qbSelectedLessonObj.id)
+        if (qbLessonId) {
+          params.set('lessonId', qbLessonId)
         }
       }
       if (statusFilter !== 'all') params.set('status', statusFilter)
@@ -1232,7 +1254,9 @@ const Admin = () => {
           : `/api/questions/admin?${params.toString()}`
         res = await apiFetch(endpoint, {
           headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
         })
+        if (reqSeq !== questionsReqSeqRef.current) return
         if (res.status === 401 || res.status === 403) {
           handleLogout()
           return
@@ -1240,9 +1264,12 @@ const Admin = () => {
         if (res.ok) {
           data = await res.json()
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (e?.name === 'AbortError' || controller.signal.aborted) return
         console.warn('Backend questions/admin unreachable, using local staged view:', e)
       }
+
+      if (reqSeq !== questionsReqSeqRef.current) return
 
       if (data && data.status === 'success') {
         setQuestions(data.data)
@@ -1257,7 +1284,7 @@ const Admin = () => {
             return false
           }
           if (subjectFilter !== 'all') {
-            const targetSubj = (qbSelectedSubjectObj?.name || subjectFilter).toLowerCase()
+            const targetSubj = (qbSubjectName || subjectFilter).toLowerCase()
             const qSubj = (q.subject || '').toLowerCase()
             if (targetSubj.includes('tamil')) {
               if (!qSubj.includes('tamil') && !qSubj.includes('தமிழ்')) return false
@@ -1288,8 +1315,8 @@ const Admin = () => {
           if (difficultyFilter !== 'all' && q.difficulty !== difficultyFilter) {
             return false
           }
-          if (searchQuery.trim()) {
-            const sq = searchQuery.trim().toLowerCase()
+          if (debouncedSearchQuery.trim()) {
+            const sq = debouncedSearchQuery.trim().toLowerCase()
             const matches =
               String(q.id) === sq ||
               (q.question || '').toLowerCase().includes(sq) ||
@@ -1308,20 +1335,24 @@ const Admin = () => {
         setFilteredTotal(filteredLocal.length)
       }
     } catch (err: any) {
-      console.error('Failed to load questions:', err)
+      if (err?.name !== 'AbortError') {
+        console.error('Failed to load questions:', err)
+      }
     } finally {
-      setIsLoading(false)
+      if (reqSeq === questionsReqSeqRef.current) {
+        setIsLoading(false)
+      }
     }
   }, [
     token,
-    searchQuery,
+    debouncedSearchQuery,
     groupFilter,
     subjectFilter,
-    qbSelectedSubjectObj,
+    qbSubjectName,
     standardFilter,
     unitFilter,
     lessonFilter,
-    qbSelectedLessonObj,
+    qbLessonId,
     statusFilter,
     difficultyFilter,
     targetSystemFilter,
@@ -2959,23 +2990,25 @@ const Admin = () => {
   }
 
   useEffect(() => {
+    if (!isQuestions) return
     fetchQuestions()
-  }, [fetchQuestions])
+  }, [isQuestions, fetchQuestions])
 
   useEffect(() => {
+    if (!isNotes) return
     fetchNotes()
-  }, [fetchNotes])
+  }, [isNotes, fetchNotes])
 
   useEffect(() => {
     setSelectedQuestionIds(new Set())
   }, [
-    searchQuery,
+    debouncedSearchQuery,
     groupFilter,
     subjectFilter,
     standardFilter,
     unitFilter,
     lessonFilter,
-    qbSelectedLessonObj,
+    qbLessonId,
     statusFilter,
     difficultyFilter,
     targetSystemFilter,
@@ -4717,6 +4750,7 @@ const Admin = () => {
                       setStatusFilter('all')
                       setDifficultyFilter('all')
                       setSearchQuery('')
+                      setDebouncedSearchQuery('')
                       setPage(1)
                     }}
                     title="Reset all syllabus and status filters"
@@ -4765,16 +4799,16 @@ const Admin = () => {
                 <th style={{ width: '130px', textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {isLoading ? (
+            <tbody style={{ opacity: isLoading && questions.length > 0 ? 0.65 : 1, transition: 'opacity 0.15s ease' }}>
+              {isLoading && questions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
                     Loading questions from PostgreSQL...
                   </td>
                 </tr>
               ) : questions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
                     No questions found matching your filter criteria.
                   </td>
                 </tr>
