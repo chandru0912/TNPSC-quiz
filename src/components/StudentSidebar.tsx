@@ -10,6 +10,7 @@ import {
   Archive,
   Award,
   TrendingUp,
+  BarChart3,
   Sparkles,
   Flame,
   LogOut,
@@ -54,20 +55,33 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
     { label: 'MCQ Practice', to: '/practice', icon: FileText },
     { label: 'Mock Tests', to: '/mock-tests', icon: GraduationCap },
     { label: 'Previous Year Questions', to: '/previous-papers', icon: Archive },
+    { label: 'Performance Analytics', to: '/performance-analytics', icon: BarChart3 },
     { label: 'Mark List', to: '/mark-list', icon: Award },
     { label: 'Progress Tracker', to: '/progress-tracker', icon: TrendingUp },
   ];
 
   const isLinkActive = (to: string): boolean => {
     const current = location.pathname.toLowerCase();
+    const originState = (location.state as { from?: string } | null)?.from;
+    const originQuery = new URLSearchParams(location.search).get('from');
+    const origin = originState || originQuery;
+
     if (to === '/dashboard') {
       return current === '/dashboard';
     }
     if (to === '/materials') {
-      return current.startsWith('/materials') && !current.startsWith('/materials/practice');
+      if (origin === 'school-materials') return false;
+      return (
+        (current.startsWith('/materials') && !current.startsWith('/materials/practice')) ||
+        current.startsWith('/study-materials/practice')
+      );
     }
     if (to === '/school-materials') {
-      return current.startsWith('/school-materials') || current.startsWith('/study-materials/practice');
+      if (origin === 'school-materials') return true;
+      return current.startsWith('/school-materials');
+    }
+    if (to === '/practice') {
+      return current.startsWith('/practice') || current.startsWith('/materials/practice');
     }
     return current.startsWith(to.toLowerCase());
   };

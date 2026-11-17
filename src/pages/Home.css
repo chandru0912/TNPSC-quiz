@@ -7,7 +7,11 @@
    ========================================================= */
 .hero {
   position: relative;
-  padding: 4.5rem 2rem 3.5rem;
+  width: 100%;
+  min-height: clamp(520px, 72vh, 760px);
+  padding: 4.5rem clamp(1.5rem, 3vw, 3.5rem) 3.5rem;
+  display: flex;
+  align-items: center;
   overflow: hidden;
 }
 
@@ -33,11 +37,12 @@
 }
 
 .hero-container {
-  max-width: 1320px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 1600px;
+  margin-inline: auto;
   display: grid;
   grid-template-columns: 1.4fr 1fr;
-  gap: 3.5rem;
+  gap: clamp(2.5rem, 4vw, 5rem);
   align-items: center;
   position: relative;
   z-index: 1;
@@ -352,8 +357,12 @@
 
 .hero-visual {
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
+  justify-self: end;
   align-items: center;
+  width: 380px;
+  max-width: 100%;
+  flex-shrink: 0;
   position: relative;
   height: 480px;
   min-height: 480px;
@@ -366,7 +375,7 @@
   position: absolute;
   width: 380px;
   height: 380px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.28) 0%, rgba(59, 130, 246, 0.16) 45%, transparent 70%);
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, rgba(59, 130, 246, 0.06) 45%, transparent 70%);
   filter: blur(55px);
   border-radius: 50%;
   pointer-events: none;
@@ -375,12 +384,13 @@
 }
 
 @keyframes heroCardAura {
-  0% { transform: scale(0.92) translate(0, 0); opacity: 0.65; }
-  50% { transform: scale(1.08) translate(10px, -8px); opacity: 0.9; }
-  100% { transform: scale(0.96) translate(-8px, 10px); opacity: 0.75; }
+  0% { transform: scale(0.92) translate(0, 0); opacity: 0.45; }
+  50% { transform: scale(1.08) translate(10px, -8px); opacity: 0.65; }
+  100% { transform: scale(0.96) translate(-8px, 10px); opacity: 0.5; }
 }
 
-.hero-card {
+.hero-card,
+.hero-card.glass {
   padding: 1.25rem 1.6rem 1.15rem;
   border-radius: 28px;
   text-align: center;
@@ -395,16 +405,6 @@
   min-height: 480px;
   max-height: 480px;
   box-sizing: border-box;
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 
-    0 20px 50px -10px rgba(0, 0, 0, 0.45),
-    0 0 25px rgba(255, 215, 0, 0.08),
-    inset 0 1px 1px rgba(255, 255, 255, 0.22);
-  position: relative;
-  overflow: hidden;
   z-index: 1;
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1),
@@ -412,14 +412,15 @@
               border-color 0.35s ease;
 }
 
-.hero-card:hover {
+.hero-card:hover,
+.hero-card.glass:hover {
   transform: translateY(-4px);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%);
-  border-color: rgba(255, 215, 0, 0.35);
-  box-shadow: 
-    0 28px 65px -10px rgba(0, 0, 0, 0.55),
-    0 0 35px rgba(255, 215, 0, 0.15),
-    inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.36);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.28),
+    inset 1px 0 1px rgba(255, 255, 255, 0.12),
+    0 14px 40px rgba(0, 0, 0, 0.14);
 }
 
 /* =========================================================
@@ -443,10 +444,10 @@
   gap: 0.45rem;
   padding: 0.3rem 0.75rem;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
   font-size: 0.75rem;
   font-weight: 700;
   color: #e2e8f0;
@@ -473,28 +474,24 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: 
-    radial-gradient(120% 100% at 50% -10%, rgba(255, 255, 255, 0.25) 0%, transparent 60%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(15, 23, 42, 0.4) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(216, 180, 254, 0.3);
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  border: 1px solid rgba(255, 255, 255, 0.26);
   color: #e0e7ff;
   display: grid;
   place-items: center;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 2px 10px rgba(0, 0, 0, 0.12);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   padding: 0;
 }
 
 .hero-carousel-nav-btn:hover {
-  background: 
-    radial-gradient(120% 100% at 50% -10%, rgba(255, 255, 255, 0.35) 0%, transparent 60%),
-    linear-gradient(135deg, rgba(168, 85, 247, 0.3) 0%, rgba(59, 130, 246, 0.25) 100%);
-  border-color: rgba(216, 180, 254, 0.65);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(216, 180, 254, 0.6);
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 4px 16px rgba(139, 92, 246, 0.3);
   transform: translateY(-1.5px);
 }
 
@@ -539,14 +536,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(145deg, rgba(147, 51, 234, 0.32) 0%, rgba(99, 102, 241, 0.22) 50%, rgba(20, 26, 52, 0.7) 100%);
-  border: 1px solid rgba(255, 215, 0, 0.32);
-  box-shadow: 
-    0 12px 28px -4px rgba(0, 0, 0, 0.6),
-    0 0 16px rgba(255, 215, 0, 0.15),
-    inset 0 1px 1px rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.24),
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    0 0 16px rgba(255, 215, 0, 0.1);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
   position: relative;
   z-index: 3;
   overflow: visible;
@@ -582,8 +579,8 @@
   gap: 0.35rem;
   padding: 0.18rem 0.7rem;
   border-radius: 9999px;
-  background: rgba(168, 85, 247, 0.16);
-  border: 1px solid rgba(196, 181, 253, 0.38);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(216, 180, 254, 0.36);
   color: #ddd6fe;
   font-size: 0.72rem;
   font-weight: 700;
@@ -686,12 +683,12 @@
   top: 1px;
   left: 8%;
   right: 8%;
-  height: 48%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.08) 85%, transparent 100%);
+  height: 45%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 85%, transparent 100%);
   border-radius: 9999px 9999px 50% 50%;
   pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease;
-  opacity: 0.85;
+  opacity: 0.75;
   z-index: 1;
 }
 
@@ -764,8 +761,8 @@
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: blur(1px) saturate(115%);
+  -webkit-backdrop-filter: blur(1px) saturate(115%);
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
               background 0.25s ease,
@@ -792,12 +789,12 @@
   top: 1px;
   left: 8%;
   right: 8%;
-  height: 48%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.08) 85%, transparent 100%);
+  height: 45%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 85%, transparent 100%);
   border-radius: 9999px 9999px 50% 50%;
   pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease;
-  opacity: 0.85;
+  opacity: 0.75;
   z-index: 1;
 }
 
@@ -1177,6 +1174,12 @@
 
   .hero-content {
     align-items: center;
+  }
+
+  .hero-visual {
+    width: 100%;
+    justify-self: center;
+    justify-content: center;
   }
 
   .hero-subtitle {

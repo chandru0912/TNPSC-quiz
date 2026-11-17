@@ -15,7 +15,7 @@ import { ensureDatabaseSchema } from './migrate';
 import { normalizePayloadUnicode } from './utils/tamilUnicode';
 import questionsRouter from './routes/questions';
 import authRouter, { getConfiguredAdminCount } from './routes/auth';
-import { generateAdminToken, verifyAdminToken } from './middleware/auth';
+import { generateAdminToken, verifyAdminToken, requireStudentAuth, StudentAuthenticatedRequest } from './middleware/auth';
 import notesRouter from './routes/notes';
 import textbooksRouter from './routes/textbooks';
 import studyMaterialQuestionsRouter from './routes/studyMaterialQuestions';
@@ -26,6 +26,7 @@ import claudeRouter from './routes/claudeRoutes';
 import geminiRouter from './routes/geminiRoutes';
 import driveRouter from './routes/drive';
 import studentRouter from './routes/student';
+import { getStudentDashboardData } from './services/studentDashboardService';
 import analyticsRouter from './routes/analyticsRoutes';
 import studyManagementRouter from './routes/studyMaterialsManagementRoutes';
 import aiSyllabusImportRouter from './routes/aiSyllabusImportRoutes';
@@ -373,6 +374,19 @@ app.use('/api/api/drive', requireSchemaMiddleware, driveRouter);
 app.use('/api/student', requireSchemaMiddleware, studentRouter);
 app.use('/student', requireSchemaMiddleware, studentRouter);
 app.use('/api/api/student', requireSchemaMiddleware, studentRouter);
+
+app.get(['/api/dashboard/performance', '/dashboard/performance'], requireSchemaMiddleware, requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const data = await getStudentDashboardData(req.studentUser!.studentId);
+    if (!data) {
+      return res.status(404).json({ status: 'error', message: 'Student account not found.' });
+    }
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Dashboard Performance Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load dashboard performance.' });
+  }
+});
 
 app.use(['/api/analytics', '/analytics', '/api/api/analytics', '/api/overview', '/overview'], requireSchemaMiddleware, analyticsRouter);
 

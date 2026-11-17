@@ -14,8 +14,11 @@ import {
   normalizeQuestionIds,
   translateStudyMaterialQuestions,
 } from '../services/mcqTranslationService';
+import { getCached, setCached, invalidateCachePrefix } from '../utils/cache';
+import { platformContentSyncMiddleware } from '../services/studentDashboardService';
 
 const router = Router();
+router.use(platformContentSyncMiddleware);
 
 /**
  * GET /api/study-materials/questions (Public Student Practice Endpoint)
@@ -124,10 +127,6 @@ router.get('/', async (req: Request, res: Response) => {
     const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 300), 500);
     const safeOffset = Math.max(0, parseInt(offset as string, 10) || 0);
 
-    const countQuery = `SELECT COUNT(*) AS total FROM questions ${whereClause}`;
-    const totalResult = await pool.query(countQuery, values);
-    const totalCount = parseInt(totalResult.rows[0].total, 10);
-
     const dataQuery = `
       SELECT * FROM questions 
       ${whereClause} 
@@ -136,6 +135,15 @@ router.get('/', async (req: Request, res: Response) => {
     `;
     const dataValues = [...values, safeLimit, safeOffset];
     const dataResult = await pool.query(dataQuery, dataValues);
+
+    let totalCount: number;
+    if (safeOffset === 0 && dataResult.rows.length < safeLimit) {
+      totalCount = dataResult.rows.length;
+    } else {
+      const countQuery = `SELECT COUNT(*) AS total FROM questions ${whereClause}`;
+      const totalResult = await pool.query(countQuery, values);
+      totalCount = parseInt(totalResult.rows[0].total, 10);
+    }
 
     const questions: QuestionDTO[] = dataResult.rows.map(mapRowToQuestion);
 
@@ -282,24 +290,19 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 50), 200);
     const safeOffset = Math.max(0, parseInt(offset as string, 10) || 0);
 
-    // Global Metrics for Study Materials
-    const metricsResult = await pool.query(`
-      SELECT 
-        COUNT(*) as total_count,
-        COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
-        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
-        COUNT(CASE WHEN verification_status = 'needs_review' OR verification_status IS NULL THEN 1 END) as pending_review_count,
-        COUNT(DISTINCT unit_id) as units_count,
-        COUNT(DISTINCT class_id) as classes_count
-      FROM questions
-      WHERE target_system = 'study_materials';
-    `);
-    const metrics = metricsResult.rows[0];
+    // Global Metrics for Study Materials (cached 30s per instance, invalidated on mutations)
+    const metricsCacheKey = 'metrics:questions:study_materials';
+    type SmAdminMetrics = {
+      totalQuestions: number;
+      stagingCount: number;
+      publishedCount: number;
+      pendingReviewCount: number;
+      unitsCount: number;
+      classesCount: number;
+    };
+    const cachedMetrics = getCached<SmAdminMetrics>(metricsCacheKey);
 
     const countQuery = `SELECT COUNT(*) AS filtered_total FROM questions ${whereClause}`;
-    const countResult = await pool.query(countQuery, values);
-    const filteredTotal = parseInt(countResult.rows[0].filtered_total, 10);
-
     const dataQuery = `
       SELECT * FROM questions 
       ${whereClause} 
@@ -307,19 +310,47 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
     const dataValues = [...values, safeLimit, safeOffset];
-    const dataResult = await pool.query(dataQuery, dataValues);
 
-    return res.status(200).json({
-      status: 'success',
-      targetSystem: 'study_materials',
-      metrics: {
+    const [metricsResult, countResult, dataResult] = await Promise.all([
+      cachedMetrics
+        ? Promise.resolve(null)
+        : pool.query(`
+            SELECT 
+              COUNT(*) as total_count,
+              COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
+              COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+              COUNT(CASE WHEN verification_status = 'needs_review' OR verification_status IS NULL THEN 1 END) as pending_review_count,
+              COUNT(DISTINCT unit_id) as units_count,
+              COUNT(DISTINCT class_id) as classes_count
+            FROM questions
+            WHERE target_system = 'study_materials';
+          `),
+      pool.query(countQuery, values),
+      pool.query(dataQuery, dataValues),
+    ]);
+
+    let resolvedMetrics: SmAdminMetrics;
+    if (cachedMetrics) {
+      resolvedMetrics = cachedMetrics;
+    } else {
+      const metrics = metricsResult!.rows[0];
+      resolvedMetrics = {
         totalQuestions: parseInt(metrics?.total_count || '0', 10),
         stagingCount: parseInt(metrics?.staging_count || '0', 10),
         publishedCount: parseInt(metrics?.published_count || '0', 10),
         pendingReviewCount: parseInt(metrics?.pending_review_count || '0', 10),
         unitsCount: parseInt(metrics?.units_count || '0', 10),
         classesCount: parseInt(metrics?.classes_count || '0', 10),
-      },
+      };
+      setCached(metricsCacheKey, resolvedMetrics, 30_000);
+    }
+
+    const filteredTotal = parseInt(countResult.rows[0].filtered_total, 10);
+
+    return res.status(200).json({
+      status: 'success',
+      targetSystem: 'study_materials',
+      metrics: resolvedMetrics,
       filteredTotal,
       data: dataResult.rows.map(mapRowToQuestion),
     });
@@ -365,14 +396,17 @@ router.post('/translate', async (req: Request, res: Response) => {
       return res.status(400).json({ status: 'error', message: 'All question IDs must be positive integers.' });
     }
 
-    const result = await translateStudyMaterialQuestions(questionIds);
+    const cacheOnly = Boolean(req.body?.cacheOnly);
+    const result = await translateStudyMaterialQuestions(questionIds, { cacheOnly });
     return res.status(200).json({
       status: 'success',
       language: 'ta',
       count: result.translations.length,
       data: result.translations,
+      missingIds: result.missingIds,
       failedIds: result.failures.map((failure) => failure.questionId),
       errors: result.failures,
+      stats: result.stats,
     });
   } catch (error: any) {
     console.error('[Study Materials Translation Error]:', error?.message || error);
@@ -596,6 +630,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
     }
 
     await client.query('COMMIT');
+    invalidateCachePrefix('metrics:questions:');
 
     return res.status(201).json({
       status: 'success',
@@ -762,6 +797,7 @@ router.patch('/publish', requireAdminAuth, async (req: Request, res: Response) =
       WHERE target_system = 'study_materials';
     `);
     const liveM = liveMetricsRes.rows[0];
+    invalidateCachePrefix('metrics:questions:');
 
     const allPublishedIds = [...result.rows.map((row: any) => row.id), ...alreadyPublishedIds];
 
@@ -813,6 +849,7 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
         "DELETE FROM questions WHERE id = ANY($1) AND target_system = 'study_materials' RETURNING id",
         [validIds]
       );
+      invalidateCachePrefix('metrics:questions:');
       return res.status(200).json({
         status: 'success',
         message: `Deleted ${result.rowCount} Study Materials question(s)`,
@@ -822,6 +859,7 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
 
     if (deleteAll) {
       const result = await client.query("DELETE FROM questions WHERE target_system = 'study_materials' RETURNING id");
+      invalidateCachePrefix('metrics:questions:');
       return res.status(200).json({
         status: 'success',
         message: `Deleted all ${result.rowCount} Study Materials question(s)`,
@@ -851,6 +889,7 @@ router.delete('/:id(\\d+)', requireAdminAuth, async (req: Request, res: Response
     if (result.rowCount === 0) {
       return res.status(404).json({ status: 'error', message: `Study Materials question #${id} not found` });
     }
+    invalidateCachePrefix('metrics:questions:');
     return res.status(200).json({
       status: 'success',
       message: `Study Materials question #${id} deleted successfully`,

@@ -14,8 +14,14 @@ import {
   persistTopicAlignedNotes,
   migrateAllExistingStudyMaterials,
 } from '../services/topicAlignmentService';
+import { getCached, setCached, invalidateCachePrefix } from '../utils/cache';
+import { platformContentSyncMiddleware } from '../services/studentDashboardService';
+
+const NOTES_METRICS_CACHE_KEY = 'metrics:notes:all';
+const NOTES_METRICS_TTL_MS = 30_000;
 
 const router = Router();
+router.use(platformContentSyncMiddleware);
 
 function mapRowToNote(row: any) {
   return {
@@ -251,10 +257,6 @@ router.get('/', async (req: Request, res: Response) => {
     const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 100), 500);
     const safeOffset = Math.max(0, parseInt(offset as string, 10) || 0);
 
-    const countQuery = `SELECT COUNT(*) AS total FROM study_notes ${whereClause}`;
-    const totalResult = await pool.query(countQuery, values);
-    const totalCount = parseInt(totalResult.rows[0].total, 10);
-
     const dataQuery = `
       SELECT * FROM study_notes 
       ${whereClause} 
@@ -263,6 +265,15 @@ router.get('/', async (req: Request, res: Response) => {
     `;
     const dataValues = [...values, safeLimit, safeOffset];
     const dataResult = await pool.query(dataQuery, dataValues);
+
+    let totalCount: number;
+    if (safeOffset === 0 && dataResult.rows.length < safeLimit) {
+      totalCount = dataResult.rows.length;
+    } else {
+      const countQuery = `SELECT COUNT(*) AS total FROM study_notes ${whereClause}`;
+      const totalResult = await pool.query(countQuery, values);
+      totalCount = parseInt(totalResult.rows[0].total, 10);
+    }
 
     res.status(200).json({
       status: 'success',
@@ -416,9 +427,6 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     const safeOffset = Math.max(0, parseInt(offset as string, 10) || 0);
 
     const countQuery = `SELECT COUNT(*) AS total FROM study_notes ${whereClause}`;
-    const countResult = await pool.query(countQuery, values);
-    const total = parseInt(countResult.rows[0].total, 10);
-
     const dataQuery = `
       SELECT * FROM study_notes 
       ${whereClause} 
@@ -426,24 +434,45 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
     const dataValues = [...values, safeLimit, safeOffset];
-    const dataResult = await pool.query(dataQuery, dataValues);
 
-    // Global Metrics for Study Notes HUD
-    const metricsResult = await pool.query(`
-      SELECT 
-        COUNT(*) as total_count,
-        COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
-        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
-        COUNT(DISTINCT class_id) as standards_count
-      FROM study_notes;
-    `);
-    const metricsRow = metricsResult.rows[0];
-    const metrics = {
-      totalNotes: parseInt(metricsRow?.total_count || '0', 10),
-      stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
-      publishedCount: parseInt(metricsRow?.published_count || '0', 10),
-      classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
+    type NotesMetrics = {
+      totalNotes: number;
+      stagingCount: number;
+      publishedCount: number;
+      classesCovered: number;
     };
+    const cachedMetrics = getCached<NotesMetrics>(NOTES_METRICS_CACHE_KEY);
+
+    const [countResult, dataResult, metricsResult] = await Promise.all([
+      pool.query(countQuery, values),
+      pool.query(dataQuery, dataValues),
+      cachedMetrics
+        ? Promise.resolve(null)
+        : pool.query(`
+            SELECT 
+              COUNT(*) as total_count,
+              COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
+              COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+              COUNT(DISTINCT class_id) as standards_count
+            FROM study_notes;
+          `),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
+
+    let metrics: NotesMetrics;
+    if (cachedMetrics) {
+      metrics = cachedMetrics;
+    } else {
+      const metricsRow = metricsResult!.rows[0];
+      metrics = {
+        totalNotes: parseInt(metricsRow?.total_count || '0', 10),
+        stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
+        publishedCount: parseInt(metricsRow?.published_count || '0', 10),
+        classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
+      };
+      setCached(NOTES_METRICS_CACHE_KEY, metrics, NOTES_METRICS_TTL_MS);
+    }
 
     res.status(200).json({
       status: 'success',
@@ -469,6 +498,16 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
  */
 router.get('/metrics', async (_req: Request, res: Response) => {
   try {
+    const cachedMetrics = getCached<{
+      totalNotes: number;
+      stagingCount: number;
+      publishedCount: number;
+      classesCovered: number;
+    }>(NOTES_METRICS_CACHE_KEY);
+    if (cachedMetrics) {
+      return res.status(200).json({ status: 'success', metrics: cachedMetrics });
+    }
+
     const metricsResult = await pool.query(`
       SELECT 
         COUNT(*) as total_count,
@@ -478,14 +517,16 @@ router.get('/metrics', async (_req: Request, res: Response) => {
       FROM study_notes;
     `);
     const metricsRow = metricsResult.rows[0];
+    const metrics = {
+      totalNotes: parseInt(metricsRow?.total_count || '0', 10),
+      stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
+      publishedCount: parseInt(metricsRow?.published_count || '0', 10),
+      classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
+    };
+    setCached(NOTES_METRICS_CACHE_KEY, metrics, NOTES_METRICS_TTL_MS);
     return res.status(200).json({
       status: 'success',
-      metrics: {
-        totalNotes: parseInt(metricsRow?.total_count || '0', 10),
-        stagingCount: parseInt(metricsRow?.staging_count || '0', 10),
-        publishedCount: parseInt(metricsRow?.published_count || '0', 10),
-        classesCovered: parseInt(metricsRow?.standards_count || '0', 10),
-      },
+      metrics,
     });
   } catch (error: any) {
     console.error('Error in study notes metrics query:', error);
@@ -562,6 +603,7 @@ router.post('/bulk-publish', requireAdminAuth, async (req: Request, res: Respons
     );
 
     await client.query('COMMIT');
+    invalidateCachePrefix('metrics:notes:');
 
     return res.status(200).json({
       status: 'success',
@@ -657,6 +699,7 @@ router.post('/bulk-upload', requireAdminAuth, async (req: Request, res: Response
     }
 
     await client.query('COMMIT');
+    invalidateCachePrefix('metrics:notes:');
     return res.status(201).json({
       status: 'success',
       message: `Successfully uploaded ${insertedNotes.length} study note(s) to Staging.${duplicatesSkipped > 0 ? ` (${duplicatesSkipped} duplicate note(s) skipped).` : ''}`,
@@ -715,6 +758,8 @@ router.post('/publish-scope', requireAdminAuth, async (req: Request, res: Respon
       updatedCount = result.rows.length;
     }
 
+    invalidateCachePrefix('metrics:notes:');
+
     return res.status(200).json({
       status: 'success',
       message: `Successfully published ${updatedCount} lesson study notes live to Study Materials!`,
@@ -730,6 +775,7 @@ router.post('/publish-scope', requireAdminAuth, async (req: Request, res: Respon
 router.post('/migrate-topics', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const stats = await migrateAllExistingStudyMaterials(pool);
+    invalidateCachePrefix('metrics:notes:');
     return res.status(200).json({
       status: 'success',
       message: `Successfully migrated and organized ${stats.lessonsProcessed} lesson(s) into ${stats.topicsCreated} topic records across PostgreSQL.`,
@@ -1183,6 +1229,8 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       console.warn('[NotesRoute] Automatic topic separation non-fatal warning:', sepErr);
     }
 
+    invalidateCachePrefix('metrics:notes:');
+
     return res.status(201).json({
       status: 'success',
       message: status === 'published'
@@ -1263,6 +1311,7 @@ router.patch('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     const updateQuery = `UPDATE study_notes SET ${updateClauses.join(', ')} WHERE id = $${pIdx} RETURNING *;`;
     const result = await pool.query(updateQuery, values);
     if (result.rows.length === 0) return res.status(404).json({ status: 'error', message: 'Note not found' });
+    invalidateCachePrefix('metrics:notes:');
     return res.status(200).json({ status: 'success', message: 'Study notes updated successfully', data: mapRowToNote(result.rows[0]) });
   } catch (error: any) {
     console.error('Error updating study note:', error);
@@ -1310,6 +1359,7 @@ router.post('/:id/reassign', requireAdminAuth, async (req: Request, res: Respons
     if (result.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: 'Study note not found' });
     }
+    invalidateCachePrefix('metrics:notes:');
 
     return res.status(200).json({
       status: 'success',
@@ -1334,6 +1384,7 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
         return res.status(400).json({ status: 'error', message: 'No valid note IDs provided' });
       }
       const result = await client.query('DELETE FROM study_notes WHERE id = ANY($1) RETURNING id', [validIds]);
+      invalidateCachePrefix('metrics:notes:');
       return res.status(200).json({
         status: 'success',
         message: `Deleted ${result.rowCount} study note(s)`,
@@ -1393,6 +1444,7 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
 
       const deleteQuery = `DELETE FROM study_notes ${whereClause} RETURNING id`;
       const deleteResult = await client.query(deleteQuery, values);
+      invalidateCachePrefix('metrics:notes:');
       return res.status(200).json({
         status: 'success',
         message: `Deleted ${deleteResult.rowCount} study note(s)`,
@@ -1416,6 +1468,7 @@ router.delete('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     if (isNaN(id)) return res.status(400).json({ status: 'error', message: 'Invalid note ID' });
     const result = await pool.query('DELETE FROM study_notes WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) return res.status(404).json({ status: 'error', message: 'Note not found' });
+    invalidateCachePrefix('metrics:notes:');
     return res.status(200).json({ status: 'success', message: 'Study notes deleted successfully' });
   } catch (error: any) {
     console.error('Error deleting study note:', error);

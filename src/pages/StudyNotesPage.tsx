@@ -15,6 +15,7 @@ import {
   ChevronDown,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
+import { notifyStudentSync } from '../utils/studentSync'
 import { cleanTamilUnicodeText } from '../utils/tamilUnicodeCleaner'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { getLessonsForSelection } from '../data/unifiedSyllabusRegistry'
@@ -344,7 +345,11 @@ const StudyNotesPage: React.FC = () => {
           readingTimeSeconds: 45,
           isCompleted: true,
         }),
-      }).catch((err) => console.warn('[StudentTrack] Material progress log failed:', err))
+      })
+        .then((res) => {
+          if (res.ok) notifyStudentSync()
+        })
+        .catch((err) => console.warn('[StudentTrack] Material progress log failed:', err))
     }, 45_000)
 
     return () => clearTimeout(completionTimer)

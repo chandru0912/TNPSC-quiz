@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { GraduationCap, Clock, FileText, Users, Play, Star } from 'lucide-react'
+import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import './MockTests.css'
 
 interface MockTestItem {
@@ -108,6 +109,7 @@ const MOCK_TESTS: MockTestItem[] = [
 ]
 
 const MockTests = () => {
+  useStudyTimeTracker()
   const navigate = useNavigate()
   const [selectedCategory, setSelectedCategory] = useState<'group1' | 'group2_2a' | 'group4'>('group1')
 

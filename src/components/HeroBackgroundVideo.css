@@ -1,0 +1,69 @@
+.hero-bg-video-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  background: #080d1b;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  filter: none;
+}
+
+.hero-video {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 1440px;
+  height: 810px;
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
+  object-position: center center;
+  display: block;
+  pointer-events: none;
+  filter: none;
+  opacity: 1;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%);
+}
+
+/* Subtle 12% black cinematic shade + localized left text readability */
+.hero-video-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(6, 10, 22, 0.36) 0%,
+      rgba(6, 10, 22, 0.14) 26%,
+      transparent 44%
+    ),
+    rgba(0, 0, 0, 0.12);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  filter: none;
+}
+
+@media (max-width: 968px) {
+  .hero-video-overlay {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(6, 10, 22, 0.35) 0%,
+        rgba(6, 10, 22, 0.14) 40%,
+        transparent 75%
+      ),
+      rgba(0, 0, 0, 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-video {
+    display: none;
+  }
+}

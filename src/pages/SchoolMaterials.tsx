@@ -15,6 +15,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch, getApiUrl } from '../utils/api'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
+import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import './SchoolMaterials.css'
 
 interface TextbookRecord {
@@ -80,6 +81,7 @@ function isTextbookEnabled(status?: string): boolean {
 }
 
 const SchoolMaterials = () => {
+  useStudyTimeTracker()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 

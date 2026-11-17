@@ -1460,21 +1460,43 @@ export class StudyManagementService {
     }
 
     const res = await pool.query(
-      `SELECT l.*,
-              (SELECT COUNT(*)::int FROM syllabus_topics t WHERE t.lesson_id = l.id AND t.is_active = true) as topics_count,
-              EXISTS (SELECT 1 FROM study_notes sn WHERE (sn.lesson_id = l.id OR LOWER(sn.lesson_title) = LOWER(l.title))) as has_notes
-       FROM syllabus_lessons l
-       WHERE (
-         ($1::int[] IS NOT NULL AND l.unit_id = ANY($1::int[]))
-         OR (
-           $1::int[] IS NULL
-           AND ($2::text[] IS NULL OR l.exam_id = ANY($2::text[]))
-           AND ($3::text[] IS NULL OR l.subject_id = ANY($3::text[]))
+      `WITH filtered_lessons AS (
+         SELECT l.*
+         FROM syllabus_lessons l
+         WHERE (
+           ($1::int[] IS NOT NULL AND l.unit_id = ANY($1::int[]))
+           OR (
+             $1::int[] IS NULL
+             AND ($2::text[] IS NULL OR l.exam_id = ANY($2::text[]))
+             AND ($3::text[] IS NULL OR l.subject_id = ANY($3::text[]))
+           )
          )
+           AND ($4::int IS NULL OR l.standard_number = $4)
+           AND l.is_active = true
+           AND COALESCE(l.status, 'Available') NOT IN ('Inactive', 'Draft')
+       ),
+       topic_counts AS (
+         SELECT t.lesson_id, COUNT(*)::int AS topics_count
+         FROM syllabus_topics t
+         WHERE t.is_active = true
+           AND t.lesson_id IN (SELECT id FROM filtered_lessons)
+         GROUP BY t.lesson_id
+       ),
+       matched_lesson_notes AS (
+         SELECT fl.id AS lesson_id
+         FROM filtered_lessons fl
+         JOIN study_notes sn ON sn.lesson_id = fl.id
+         UNION
+         SELECT fl.id AS lesson_id
+         FROM filtered_lessons fl
+         JOIN study_notes sn ON LOWER(sn.lesson_title) = LOWER(fl.title)
        )
-         AND ($4::int IS NULL OR l.standard_number = $4)
-         AND l.is_active = true
-         AND COALESCE(l.status, 'Available') NOT IN ('Inactive', 'Draft')
+       SELECT l.*,
+              COALESCE(tc.topics_count, 0) as topics_count,
+              (mln.lesson_id IS NOT NULL) as has_notes
+       FROM filtered_lessons l
+       LEFT JOIN topic_counts tc ON tc.lesson_id = l.id
+       LEFT JOIN matched_lesson_notes mln ON mln.lesson_id = l.id
        ORDER BY 
          CASE WHEN l.exam_id = $5 THEN 0 ELSE 1 END ASC,
          l.standard_number ASC,
@@ -1516,12 +1538,33 @@ export class StudyManagementService {
     if (deduped.length > 0) {
       const lessonIds = deduped.map((l) => l.id);
       const topicsRes = await pool.query(
-        `SELECT t.*,
-                (SELECT COUNT(*)::int FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name)) as notes_count,
-                (SELECT id FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name) LIMIT 1) as notes_id
-         FROM syllabus_topics t
-         WHERE t.lesson_id = ANY($1::text[])
-           AND t.is_active = true
+        `WITH filtered_topics AS (
+           SELECT t.*
+           FROM syllabus_topics t
+           WHERE t.lesson_id = ANY($1::text[])
+             AND t.is_active = true
+         ),
+         matched_notes AS (
+           SELECT ft.id AS topic_pk, sn.id AS note_id
+           FROM filtered_topics ft
+           JOIN study_notes sn ON sn.topic_id = ft.id::text
+           UNION
+           SELECT ft.id AS topic_pk, sn.id AS note_id
+           FROM filtered_topics ft
+           JOIN study_notes sn ON LOWER(sn.topic) = LOWER(ft.topic_name)
+         ),
+         topic_note_stats AS (
+           SELECT topic_pk,
+                  COUNT(*)::int AS notes_count,
+                  (ARRAY_AGG(note_id ORDER BY note_id ASC))[1] AS notes_id
+           FROM matched_notes
+           GROUP BY topic_pk
+         )
+         SELECT t.*,
+                COALESCE(tns.notes_count, 0) as notes_count,
+                tns.notes_id
+         FROM filtered_topics t
+         LEFT JOIN topic_note_stats tns ON tns.topic_pk = t.id
          ORDER BY t.display_order ASC, t.id ASC`,
         [lessonIds]
       );
@@ -1790,10 +1833,34 @@ export class StudyManagementService {
     const titleTerm = (options?.lessonTitle || term).trim();
     const unitId = options?.unitId;
 
-    const baseSelect = `SELECT t.*,
-              (SELECT COUNT(*)::int FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name)) as notes_count,
-              (SELECT id FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name) LIMIT 1) as notes_id
-       FROM syllabus_topics t`;
+    const buildTopicsQuery = (whereSql: string) => `
+      WITH filtered_topics AS (
+        SELECT t.*
+        FROM syllabus_topics t
+        ${whereSql}
+      ),
+      matched_notes AS (
+        SELECT ft.id AS topic_pk, sn.id AS note_id
+        FROM filtered_topics ft
+        JOIN study_notes sn ON sn.topic_id = ft.id::text
+        UNION
+        SELECT ft.id AS topic_pk, sn.id AS note_id
+        FROM filtered_topics ft
+        JOIN study_notes sn ON LOWER(sn.topic) = LOWER(ft.topic_name)
+      ),
+      topic_note_stats AS (
+        SELECT topic_pk,
+               COUNT(*)::int AS notes_count,
+               (ARRAY_AGG(note_id ORDER BY note_id ASC))[1] AS notes_id
+        FROM matched_notes
+        GROUP BY topic_pk
+      )
+      SELECT t.*,
+             COALESCE(tns.notes_count, 0) as notes_count,
+             tns.notes_id
+      FROM filtered_topics t
+      LEFT JOIN topic_note_stats tns ON tns.topic_pk = t.id
+    `;
 
     const orderClause = `ORDER BY 
          CASE WHEN t.display_order > 0 THEN t.display_order ELSE 999999 END ASC,
@@ -1808,9 +1875,8 @@ export class StudyManagementService {
     let rows: any[] = [];
     if (term) {
       const exactRes = await pool.query(
-        `${baseSelect}
-         WHERE (t.lesson_id = $1 OR LOWER(t.lesson_id) = LOWER($1))
-           AND t.is_active = true
+        `${buildTopicsQuery(`WHERE (t.lesson_id = $1 OR LOWER(t.lesson_id) = LOWER($1))
+           AND t.is_active = true`)}
          ${orderClause}`,
         [term]
       );
@@ -1820,8 +1886,7 @@ export class StudyManagementService {
     // 2. Fallback to lessonTitle match only if no exact lesson_id rows exist
     if (rows.length === 0 && (term || titleTerm)) {
       const fallbackRes = await pool.query(
-        `${baseSelect}
-         WHERE (
+        `${buildTopicsQuery(`WHERE (
            t.lesson_id IN (
              SELECT id FROM syllabus_lessons 
              WHERE id = $1 
@@ -1836,7 +1901,7 @@ export class StudyManagementService {
              )
            ))
          )
-           AND t.is_active = true
+           AND t.is_active = true`)}
          ${orderClause}`,
         [term, titleTerm, unitId || null]
       );
@@ -2188,13 +2253,35 @@ export class StudyManagementService {
     // 2. Fetch all lessons belonging to these units
     const unitIds = units.map((u) => u.id);
     const lessonsRes = await pool.query(
-      `SELECT l.*,
-              (SELECT COUNT(*)::int FROM syllabus_topics t WHERE t.lesson_id = l.id AND t.is_active = true) as topics_count,
-              EXISTS (SELECT 1 FROM study_notes sn WHERE sn.lesson_id = l.id OR LOWER(sn.lesson_title) = LOWER(l.title)) as has_notes
-       FROM syllabus_lessons l
-       WHERE l.unit_id = ANY($1::int[])
-         AND ($2::int IS NULL OR l.standard_number = $2)
-         AND l.is_active = true
+      `WITH filtered_lessons AS (
+         SELECT l.*
+         FROM syllabus_lessons l
+         WHERE l.unit_id = ANY($1::int[])
+           AND ($2::int IS NULL OR l.standard_number = $2)
+           AND l.is_active = true
+       ),
+       topic_counts AS (
+         SELECT t.lesson_id, COUNT(*)::int AS topics_count
+         FROM syllabus_topics t
+         WHERE t.is_active = true
+           AND t.lesson_id IN (SELECT id FROM filtered_lessons)
+         GROUP BY t.lesson_id
+       ),
+       matched_lesson_notes AS (
+         SELECT fl.id AS lesson_id
+         FROM filtered_lessons fl
+         JOIN study_notes sn ON sn.lesson_id = fl.id
+         UNION
+         SELECT fl.id AS lesson_id
+         FROM filtered_lessons fl
+         JOIN study_notes sn ON LOWER(sn.lesson_title) = LOWER(fl.title)
+       )
+       SELECT l.*,
+              COALESCE(tc.topics_count, 0) as topics_count,
+              (mln.lesson_id IS NOT NULL) as has_notes
+       FROM filtered_lessons l
+       LEFT JOIN topic_counts tc ON tc.lesson_id = l.id
+       LEFT JOIN matched_lesson_notes mln ON mln.lesson_id = l.id
        ORDER BY 
          CASE WHEN l.exam_id = $3 THEN 0 ELSE 1 END ASC,
          l.standard_number ASC,
@@ -2215,12 +2302,32 @@ export class StudyManagementService {
     let topics: any[] = [];
     if (lessonIds.length > 0) {
       const topicsRes = await pool.query(
-        `SELECT t.*,
-                (SELECT id FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name) LIMIT 1) as notes_id,
-                EXISTS (SELECT 1 FROM study_notes sn WHERE sn.topic_id = t.id::text OR LOWER(sn.topic) = LOWER(t.topic_name)) as has_notes
-         FROM syllabus_topics t
-         WHERE t.lesson_id = ANY($1::text[])
-           AND t.is_active = true
+        `WITH filtered_topics AS (
+           SELECT t.*
+           FROM syllabus_topics t
+           WHERE t.lesson_id = ANY($1::text[])
+             AND t.is_active = true
+         ),
+         matched_notes AS (
+           SELECT ft.id AS topic_pk, sn.id AS note_id
+           FROM filtered_topics ft
+           JOIN study_notes sn ON sn.topic_id = ft.id::text
+           UNION
+           SELECT ft.id AS topic_pk, sn.id AS note_id
+           FROM filtered_topics ft
+           JOIN study_notes sn ON LOWER(sn.topic) = LOWER(ft.topic_name)
+         ),
+         topic_note_stats AS (
+           SELECT topic_pk,
+                  (ARRAY_AGG(note_id ORDER BY note_id ASC))[1] AS notes_id
+           FROM matched_notes
+           GROUP BY topic_pk
+         )
+         SELECT t.*,
+                tns.notes_id,
+                (tns.notes_id IS NOT NULL) as has_notes
+         FROM filtered_topics t
+         LEFT JOIN topic_note_stats tns ON tns.topic_pk = t.id
          ORDER BY 
          CASE WHEN t.display_order > 0 THEN t.display_order ELSE 999999 END ASC,
          CASE 

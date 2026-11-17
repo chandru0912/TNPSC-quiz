@@ -12,8 +12,17 @@ import {
   generateTextbookGroundedExplanations,
   applyExplanationToDatabase,
 } from '../services/explanationGeneratorService';
+import {
+  MAX_TRANSLATION_IDS,
+  normalizeQuestionIds,
+  translateStudyMaterialQuestions,
+  scheduleBackgroundPreTranslation,
+} from '../services/mcqTranslationService';
+import { getCached, setCached, invalidateCachePrefix } from '../utils/cache';
+import { platformContentSyncMiddleware } from '../services/studentDashboardService';
 
 const router = Router();
+router.use(platformContentSyncMiddleware);
 
 export interface QuestionDTO {
   id: number;
@@ -171,6 +180,10 @@ router.post('/admin/apply-explanations', requireAdminAuth, async (req: Request, 
       updatedCount++;
     }
 
+    if (updatedCount > 0) {
+      invalidateCachePrefix('metrics:questions:');
+    }
+
     return res.status(200).json({
       status: 'success',
       updatedCount,
@@ -232,9 +245,22 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
-    if (subject && typeof subject === 'string' && subject.trim() !== '' && subject.toLowerCase() !== 'general-studies' && subject.toLowerCase() !== 'all') {
-      queryConditions.push(`LOWER(subject) = $${paramIndex++}`);
-      values.push(subject.trim().toLowerCase());
+    const rawSubj = (subject || req.query.subjectId) as string | undefined;
+    if (rawSubj && typeof rawSubj === 'string' && rawSubj.trim() !== '' && rawSubj.toLowerCase() !== 'all') {
+      const cleanSubj = rawSubj.trim().toLowerCase();
+      if (cleanSubj.includes('tamil') || cleanSubj.includes('தமிழ்')) {
+        queryConditions.push(`(LOWER(subject) LIKE '%tamil%' OR LOWER(subject) LIKE '%தமிழ்%' OR subject_id = 'general-tamil')`);
+      } else if (cleanSubj.includes('english')) {
+        queryConditions.push(`(LOWER(subject) LIKE '%english%' OR subject_id = 'general-english')`);
+      } else if (cleanSubj.includes('aptitude')) {
+        queryConditions.push(`(LOWER(subject) LIKE '%aptitude%' OR subject_id = 'aptitude')`);
+      } else if (cleanSubj === 'general-studies' || cleanSubj === 'general studies') {
+        queryConditions.push(`(LOWER(subject) IN ('general studies', 'general-studies', 'general science', 'geography', 'history & inm', 'indian polity', 'economy & tn admin', 'tamil nadu heritage') OR subject_id = 'general-studies')`);
+      } else {
+        queryConditions.push(`(LOWER(subject) = $${paramIndex} OR subject_id = $${paramIndex})`);
+        values.push(cleanSubj);
+        paramIndex++;
+      }
     }
 
     // Strict Lesson Mapping:
@@ -285,10 +311,6 @@ router.get('/', async (req: Request, res: Response) => {
     const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 100), 500);
     const safeOffset = Math.max(0, parseInt(offset as string, 10) || 0);
 
-    const countQuery = `SELECT COUNT(*) AS total FROM questions ${whereClause}`;
-    const totalResult = await pool.query(countQuery, values);
-    const totalCount = parseInt(totalResult.rows[0].total, 10);
-
     const dataQuery = `
       SELECT * FROM questions 
       ${whereClause} 
@@ -297,6 +319,15 @@ router.get('/', async (req: Request, res: Response) => {
     `;
     const dataValues = [...values, safeLimit, safeOffset];
     const dataResult = await pool.query(dataQuery, dataValues);
+
+    let totalCount: number;
+    if (safeOffset === 0 && dataResult.rows.length < safeLimit) {
+      totalCount = dataResult.rows.length;
+    } else {
+      const countQuery = `SELECT COUNT(*) AS total FROM questions ${whereClause}`;
+      const totalResult = await pool.query(countQuery, values);
+      totalCount = parseInt(totalResult.rows[0].total, 10);
+    }
 
     const questions = dataResult.rows.map(mapRowToQuestion);
 
@@ -314,6 +345,206 @@ router.get('/', async (req: Request, res: Response) => {
       status: 'error',
       message: 'Failed to retrieve questions from database',
       error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/questions/syllabus-facets (Public Endpoint for MCQ Practice)
+ * Aggregates live published question counts across both Study Materials and Main Practice
+ * grouped by Group -> Subject -> Standard -> Unit -> Lesson for independent MCQ Practice browsing.
+ */
+router.get('/syllabus-facets', async (req: Request, res: Response) => {
+  try {
+    const rawGroup = (req.query.category || req.query.group || 'all') as string;
+    const rawSubject = req.query.subject as string | undefined;
+    const rawClassId = req.query.classId as string | undefined;
+    const rawUnitId = req.query.unitId as string | undefined;
+
+    const baseConditions: string[] = ["status = 'published'"];
+    const baseValues: any[] = [];
+    let pIdx = 1;
+
+    if (rawGroup && rawGroup !== 'all') {
+      const cleanCat = rawGroup.trim().toLowerCase();
+      if (cleanCat === 'group2_2a' || cleanCat === 'group2' || cleanCat === 'group2a') {
+        baseConditions.push(`category IN ('group2', 'group2a', 'group2_2a')`);
+      } else if (cleanCat === 'group4_vao' || cleanCat === 'group4' || cleanCat === 'vao') {
+        baseConditions.push(`category IN ('group4', 'vao', 'group4_vao')`);
+      } else {
+        baseConditions.push(`category = $${pIdx++}`);
+        baseValues.push(cleanCat);
+      }
+    }
+
+    const baseWhere = `WHERE ${baseConditions.join(' AND ')}`;
+    const facetsRes = await pool.query(
+      `SELECT
+         COALESCE(NULLIF(TRIM(subject_id), ''), LOWER(TRIM(COALESCE(NULLIF(TRIM(subject), ''), 'General Studies')))) AS subject_id,
+         COALESCE(NULLIF(TRIM(subject), ''), 'General Studies') AS subject,
+         COALESCE(standard_id, class_id) AS class_id,
+         unit_id,
+         lesson_id,
+         COALESCE(NULLIF(TRIM(lesson_title), ''), 'General Practice') AS lesson_title,
+         COUNT(DISTINCT id)::int AS question_count
+       FROM questions
+       ${baseWhere}
+       GROUP BY 1, 2, 3, 4, 5, 6
+       ORDER BY 2 ASC, 3 ASC NULLS LAST, 4 ASC NULLS LAST, 6 ASC`,
+      baseValues
+    );
+
+    const rows = facetsRes.rows;
+
+    const normalizeSubjectId = (row: any): string => {
+      const sid = String(row.subject_id || '').toLowerCase();
+      const sname = String(row.subject || '').toLowerCase();
+      if (sid === 'general-tamil' || sname.includes('tamil') || sname.includes('தமிழ்')) return 'general-tamil';
+      if (sid === 'general-english' || sname.includes('english')) return 'general-english';
+      if (sid === 'aptitude' || sname.includes('aptitude')) return 'aptitude';
+      return 'general-studies';
+    };
+
+    // Aggregate subjects across the selected group by canonical subjectId
+    const subjectMap = new Map<string, { id: string; name: string; questionCount: number }>();
+    for (const r of rows) {
+      const sid = normalizeSubjectId(r);
+      const existing = subjectMap.get(sid);
+      if (existing) {
+        existing.questionCount += r.question_count;
+      } else {
+        subjectMap.set(sid, { id: sid, name: r.subject, questionCount: r.question_count });
+      }
+    }
+
+    // Filter rows progressively for downstream facets (subject -> classId -> unitId)
+    const subjNorm = rawSubject && rawSubject !== 'all' ? rawSubject.trim().toLowerCase() : null;
+    const afterSubj = subjNorm
+      ? rows.filter((r) => normalizeSubjectId(r) === subjNorm || r.subject.toLowerCase() === subjNorm)
+      : rows;
+
+    const standardMap = new Map<number, number>();
+    for (const r of afterSubj) {
+      if (r.class_id != null) {
+        standardMap.set(Number(r.class_id), (standardMap.get(Number(r.class_id)) || 0) + r.question_count);
+      }
+    }
+
+    const parsedClass = rawClassId && !isNaN(Number(rawClassId)) ? Number(rawClassId) : null;
+    const afterClass = parsedClass != null
+      ? afterSubj.filter((r) => Number(r.class_id) === parsedClass)
+      : afterSubj;
+
+    const unitMap = new Map<number, number>();
+    for (const r of afterClass) {
+      if (r.unit_id != null) {
+        unitMap.set(Number(r.unit_id), (unitMap.get(Number(r.unit_id)) || 0) + r.question_count);
+      }
+    }
+
+    const parsedUnit = rawUnitId && !isNaN(Number(rawUnitId)) ? Number(rawUnitId) : null;
+    const afterUnit = parsedUnit != null
+      ? afterClass.filter((r) => Number(r.unit_id) === parsedUnit)
+      : afterClass;
+
+    // Merge lessons that share the same normalized title + unit + class
+    const lessonMap = new Map<string, {
+      lessonId: string | null;
+      lessonTitle: string;
+      subject: string;
+      classId: number | null;
+      unitId: number | null;
+      questionCount: number;
+    }>();
+    for (const r of afterUnit) {
+      const key = `${r.lesson_id || r.lesson_title.toLowerCase()}::${r.unit_id ?? ''}::${r.class_id ?? ''}`;
+      const existing = lessonMap.get(key);
+      if (existing) {
+        existing.questionCount += r.question_count;
+      } else {
+        lessonMap.set(key, {
+          lessonId: r.lesson_id || null,
+          lessonTitle: r.lesson_title,
+          subject: r.subject,
+          classId: r.class_id != null ? Number(r.class_id) : null,
+          unitId: r.unit_id != null ? Number(r.unit_id) : null,
+          questionCount: r.question_count,
+        });
+      }
+    }
+
+    const totalQuestions = afterUnit.reduce((acc, r) => acc + r.question_count, 0);
+
+    return res.status(200).json({
+      status: 'success',
+      totalQuestions,
+      subjects: Array.from(subjectMap.values()),
+      standards: Array.from(standardMap.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([classId, questionCount]) => ({ classId, questionCount })),
+      units: Array.from(unitMap.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([unitId, questionCount]) => ({ unitId, questionCount })),
+      lessons: Array.from(lessonMap.values()),
+    });
+  } catch (error: any) {
+    console.error('Error fetching syllabus facets:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to retrieve syllabus facets',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/questions/translate (Public Bulk Translation & Cache Endpoint)
+ * Supports cacheOnly=true for instant (<50ms) retrieval of cached Tamil translations
+ * and parallel batched AI translation for missing question IDs.
+ */
+router.post('/translate', async (req: Request, res: Response) => {
+  try {
+    const rawLanguage = String(req.body?.targetLanguage || req.body?.language || 'ta').trim().toLowerCase();
+    if (!['ta', 'tamil'].includes(rawLanguage)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Only Tamil (ta) translation is supported. English questions are served from the original question bank.',
+      });
+    }
+
+    const rawIds = req.body?.questionIds;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'A non-empty questionIds array is required.' });
+    }
+    if (rawIds.length > MAX_TRANSLATION_IDS) {
+      return res.status(400).json({
+        status: 'error',
+        message: `A maximum of ${MAX_TRANSLATION_IDS} question IDs can be translated per request.`,
+      });
+    }
+
+    const questionIds = normalizeQuestionIds(rawIds);
+    if (questionIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'All question IDs must be positive integers.' });
+    }
+
+    const cacheOnly = Boolean(req.body?.cacheOnly);
+    const result = await translateStudyMaterialQuestions(questionIds, { cacheOnly });
+    return res.status(200).json({
+      status: 'success',
+      language: 'ta',
+      count: result.translations.length,
+      data: result.translations,
+      missingIds: result.missingIds,
+      failedIds: result.failures.map((failure) => failure.questionId),
+      errors: result.failures,
+      stats: result.stats,
+    });
+  } catch (error: any) {
+    console.error('[MCQ Practice Translation Error]:', error?.message || error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to translate MCQ questions. Please retry.',
     });
   }
 });
@@ -504,32 +735,23 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
     const safeLimit = Math.min(Math.max(1, parseInt(limit as string, 10) || 100), 200);
     const safeOffset = Math.max(0, parseInt(offset as string, 10) || 0);
 
-    // Dynamic Metrics matching target system
+    // Dynamic Metrics matching target system (cached 30s per instance, invalidated on mutations)
     const metricsWhere = targetSystem === 'study_materials'
       ? "target_system = 'study_materials'"
       : targetSystem === 'main_practice'
       ? "(target_system = 'main_practice' OR target_system IS NULL)"
       : "1=1";
+    const metricsCacheKey = `metrics:questions:${targetSystem || 'all'}`;
+    type AdminQuestionMetrics = {
+      totalQuestions: number;
+      stagingCount: number;
+      publishedCount: number;
+      pendingReviewCount: number;
+      unitsCount: number;
+      classesCount: number;
+    };
+    const cachedMetrics = getCached<AdminQuestionMetrics>(metricsCacheKey);
 
-    const metricsResult = await pool.query(`
-      SELECT 
-        COUNT(*) as total_count,
-        COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
-        COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
-        COUNT(CASE WHEN verification_status = 'needs_review' OR verification_status IS NULL THEN 1 END) as pending_review_count,
-        COUNT(DISTINCT unit_id) as units_count,
-        COUNT(DISTINCT class_id) as classes_count
-      FROM questions
-      WHERE ${metricsWhere};
-    `);
-    const metrics = metricsResult.rows[0];
-
-    // Filtered count
-    const countQuery = `SELECT COUNT(*) AS filtered_total FROM questions ${whereClause}`;
-    const countResult = await pool.query(countQuery, values);
-    const filteredTotal = parseInt(countResult.rows[0].filtered_total, 10);
-
-    // Filtered data
     const dataQuery = `
       SELECT * FROM questions 
       ${whereClause} 
@@ -537,18 +759,47 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
       LIMIT $${paramIndex++} OFFSET $${paramIndex++}
     `;
     const dataValues = [...values, safeLimit, safeOffset];
-    const dataResult = await pool.query(dataQuery, dataValues);
+    const countQuery = `SELECT COUNT(*) AS filtered_total FROM questions ${whereClause}`;
 
-    res.status(200).json({
-      status: 'success',
-      metrics: {
+    const [metricsResult, countResult, dataResult] = await Promise.all([
+      cachedMetrics
+        ? Promise.resolve(null)
+        : pool.query(`
+            SELECT 
+              COUNT(*) as total_count,
+              COUNT(CASE WHEN status = 'staging' THEN 1 END) as staging_count,
+              COUNT(CASE WHEN status = 'published' THEN 1 END) as published_count,
+              COUNT(CASE WHEN verification_status = 'needs_review' OR verification_status IS NULL THEN 1 END) as pending_review_count,
+              COUNT(DISTINCT unit_id) as units_count,
+              COUNT(DISTINCT class_id) as classes_count
+            FROM questions
+            WHERE ${metricsWhere};
+          `),
+      pool.query(countQuery, values),
+      pool.query(dataQuery, dataValues),
+    ]);
+
+    let resolvedMetrics: AdminQuestionMetrics;
+    if (cachedMetrics) {
+      resolvedMetrics = cachedMetrics;
+    } else {
+      const metrics = metricsResult!.rows[0];
+      resolvedMetrics = {
         totalQuestions: parseInt(metrics?.total_count || '0', 10),
         stagingCount: parseInt(metrics?.staging_count || '0', 10),
         publishedCount: parseInt(metrics?.published_count || '0', 10),
         pendingReviewCount: parseInt(metrics?.pending_review_count || '0', 10),
         unitsCount: parseInt(metrics?.units_count || '0', 10),
         classesCount: parseInt(metrics?.classes_count || '0', 10),
-      },
+      };
+      setCached(metricsCacheKey, resolvedMetrics, 30_000);
+    }
+
+    const filteredTotal = parseInt(countResult.rows[0].filtered_total, 10);
+
+    res.status(200).json({
+      status: 'success',
+      metrics: resolvedMetrics,
       filteredTotal,
       limit: safeLimit,
       offset: safeOffset,
@@ -763,6 +1014,11 @@ router.post('/', requireAdminAuth, async (req: Request, res: Response) => {
       });
     }
 
+    invalidateCachePrefix('metrics:questions:');
+    if (status === 'published' && result.rows[0]?.id) {
+      scheduleBackgroundPreTranslation([result.rows[0].id]);
+    }
+
     return res.status(201).json({
       status: 'success',
       message: 'Question created successfully',
@@ -890,6 +1146,7 @@ router.patch('/:id(\\d+)', requireAdminAuth, async (req: Request, res: Response)
     `;
 
     const updatedResult = await pool.query(updateQuery, values);
+    invalidateCachePrefix('metrics:questions:');
     return res.status(200).json({
       status: 'success',
       message: `Question #${id} updated successfully`,
@@ -932,6 +1189,7 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
         return res.status(400).json({ status: 'error', message: 'No valid question IDs provided' });
       }
       const result = await client.query('DELETE FROM questions WHERE id = ANY($1) RETURNING id', [validIds]);
+      invalidateCachePrefix('metrics:questions:');
       return res.status(200).json({
         status: 'success',
         message: `Deleted ${result.rowCount} question(s)`,
@@ -1003,6 +1261,7 @@ router.delete('/', requireAdminAuth, async (req: Request, res: Response) => {
 
       const deleteQuery = `DELETE FROM questions ${whereClause} RETURNING id`;
       const deleteResult = await client.query(deleteQuery, values);
+      invalidateCachePrefix('metrics:questions:');
       return res.status(200).json({
         status: 'success',
         message: `Deleted ${deleteResult.rowCount} question(s)`,
@@ -1034,6 +1293,8 @@ router.delete('/:id', requireAdminAuth, async (req: Request, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ status: 'error', message: `Question #${id} not found` });
     }
+
+    invalidateCachePrefix('metrics:questions:');
 
     return res.status(200).json({
       status: 'success',
@@ -1281,6 +1542,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
     }
 
     await client.query('COMMIT');
+    invalidateCachePrefix('metrics:questions:');
 
     return res.status(201).json({
       status: 'success',
@@ -1478,6 +1740,7 @@ router.post('/batch', requireAdminAuth, async (req: Request, res: Response) => {
     }
 
     await client.query('COMMIT');
+    invalidateCachePrefix('metrics:questions:');
 
     return res.status(201).json({
       status: 'success',
@@ -1643,8 +1906,10 @@ router.patch('/publish', requireAdminAuth, async (req: Request, res: Response) =
       FROM questions;
     `);
     const liveM = liveMetricsRes.rows[0];
+    invalidateCachePrefix('metrics:questions:');
 
     const allPublishedIds = [...result.rows.map((row: any) => row.id), ...alreadyPublishedIds];
+    scheduleBackgroundPreTranslation(allPublishedIds);
 
     return res.status(200).json({
       status: 'success',

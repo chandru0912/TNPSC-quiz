@@ -617,7 +617,7 @@ const Group1UnitClass = () => {
         {activeReadingLesson && activeDeck && currentSlide && (
           <div className="slide-modal-overlay" onClick={closeLessonNotes}>
             <motion.div
-              className="slide-modal-card glass"
+              className="slide-modal-card glass premium-crystal-glass"
               initial={{ opacity: 0, scale: 0.92, y: 25 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.92, y: 25 }}

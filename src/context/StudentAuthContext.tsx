@@ -69,6 +69,7 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Standard student login handler
   const login = useCallback((newToken: string, newStudent: StudentUser) => {
     localStorage.removeItem(PREVIEW_KEY)
+    localStorage.removeItem('tnpsc_study_tab_leader')
     setIsPreviewMode(false)
     setToken(newToken)
     setStudent(newStudent)
@@ -92,6 +93,7 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
       })
     }
     localStorage.removeItem(PREVIEW_KEY)
+    localStorage.removeItem('tnpsc_study_tab_leader')
     setIsPreviewMode(false)
     setToken(null)
     setStudent(null)

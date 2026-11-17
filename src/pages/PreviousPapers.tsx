@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { FileText, Calendar, Eye, Download, X, Award, CheckCircle, BookOpen } from 'lucide-react'
 import { useScrollLock } from '../hooks/useScrollLock'
+import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import './PreviousPapers.css'
 
 interface PaperItem {
@@ -14,6 +15,7 @@ interface PaperItem {
 }
 
 const PreviousPapers = () => {
+  useStudyTimeTracker()
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'group1' | 'group2_2a' | 'group4'>('all')
   const [previewPaper, setPreviewPaper] = useState<PaperItem | null>(null)
 

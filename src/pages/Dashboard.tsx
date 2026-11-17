@@ -25,7 +25,8 @@ import {
 import './Dashboard.css'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
-import { apiFetch } from '../utils/api'
+import { apiFetch, getApiUrl } from '../utils/api'
+import { subscribeStudentSync } from '../utils/studentSync'
 import { CloudAiGeneratorModal } from '../components/CloudAiGeneratorModal'
 
 interface DashboardData {
@@ -45,20 +46,27 @@ interface DashboardData {
     totalAttempts: number
     totalCorrect: number
     targetQuestions: number
+    remainingQuestions?: number
     overallAccuracy: number
     currentStreak: number
     materialsStudied: number
+    materialsInProgress?: number
+    materialsNotStarted?: number
     targetMaterials: number
     mockTestsCompleted: number
     targetMockTests: number
     mockAvgScore: number
     mockHighestScore: number
     overallProgress: number
+    completedTopics?: number
+    remainingTopics?: number
+    totalTopics?: number
   }
   progressStats: {
     label: string
     value: string
     percentage: number
+    subtitle?: string
   }[]
   weeklyProgress: {
     day: string
@@ -99,27 +107,30 @@ const defaultDashboardData: DashboardData = {
   metrics: {
     totalStudySeconds: 0,
     totalStudyHours: 0,
-    studyHoursFormatted: '0 hrs',
+    studyHoursFormatted: '0h 0m',
     totalQuestionsSolved: 0,
     totalQuestionsAttempted: 0,
     totalAttempts: 0,
     totalCorrect: 0,
-    targetQuestions: 2500,
+    targetQuestions: 0,
     overallAccuracy: 0,
     currentStreak: 0,
     materialsStudied: 0,
-    targetMaterials: 120,
+    targetMaterials: 0,
     mockTestsCompleted: 0,
-    targetMockTests: 20,
+    targetMockTests: 0,
     mockAvgScore: 0,
     mockHighestScore: 0,
     overallProgress: 0,
+    completedTopics: 0,
+    remainingTopics: 0,
+    totalTopics: 0,
   },
   progressStats: [
-    { label: 'Materials Studied', value: '0/120', percentage: 0 },
-    { label: 'Questions Attempted', value: '0/2500', percentage: 0 },
-    { label: 'Mock Tests', value: '0/20', percentage: 0 },
-    { label: 'Accuracy', value: '0%', percentage: 0 },
+    { label: 'Study Materials', value: '0/0', percentage: 0, subtitle: 'Completed: 0 • Remaining: 0' },
+    { label: 'MCQ Practice', value: '0/0', percentage: 0, subtitle: 'Correct: 0 • Incorrect: 0 • Acc: 0%' },
+    { label: 'Mock Tests', value: '0/0', percentage: 0, subtitle: 'Avg Score: 0% • Acc: 0%' },
+    { label: 'Overall Accuracy', value: '0%', percentage: 0, subtitle: 'Attempted: 0 • Correct: 0 • Incorrect: 0' },
   ],
   weeklyProgress: [
     { day: 'Mon', value: 0, seconds: 0, questions: 0 },
@@ -157,6 +168,32 @@ const Dashboard = () => {
     return null
   })
 
+  const applyDashboardPayload = useCallback((incoming: any) => {
+    if (!incoming || typeof incoming !== 'object') return
+    setData({
+      student: {
+        ...defaultDashboardData.student,
+        ...(incoming.student && typeof incoming.student === 'object' ? incoming.student : {}),
+      },
+      metrics: {
+        ...defaultDashboardData.metrics,
+        ...(incoming.metrics && typeof incoming.metrics === 'object' ? incoming.metrics : {}),
+      },
+      progressStats: Array.isArray(incoming.progressStats)
+        ? incoming.progressStats
+        : defaultDashboardData.progressStats,
+      weeklyProgress: Array.isArray(incoming.weeklyProgress)
+        ? incoming.weeklyProgress
+        : defaultDashboardData.weeklyProgress,
+      recentActivity: Array.isArray(incoming.recentActivity) ? incoming.recentActivity : [],
+      weakAreas: Array.isArray(incoming.weakAreas) ? incoming.weakAreas : [],
+      upcomingGoals: Array.isArray(incoming.upcomingGoals)
+        ? incoming.upcomingGoals
+        : defaultDashboardData.upcomingGoals,
+    })
+    setDashboardError(null)
+  }, [])
+
   // Fetch live dashboard statistics from PostgreSQL backend
   const fetchDashboardStats = useCallback(async (silent = false) => {
     if (!token || token === 'preview_admin_token') {
@@ -185,29 +222,7 @@ const Dashboard = () => {
       }
 
       if (json.status === 'success' && json.data && typeof json.data === 'object') {
-        const incoming = json.data
-        setData({
-          student: {
-            ...defaultDashboardData.student,
-            ...(incoming.student && typeof incoming.student === 'object' ? incoming.student : {}),
-          },
-          metrics: {
-            ...defaultDashboardData.metrics,
-            ...(incoming.metrics && typeof incoming.metrics === 'object' ? incoming.metrics : {}),
-          },
-          progressStats: Array.isArray(incoming.progressStats)
-            ? incoming.progressStats
-            : defaultDashboardData.progressStats,
-          weeklyProgress: Array.isArray(incoming.weeklyProgress)
-            ? incoming.weeklyProgress
-            : defaultDashboardData.weeklyProgress,
-          recentActivity: Array.isArray(incoming.recentActivity) ? incoming.recentActivity : [],
-          weakAreas: Array.isArray(incoming.weakAreas) ? incoming.weakAreas : [],
-          upcomingGoals: Array.isArray(incoming.upcomingGoals)
-            ? incoming.upcomingGoals
-            : defaultDashboardData.upcomingGoals,
-        })
-        setDashboardError(null)
+        applyDashboardPayload(json.data)
       }
     } catch (err: any) {
       console.warn('[Dashboard] Could not fetch real-time student stats:', err?.message)
@@ -217,20 +232,100 @@ const Dashboard = () => {
     } finally {
       setIsRefreshing(false)
     }
-  }, [token])
+  }, [token, applyDashboardPayload])
 
   useEffect(() => {
+    // Clear previous student state immediately when account/token changes
+    setData(defaultDashboardData)
+
+    if (!token || token === 'preview_admin_token') {
+      return
+    }
+
     fetchDashboardStats()
 
-    // Poll live updates periodically (every 45s) while page is open
-    const pollInterval = setInterval(() => {
-      if (!document.hidden) {
+    let isDisposed = false
+    let sseConnected = false
+    const streamController = new AbortController()
+
+    // Connect to Server-Sent Events (SSE) for real-time updates
+    const connectSse = async () => {
+      try {
+        const res = await fetch(getApiUrl('/api/student/dashboard/stream'), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'text/event-stream',
+          },
+          cache: 'no-store',
+          signal: streamController.signal,
+        })
+
+        if (!res.ok || !res.body) {
+          sseConnected = false
+          return
+        }
+
+        sseConnected = true
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (!isDisposed) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const events = buffer.split('\n\n')
+          buffer = events.pop() || ''
+
+          for (const rawEvent of events) {
+            const dataLine = rawEvent
+              .split('\n')
+              .find((line) => line.startsWith('data:'))
+            if (!dataLine) continue
+            const payloadText = dataLine.slice(5).trim()
+            if (!payloadText) continue
+            try {
+              const parsed = JSON.parse(payloadText)
+              if (parsed?.status === 'success' && parsed?.data) {
+                applyDashboardPayload(parsed.data)
+              }
+            } catch {
+              // Ignore malformed SSE chunk
+            }
+          }
+        }
+      } catch {
+        // SSE aborted or unavailable; 10s polling fallback handles sync
+      } finally {
+        sseConnected = false
+      }
+    }
+
+    connectSse()
+
+    // Cross-tab instant sync when student completes activity in another tab
+    const unsubscribeSync = subscribeStudentSync(() => {
+      if (!isDisposed) {
         fetchDashboardStats(true)
       }
-    }, 45_000)
+    })
 
-    return () => clearInterval(pollInterval)
-  }, [fetchDashboardStats])
+    // 10-second polling fallback when SSE is unavailable
+    const pollInterval = setInterval(() => {
+      if (!document.hidden && !sseConnected) {
+        fetchDashboardStats(true)
+      }
+    }, 10_000)
+
+    return () => {
+      isDisposed = true
+      streamController.abort()
+      unsubscribeSync()
+      clearInterval(pollInterval)
+    }
+  }, [token, student?.id, fetchDashboardStats, applyDashboardPayload])
 
   const userName = student?.fullName || data.student.fullName || 'Student'
   const userGroup =
@@ -262,7 +357,7 @@ const Dashboard = () => {
       description: 'Topic-wise objective questions with answers.',
       to: '/practice',
       icon: FileText,
-      meta: `${data.metrics.totalQuestionsSolved} solved`,
+      meta: `${data.metrics.totalQuestionsAttempted ?? 0} attempted`,
     },
     {
       title: 'Mock Tests',
@@ -401,8 +496,7 @@ const Dashboard = () => {
             <div className="dash-summary-info">
               <span className="dash-summary-label">Total Study Time</span>
               <span className="dash-summary-val">
-                {data.metrics.totalStudyHours}{' '}
-                <span className="dash-summary-unit">hrs</span>
+                {data.metrics.studyHoursFormatted || '0h 0m'}
               </span>
             </div>
           </div>
@@ -414,8 +508,8 @@ const Dashboard = () => {
             <div className="dash-summary-info">
               <span className="dash-summary-label">Questions Solved</span>
               <span className="dash-summary-val">
-                {data.metrics.totalQuestionsSolved ?? 0}{' '}
-                <span className="dash-summary-unit">/ {Number(data.metrics.targetQuestions ?? 2500).toLocaleString()}</span>
+                {Number(data.metrics.totalQuestionsAttempted ?? 0).toLocaleString()}{' '}
+                <span className="dash-summary-unit">/ {Number(data.metrics.targetQuestions ?? 0).toLocaleString()}</span>
               </span>
             </div>
           </div>
@@ -488,10 +582,10 @@ const Dashboard = () => {
               </p>
               <div className="overview-legend">
                 <span className="legend-item">
-                  <span className="legend-dot legend-dot-gold" /> Completed
+                  <span className="legend-dot legend-dot-gold" /> Completed ({data.metrics.completedTopics ?? 0})
                 </span>
                 <span className="legend-item">
-                  <span className="legend-dot legend-dot-muted" /> Remaining
+                  <span className="legend-dot legend-dot-muted" /> Remaining ({data.metrics.remainingTopics ?? 0})
                 </span>
               </div>
             </div>
@@ -517,6 +611,19 @@ const Dashboard = () => {
                   </div>
                   <div className="stat-tile-value">{stat.value}</div>
                   <div className="stat-tile-label">{stat.label}</div>
+                  {stat.subtitle && (
+                    <div
+                      className="stat-tile-submeta"
+                      style={{
+                        fontSize: '0.72rem',
+                        color: 'rgba(203, 213, 225, 0.78)',
+                        marginTop: '0.2rem',
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {stat.subtitle}
+                    </div>
+                  )}
                   <div className="stat-tile-bar">
                     <motion.span
                       initial={{ width: 0 }}

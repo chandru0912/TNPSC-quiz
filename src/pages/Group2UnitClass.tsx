@@ -636,7 +636,7 @@ const Group2UnitClass = () => {
               onClick={() => setActiveModalLesson(null)}
             >
               <motion.div
-                className="lesson-modal glass"
+                className="lesson-modal glass premium-crystal-glass"
                 initial={{ opacity: 0, scale: 0.94 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.94 }}

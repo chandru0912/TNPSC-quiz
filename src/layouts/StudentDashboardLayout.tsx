@@ -57,6 +57,9 @@ export const StudentDashboardLayout: React.FC = () => {
     if (p.startsWith('/progress-tracker')) {
       return { title: 'Progress Tracker', category: 'Syllabus Mastery' };
     }
+    if (p.startsWith('/performance-analytics')) {
+      return { title: 'Performance Analytics', category: 'Attempts & Trend Insights' };
+    }
     if (p.startsWith('/study-notes')) {
       return { title: 'Study Notes', category: 'Lesson Notes' };
     }

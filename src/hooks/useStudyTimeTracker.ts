@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { apiFetch } from '../utils/api'
+import { notifyStudentSync } from '../utils/studentSync'
 
 const HEARTBEAT_INTERVAL_MS = 30_000 // 30 seconds
 const IDLE_TIMEOUT_MS = 120_000 // 2 minutes idle cutoff
@@ -92,7 +93,7 @@ export function useStudyTimeTracker() {
     const sendHeartbeat = async (deltaSeconds: number) => {
       if (deltaSeconds <= 0) return
       try {
-        await apiFetch('/api/student/study-session/heartbeat', {
+        const res = await apiFetch('/api/student/study-session/heartbeat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -104,6 +105,9 @@ export function useStudyTimeTracker() {
             deltaSeconds,
           }),
         })
+        if (res.ok) {
+          notifyStudentSync()
+        }
       } catch (err) {
         // Silently handle heartbeat network glitches
         console.warn('[StudyTimeTracker] Heartbeat sync failed:', err)

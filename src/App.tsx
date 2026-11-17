@@ -46,6 +46,7 @@ const MockTests = lazyWithRetry(() => import('./pages/MockTests'))
 const PreviousPapers = lazyWithRetry(() => import('./pages/PreviousPapers'))
 const MarkList = lazyWithRetry(() => import('./pages/MarkList'))
 const ProgressTracker = lazyWithRetry(() => import('./pages/ProgressTracker'))
+const PerformanceAnalytics = lazyWithRetry(() => import('./pages/PerformanceAnalytics'))
 const Login = lazyWithRetry(() => import('./pages/Login'))
 const Register = lazyWithRetry(() => import('./pages/Register'))
 const Admin = lazyWithRetry(() => import('./pages/Admin'))
@@ -95,6 +96,7 @@ function AppShell() {
       '/previous-papers',
       '/mark-list',
       '/progress-tracker',
+      '/performance-analytics',
       '/study-notes',
     ].some((prefix) => location.pathname.startsWith(prefix))
 
@@ -204,10 +206,17 @@ function AppShell() {
             <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
             <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
             <Route path="/practice" element={<MCQPractice />} />
+            <Route path="/practice/:groupId" element={<MCQPractice />} />
+            <Route path="/practice/:groupId/:subjectId" element={<MCQPractice />} />
+            <Route path="/practice/:groupId/:subjectId/:standardId" element={<MCQPractice />} />
+            <Route path="/practice/:groupId/:subjectId/:standardId/:unitId" element={<MCQPractice />} />
+            <Route path="/practice/:groupId/:subjectId/:standardId/:unitId/:lessonId" element={<MCQPractice />} />
+            <Route path="/practice/:groupId/:subjectId/:standardId/:unitId/:lessonId/test" element={<MCQPractice />} />
             <Route path="/mock-tests" element={<MockTests />} />
             <Route path="/previous-papers" element={<PreviousPapers />} />
             <Route path="/mark-list" element={<MarkList />} />
             <Route path="/progress-tracker" element={<ProgressTracker />} />
+            <Route path="/performance-analytics" element={<PerformanceAnalytics />} />
           </Route>
 
           <Route path="/login" element={<Login />} />

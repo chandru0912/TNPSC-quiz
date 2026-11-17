@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -17,6 +17,7 @@ import {
   Languages,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
+import { notifyStudentSync } from '../utils/studentSync'
 import {
   getSubjectsForGroup,
   getUnitsForSubjectStandard,
@@ -94,6 +95,8 @@ export const StudyMaterialsPractice: React.FC = () => {
   const [isQuizCompleted, setIsQuizCompleted] = useState<boolean>(false)
   const [isReviewMode, setIsReviewMode] = useState<boolean>(false)
   const [showExplanation, setShowExplanation] = useState<boolean>(true)
+  const quizStartTimeRef = useRef<number>(Date.now())
+  const submissionTokenRef = useRef<string>(`smq_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`)
   const [questionLang, setQuestionLang] = useState<'en' | 'ta'>('en')
 
   // 1. Resolve Hierarchy Metadata from authoritative registry
@@ -285,7 +288,11 @@ export const StudyMaterialsPractice: React.FC = () => {
           sourceSystem: 'study_materials',
           timeSpentSeconds: 15,
         }),
-      }).catch((err) => console.warn('[StudentTrack] Failed to log lesson question attempt:', err))
+      })
+        .then((res) => {
+          if (res.ok) notifyStudentSync()
+        })
+        .catch((err) => console.warn('[StudentTrack] Failed to log lesson question attempt:', err))
     }
   }
 
@@ -304,6 +311,51 @@ export const StudyMaterialsPractice: React.FC = () => {
       }
     } else {
       setIsQuizCompleted(true)
+      const studentToken = localStorage.getItem('tnpsc_student_token')
+      const finalAnswered = Object.keys(userAnswers).length
+      const finalCorrect = Object.values(userAnswers).filter((a) => a.isCorrect).length
+      if (studentToken && finalAnswered > 0 && questions.length > 0) {
+        const elapsedSeconds = Math.max(1, Math.round((Date.now() - quizStartTimeRef.current) / 1000))
+        const responses = questions.map((q, idx) => {
+          const ans = userAnswers[idx]
+          return {
+            questionId: q.id,
+            questionText: q.question,
+            options: q.options,
+            subject: resolvedSubject?.name || q.subject || subjectId,
+            topic: q.lessonTitle || displayLessonTitle,
+            selectedOption: ans ? ans.selected : null,
+            correctAnswer: q.correctAnswer,
+            isCorrect: ans ? ans.isCorrect : false,
+          }
+        })
+        apiFetch('/api/student/assessments/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${studentToken}`,
+          },
+          body: JSON.stringify({
+            testTitle: displayLessonTitle || 'Study Material Lesson Quiz',
+            category: normalizedGroup,
+            assessmentType: 'study_material_quiz',
+            submissionToken: submissionTokenRef.current,
+            totalQuestions: questions.length,
+            attemptedQuestions: finalAnswered,
+            correctAnswers: finalCorrect,
+            incorrectAnswers: Math.max(0, finalAnswered - finalCorrect),
+            unansweredQuestions: Math.max(0, questions.length - finalAnswered),
+            score: finalCorrect * 1.5,
+            maxScore: questions.length * 1.5,
+            timeSpentSeconds: elapsedSeconds,
+            responses,
+          }),
+        })
+          .then((res) => {
+            if (res.ok) notifyStudentSync()
+          })
+          .catch((err) => console.warn('[StudentTrack] Failed to log study material quiz:', err))
+      }
     }
   }
 
@@ -331,6 +383,8 @@ export const StudyMaterialsPractice: React.FC = () => {
     setUserAnswers({})
     setIsQuizCompleted(false)
     setIsReviewMode(false)
+    quizStartTimeRef.current = Date.now()
+    submissionTokenRef.current = `smq_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
   }
 
   // Calculate Performance Stats

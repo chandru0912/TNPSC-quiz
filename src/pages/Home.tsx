@@ -18,6 +18,7 @@ import {
   Award,
   Sparkles
 } from 'lucide-react'
+import HeroBackgroundVideo from '../components/HeroBackgroundVideo'
 import './Home.css'
 
 const Home = () => {
@@ -122,6 +123,7 @@ const Home = () => {
       {/* Hero Section */}
       <section className="hero">
         <div className="hero-background">
+          <HeroBackgroundVideo />
           <div className="hero-gradient"></div>
           <div className="hero-pattern"></div>
         </div>
@@ -168,7 +170,7 @@ const Home = () => {
             transition={{ duration: 0.8, delay: 0.2 }}
           >
             <div 
-              className="hero-card hero-slides-container glass"
+              className="hero-card hero-slides-container glass premium-crystal-glass"
               onMouseEnter={() => setIsPaused(true)}
               onMouseLeave={() => setIsPaused(false)}
             >

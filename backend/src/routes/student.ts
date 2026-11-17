@@ -16,6 +16,22 @@ import {
   verifyGoogleCredentialOrCode,
   GoogleAuthError,
 } from '../services/googleAuthService';
+import {
+  getStudentDashboardData,
+  getPlatformStats,
+  notifyStudentDashboardUpdate,
+  notifyPlatformContentUpdate,
+  subscribeStudentDashboardUpdates,
+  formatRelativeTime,
+} from '../services/studentDashboardService';
+import {
+  submitAssessmentAttempt,
+  getStudentMarkList,
+  getStudentScorecardDetail,
+  getAdminAssessmentAnalytics,
+} from '../services/markListService';
+import { getStudentPerformanceAnalytics } from '../services/performanceAnalyticsService';
+import { getStudentProgressTrackerData } from '../services/progressTrackerService';
 
 const router = Router();
 
@@ -46,22 +62,6 @@ function formatStudentResponse(row: any) {
 
 function hashResetToken(token: string): string {
   return crypto.createHash('sha256').update(token.trim()).digest('hex');
-}
-
-// Helper: format relative time (e.g., '2 hours ago', 'Just now')
-function formatRelativeTime(dateInput: string | Date): string {
-  const d = new Date(dateInput);
-  const diffMs = Date.now() - d.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return 'Just now';
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} min${diffMin > 1 ? 's' : ''} ago`;
-  const diffHrs = Math.floor(diffMin / 60);
-  if (diffHrs < 24) return `${diffHrs} hour${diffHrs > 1 ? 's' : ''} ago`;
-  const diffDays = Math.floor(diffHrs / 24);
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays} days ago`;
-  return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
 }
 
 // ====================================================
@@ -768,314 +768,118 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
 });
 
 // ====================================================
-// 4. REAL-TIME STUDENT DASHBOARD STATISTICS
+// 4. REAL-TIME STUDENT DASHBOARD STATISTICS & SSE STREAM
 // ====================================================
+router.get('/platform-stats', async (_req: Request, res: Response) => {
+  try {
+    const stats = await getPlatformStats();
+    return res.status(200).json({ status: 'success', data: stats });
+  } catch (err: any) {
+    console.error('[Platform Stats Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load platform stats.' });
+  }
+});
+
+router.get('/mock-tests', async (_req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, slug, title, category, category_name, questions_count, duration_minutes, difficulty, status, created_at
+       FROM mock_tests
+       WHERE status = 'published'
+       ORDER BY id ASC`
+    );
+    return res.status(200).json({ status: 'success', data: result.rows });
+  } catch (err: any) {
+    console.error('[Mock Tests List Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load mock tests.' });
+  }
+});
+
+router.patch('/admin/mock-tests/:id/publish', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const testId = Number(req.params.id);
+    const { status } = req.body || {};
+    if (!Number.isInteger(testId) || testId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const cleanStatus = ['published', 'staging', 'archived'].includes(status) ? status : 'published';
+    const result = await pool.query(
+      `UPDATE mock_tests SET status = $1 WHERE id = $2 RETURNING id, slug, title, status`,
+      [cleanStatus, testId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Mock test not found.' });
+    }
+    notifyPlatformContentUpdate();
+    return res.status(200).json({ status: 'success', data: result.rows[0] });
+  } catch (err: any) {
+    console.error('[Mock Test Publish Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to update mock test status.' });
+  }
+});
+
 router.get('/dashboard', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
     const studentId = req.studentUser!.studentId;
-
-    // 1. Fetch Student Info
-    const studentRes = await pool.query(
-      `SELECT id, full_name, email, target_group, created_at FROM students WHERE id = $1`,
-      [studentId]
-    );
-    if (studentRes.rows.length === 0) {
+    const data = await getStudentDashboardData(studentId);
+    if (!data) {
       return res.status(404).json({ status: 'error', message: 'Student account not found.' });
     }
-    const student = studentRes.rows[0];
-
-    // 2. Total Active Study Time from sessions
-    const timeRes = await pool.query(
-      `SELECT COALESCE(SUM(duration_seconds), 0)::int AS total_seconds
-       FROM study_sessions
-       WHERE student_id = $1`,
-      [studentId]
-    );
-    const totalStudySeconds: number = timeRes.rows[0]?.total_seconds || 0;
-    const totalStudyHours = Math.round((totalStudySeconds / 3600) * 10) / 10;
-    const studyHoursFormatted = totalStudyHours === 0 ? '0 hrs' : `${totalStudyHours} hrs`;
-
-    // 3. Question Attempts: total, unique, correct, accuracy
-    const attemptsRes = await pool.query(
-      `SELECT
-         COUNT(*)::int AS total_attempts,
-         COUNT(CASE WHEN is_correct THEN 1 END)::int AS total_correct,
-         COUNT(DISTINCT question_id)::int AS unique_attempted,
-         COUNT(DISTINCT CASE WHEN is_correct THEN question_id END)::int AS unique_correct
-       FROM question_attempts
-       WHERE student_id = $1`,
-      [studentId]
-    );
-    const totalAttempts: number = attemptsRes.rows[0]?.total_attempts || 0;
-    const totalCorrect: number = attemptsRes.rows[0]?.total_correct || 0;
-    const uniqueAttempted: number = attemptsRes.rows[0]?.unique_attempted || 0;
-    const uniqueCorrect: number = attemptsRes.rows[0]?.unique_correct || 0;
-
-    const overallAccuracy: number = totalAttempts > 0 ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
-    const targetQuestions: number = 2500;
-
-    // 4. Study Materials Progress
-    const materialsRes = await pool.query(
-      `SELECT
-         COUNT(*)::int AS total_materials_accessed,
-         COUNT(CASE WHEN is_completed THEN 1 END)::int AS total_materials_completed
-       FROM study_material_progress
-       WHERE student_id = $1`,
-      [studentId]
-    );
-    const materialsStudied = materialsRes.rows[0]?.total_materials_completed || 0;
-    const targetMaterials = 120; // 120 chapters across standards
-
-    // 5. Mock Tests Performance
-    const mockRes = await pool.query(
-      `SELECT
-         COUNT(*)::int AS total_mock_tests,
-         COALESCE(AVG(percentage), 0)::numeric(5,1) AS avg_score,
-         COALESCE(MAX(score), 0)::numeric(5,1) AS highest_score
-       FROM mock_test_attempts
-       WHERE student_id = $1`,
-      [studentId]
-    );
-    const mockTestsCompleted = mockRes.rows[0]?.total_mock_tests || 0;
-    const mockAvgScore = parseFloat(mockRes.rows[0]?.avg_score || '0');
-    const mockHighestScore = parseFloat(mockRes.rows[0]?.highest_score || '0');
-    const targetMockTests = 20;
-
-    // 6. Overall Preparation Progress (Weighted Formula)
-    // 0% for brand new student; dynamic based on true DB activity
-    let overallProgress = 0;
-    if (totalAttempts > 0 || materialsStudied > 0 || mockTestsCompleted > 0) {
-      const qProgress = Math.min(100, (uniqueAttempted / targetQuestions) * 100);
-      const mProgress = Math.min(100, (materialsStudied / targetMaterials) * 100);
-      const tProgress = Math.min(100, (mockTestsCompleted / targetMockTests) * 100);
-      const accScore = overallAccuracy;
-
-      overallProgress = Math.min(
-        100,
-        Math.round(qProgress * 0.4 + mProgress * 0.3 + tProgress * 0.2 + accScore * 0.1)
-      );
-    }
-
-    // 7. Streak Calculation (Asia/Kolkata timezone)
-    const kolkataNowRes = await pool.query(`
-      SELECT
-        TO_CHAR(timezone('Asia/Kolkata', CURRENT_TIMESTAMP), 'YYYY-MM-DD') AS today_kolkata,
-        TO_CHAR(timezone('Asia/Kolkata', CURRENT_TIMESTAMP - INTERVAL '1 day'), 'YYYY-MM-DD') AS yesterday_kolkata
-    `);
-    const todayKolkata = kolkataNowRes.rows[0].today_kolkata;
-    const yesterdayKolkata = kolkataNowRes.rows[0].yesterday_kolkata;
-
-    const streakRows = await pool.query(
-      `SELECT
-         TO_CHAR(activity_date, 'YYYY-MM-DD') AS act_date,
-         (questions_count > 0 OR study_seconds >= 60 OR mock_tests_count > 0 OR notes_count > 0) AS is_active
-       FROM daily_streaks
-       WHERE student_id = $1
-       ORDER BY activity_date DESC
-       LIMIT 60`,
-      [studentId]
-    );
-
-    const activeDates = new Set<string>();
-    streakRows.rows.forEach((r) => {
-      if (r.is_active) {
-        activeDates.add(r.act_date);
-      }
-    });
-
-    let currentStreak = 0;
-    // Streak is alive if active today or yesterday
-    let checkDateStr = activeDates.has(todayKolkata) ? todayKolkata : activeDates.has(yesterdayKolkata) ? yesterdayKolkata : null;
-
-    if (checkDateStr) {
-      let cur = new Date(checkDateStr);
-      while (true) {
-        const y = cur.getFullYear();
-        const m = String(cur.getMonth() + 1).padStart(2, '0');
-        const d = String(cur.getDate()).padStart(2, '0');
-        const formatted = `${y}-${m}-${d}`;
-        if (activeDates.has(formatted)) {
-          currentStreak++;
-          cur.setDate(cur.getDate() - 1);
-        } else {
-          break;
-        }
-      }
-    }
-
-    // 8. Weekly Study Activity (Mon - Sun of current week)
-    const weeklyDataRes = await pool.query(
-      `SELECT
-         TO_CHAR(timezone('Asia/Kolkata', activity_date), 'Dy') AS day_abbr,
-         TO_CHAR(timezone('Asia/Kolkata', activity_date), 'YYYY-MM-DD') AS day_date,
-         COALESCE(study_seconds, 0) AS seconds,
-         COALESCE(questions_count, 0) AS questions
-       FROM daily_streaks
-       WHERE student_id = $1
-         AND activity_date >= (timezone('Asia/Kolkata', CURRENT_TIMESTAMP)::date - INTERVAL '6 days')
-       ORDER BY activity_date ASC`,
-      [studentId]
-    );
-
-    // Build last 7 days chart array
-    const dayMap = new Map<string, { seconds: number; questions: number }>();
-    weeklyDataRes.rows.forEach((r) => {
-      dayMap.set(r.day_date, { seconds: Number(r.seconds), questions: Number(r.questions) });
-    });
-
-    const weeklyProgress: { day: string; value: number; seconds: number; questions: number }[] = [];
-    const dateCursor = new Date(todayKolkata);
-    dateCursor.setDate(dateCursor.getDate() - 6);
-
-    for (let i = 0; i < 7; i++) {
-      const y = dateCursor.getFullYear();
-      const m = String(dateCursor.getMonth() + 1).padStart(2, '0');
-      const d = String(dateCursor.getDate()).padStart(2, '0');
-      const dateStr = `${y}-${m}-${d}`;
-      const dayName = dateCursor.toLocaleDateString('en-US', { weekday: 'short' });
-      const record = dayMap.get(dateStr) || { seconds: 0, questions: 0 };
-      // Goal percentage: 45 min target per day (2700 sec)
-      const pct = Math.min(100, Math.round((record.seconds / 2700) * 100));
-      weeklyProgress.push({
-        day: dayName,
-        value: pct,
-        seconds: record.seconds,
-        questions: record.questions,
-      });
-      dateCursor.setDate(dateCursor.getDate() + 1);
-    }
-
-    // 9. Recent Activity (Recent real actions from student_activity)
-    const recentActivityRes = await pool.query(
-      `SELECT
-         id, activity_type, reference_id, reference_title, metadata, created_at
-       FROM student_activity
-       WHERE student_id = $1
-       ORDER BY created_at DESC
-       LIMIT 6`,
-      [studentId]
-    );
-
-    const recentActivity = recentActivityRes.rows.map((r) => {
-      const meta = r.metadata || {};
-      let questions = meta.questions || 1;
-      let score = meta.score ? String(meta.score) : 'Done';
-      if (r.activity_type === 'question_practice') {
-        questions = meta.questionsCount || 1;
-        score = meta.isCorrect ? 'Correct' : 'Incorrect';
-      } else if (r.activity_type === 'mock_test') {
-        questions = meta.totalQuestions || 20;
-        score = `${meta.score ?? 0}/${meta.maxScore ?? 100}`;
-      } else if (r.activity_type === 'study_material') {
-        score = meta.isCompleted ? 'Completed' : 'Reading';
-      }
-
-      return {
-        id: r.id,
-        type: r.activity_type,
-        subject: meta.subject || 'General Studies',
-        topic: r.reference_title,
-        questions,
-        score,
-        time: formatRelativeTime(r.created_at),
-        createdAt: r.created_at,
-      };
-    });
-
-    // 10. Weak Areas Identification (Lowest accuracy subjects with >= 3 attempts)
-    const weakAreasRes = await pool.query(
-      `SELECT
-         subject,
-         COUNT(*)::int AS attempts,
-         COUNT(CASE WHEN is_correct THEN 1 END)::int AS correct,
-         ROUND((COUNT(CASE WHEN is_correct THEN 1 END)::numeric / COUNT(*)) * 100)::int AS accuracy
-       FROM question_attempts
-       WHERE student_id = $1
-         AND subject IS NOT NULL
-         AND TRIM(subject) <> ''
-       GROUP BY subject
-       HAVING COUNT(*) >= 3 AND (COUNT(CASE WHEN is_correct THEN 1 END)::numeric / COUNT(*)) < 0.75
-       ORDER BY accuracy ASC
-       LIMIT 3`,
-      [studentId]
-    );
-
-    const weakAreas = weakAreasRes.rows.map((w) => ({
-      subject: w.subject,
-      attempts: w.attempts,
-      correct: w.correct,
-      accuracy: w.accuracy,
-    }));
-
-    // Dynamic upcoming goals based on active student stats
-    const upcomingGoals = [
-      { task: `Attempt 25 questions in ${weakAreas[0]?.subject || 'Indian Polity'}`, completed: totalAttempts >= 25 },
-      { task: 'Complete at least 1 Full-Length Mock Test', completed: mockTestsCompleted >= 1 },
-      { task: 'Study 1 Lesson Note today', completed: materialsStudied >= 1 },
-      { task: 'Reach a 7-day Study Streak', completed: currentStreak >= 7 },
-    ];
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        student: {
-          id: student.id,
-          fullName: student.full_name,
-          email: student.email,
-          targetGroup: student.target_group,
-          createdAt: student.created_at,
-        },
-        metrics: {
-          totalStudySeconds,
-          totalStudyHours,
-          studyHoursFormatted,
-          totalQuestionsSolved: uniqueCorrect,
-          totalQuestionsAttempted: uniqueAttempted,
-          totalAttempts,
-          totalCorrect,
-          targetQuestions,
-          overallAccuracy,
-          currentStreak,
-          materialsStudied,
-          targetMaterials,
-          mockTestsCompleted,
-          targetMockTests,
-          mockAvgScore,
-          mockHighestScore,
-          overallProgress,
-        },
-        progressStats: [
-          {
-            label: 'Materials Studied',
-            value: `${materialsStudied}/${targetMaterials}`,
-            percentage: Math.min(100, Math.round((materialsStudied / targetMaterials) * 100)),
-          },
-          {
-            label: 'Questions Attempted',
-            value: `${uniqueAttempted}/${targetQuestions}`,
-            percentage: Math.min(100, Math.round((uniqueAttempted / targetQuestions) * 100)),
-          },
-          {
-            label: 'Mock Tests',
-            value: `${mockTestsCompleted}/${targetMockTests}`,
-            percentage: Math.min(100, Math.round((mockTestsCompleted / targetMockTests) * 100)),
-          },
-          {
-            label: 'Accuracy',
-            value: `${overallAccuracy}%`,
-            percentage: overallAccuracy,
-          },
-        ],
-        weeklyProgress,
-        recentActivity,
-        weakAreas,
-        upcomingGoals,
-      },
-    });
+    return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
     console.error('[Student Dashboard Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to load dashboard statistics.' });
   }
+});
+
+router.get('/dashboard/stream', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  const studentId = req.studentUser!.studentId;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof (res as any).flushHeaders === 'function') {
+    (res as any).flushHeaders();
+  }
+
+  let closed = false;
+  let debounceTimer: NodeJS.Timeout | null = null;
+
+  const pushSnapshot = async () => {
+    if (closed) return;
+    try {
+      const data = await getStudentDashboardData(studentId);
+      if (data && !closed) {
+        res.write(`event: dashboard\ndata: ${JSON.stringify({ status: 'success', data })}\n\n`);
+      }
+    } catch (err) {
+      console.warn('[Dashboard SSE Push Error]:', (err as any)?.message || err);
+    }
+  };
+
+  await pushSnapshot();
+
+  const unsubscribe = subscribeStudentDashboardUpdates(studentId, () => {
+    if (closed) return;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      pushSnapshot();
+    }, 350);
+  });
+
+  const keepAliveInterval = setInterval(() => {
+    if (!closed) {
+      res.write(': keepalive\n\n');
+    }
+  }, 20_000);
+
+  req.on('close', () => {
+    closed = true;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    clearInterval(keepAliveInterval);
+    unsubscribe();
+  });
 });
 
 // ====================================================
@@ -1125,6 +929,8 @@ router.post('/study-session/heartbeat', requireStudentAuth, async (req: StudentA
        DO UPDATE SET study_seconds = daily_streaks.study_seconds + $2`,
       [studentId, cleanDelta]
     );
+
+    notifyStudentDashboardUpdate(studentId);
 
     return res.status(200).json({
       status: 'success',
@@ -1176,6 +982,23 @@ router.post('/question-attempt', requireStudentAuth, async (req: StudentAuthenti
     const cleanSource = sourceSystem || 'mcq_practice';
     const cleanTime = typeof timeSpentSeconds === 'number' ? Math.max(0, timeSpentSeconds) : 0;
 
+    // Duplicate-submission guard: prevent accidental double-clicks/replays within 10s
+    if (cleanQuestionId) {
+      const dupCheck = await pool.query(
+        `SELECT id FROM question_attempts
+         WHERE student_id = $1
+           AND question_id = $2
+           AND source_system = $3
+           AND selected_option = $4
+           AND attempted_at >= (CURRENT_TIMESTAMP - INTERVAL '10 seconds')
+         LIMIT 1`,
+        [studentId, cleanQuestionId, cleanSource, Number(selectedOption)]
+      );
+      if (dupCheck.rows.length > 0) {
+        return res.status(200).json({ status: 'success', duplicate: true });
+      }
+    }
+
     // 1. Insert question attempt record
     await pool.query(
       `INSERT INTO question_attempts (
@@ -1225,6 +1048,8 @@ router.post('/question-attempt', requireStudentAuth, async (req: StudentAuthenti
       ]
     );
 
+    notifyStudentDashboardUpdate(studentId);
+
     return res.status(200).json({
       status: 'success',
       message: 'Question attempt recorded successfully.',
@@ -1236,22 +1061,26 @@ router.post('/question-attempt', requireStudentAuth, async (req: StudentAuthenti
 });
 
 // ====================================================
-// 7. RECORD MOCK TEST SUBMISSION
+// 7. RECORD MOCK TEST / ASSESSMENT SUBMISSION (TRANSACTIONAL)
 // ====================================================
-router.post('/mock-test/submit', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+async function handleAssessmentSubmit(req: StudentAuthenticatedRequest, res: Response) {
   try {
     const studentId = req.studentUser!.studentId;
     const {
       testId,
       testTitle,
       category,
+      assessmentType,
+      submissionToken,
       totalQuestions,
       attemptedQuestions,
       correctAnswers,
       incorrectAnswers,
+      unansweredQuestions,
       score,
       maxScore,
       timeSpentSeconds,
+      responses,
     } = req.body;
 
     // Read-only server guard: never alter student database records during admin preview mode
@@ -1287,74 +1116,117 @@ router.post('/mock-test/submit', requireStudentAuth, async (req: StudentAuthenti
       return res.status(400).json({ status: 'error', message: 'Test title is required.' });
     }
 
-    const tTotal = Number(totalQuestions) || 20;
-    const tAttempted = Number(attemptedQuestions) || 0;
-    const tCorrect = Number(correctAnswers) || 0;
-    const tIncorrect = Number(incorrectAnswers) || Math.max(0, tAttempted - tCorrect);
-    const tScore = Number(score) || tCorrect;
-    const tMaxScore = Number(maxScore) || tTotal;
-    const percentage = tMaxScore > 0 ? Math.round((tScore / tMaxScore) * 1000) / 10 : 0;
-    const tTime = Number(timeSpentSeconds) || 0;
-
-    // 1. Insert mock test attempt
-    const insertRes = await pool.query(
-      `INSERT INTO mock_test_attempts (
-         student_id, test_id, test_title, category, total_questions, attempted_questions,
-         correct_answers, incorrect_answers, score, max_score, percentage, time_spent_seconds, completed_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
-       RETURNING id`,
-      [
-        studentId,
-        testId ? String(testId) : null,
-        testTitle,
-        category || 'group1',
-        tTotal,
-        tAttempted,
-        tCorrect,
-        tIncorrect,
-        tScore,
-        tMaxScore,
-        percentage,
-        tTime,
-      ]
-    );
-
-    // 2. Update daily streak (increment mock test count)
-    await pool.query(
-      `INSERT INTO daily_streaks (student_id, activity_date, mock_tests_count)
-       VALUES ($1, timezone('Asia/Kolkata', CURRENT_TIMESTAMP)::date, 1)
-       ON CONFLICT (student_id, activity_date)
-       DO UPDATE SET mock_tests_count = daily_streaks.mock_tests_count + 1`,
-      [studentId]
-    );
-
-    // 3. Log student activity
-    await pool.query(
-      `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
-       VALUES ($1, 'mock_test', $2, $3, $4::jsonb)`,
-      [
-        studentId,
-        String(insertRes.rows[0].id),
-        testTitle,
-        JSON.stringify({
-          category,
-          totalQuestions: tTotal,
-          score: tScore,
-          maxScore: tMaxScore,
-          percentage,
-        }),
-      ]
-    );
+    const result = await submitAssessmentAttempt(studentId, {
+      testId,
+      testTitle,
+      category,
+      assessmentType,
+      submissionToken,
+      totalQuestions,
+      attemptedQuestions,
+      correctAnswers,
+      incorrectAnswers,
+      unansweredQuestions,
+      score,
+      maxScore,
+      timeSpentSeconds,
+      responses,
+    });
 
     return res.status(200).json({
       status: 'success',
-      message: 'Mock test submission recorded successfully.',
-      attemptId: insertRes.rows[0].id,
-      percentage,
+      message: result.message,
+      attemptId: result.attemptId,
+      percentage: result.percentage,
+      duplicate: Boolean((result as any).duplicate),
+      ignored: Boolean((result as any).ignored),
     });
   } catch (err: any) {
-    console.error('[Mock Test Submit Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to submit mock test.' });
+    console.error('[Assessment Submit Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to submit assessment.' });
+  }
+}
+
+router.post('/mock-test/submit', requireStudentAuth, handleAssessmentSubmit);
+router.post('/assessments/submit', requireStudentAuth, handleAssessmentSubmit);
+
+// ====================================================
+// 7B. MARK LIST & DETAILED SCORECARDS (STUDENT-ISOLATED)
+// ====================================================
+router.get('/mark-list', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const data = await getStudentMarkList(studentId, {
+      type: typeof req.query.type === 'string' ? req.query.type : 'all',
+      from: typeof req.query.from === 'string' ? req.query.from : undefined,
+      to: typeof req.query.to === 'string' ? req.query.to : undefined,
+      page: req.query.page ? Number(req.query.page) : 1,
+      limit: req.query.limit ? Number(req.query.limit) : 25,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Mark List Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load mark list.' });
+  }
+});
+
+router.get('/mark-list/:attemptId(\\d+)', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const attemptId = Number(req.params.attemptId);
+    if (!Number.isInteger(attemptId) || attemptId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid assessment ID is required.' });
+    }
+    const detail = await getStudentScorecardDetail(studentId, attemptId);
+    if (!detail) {
+      return res.status(404).json({ status: 'error', message: 'Scorecard not found.' });
+    }
+    return res.status(200).json({ status: 'success', data: detail });
+  } catch (err: any) {
+    console.error('[Scorecard Detail Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load scorecard detail.' });
+  }
+});
+
+router.get('/performance-analytics', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const data = await getStudentPerformanceAnalytics(studentId, {
+      group: typeof req.query.group === 'string' ? req.query.group : 'all',
+      subject: typeof req.query.subject === 'string' ? req.query.subject : 'all',
+      range: typeof req.query.range === 'string' ? req.query.range : '30d',
+      from: typeof req.query.from === 'string' ? req.query.from : undefined,
+      to: typeof req.query.to === 'string' ? req.query.to : undefined,
+      testKey: typeof req.query.testKey === 'string' ? req.query.testKey : undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Performance Analytics Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load performance analytics.' });
+  }
+});
+
+router.get('/progress-tracker', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const data = await getStudentProgressTrackerData(studentId);
+    if (!data) {
+      return res.status(404).json({ status: 'error', message: 'Student account not found.' });
+    }
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Progress Tracker Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load progress tracker.' });
+  }
+});
+
+router.get('/admin/assessments/analytics', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const analytics = await getAdminAssessmentAnalytics();
+    return res.status(200).json({ status: 'success', data: analytics });
+  } catch (err: any) {
+    console.error('[Admin Assessment Analytics Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load assessment analytics.' });
   }
 });
 
@@ -1445,6 +1317,8 @@ router.post('/material-progress', requireStudentAuth, async (req: StudentAuthent
         ]
       );
     }
+
+    notifyStudentDashboardUpdate(studentId);
 
     return res.status(200).json({
       status: 'success',

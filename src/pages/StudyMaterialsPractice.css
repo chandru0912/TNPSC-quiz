@@ -6,7 +6,8 @@
 }
 
 .sm-practice-container {
-  max-width: 980px;
+  width: 100%;
+  max-width: 1320px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;

@@ -296,6 +296,10 @@ export async function runMigration() {
 
       CREATE INDEX IF NOT EXISTS idx_mcq_translations_lookup
       ON mcq_question_translations (question_id, translation_language, translation_status);
+
+      ALTER TABLE mcq_question_translations
+        ADD COLUMN IF NOT EXISTS model_name VARCHAR(120),
+        ADD COLUMN IF NOT EXISTS translation_version INT NOT NULL DEFAULT 1;
     `);
 
     // Backfill existing questions: set study_materials for textbook-grounded or lesson-mapped questions
@@ -904,6 +908,52 @@ export async function runMigration() {
         CONSTRAINT unique_student_activity_date UNIQUE (student_id, activity_date)
       );
       CREATE INDEX IF NOT EXISTS idx_daily_streaks_student_date ON daily_streaks (student_id, activity_date DESC);
+
+      -- 12B. Published Mock Tests Catalog & Analytics Indexes
+      CREATE TABLE IF NOT EXISTS mock_tests (
+        id SERIAL PRIMARY KEY,
+        slug VARCHAR(120) UNIQUE NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        category VARCHAR(50) NOT NULL DEFAULT 'group1',
+        category_name VARCHAR(100) NOT NULL,
+        questions_count INT NOT NULL DEFAULT 100,
+        duration_minutes INT NOT NULL DEFAULT 90,
+        difficulty VARCHAR(20) NOT NULL DEFAULT 'Medium',
+        status VARCHAR(20) NOT NULL DEFAULT 'published' CHECK (status IN ('staging', 'published', 'archived')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_mock_tests_status ON mock_tests (status);
+      CREATE INDEX IF NOT EXISTS idx_questions_status ON questions (status);
+      CREATE INDEX IF NOT EXISTS idx_study_notes_status ON study_notes (status);
+
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS assessment_type VARCHAR(40) NOT NULL DEFAULT 'mock_test';
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS submission_token VARCHAR(120);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS unanswered_questions INT NOT NULL DEFAULT 0;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS subject_breakdown JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS topic_breakdown JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS question_responses JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS attempt_number INT NOT NULL DEFAULT 1;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS test_key VARCHAR(255);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS subject VARCHAR(120);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS started_at TIMESTAMP WITH TIME ZONE;
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_student_status ON mock_test_attempts (student_id, status);
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_type ON mock_test_attempts (student_id, assessment_type, completed_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_student_test_key ON mock_test_attempts (student_id, test_key, attempt_number DESC);
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_student_subject ON mock_test_attempts (student_id, subject, completed_at DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mock_attempts_submission_token ON mock_test_attempts (student_id, submission_token) WHERE submission_token IS NOT NULL;
+
+      INSERT INTO mock_tests (slug, title, category, category_name, questions_count, duration_minutes, difficulty, status)
+      VALUES
+        ('group1-prelims-full-1', 'TNPSC Group 1 Prelims Full Mock Test 1', 'group1', 'TNPSC Group 1', 200, 180, 'Hard', 'published'),
+        ('group1-gs-unit8-9-rapid', 'TNPSC Group 1 General Studies & Unit 8/9 Rapid Mock', 'group1', 'TNPSC Group 1', 100, 90, 'Medium', 'published'),
+        ('group2-2a-combined-prelims', 'TNPSC Group 2 & 2A Combined Prelims Comprehensive Mock', 'group2_2a', 'TNPSC Group 2 & 2A', 200, 180, 'Medium', 'published'),
+        ('group2-mains-aptitude-scenario', 'TNPSC Group 2 Mains Aptitude & Scenario Mock Test', 'group2_2a', 'TNPSC Group 2 (Interview)', 100, 120, 'Hard', 'published'),
+        ('group2a-speed-practice', 'TNPSC Group 2A Speed Practice Mock Test', 'group2_2a', 'TNPSC Group 2A (Non-Interview)', 150, 120, 'Medium', 'published'),
+        ('group4-vao-complete-full', 'TNPSC Group 4 & VAO Complete Full Mock Test (Tamil + GS)', 'group4_vao', 'TNPSC Group 4 & VAO', 200, 180, 'Medium', 'published'),
+        ('vao-village-admin-special', 'TNPSC VAO Village Administration & Revenue Special Mock', 'group4_vao', 'VAO (Village Admin)', 100, 90, 'Easy', 'published'),
+        ('group4-ja-typist-speed', 'TNPSC Group 4 Junior Assistant & Typist Speed Drill', 'group4_vao', 'Group 4 (JA / Typist)', 100, 90, 'Easy', 'published')
+      ON CONFLICT (slug) DO NOTHING;
 
       -- 13. Advanced SaaS Analytics & Live Tracking Tables
       ALTER TABLE students ADD COLUMN IF NOT EXISTS district VARCHAR(100);

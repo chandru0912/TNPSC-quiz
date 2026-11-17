@@ -10,10 +10,12 @@ import { IAIProvider } from './ai/ai-provider.interface';
  */
 
 const TARGET_LANGUAGE = 'ta';
-// Batching 5 keeps each AI response well under the provider output-token cap:
-// explanation-rich MCQs truncate JSON at 10 per call, which fails validation.
-const AI_BATCH_SIZE = 5;
-export const MAX_TRANSLATION_IDS = 100;
+const TRANSLATION_VERSION = 1;
+// Batching 6 keeps each AI response well under the provider output-token cap
+// while running up to 3 batches concurrently for fast bulk translation.
+const AI_BATCH_SIZE = 6;
+const AI_CONCURRENCY = 3;
+export const MAX_TRANSLATION_IDS = 500;
 
 const TAMIL_CHAR_REGEX = /[\u0B80-\u0BFF]/;
 const LATIN_LETTER_REGEX = /[A-Za-z]/;
@@ -64,7 +66,14 @@ export interface McqTranslationFailure {
 
 export interface McqTranslationResult {
   translations: McqTranslationPayload[];
+  missingIds: number[];
   failures: McqTranslationFailure[];
+  stats: {
+    total: number;
+    completed: number;
+    pending: number;
+    failed: number;
+  };
 }
 
 function parseOptions(row: SourceQuestionRow): string[] {
@@ -295,54 +304,98 @@ Expected JSON format:
   return { translations, failed, rateLimited: false };
 }
 
+const inFlightById = new Map<number, Promise<McqTranslationPayload | null>>();
+
 async function saveTranslations(
   providerName: string,
+  modelName: string | null,
   sources: Map<number, SourceQuestion>,
   translations: Map<number, RawTranslation>
 ): Promise<void> {
-  for (const [id, translation] of translations) {
-    const source = sources.get(id);
-    if (!source) continue;
-    try {
-      await pool.query(
-        `INSERT INTO mcq_question_translations (
-           question_id, translation_language,
-           translated_question, translated_option_a, translated_option_b,
-           translated_option_c, translated_option_d, translated_explanation,
-           source_content_hash, translation_status, provider, updated_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'approved', $10, CURRENT_TIMESTAMP)
-         ON CONFLICT (question_id, translation_language) DO UPDATE SET
-           translated_question = EXCLUDED.translated_question,
-           translated_option_a = EXCLUDED.translated_option_a,
-           translated_option_b = EXCLUDED.translated_option_b,
-           translated_option_c = EXCLUDED.translated_option_c,
-           translated_option_d = EXCLUDED.translated_option_d,
-           translated_explanation = EXCLUDED.translated_explanation,
-           source_content_hash = EXCLUDED.source_content_hash,
-           translation_status = 'approved',
-           provider = EXCLUDED.provider,
-           updated_at = CURRENT_TIMESTAMP
-         WHERE mcq_question_translations.source_content_hash <> EXCLUDED.source_content_hash`,
-        [
-          id,
-          TARGET_LANGUAGE,
-          translation.question,
-          translation.options[0],
-          translation.options[1],
-          translation.options[2],
-          translation.options[3],
-          translation.explanation,
-          source.contentHash,
-          providerName,
-        ]
-      );
-    } catch (err: any) {
-      // The validated translation is still returned for this session; it will be retried on the next request.
-      console.warn('[McqTranslation] Failed to cache translation:', {
-        questionId: id,
-        error: err?.message || String(err),
-      });
-    }
+  const entries = Array.from(translations.entries()).filter(([id]) => sources.has(id));
+  if (entries.length === 0) return;
+
+  const qIds: number[] = [];
+  const langs: string[] = [];
+  const qTexts: string[] = [];
+  const optAs: string[] = [];
+  const optBs: string[] = [];
+  const optCs: string[] = [];
+  const optDs: string[] = [];
+  const expls: string[] = [];
+  const hashes: string[] = [];
+  const providers: string[] = [];
+  const models: (string | null)[] = [];
+  const versions: number[] = [];
+
+  for (const [id, translation] of entries) {
+    const source = sources.get(id)!;
+    qIds.push(id);
+    langs.push(TARGET_LANGUAGE);
+    qTexts.push(translation.question);
+    optAs.push(translation.options[0]);
+    optBs.push(translation.options[1]);
+    optCs.push(translation.options[2]);
+    optDs.push(translation.options[3]);
+    expls.push(translation.explanation);
+    hashes.push(source.contentHash);
+    providers.push(providerName);
+    models.push(modelName);
+    versions.push(TRANSLATION_VERSION);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO mcq_question_translations (
+         question_id, translation_language,
+         translated_question, translated_option_a, translated_option_b,
+         translated_option_c, translated_option_d, translated_explanation,
+         source_content_hash, translation_status, provider, model_name, translation_version, updated_at
+       )
+       SELECT
+         t.question_id, t.translation_language,
+         t.translated_question, t.translated_option_a, t.translated_option_b,
+         t.translated_option_c, t.translated_option_d, t.translated_explanation,
+         t.source_content_hash, 'approved', t.provider, t.model_name, t.translation_version, CURRENT_TIMESTAMP
+       FROM UNNEST(
+         $1::int[], $2::text[],
+         $3::text[], $4::text[], $5::text[],
+         $6::text[], $7::text[], $8::text[],
+         $9::text[], $10::text[], $11::text[], $12::int[]
+       ) AS t(
+         question_id, translation_language,
+         translated_question, translated_option_a, translated_option_b,
+         translated_option_c, translated_option_d, translated_explanation,
+         source_content_hash, provider, model_name, translation_version
+       )
+       ON CONFLICT (question_id, translation_language) DO UPDATE SET
+         translated_question = EXCLUDED.translated_question,
+         translated_option_a = EXCLUDED.translated_option_a,
+         translated_option_b = EXCLUDED.translated_option_b,
+         translated_option_c = EXCLUDED.translated_option_c,
+         translated_option_d = EXCLUDED.translated_option_d,
+         translated_explanation = EXCLUDED.translated_explanation,
+         source_content_hash = EXCLUDED.source_content_hash,
+         translation_status = 'approved',
+         provider = EXCLUDED.provider,
+         model_name = EXCLUDED.model_name,
+         translation_version = EXCLUDED.translation_version,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE mcq_question_translations.source_content_hash <> EXCLUDED.source_content_hash
+          OR mcq_question_translations.translation_status <> 'approved'`,
+      [qIds, langs, qTexts, optAs, optBs, optCs, optDs, expls, hashes, providers, models, versions]
+    );
+    await client.query('COMMIT');
+  } catch (err: any) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.warn('[McqTranslation] Bulk cache write failed:', {
+      count: entries.length,
+      error: err?.message || String(err),
+    });
+  } finally {
+    client.release();
   }
 }
 
@@ -354,16 +407,25 @@ export function normalizeQuestionIds(rawIds: unknown): number[] {
   return Array.from(new Set(ids)).slice(0, MAX_TRANSLATION_IDS);
 }
 
-export async function translateStudyMaterialQuestions(rawIds: unknown): Promise<McqTranslationResult> {
+export async function translateStudyMaterialQuestions(
+  rawIds: unknown,
+  options: { cacheOnly?: boolean } = {}
+): Promise<McqTranslationResult> {
   const ids = normalizeQuestionIds(rawIds);
-  if (ids.length === 0) return { translations: [], failures: [] };
+  if (ids.length === 0) {
+    return {
+      translations: [],
+      missingIds: [],
+      failures: [],
+      stats: { total: 0, completed: 0, pending: 0, failed: 0 },
+    };
+  }
 
   const sourceResult = await pool.query<SourceQuestionRow>(
     `SELECT id, subject, lesson_title, question_text, options,
             option_a, option_b, option_c, option_d, explanation
      FROM questions
      WHERE id = ANY($1::int[])
-       AND target_system = 'study_materials'
        AND status = 'published'`,
     [ids]
   );
@@ -378,7 +440,7 @@ export async function translateStudyMaterialQuestions(rawIds: unknown): Promise<
   const failures = new Map<number, string>();
   for (const id of ids) {
     if (!sourcesById.has(id)) {
-      failures.set(id, 'Question is not an available published Study Materials question.');
+      failures.set(id, 'Question is not an available published question.');
     }
   }
 
@@ -413,7 +475,54 @@ export async function translateStudyMaterialQuestions(rawIds: unknown): Promise<
     }
   }
 
-  const pending = availableSources.filter((source) => !translations.has(source.id));
+  let pending = availableSources.filter((source) => !translations.has(source.id));
+
+  // If cacheOnly is requested, return all cached translations immediately with missingIds
+  if (options.cacheOnly) {
+    const missingIds = pending.map((s) => s.id);
+    return {
+      translations: ids
+        .map((id) => translations.get(id))
+        .filter((item): item is McqTranslationPayload => Boolean(item)),
+      missingIds,
+      failures: ids
+        .filter((id) => failures.has(id) && !translations.has(id))
+        .map((id) => ({ questionId: id, message: failures.get(id) || 'Unavailable.' })),
+      stats: {
+        total: ids.length,
+        completed: translations.size,
+        pending: missingIds.length,
+        failed: failures.size,
+      },
+    };
+  }
+
+  // Wait for any in-flight translations for overlapping IDs to avoid duplicate AI calls
+  const awaitingInFlight: SourceQuestion[] = [];
+  const needTranslation: SourceQuestion[] = [];
+  for (const source of pending) {
+    if (inFlightById.has(source.id)) {
+      awaitingInFlight.push(source);
+    } else {
+      needTranslation.push(source);
+    }
+  }
+
+  if (awaitingInFlight.length > 0) {
+    await Promise.all(
+      awaitingInFlight.map(async (source) => {
+        const res = await inFlightById.get(source.id)?.catch(() => null);
+        if (res) {
+          translations.set(source.id, res);
+        } else {
+          needTranslation.push(source);
+        }
+      })
+    );
+  }
+
+  pending = needTranslation;
+
   if (pending.length > 0) {
     let provider: IAIProvider | null = null;
     try {
@@ -427,57 +536,118 @@ export async function translateStudyMaterialQuestions(rawIds: unknown): Promise<
         failures.set(source.id, 'Translation service is not configured. Please retry later.');
       }
     } else {
+      const batches: SourceQuestion[][] = [];
       for (let offset = 0; offset < pending.length; offset += AI_BATCH_SIZE) {
-        const batch = pending.slice(offset, offset + AI_BATCH_SIZE);
-        let outcome = await callProvider(provider, batch);
+        batches.push(pending.slice(offset, offset + AI_BATCH_SIZE));
+      }
 
-        const retrySources = batch.filter((source) => !outcome.translations.has(source.id));
-        if (retrySources.length > 0 && !outcome.rateLimited) {
-          const retryOutcome = await callProvider(provider, retrySources);
-          for (const [id, raw] of retryOutcome.translations) outcome.translations.set(id, raw);
-          outcome = { ...outcome, failed: retryOutcome.failed, rateLimited: retryOutcome.rateLimited };
-        }
+      let rateLimitedGlobal = false;
+      const resolvers = new Map<number, (val: McqTranslationPayload | null) => void>();
+      for (const source of pending) {
+        const p = new Promise<McqTranslationPayload | null>((resolve) => {
+          resolvers.set(source.id, resolve);
+        });
+        inFlightById.set(source.id, p);
+      }
 
-        for (const [id, raw] of outcome.translations) {
-          const source = sourcesById.get(id);
-          if (!source) continue;
-          translations.set(id, {
-            questionId: id,
-            question: raw.question,
-            options: [raw.options[0], raw.options[1], raw.options[2], raw.options[3]],
-            explanation: raw.explanation,
-            cached: false,
-          });
-        }
+      let cursor = 0;
+      const runWorker = async () => {
+        while (cursor < batches.length && !rateLimitedGlobal) {
+          const batchIndex = cursor++;
+          const batch = batches[batchIndex];
+          let outcome = await callProvider(provider!, batch);
 
-        await saveTranslations(provider.name, sourcesById, outcome.translations);
+          const retrySources = batch.filter((source) => !outcome.translations.has(source.id));
+          if (retrySources.length > 0 && !outcome.rateLimited) {
+            const retryOutcome = await callProvider(provider!, retrySources);
+            for (const [id, raw] of retryOutcome.translations) outcome.translations.set(id, raw);
+            outcome = { ...outcome, failed: retryOutcome.failed, rateLimited: retryOutcome.rateLimited };
+          }
 
-        for (const [id, message] of outcome.failed) {
-          if (!outcome.translations.has(id)) failures.set(id, message);
-        }
-        for (const source of batch) {
-          if (!translations.has(source.id) && !failures.has(source.id)) {
-            failures.set(source.id, 'Translation could not be validated.');
+          if (outcome.rateLimited) {
+            rateLimitedGlobal = true;
+          }
+
+          await saveTranslations(
+            provider!.name,
+            (provider as any).model || null,
+            sourcesById,
+            outcome.translations
+          );
+
+          for (const source of batch) {
+            const raw = outcome.translations.get(source.id);
+            if (raw) {
+              const payload: McqTranslationPayload = {
+                questionId: source.id,
+                question: raw.question,
+                options: [raw.options[0], raw.options[1], raw.options[2], raw.options[3]],
+                explanation: raw.explanation,
+                cached: false,
+              };
+              translations.set(source.id, payload);
+              resolvers.get(source.id)?.(payload);
+            } else {
+              const msg = outcome.rateLimited
+                ? 'Translation service is rate limited. Please retry shortly.'
+                : outcome.failed.get(source.id) || 'Translation could not be validated.';
+              failures.set(source.id, msg);
+              resolvers.get(source.id)?.(null);
+            }
+            inFlightById.delete(source.id);
           }
         }
+      };
 
-        if (outcome.rateLimited) {
-          for (const source of pending.slice(offset + AI_BATCH_SIZE)) {
+      const workers = Array.from({ length: Math.min(AI_CONCURRENCY, batches.length) }, () => runWorker());
+      await Promise.all(workers);
+
+      // Clean up any leftover resolvers if rateLimitedGlobal stopped workers early
+      for (const source of pending) {
+        if (inFlightById.has(source.id)) {
+          if (!translations.has(source.id) && !failures.has(source.id)) {
             failures.set(source.id, 'Translation service is rate limited. Please retry shortly.');
           }
-          break;
+          resolvers.get(source.id)?.(null);
+          inFlightById.delete(source.id);
         }
       }
     }
   }
 
-  // Preserve the requested question order, same as the canonical question bank.
+  const orderedTranslations = ids
+    .map((id) => translations.get(id))
+    .filter((item): item is McqTranslationPayload => Boolean(item));
+  const orderedFailures = ids
+    .filter((id) => failures.has(id) && !translations.has(id))
+    .map((id) => ({ questionId: id, message: failures.get(id) || 'Translation unavailable.' }));
+
   return {
-    translations: ids
-      .map((id) => translations.get(id))
-      .filter((item): item is McqTranslationPayload => Boolean(item)),
-    failures: ids
-      .filter((id) => failures.has(id) && !translations.has(id))
-      .map((id) => ({ questionId: id, message: failures.get(id) || 'Translation unavailable.' })),
+    translations: orderedTranslations,
+    missingIds: orderedFailures.map((f) => f.questionId),
+    failures: orderedFailures,
+    stats: {
+      total: ids.length,
+      completed: orderedTranslations.length,
+      pending: 0,
+      failed: orderedFailures.length,
+    },
   };
+}
+
+/**
+ * Non-blocking background pre-translation queue for newly uploaded/created MCQs.
+ */
+export function scheduleBackgroundPreTranslation(questionIds: number[]): void {
+  const cleanIds = normalizeQuestionIds(questionIds);
+  if (cleanIds.length === 0) return;
+  setImmediate(async () => {
+    try {
+      for (let i = 0; i < cleanIds.length; i += 30) {
+        await translateStudyMaterialQuestions(cleanIds.slice(i, i + 30));
+      }
+    } catch (err: any) {
+      console.warn('[McqTranslation] Background pre-translation error:', err?.message || String(err));
+    }
+  });
 }
