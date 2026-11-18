@@ -44,6 +44,7 @@ const StudyMaterialsPractice = lazyWithRetry(() => import('./pages/StudyMaterial
 const StudyNotesPage = lazyWithRetry(() => import('./pages/StudyNotesPage'))
 const MockTests = lazyWithRetry(() => import('./pages/MockTests'))
 const PreviousPapers = lazyWithRetry(() => import('./pages/PreviousPapers'))
+const PreviousPaperTest = lazyWithRetry(() => import('./pages/PreviousPaperTest'))
 const MarkList = lazyWithRetry(() => import('./pages/MarkList'))
 const ProgressTracker = lazyWithRetry(() => import('./pages/ProgressTracker'))
 const PerformanceAnalytics = lazyWithRetry(() => import('./pages/PerformanceAnalytics'))
@@ -214,6 +215,7 @@ function AppShell() {
             <Route path="/practice/:groupId/:subjectId/:standardId/:unitId/:lessonId/test" element={<MCQPractice />} />
             <Route path="/mock-tests" element={<MockTests />} />
             <Route path="/previous-papers" element={<PreviousPapers />} />
+            <Route path="/previous-papers/test/:paperId" element={<PreviousPaperTest />} />
             <Route path="/mark-list" element={<MarkList />} />
             <Route path="/progress-tracker" element={<ProgressTracker />} />
             <Route path="/performance-analytics" element={<PerformanceAnalytics />} />

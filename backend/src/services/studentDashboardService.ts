@@ -114,6 +114,7 @@ export async function getStudentDashboardData(studentId: number) {
     mcqAttemptsRes,
     materialsRes,
     mockRes,
+    previousPapersRes,
     mcqTestsRes,
     subjectPerfRes,
     standardPerfRes,
@@ -182,6 +183,26 @@ export async function getStudentDashboardData(studentId: number) {
          AND COALESCE(assessment_type, 'mock_test') = 'mock_test'
          AND COALESCE(status, 'completed') = 'completed'
          AND attempted_questions > 0`,
+      [studentId]
+    ),
+    pool.query(
+      `SELECT
+         id,
+         test_title,
+         category,
+         total_questions,
+         attempted_questions,
+         correct_answers,
+         incorrect_answers,
+         score::float AS score,
+         max_score::float AS max_score,
+         percentage::float AS percentage,
+         completed_at
+       FROM mock_test_attempts
+       WHERE student_id = $1
+         AND assessment_type = 'previous_paper'
+         AND COALESCE(status, 'completed') = 'completed'
+       ORDER BY completed_at DESC`,
       [studentId]
     ),
     pool.query(
@@ -471,6 +492,31 @@ export async function getStudentDashboardData(studentId: number) {
     mcqAccuracy: calculateSafePercentage(r.mcq_correct, r.mcq_attempted),
   }));
 
+  const pypRows = previousPapersRes.rows;
+  const pypQuestionsSolved = pypRows.reduce((acc: number, r: any) => acc + Number(r.attempted_questions || 0), 0);
+  const pypCorrectAnswers = pypRows.reduce((acc: number, r: any) => acc + Number(r.correct_answers || 0), 0);
+  const pypIncorrectAnswers = pypRows.reduce((acc: number, r: any) => acc + Number(r.incorrect_answers || 0), 0);
+  const previousPapersStats = {
+    papersAttempted: pypRows.length,
+    questionsSolved: pypQuestionsSolved,
+    correctAnswers: pypCorrectAnswers,
+    incorrectAnswers: pypIncorrectAnswers,
+    accuracy: calculateSafePercentage(pypCorrectAnswers, pypQuestionsSolved),
+    bestScore: pypRows.length > 0 ? Math.max(...pypRows.map((r: any) => Number(r.score || 0))) : 0,
+    latestScore: pypRows.length > 0 ? Number(pypRows[0].score || 0) : 0,
+    history: pypRows.slice(0, 10).map((r: any) => ({
+      attemptId: r.id,
+      paperTitle: r.test_title,
+      category: r.category,
+      score: Number(r.score || 0),
+      maxScore: Number(r.max_score || 300),
+      percentage: Number(r.percentage || 0),
+      attemptedQuestions: Number(r.attempted_questions || 0),
+      correctAnswers: Number(r.correct_answers || 0),
+      completedAt: r.completed_at,
+    })),
+  };
+
   return {
     student: {
       id: student.id,
@@ -548,6 +594,7 @@ export async function getStudentDashboardData(studentId: number) {
     ],
     subjectPerformance,
     standardPerformance,
+    previousPapersStats,
     weeklyProgress,
     recentActivity,
     weakAreas,

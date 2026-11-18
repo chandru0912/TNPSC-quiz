@@ -926,6 +926,81 @@ export async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_questions_status ON questions (status);
       CREATE INDEX IF NOT EXISTS idx_study_notes_status ON study_notes (status);
 
+      ALTER TABLE mock_tests DROP CONSTRAINT IF EXISTS mock_tests_status_check;
+      ALTER TABLE mock_tests
+        ADD CONSTRAINT mock_tests_status_check
+        CHECK (status IN ('draft', 'staging', 'published', 'scheduled', 'archived'));
+
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS tnpsc_group VARCHAR(40);
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS subject VARCHAR(150) DEFAULT 'General Studies';
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS standard VARCHAR(40);
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS unit VARCHAR(120);
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS total_marks NUMERIC(8, 2) NOT NULL DEFAULT 150;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS marks_per_question NUMERIC(6, 2) NOT NULL DEFAULT 1.5;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS negative_marking NUMERIC(6, 2) NOT NULL DEFAULT 0;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS start_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS end_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS created_by VARCHAR(100);
+
+      UPDATE mock_tests
+      SET
+        tnpsc_group = COALESCE(
+          tnpsc_group,
+          CASE
+            WHEN category = 'group1' THEN 'Group 1'
+            WHEN category = 'group2' THEN 'Group 2'
+            WHEN category = 'group2a' THEN 'Group 2A'
+            WHEN category = 'group2_2a' THEN 'Group 2'
+            WHEN category IN ('group4', 'group4_vao') THEN 'Group 4'
+            ELSE 'Group 1'
+          END
+        ),
+        total_marks = CASE WHEN total_marks = 150 AND questions_count <> 100 THEN questions_count * marks_per_question ELSE total_marks END,
+        published_at = COALESCE(published_at, CASE WHEN status = 'published' THEN created_at ELSE NULL END)
+      WHERE tnpsc_group IS NULL OR (status = 'published' AND published_at IS NULL);
+
+      CREATE TABLE IF NOT EXISTS mock_test_questions (
+        id SERIAL PRIMARY KEY,
+        mock_test_id INT NOT NULL REFERENCES mock_tests(id) ON DELETE CASCADE,
+        question_id INT NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+        question_order INT NOT NULL DEFAULT 1,
+        marks NUMERIC(6, 2),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_mock_test_question UNIQUE (mock_test_id, question_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mock_test_questions_test ON mock_test_questions (mock_test_id, question_order);
+
+      CREATE TABLE IF NOT EXISTS mock_test_sessions (
+        id SERIAL PRIMARY KEY,
+        mock_test_id INT NOT NULL REFERENCES mock_tests(id) ON DELETE CASCADE,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        status VARCHAR(20) NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'submitted', 'expired')),
+        started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP WITH TIME ZONE,
+        submitted_at TIMESTAMP WITH TIME ZONE,
+        answers JSONB NOT NULL DEFAULT '{}'::jsonb,
+        current_question_index INT NOT NULL DEFAULT 0,
+        attempt_id INT REFERENCES mock_test_attempts(id) ON DELETE SET NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_mock_test_sessions_student ON mock_test_sessions (student_id, mock_test_id, status);
+
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS test_category VARCHAR(30) NOT NULL DEFAULT 'full_length';
+      ALTER TABLE mock_tests DROP CONSTRAINT IF EXISTS mock_tests_test_category_check;
+      ALTER TABLE mock_tests
+        ADD CONSTRAINT mock_tests_test_category_check
+        CHECK (test_category IN ('lesson_wise', 'unit_wise', 'full_length'));
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS lesson VARCHAR(255);
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS randomize_per_attempt BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS avoid_repeated_questions BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS include_incorrect_on_retake BOOLEAN NOT NULL DEFAULT FALSE;
+      CREATE INDEX IF NOT EXISTS idx_mock_tests_group_category ON mock_tests (category, test_category, status);
+
+      ALTER TABLE mock_test_sessions ADD COLUMN IF NOT EXISTS question_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+
       ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
       ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS assessment_type VARCHAR(40) NOT NULL DEFAULT 'mock_test';
       ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS submission_token VARCHAR(120);
@@ -1168,6 +1243,74 @@ export async function runMigration() {
       console.warn('[Migration] Non-fatal notice during baseline analytics seeding:', baselineErr?.message);
     }
 
+    // Previous Year Papers Online Mock Test System tables
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS previous_year_papers (
+        id SERIAL PRIMARY KEY,
+        year INT NOT NULL,
+        exam VARCHAR(120) NOT NULL,
+        category VARCHAR(40) NOT NULL,
+        subjects TEXT NOT NULL,
+        total_questions INT NOT NULL DEFAULT 200,
+        duration_minutes INT NOT NULL DEFAULT 180,
+        marks_per_question NUMERIC(5,2) NOT NULL DEFAULT 1.5,
+        negative_marking NUMERIC(5,2) NOT NULL DEFAULT 0,
+        status VARCHAR(20) NOT NULL DEFAULT 'published',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS previous_year_paper_questions (
+        id SERIAL PRIMARY KEY,
+        paper_id INT NOT NULL REFERENCES previous_year_papers(id) ON DELETE CASCADE,
+        question_number INT NOT NULL,
+        question_id INT REFERENCES questions(id) ON DELETE SET NULL,
+        subject VARCHAR(120) NOT NULL DEFAULT 'General Studies',
+        topic VARCHAR(255),
+        question_text TEXT NOT NULL,
+        option_a TEXT NOT NULL,
+        option_b TEXT NOT NULL,
+        option_c TEXT NOT NULL,
+        option_d TEXT NOT NULL,
+        correct_answer INT NOT NULL,
+        explanation TEXT,
+        CONSTRAINT uq_pyp_paper_qnum UNIQUE (paper_id, question_number)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pyp_questions_paper
+      ON previous_year_paper_questions (paper_id, question_number);
+
+      CREATE TABLE IF NOT EXISTS student_test_sessions (
+        id SERIAL PRIMARY KEY,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        paper_id INT NOT NULL REFERENCES previous_year_papers(id) ON DELETE CASCADE,
+        status VARCHAR(20) NOT NULL DEFAULT 'in_progress',
+        started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        submitted_at TIMESTAMP WITH TIME ZONE,
+        current_question INT NOT NULL DEFAULT 1,
+        submission_token VARCHAR(120) UNIQUE,
+        attempt_id INT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_student_test_sessions_lookup
+      ON student_test_sessions (student_id, paper_id, status);
+
+      CREATE TABLE IF NOT EXISTS student_test_answers (
+        id SERIAL PRIMARY KEY,
+        session_id INT NOT NULL REFERENCES student_test_sessions(id) ON DELETE CASCADE,
+        question_id INT NOT NULL REFERENCES previous_year_paper_questions(id) ON DELETE CASCADE,
+        question_number INT NOT NULL,
+        selected_option INT,
+        is_marked_for_review BOOLEAN NOT NULL DEFAULT FALSE,
+        is_visited BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uq_student_test_answer UNIQUE (session_id, question_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_student_test_answers_session
+      ON student_test_answers (session_id, question_number);
+    `);
+
     await client.query('COMMIT');
     console.log('Migration completed successfully: questions, admin_users, study_notes, textbooks, textbook_content, jobs, google_drive_materials, and ai_providers verified.');
 
@@ -1215,6 +1358,7 @@ export function ensureDatabaseSchema(): Promise<void> {
               to_regclass('public.syllabus_topics') AS t_topics,
               to_regclass('public.mcq_generation_batches') AS t_mcq_batches,
               to_regclass('public.mcq_question_translations') AS t_mcq_translations,
+              to_regclass('public.previous_year_papers') AS t_pyp,
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'textbooks' AND column_name = 'google_drive_file_id'
@@ -1226,7 +1370,15 @@ export function ensureDatabaseSchema(): Promise<void> {
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'pdf_extractions' AND column_name = 'retry_count'
-              ) AS has_pe_retry
+              ) AS has_pe_retry,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'mock_tests' AND column_name = 'test_category'
+              ) AS has_mt_test_category,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'mock_test_sessions' AND column_name = 'question_ids'
+              ) AS has_mts_question_ids
           `);
           const row = check.rows[0];
           if (
@@ -1237,9 +1389,12 @@ export function ensureDatabaseSchema(): Promise<void> {
             row?.t_topics &&
             row?.t_mcq_batches &&
             row?.t_mcq_translations &&
+            row?.t_pyp &&
             row?.has_tb_gdrive &&
             row?.has_tb_unit &&
-            row?.has_pe_retry
+            row?.has_pe_retry &&
+            row?.has_mt_test_category &&
+            row?.has_mts_question_ids
           ) {
             return;
           }

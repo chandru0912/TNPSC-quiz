@@ -1,0 +1,34 @@
+{
+  "source_path": "D:\\moonzoro\\TNPSC quiz\\docs\\designs\\phase1_implementation_plan.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "TNPSC Study Hub — Phase 1 Implementation Plan",
+  "summary": "Phase 1 technical plan to harden Neon PostgreSQL pooling, TLS, cold-start overhead, and query performance without breaking APIs.",
+  "scope": [
+    "Neon PostgreSQL",
+    "connection pooling",
+    "TLS verification",
+    "cold-start overhead",
+    "COUNT(*) optimization",
+    "study_notes queries",
+    "backend/src/db.ts"
+  ],
+  "cross_refs": [
+    "file:///d:/moonzoro/TNPSC%20quiz/docs/designs/tnpsc_study_hub_architecture_roadmap.md",
+    "file:///d:/moonzoro/TNPSC%20quiz/backend/src/db.ts#L1-L60",
+    "file:///d:/moonzoro/TNPSC%20quiz/backend/src/routes/questions.ts#L288-L310",
+    "file:///d:/moonzoro/TNPSC%20quiz/backend/src/routes/studyMaterialQuestions.ts#L127-L150",
+    "file:///d:/moonzoro/TNPSC%20quiz/backend/src/routes/notes.ts#L254-L270",
+    "file:///d:/moonzoro/TNPSC%20quiz/src/pages/Admin.tsx#L1291-L1294",
+    "file:///d:/moonzoro/TNPSC%20quiz/backend/src/services/studyManagementService.ts#L1465-L1525",
+    "file:///d:/moonzoro/TNPSC%20quiz/backend/src/routes/drive.ts#L55-L60",
+    "file:///d:/moonzoro/TNPSC%20quiz/backend/src/routes/textbooks.ts#L46-L51",
+    "file:///d:/moonzoro/TNPSC%20quiz/src/pages/MCQPractice.tsx#L149-L185",
+    "file:///d:/moonzoro/TNPSC%20quiz/src/pages/StudyMaterialsPractice.tsx#L178-L189",
+    "file:///d:/moonzoro/TNPSC%20quiz/src/pages/Admin.tsx#L1269-L1295"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "No frontmatter or spec/ filename convention; classified as SPEC (medium) based on endpoint/module impact tables, technical contracts, and performance benchmarks."
+}

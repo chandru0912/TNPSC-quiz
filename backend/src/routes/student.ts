@@ -782,13 +782,9 @@ router.get('/platform-stats', async (_req: Request, res: Response) => {
 
 router.get('/mock-tests', async (_req: Request, res: Response) => {
   try {
-    const result = await pool.query(
-      `SELECT id, slug, title, category, category_name, questions_count, duration_minutes, difficulty, status, created_at
-       FROM mock_tests
-       WHERE status = 'published'
-       ORDER BY id ASC`
-    );
-    return res.status(200).json({ status: 'success', data: result.rows });
+    const { getPublishedMockTestsForStudent } = await import('../services/mockTestService.js');
+    const data = await getPublishedMockTestsForStudent();
+    return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
     console.error('[Mock Tests List Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to load mock tests.' });

@@ -26,11 +26,13 @@ import claudeRouter from './routes/claudeRoutes';
 import geminiRouter from './routes/geminiRoutes';
 import driveRouter from './routes/drive';
 import studentRouter from './routes/student';
+import previousPapersRouter from './routes/previousPapersRoutes';
 import { getStudentDashboardData } from './services/studentDashboardService';
 import analyticsRouter from './routes/analyticsRoutes';
 import studyManagementRouter from './routes/studyMaterialsManagementRoutes';
 import aiSyllabusImportRouter from './routes/aiSyllabusImportRoutes';
 import mcqGenerationJobsRouter from './routes/mcqGenerationJobs';
+import { adminMockTestsRouter, studentMockTestsRouter } from './routes/mockTestsRoutes';
 import { AISyllabusJobService } from './services/aiSyllabusJobService';
 
 const app = express();
@@ -375,6 +377,8 @@ app.use('/api/student', requireSchemaMiddleware, studentRouter);
 app.use('/student', requireSchemaMiddleware, studentRouter);
 app.use('/api/api/student', requireSchemaMiddleware, studentRouter);
 
+app.use(['/api/previous-papers', '/previous-papers', '/api/api/previous-papers'], requireSchemaMiddleware, previousPapersRouter);
+
 app.get(['/api/dashboard/performance', '/dashboard/performance'], requireSchemaMiddleware, requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
     const data = await getStudentDashboardData(req.studentUser!.studentId);
@@ -394,6 +398,9 @@ app.use(['/api/study-management/ai-import', '/study-management/ai-import', '/api
 app.use('/api/study-management', requireSchemaMiddleware, studyManagementRouter);
 app.use('/study-management', requireSchemaMiddleware, studyManagementRouter);
 app.use('/api/api/study-management', requireSchemaMiddleware, studyManagementRouter);
+
+app.use(['/api/admin/mock-tests', '/admin/mock-tests', '/api/api/admin/mock-tests'], requireSchemaMiddleware, adminMockTestsRouter);
+app.use(['/api/mock-tests', '/mock-tests', '/api/api/mock-tests'], requireSchemaMiddleware, studentMockTestsRouter);
 
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {

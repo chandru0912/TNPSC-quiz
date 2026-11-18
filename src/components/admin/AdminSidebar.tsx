@@ -24,6 +24,7 @@ import {
   LogOut,
   X,
   Layers,
+  ClipboardCheck,
 } from 'lucide-react';
 import './AdminSidebar.css';
 
@@ -35,6 +36,7 @@ export type AdminSectionType =
   | 'textbooks'
   | 'notes'
   | 'study-materials-management'
+  | 'mock-tests'
   | 'gdrive'
   | 'claude'
   | 'dashboard-view';
@@ -59,6 +61,7 @@ interface AdminSidebarProps {
     questions: number;
     textbooks: number;
     notes: number;
+    mockTests?: number;
   };
   onOpenAdminAccounts: () => void;
   onLogout: () => void;
@@ -357,6 +360,18 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                   <Layers size={17} className="btn-lead-icon" />
                   <span className="btn-label-text">Study Materials Management</span>
                   <span className="btn-tag cyan">Dynamic</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className={`nav-tree-btn ${isItemActive('/admin/mock-tests') ? 'active' : ''}`}
+                  onClick={() => handleNavClick('/admin/mock-tests')}
+                  title="Mock Test Management (Create, Schedule & Publish Mock Tests)"
+                >
+                  <ClipboardCheck size={17} className="btn-lead-icon" />
+                  <span className="btn-label-text">Mock Test Management</span>
+                  <span className="item-count-badge">{counts.mockTests ?? 0}</span>
                 </button>
               </li>
             </ul>

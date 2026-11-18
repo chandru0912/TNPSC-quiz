@@ -1,0 +1,37 @@
+{
+  "source_path": "D:/moonzoro/TNPSC quiz/docs/designs/concepts_brief.md",
+  "type": "ADR",
+  "confidence": "low",
+  "manifest_override": false,
+  "title": "TNPSC Study Hub — Reliability & 50k-Scale Architecture Plan",
+  "summary": "Architecture improvement plan to stabilize Vercel/Neon reliability, offload PDF/OCR/AI pipelines to a persistent worker, unify syllabus data, and scale to 50,000 students.",
+  "scope": [
+    "TNPSC Study Hub",
+    "Vercel Serverless",
+    "Neon PostgreSQL",
+    "Admin ingestion pipeline",
+    "PDF/OCR extraction",
+    "MCQ translation",
+    "syllabus single source of truth",
+    "Admin.tsx"
+  ],
+  "cross_refs": [
+    "src/",
+    "backend/src/server.ts",
+    "src/data/unifiedSyllabusRegistry.ts",
+    "src/data/samacheerTextbookCatalog.ts",
+    "backend/src/routes/syllabusRoutes.ts",
+    "backend/src/utils/cache.ts",
+    "backend/src/db.ts",
+    "backend/src/routes/questions.ts",
+    "backend/src/services/mcqJobService.ts",
+    "backend/src/services/mcqTranslationService.ts",
+    "backend/src/services/pdfExtractionService.ts",
+    "vercel.json",
+    "api/index.ts",
+    "src/pages/Admin.tsx"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Concept brief without frontmatter or Status field; combines PRD signals (Goals vs. Non-Goals) and ADR signals (Alternatives Weighed with [Recommended] options, Key Decisions & Phased Migration Plan). Classified as ADR per ambiguity rule (ADR > PRD) with locked=false."
+}

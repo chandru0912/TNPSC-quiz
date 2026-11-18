@@ -1,0 +1,22 @@
+{
+  "source_path": "D:/moonzoro/TNPSC quiz/docs/superpowers/plans/2026-11-02-bulk-pdf-upload-syllabus-classification.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "TNPSC Study Hub – Complete Bulk PDF Upload & Automatic Syllabus Classification Implementation Plan",
+  "summary": "Implementation plan for bulk Samacheer Kalvi PDF upload, automatic TNPSC syllabus classification, review dashboard, direct Google Drive streaming, and PostgreSQL indexing.",
+  "scope": [
+    "BulkPdfUploadModal",
+    "bulkClassificationService",
+    "fullTextbookExtractor",
+    "google_drive_materials",
+    "bulk_upload_batches",
+    "Google Drive API v3",
+    "PostgreSQL",
+    "TNPSC syllabus"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Implementation plan under docs/superpowers/plans/ without frontmatter; combines technical SPEC signals (DB schemas, API endpoints, architectural constraints) with PRD-like Goal and Review Focus. Classified as SPEC per dominant technical contract content and ambiguity precedence (SPEC > PRD)."
+}

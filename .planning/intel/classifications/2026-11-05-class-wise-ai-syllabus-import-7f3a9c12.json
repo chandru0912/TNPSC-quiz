@@ -1,0 +1,26 @@
+{
+  "source_path": "D:/moonzoro/TNPSC quiz/docs/superpowers/plans/2026-11-05-class-wise-ai-syllabus-import.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Class-wise AI Syllabus Import Implementation Plan",
+  "summary": "Implementation plan for upgrading AI Syllabus Import with class-wise standard selection (6-12), dynamic unit generation, hierarchical parsing, and selective review/publish.",
+  "scope": [
+    "AI Syllabus Import",
+    "AISyllabusImportService",
+    "StudyMaterialsManagement",
+    "Samacheer Kalvi",
+    "syllabus_units",
+    "syllabus_lessons",
+    "syllabus_topics"
+  ],
+  "cross_refs": [
+    "backend/src/services/aiSyllabusImportService.ts",
+    "backend/src/routes/studyMaterialsManagementRoutes.ts",
+    "src/components/admin/StudyMaterialsManagement.tsx",
+    "src/components/admin/StudyMaterialsManagement.css"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Implementation plan (docs/superpowers/plans/) specifying architecture, data flow, TypeScript interface extensions, API route parameters, and DB table updates; classified as SPEC with medium confidence."
+}

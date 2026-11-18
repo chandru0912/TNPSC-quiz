@@ -54,6 +54,7 @@ import { AdminSidebar, type AdminSectionType, type AnalyticsTabType } from '../c
 import { AdminTopHeader } from '../components/admin/AdminTopHeader'
 import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
 import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
+import { MockTestManagement } from '../components/admin/MockTestManagement'
 import { NewStudentPage } from '../components/admin/pages/NewStudentPage'
 import { RestoreStudentPage } from '../components/admin/pages/RestoreStudentPage'
 import { StudentPerformancePage } from '../components/admin/pages/StudentPerformancePage'
@@ -185,6 +186,7 @@ const Admin = () => {
   const mainContentRef = useRef<HTMLDivElement>(null)
   const { startStudentPreview } = useStudentAuth()
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [publishedMockTestsCount, setPublishedMockTestsCount] = useState(0)
 
   const rawPath = location.pathname.toLowerCase().replace(/\/+$/, '') || '/admin'
 
@@ -203,12 +205,14 @@ const Admin = () => {
   const isTextbooks = rawPath === '/admin/textbook-management'
   const isNotes = rawPath === '/admin/study-notes'
   const isStudyMaterialsManagement = rawPath === '/admin/study-materials-management'
+  const isMockTests = rawPath === '/admin/mock-tests'
   const isGdrive = rawPath === '/admin/google-drive'
   const isClaude = rawPath === '/admin/ai-private-hub'
   const isDashboardView = rawPath === '/admin/dashboard-view'
 
   const resolvedSection: AdminSectionType =
     isStudyMaterialsManagement ? 'study-materials-management' :
+    isMockTests ? 'mock-tests' :
     isQuestions ? 'questions' :
     isTextbooks ? 'textbooks' :
     isNotes ? 'notes' :
@@ -238,6 +242,20 @@ const Admin = () => {
 
   // Auth state
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('tnpsc_admin_token'))
+
+  useEffect(() => {
+    if (!token) return
+    apiFetch('/api/admin/mock-tests', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.status === 'success' && data?.data?.stats) {
+          setPublishedMockTestsCount(Number(data.data.stats.publishedTests || 0))
+        }
+      })
+      .catch(() => {})
+  }, [token])
   const [adminUser, setAdminUser] = useState<{ id?: number; username: string; name?: string; role?: string } | null>(() => {
     try {
       const saved = localStorage.getItem('tnpsc_admin_user')
@@ -3878,6 +3896,7 @@ const Admin = () => {
           questions: metrics.totalQuestions,
           textbooks: textbookMetrics.totalTextbooks,
           notes: notesMetrics.totalNotes,
+          mockTests: publishedMockTestsCount,
         }}
         onOpenAdminAccounts={() => {
           setIsUsersModalOpen(true)
@@ -3899,7 +3918,7 @@ const Admin = () => {
         />
 
         <div className="admin-enterprise-body-content">
-          <div className={`admin-page ${(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isGdrive || isClaude) ? 'is-content-page' : ''}`}>
+          <div className={`admin-page ${(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isGdrive || isClaude) ? 'is-content-page' : ''}`}>
             <div className="admin-container">
         {/* Toast Notification */}
         {actionMessage && (
@@ -4060,13 +4079,13 @@ const Admin = () => {
         )}
 
         {/* 5. Header for Content Management & Integration Pages (Zero Horizontal Tabs) */}
-        {(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isGdrive || isClaude) && (
+        {(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isGdrive || isClaude) && (
           <div className="admin-header">
             <div className="admin-header-main">
               <div className="admin-badge-row">
                 <span className="admin-badge">
                   <Sparkles size={13} />
-                  {isQuestions ? 'Question Bank' : isTextbooks ? 'Textbook Management' : isNotes ? 'Study Notes' : isStudyMaterialsManagement ? 'Study Materials Management' : isGdrive ? 'Google Drive' : 'AI Provider Hub'}
+                  {isQuestions ? 'Question Bank' : isTextbooks ? 'Textbook Management' : isNotes ? 'Study Notes' : isStudyMaterialsManagement ? 'Study Materials Management' : isMockTests ? 'Mock Test Management' : isGdrive ? 'Google Drive' : 'AI Provider Hub'}
                 </span>
                 <span className="admin-user-pill admin-db-pill">
                   <Database size={13} />
@@ -4090,6 +4109,7 @@ const Admin = () => {
                 {isTextbooks && 'Textbook Management'}
                 {isNotes && 'Study Notes Management'}
                 {isStudyMaterialsManagement && 'Study Materials Management'}
+                {isMockTests && 'Mock Test Management'}
                 {isGdrive && 'Google Drive PDF Materials'}
                 {isClaude && 'AI Provider Hub (Claude & Gemini)'}
               </h1>
@@ -4098,6 +4118,7 @@ const Admin = () => {
                 {isTextbooks && 'Upload, index, and organize Samacheer Kalvi PDF textbooks for AI study notes and MCQ generation.'}
                 {isNotes && 'Review, edit, stage, and publish comprehensive TNPSC Complete Study Notes directly into the database.'}
                 {isStudyMaterialsManagement && 'Manage syllabus hierarchy dynamically across Exam, Subject, Standard (6th–12th), Units, Lessons, Topics, and Study Notes.'}
+                {isMockTests && 'Create, configure, schedule, and publish full-length TNPSC Mock Tests using real questions from the Question Bank.'}
                 {isGdrive && 'Connect your personal Google Drive account to store and stream official PDF textbooks and study materials with zero serverless size limits.'}
                 {isClaude && 'Configure Anthropic Claude AI and Google Gemini AI as two completely independent providers with separate keys, models, prompts, and generation logs.'}
               </p>
@@ -5816,6 +5837,15 @@ const Admin = () => {
           <div className="admin-study-materials-mgmt-section" style={{ width: '100%' }}>
             <ErrorBoundary key="smm" compact fallbackTitle="Study Materials Management failed to render">
               <StudyMaterialsManagement token={token} />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* Mock Test Management Module */}
+        {isMockTests && (
+          <div className="admin-mock-tests-mgmt-section" style={{ width: '100%' }}>
+            <ErrorBoundary key="mtm" compact fallbackTitle="Mock Test Management failed to render">
+              <MockTestManagement token={token} onPublishedCountChange={setPublishedMockTestsCount} />
             </ErrorBoundary>
           </div>
         )}

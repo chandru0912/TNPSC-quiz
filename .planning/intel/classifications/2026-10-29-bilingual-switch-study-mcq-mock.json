@@ -1,0 +1,21 @@
+{
+  "source_path": "D:\\moonzoro\\TNPSC quiz\\docs\\superpowers\\plans\\2026-10-29-bilingual-switch-study-mcq-mock.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Bilingual Tamil / English Language Switch Implementation Plan",
+  "summary": "Implementation plan for a scoped Tamil/English language switch across Study Materials, MCQ Questions, and Mock Tests with localStorage persistence.",
+  "scope": [
+    "LanguageContext",
+    "LanguageSwitch",
+    "Study Materials",
+    "MCQ Questions",
+    "Mock Tests",
+    "bilingual translation",
+    "localStorage"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Implementation plan with strong SPEC signals (architecture, component contracts, localStorage key, route scoping, global constraints) and secondary PRD-like goal/review criteria; classified as SPEC per precedence rule."
+}

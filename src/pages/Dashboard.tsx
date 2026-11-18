@@ -94,6 +94,26 @@ interface DashboardData {
     task: string
     completed: boolean
   }[]
+  previousPapersStats?: {
+    papersAttempted: number
+    questionsSolved: number
+    correctAnswers: number
+    incorrectAnswers: number
+    accuracy: number
+    bestScore: number
+    latestScore: number
+    history: {
+      attemptId: number
+      paperTitle: string
+      category: string
+      score: number
+      maxScore: number
+      percentage: number
+      attemptedQuestions: number
+      correctAnswers: number
+      completedAt: string
+    }[]
+  }
 }
 
 const defaultDashboardData: DashboardData = {
@@ -636,6 +656,53 @@ const Dashboard = () => {
             })}
           </div>
         </div>
+
+        {/* Previous Year Papers Online Mock Test Analytics */}
+        {data.previousPapersStats && (
+          <motion.div
+            className="dash-summary-strip glass"
+            style={{ marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <div className="dash-summary-item">
+              <div className="dash-summary-icon">
+                <Archive size={16} />
+              </div>
+              <div className="dash-summary-info">
+                <span className="dash-summary-label">Previous Papers Attempted</span>
+                <span className="dash-summary-val">{data.previousPapersStats.papersAttempted}</span>
+              </div>
+            </div>
+            <div className="dash-summary-divider" />
+            <div className="dash-summary-item">
+              <div className="dash-summary-icon">
+                <CheckCircle2 size={16} />
+              </div>
+              <div className="dash-summary-info">
+                <span className="dash-summary-label">PYQ Solved / Accuracy</span>
+                <span className="dash-summary-val">
+                  {data.previousPapersStats.questionsSolved} Qs{' '}
+                  <span className="dash-summary-unit">({data.previousPapersStats.accuracy}% Acc)</span>
+                </span>
+              </div>
+            </div>
+            <div className="dash-summary-divider" />
+            <div className="dash-summary-item">
+              <div className="dash-summary-icon">
+                <Trophy size={16} />
+              </div>
+              <div className="dash-summary-info">
+                <span className="dash-summary-label">Best / Latest PYQ Score</span>
+                <span className="dash-summary-val">
+                  {data.previousPapersStats.bestScore}{' '}
+                  <span className="dash-summary-unit">/ Latest: {data.previousPapersStats.latestScore}</span>
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Feature cards */}
         <section className="dash-section">

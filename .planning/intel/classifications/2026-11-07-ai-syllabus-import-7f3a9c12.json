@@ -1,0 +1,23 @@
+{
+  "source_path": "D:/moonzoro/TNPSC quiz/docs/superpowers/plans/2026-11-07-ai-syllabus-import.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "AI Syllabus Import (12-Step Checkpoint Architecture) Implementation Plan",
+  "summary": "Implementation plan for a 12-step AI Syllabus Import wizard, backend Gemini engine service, REST API endpoints, and atomic PostgreSQL publishing.",
+  "scope": [
+    "AI Syllabus Import",
+    "TNPSC Study Hub",
+    "aiSyllabusEngineService",
+    "aiSyllabusImportRoutes",
+    "AiSyllabusImportWizard",
+    "PostgreSQL",
+    "Samacheer Kalvi"
+  ],
+  "cross_refs": [
+    "docs/superpowers/specs/2026-11-07-ai-syllabus-import-design.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Located in docs/superpowers/plans/ as a step-by-step implementation plan (DOC signal), but defines concrete TypeScript interfaces, 5 REST endpoints, PostgreSQL transaction rules, and global constraints (SPEC signal); classified as SPEC per precedence tie-breaker."
+}

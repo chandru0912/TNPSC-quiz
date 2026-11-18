@@ -1,0 +1,23 @@
+{
+  "source_path": "D:/moonzoro/TNPSC quiz/docs/designs/tnpsc_study_hub_architecture_roadmap.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "TNPSC Study Hub — Architecture Improvement Roadmap & Phase 1 Diagnostics",
+  "summary": "Phase 1 PostgreSQL diagnostics, performance targets, durable queue/worker architecture, and four-phase scaling roadmap for 50,000 students.",
+  "scope": [
+    "Neon PostgreSQL",
+    "Vercel Serverless API",
+    "Upstash Redis",
+    "Upstash QStash",
+    "Railway/Render Worker",
+    "Cloudflare R2",
+    "OCR pipeline",
+    "Tamil translation",
+    "Admin.tsx"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "No YAML frontmatter. Contains Status: Proposed and an architectural selection (Railway/Render worker + Postgres FOR UPDATE SKIP LOCKED) alongside SPEC signals (p95 SLOs, pooling/index/upload constraints, testing/rollback contracts) and DOC-like roadmap/cost context."
+}

@@ -1,0 +1,23 @@
+{
+  "source_path": "D:/moonzoro/TNPSC quiz/docs/superpowers/specs/2026-11-07-ai-syllabus-import-design.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Technical Design Document: AI Syllabus Import Engine (12-Step Architecture)",
+  "summary": "Technical design specification for a 12-step AI syllabus import pipeline nesting Samacheer Kalvi textbook chapters under single parent units with bilingual notes, MCQs, and atomic PostgreSQL publishing.",
+  "scope": [
+    "AI Syllabus Import Engine",
+    "TNPSC Study Hub",
+    "Admin Panel",
+    "Samacheer Kalvi textbooks",
+    "PostgreSQL",
+    "Gemini service",
+    "aiSyllabusEngineService",
+    "aiSyllabusImportRoutes",
+    "AiSyllabusImportWizard"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

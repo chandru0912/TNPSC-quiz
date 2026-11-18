@@ -1,0 +1,275 @@
+import { Router, Request, Response } from 'express';
+import {
+  requireAdminAuth,
+  AuthenticatedRequest,
+  requireStudentAuth,
+  StudentAuthenticatedRequest,
+} from '../middleware/auth';
+import {
+  getAdminMockTestsOverview,
+  getAdminMockTestDetail,
+  searchQuestionBankForMockTest,
+  autoSelectQuestionsForMockTest,
+  getSyllabusOptionsForMockTests,
+  createAdminMockTest,
+  updateAdminMockTest,
+  duplicateAdminMockTest,
+  updateAdminMockTestStatus,
+  deleteAdminMockTest,
+  getPublishedMockTestsForStudent,
+  startStudentMockTestSession,
+  saveStudentMockTestProgress,
+  submitStudentMockTest,
+  MockTestStatus,
+} from '../services/mockTestService';
+
+export const adminMockTestsRouter = Router();
+export const studentMockTestsRouter = Router();
+
+// ====================================================
+// ADMIN MOCK TEST MANAGEMENT ROUTES (requireAdminAuth)
+// ====================================================
+adminMockTestsRouter.use(requireAdminAuth);
+
+adminMockTestsRouter.get('/', async (req: Request, res: Response) => {
+  try {
+    const data = await getAdminMockTestsOverview({
+      search: req.query.search as string | undefined,
+      group: req.query.group as string | undefined,
+      status: req.query.status as string | undefined,
+      subject: req.query.subject as string | undefined,
+      testCategory: req.query.testCategory as string | undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Admin MockTests List Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to load mock tests.' });
+  }
+});
+
+adminMockTestsRouter.get('/syllabus-options', async (req: Request, res: Response) => {
+  try {
+    const data = await getSyllabusOptionsForMockTests({
+      group: req.query.group as string | undefined,
+      subject: req.query.subject as string | undefined,
+      standard: req.query.standard as string | undefined,
+      unit: req.query.unit as string | undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to load syllabus options.' });
+  }
+});
+
+adminMockTestsRouter.get('/question-bank', async (req: Request, res: Response) => {
+  try {
+    const data = await searchQuestionBankForMockTest({
+      group: req.query.group as string | undefined,
+      subject: req.query.subject as string | undefined,
+      standard: req.query.standard as string | undefined,
+      unit: req.query.unit as string | undefined,
+      difficulty: req.query.difficulty as string | undefined,
+      status: req.query.status as string | undefined,
+      search: req.query.search as string | undefined,
+      limit: req.query.limit ? Number(req.query.limit) : 50,
+      offset: req.query.offset ? Number(req.query.offset) : 0,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Admin MockTests QuestionBank Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to load questions.' });
+  }
+});
+
+adminMockTestsRouter.post('/auto-select', async (req: Request, res: Response) => {
+  try {
+    const { group, subject, standard, unit, difficulty, count, excludeIds } = req.body || {};
+    const data = await autoSelectQuestionsForMockTest({
+      group,
+      subject,
+      standard,
+      unit,
+      difficulty,
+      count: Number(count) || 25,
+      excludeIds: Array.isArray(excludeIds) ? excludeIds : [],
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({
+      status: 'error',
+      message: err.message || 'Failed to auto-select questions.',
+      eligibleCount: err.eligibleCount,
+    });
+  }
+});
+
+adminMockTestsRouter.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const detail = await getAdminMockTestDetail(id);
+    if (!detail) {
+      return res.status(404).json({ status: 'error', message: 'Mock test not found.' });
+    }
+    return res.status(200).json({ status: 'success', data: detail });
+  } catch (err: any) {
+    console.error('[Admin MockTest Detail Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to load mock test.' });
+  }
+});
+
+adminMockTestsRouter.post('/', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const adminUsername = req.adminUser?.username || 'admin';
+    const created = await createAdminMockTest(req.body || {}, adminUsername);
+    return res.status(201).json({ status: 'success', data: created });
+  } catch (err: any) {
+    console.error('[Admin MockTest Create Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to create mock test.' });
+  }
+});
+
+adminMockTestsRouter.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const updated = await updateAdminMockTest(id, req.body || {});
+    return res.status(200).json({ status: 'success', data: updated });
+  } catch (err: any) {
+    console.error('[Admin MockTest Update Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to update mock test.' });
+  }
+});
+
+adminMockTestsRouter.post('/:id/duplicate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const adminUsername = req.adminUser?.username || 'admin';
+    const copy = await duplicateAdminMockTest(id, adminUsername);
+    return res.status(201).json({ status: 'success', data: copy });
+  } catch (err: any) {
+    console.error('[Admin MockTest Duplicate Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to duplicate mock test.' });
+  }
+});
+
+adminMockTestsRouter.patch('/:id/status', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const { status, startAt, endAt } = req.body || {};
+    const validStatuses: MockTestStatus[] = ['draft', 'published', 'scheduled', 'archived'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid status. Use draft, published, scheduled, or archived.' });
+    }
+    const updated = await updateAdminMockTestStatus(id, status, startAt, endAt);
+    return res.status(200).json({ status: 'success', data: updated });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to update mock test status.' });
+  }
+});
+
+adminMockTestsRouter.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const deleted = await deleteAdminMockTest(id);
+    if (!deleted) {
+      return res.status(404).json({ status: 'error', message: 'Mock test not found.' });
+    }
+    return res.status(200).json({ status: 'success', message: 'Mock test deleted successfully.' });
+  } catch (err: any) {
+    console.error('[Admin MockTest Delete Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to delete mock test.' });
+  }
+});
+
+// ====================================================
+// STUDENT MOCK TEST ROUTES (Published & Active Scheduled Only)
+// ====================================================
+studentMockTestsRouter.get('/syllabus-options', async (req: Request, res: Response) => {
+  try {
+    const data = await getSyllabusOptionsForMockTests({
+      group: req.query.group as string | undefined,
+      subject: req.query.subject as string | undefined,
+      standard: req.query.standard as string | undefined,
+      unit: req.query.unit as string | undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load syllabus options.' });
+  }
+});
+
+studentMockTestsRouter.get('/', async (req: Request, res: Response) => {
+  try {
+    const data = await getPublishedMockTestsForStudent({
+      group: req.query.group as string | undefined,
+      testCategory: req.query.testCategory as string | undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Student MockTests List Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load published mock tests.' });
+  }
+});
+
+studentMockTestsRouter.post('/:id/start', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const mockTestId = Number(req.params.id);
+    if (!Number.isInteger(mockTestId) || mockTestId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const studentId = req.studentUser!.studentId;
+    const isPreview = Boolean(req.studentUser?.isPreview);
+    const data = await startStudentMockTestSession(mockTestId, studentId, isPreview);
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to start mock test.' });
+  }
+});
+
+studentMockTestsRouter.patch('/sessions/:sessionId/progress', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = Number(req.params.sessionId);
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid session ID is required.' });
+    }
+    if (req.studentUser?.isPreview) {
+      return res.status(200).json({ status: 'success', preview: true });
+    }
+    const studentId = req.studentUser!.studentId;
+    const { answers, currentQuestionIndex } = req.body || {};
+    const updated = await saveStudentMockTestProgress(sessionId, studentId, answers || {}, currentQuestionIndex || 0);
+    return res.status(200).json({ status: 'success', data: updated });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to save progress.' });
+  }
+});
+
+studentMockTestsRouter.post('/:id/submit', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const mockTestId = Number(req.params.id);
+    if (!Number.isInteger(mockTestId) || mockTestId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const studentId = req.studentUser!.studentId;
+    const isPreview = Boolean(req.studentUser?.isPreview);
+    const result = await submitStudentMockTest(mockTestId, studentId, req.body || {}, isPreview);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    console.error('[Student MockTest Submit Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to submit mock test.' });
+  }
+});
