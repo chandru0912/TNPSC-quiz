@@ -1168,7 +1168,25 @@
 /* =========================================================
    Responsive Breakpoints
    ========================================================= */
-@media (max-width: 1199px) {
+@media (min-width: 1200px) {
+  .hero-title {
+    order: 1;
+  }
+
+  .hero-subtitle {
+    order: 2;
+  }
+
+  .hero-badge {
+    order: 3;
+  }
+
+  .hero-actions {
+    order: 4;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
   .hero {
     padding: 3.5rem 1.75rem 3rem;
     min-height: auto;
@@ -1234,7 +1252,7 @@
   }
 }
 
-@media (max-width: 968px) {
+@media (min-width: 768px) and (max-width: 968px) {
   .hero {
     padding: 3rem 1.5rem 2.75rem;
   }
@@ -1306,21 +1324,246 @@
   }
 }
 
+@keyframes heroMobileCinematicZoom {
+  0% {
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-50%, -50%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
+}
+
 @media (max-width: 767px) {
   .hero {
-    padding: 2.5rem 1.25rem 2.25rem;
+    position: relative;
+    padding: 2rem 1rem 2.25rem;
+    min-height: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  /* Layer 2: Mobile-only seamless Thirukkural background video directly below Study Hub */
+  .hero-background .hero-bg-video-wrap {
+    display: block;
+    position: absolute;
+    top: clamp(118px, 30vw, 152px);
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: clamp(275px, 74vw, 370px);
+    overflow: hidden;
+    pointer-events: none;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    z-index: 0;
+    -webkit-mask-image: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(0, 0, 0, 0.85) 14%,
+      #000 28%,
+      #000 72%,
+      rgba(0, 0, 0, 0.85) 86%,
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(0, 0, 0, 0.85) 14%,
+      #000 28%,
+      #000 72%,
+      rgba(0, 0, 0, 0.85) 86%,
+      transparent 100%
+    );
+  }
+
+  .hero-background .hero-video {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 100%;
+    height: 100%;
+    min-width: 100%;
+    min-height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: cover;
+    object-position: center center;
+    transform: translate3d(-50%, -50%, 0) scale(1);
+    transform-origin: center center;
+    animation: heroMobileCinematicZoom 18s ease-in-out infinite;
+    will-change: transform;
+    opacity: 0.9;
+    mix-blend-mode: normal;
+    filter: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .hero-background .hero-video-overlay {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+      linear-gradient(
+        180deg,
+        rgba(8, 13, 27, 0.84) 0%,
+        rgba(8, 13, 27, 0.2) 20%,
+        rgba(8, 13, 27, 0.26) 50%,
+        rgba(8, 13, 27, 0.56) 78%,
+        rgba(8, 13, 27, 0.94) 100%
+      ),
+      radial-gradient(
+        ellipse 88% 60% at 50% 48%,
+        rgba(8, 13, 27, 0.1) 0%,
+        rgba(8, 13, 27, 0.45) 100%
+      );
+  }
+
+  .hero-container {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.75rem;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .hero-content {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    width: 100%;
+    max-width: 520px;
+    gap: 1.1rem;
+    box-sizing: border-box;
+  }
+
+  .hero-title {
+    width: 100%;
+    align-items: center;
+    text-align: center;
+    font-size: clamp(1.95rem, 8vw, 2.5rem);
+    line-height: 1.15;
+    text-shadow: 0 4px 18px rgba(6, 10, 22, 0.72);
+  }
+
+  .hero-title-line {
+    width: 100%;
+    text-align: center;
+  }
+
+  .hero-subtitle {
+    position: relative;
+    text-align: center;
+    width: 100%;
+    max-width: 100%;
+    padding: 1.15rem 0.25rem 0;
+    margin-top: clamp(5.25rem, 26vw, 7.25rem);
+    margin-bottom: 0;
+    font-size: 0.96rem;
+    line-height: 1.65;
+    color: rgba(241, 245, 249, 0.92);
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    text-shadow: 0 2px 10px rgba(6, 10, 22, 0.85);
+    box-sizing: border-box;
+  }
+
+  .hero-subtitle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(190px, 56%);
+    height: 1.5px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 215, 0, 0.45) 22%,
+      rgba(255, 232, 128, 0.95) 50%,
+      rgba(255, 215, 0, 0.45) 78%,
+      transparent 100%
+    );
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.45);
+    pointer-events: none;
+  }
+
+  .hero-actions {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 340px;
+    gap: 0.85rem;
+    margin-top: 0.25rem;
+    box-sizing: border-box;
+  }
+
+  .hero-actions .btn {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-background .hero-video {
+      animation: none;
+    }
   }
 
   .hero-visual {
-    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 420px;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    margin: 0 auto;
+    box-sizing: border-box;
   }
 
   .hero-card,
   .hero-card.glass {
-    max-width: 420px;
-    border-radius: 24px;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
     min-height: 0;
-    padding: 1.1rem 1.15rem 1rem;
+    max-height: none;
+    border-radius: 24px;
+    padding: 1.15rem 1.1rem 1.05rem;
+    box-sizing: border-box;
   }
 
   .hero-carousel-nav-btn {
@@ -1384,15 +1627,15 @@
 
 @media (max-width: 640px) {
   .hero {
-    padding: 2.5rem 1rem 2rem;
+    padding: 2rem 1rem 2rem;
   }
 
   .hero-title {
-    font-size: clamp(2rem, 8vw, 2.4rem);
+    font-size: clamp(1.85rem, 8vw, 2.4rem);
   }
 
   .hero-subtitle {
-    font-size: 1rem;
+    font-size: 0.95rem;
   }
 
   .hero-actions {
