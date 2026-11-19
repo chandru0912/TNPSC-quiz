@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
@@ -24,6 +24,7 @@ import './Home.css'
 const Home = () => {
   const [currentSlide, setCurrentSlide] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
+  const touchStartX = useRef<number | null>(null)
 
   const heroSlides = [
     {
@@ -87,6 +88,26 @@ const Home = () => {
 
   const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % heroSlides.length)
   const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length)
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    touchStartX.current = e.touches[0].clientX
+    setIsPaused(true)
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStartX.current !== null) {
+      const deltaX = e.changedTouches[0].clientX - touchStartX.current
+      if (Math.abs(deltaX) > 40) {
+        if (deltaX < 0) {
+          nextSlide()
+        } else {
+          prevSlide()
+        }
+      }
+      touchStartX.current = null
+    }
+    setIsPaused(false)
+  }
 
   const features = [
     {
@@ -173,6 +194,8 @@ const Home = () => {
               className="hero-card hero-slides-container glass premium-crystal-glass"
               onMouseEnter={() => setIsPaused(true)}
               onMouseLeave={() => setIsPaused(false)}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
             >
               {/* Carousel Header Controls */}
               <div className="hero-carousel-header">
