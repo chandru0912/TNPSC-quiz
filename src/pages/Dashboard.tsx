@@ -28,6 +28,7 @@ import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { apiFetch, getApiUrl } from '../utils/api'
 import { subscribeStudentSync } from '../utils/studentSync'
 import { CloudAiGeneratorModal } from '../components/CloudAiGeneratorModal'
+import { AwardShieldLogo } from '../components/exam/AchievementAwards'
 
 interface DashboardData {
   student: {
@@ -180,6 +181,23 @@ const Dashboard = () => {
   const [data, setData] = useState<DashboardData>(defaultDashboardData)
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false)
   const [dashboardError, setDashboardError] = useState<string | null>(null)
+  const [awardsSummary, setAwardsSummary] = useState<{
+    goldCount: number
+    platinumCount: number
+    silverCount: number
+    totalAwards: number
+    highestAchievement: string
+    lessonsCompleted: number
+    mockTestsCompleted: number
+  }>({
+    goldCount: 0,
+    platinumCount: 0,
+    silverCount: 0,
+    totalAwards: 0,
+    highestAchievement: 'None Yet',
+    lessonsCompleted: 0,
+    mockTestsCompleted: 0,
+  })
   const [isCloudAiOpen, setIsCloudAiOpen] = useState(false)
   const [adminToken] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -223,6 +241,17 @@ const Dashboard = () => {
 
     if (!silent) setIsRefreshing(true)
     if (!silent) setDashboardError(null)
+
+    apiFetch('/api/student/awards-summary', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.status === 'success' && d.data) {
+          setAwardsSummary(d.data)
+        }
+      })
+      .catch(() => {})
 
     try {
       const res = await apiFetch('/api/student/dashboard', {
@@ -544,6 +573,57 @@ const Dashboard = () => {
             </div>
           </div>
         </motion.div>
+
+        {/* Student Achievement Awards Summary (GOLD -> PLATINUM -> SILVER) */}
+        <div
+          className="glass"
+          style={{
+            padding: '1.1rem 1.35rem',
+            borderRadius: '16px',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <Trophy size={22} style={{ color: '#ffd700' }} />
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.02rem', color: '#f8fafc' }}>
+                Achievement Awards Summary
+              </h3>
+              <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                Highest Achievement: <strong style={{ color: '#fde047' }}>{awardsSummary.highestAchievement}</strong>
+                {' • '}Lessons Completed: <strong style={{ color: '#e2e8f0' }}>{awardsSummary.lessonsCompleted}</strong>
+                {' • '}Mock Tests Completed: <strong style={{ color: '#e2e8f0' }}>{awardsSummary.mockTestsCompleted}</strong>
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div className="award-pill-item tier-gold">
+              <AwardShieldLogo tier="GOLD" size={28} showLabel={false} />
+              <span className="award-pill-name">GOLD</span>
+              <strong className="award-pill-count">× {awardsSummary.goldCount}</strong>
+            </div>
+            <div className="award-pill-item tier-platinum">
+              <AwardShieldLogo tier="PLATINUM" size={28} showLabel={false} />
+              <span className="award-pill-name">PLATINUM</span>
+              <strong className="award-pill-count">× {awardsSummary.platinumCount}</strong>
+            </div>
+            <div className="award-pill-item tier-silver">
+              <AwardShieldLogo tier="SILVER" size={28} showLabel={false} />
+              <span className="award-pill-name">SILVER</span>
+              <strong className="award-pill-count">× {awardsSummary.silverCount}</strong>
+            </div>
+            <div className="award-total-chip">
+              <span>Total Earned:</span>
+              <strong>{awardsSummary.totalAwards}</strong>
+            </div>
+          </div>
+        </div>
 
         {/* Overview: progress ring + stats */}
         <div className="dash-overview">

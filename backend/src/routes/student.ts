@@ -32,6 +32,23 @@ import {
 } from '../services/markListService';
 import { getStudentPerformanceAnalytics } from '../services/performanceAnalyticsService';
 import { getStudentProgressTrackerData } from '../services/progressTrackerService';
+import {
+  getGradeBoundaries,
+  updateGradeBoundaries,
+} from '../services/gradeService';
+import {
+  getAwardSettings,
+  updateAwardSettings,
+  resetAwardSettingsToDefault,
+  getStudentAwardsDashboardSummary,
+  getAdminAwardHistory,
+} from '../services/awardService';
+import {
+  getStudentSyllabusProgress,
+  getLessonAttemptHistory,
+  getMockTestProgressSummary,
+  getAdminSyllabusProgressOverview,
+} from '../services/syllabusProgressService';
 
 const router = Router();
 
@@ -1077,6 +1094,13 @@ async function handleAssessmentSubmit(req: StudentAuthenticatedRequest, res: Res
       maxScore,
       timeSpentSeconds,
       responses,
+      groupId,
+      subjectId,
+      standardId,
+      unitId,
+      lessonId,
+      lessonTitle,
+      mockTestFormat,
     } = req.body;
 
     // Read-only server guard: never alter student database records during admin preview mode
@@ -1127,13 +1151,24 @@ async function handleAssessmentSubmit(req: StudentAuthenticatedRequest, res: Res
       maxScore,
       timeSpentSeconds,
       responses,
+      groupId,
+      subjectId,
+      standardId,
+      unitId,
+      lessonId,
+      lessonTitle,
+      mockTestFormat,
     });
 
     return res.status(200).json({
       status: 'success',
       message: result.message,
       attemptId: result.attemptId,
+      attemptNumber: (result as any).attemptNumber,
       percentage: result.percentage,
+      grade: (result as any).grade,
+      gradeColor: (result as any).gradeColor,
+      awardType: (result as any).awardType,
       duplicate: Boolean((result as any).duplicate),
       ignored: Boolean((result as any).ignored),
     });
@@ -1221,8 +1256,173 @@ router.get('/admin/assessments/analytics', requireAdminAuth, async (_req: Reques
     const analytics = await getAdminAssessmentAnalytics();
     return res.status(200).json({ status: 'success', data: analytics });
   } catch (err: any) {
-    console.error('[Admin Assessment Analytics Error]:', err);
+    console.error('[Admin Assessments Analytics Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to load assessment analytics.' });
+  }
+});
+
+// ====================================================
+// 7C. GRADE SETTINGS & SYLLABUS PROGRESS APIS
+// ====================================================
+router.get('/grade-boundaries', async (_req: Request, res: Response) => {
+  try {
+    const boundaries = await getGradeBoundaries();
+    return res.status(200).json({ status: 'success', boundaries });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load grade boundaries.' });
+  }
+});
+
+router.get('/admin/grade-boundaries', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const boundaries = await getGradeBoundaries();
+    return res.status(200).json({ status: 'success', boundaries });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load grade boundaries.' });
+  }
+});
+
+router.put('/admin/grade-boundaries', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const boundaries = await updateGradeBoundaries(req.body?.boundaries || []);
+    return res.status(200).json({ status: 'success', boundaries });
+  } catch (err: any) {
+    return res.status(400).json({ status: 'error', message: err.message || 'Invalid grade boundaries.' });
+  }
+});
+
+router.get('/award-settings', async (_req: Request, res: Response) => {
+  try {
+    const settings = await getAwardSettings();
+    return res.status(200).json({ status: 'success', settings });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load award settings.' });
+  }
+});
+
+router.get('/awards-summary', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const summary = await getStudentAwardsDashboardSummary(studentId);
+    return res.status(200).json({ status: 'success', data: summary });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load awards summary.' });
+  }
+});
+
+router.get('/admin/award-settings', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const settings = await getAwardSettings();
+    return res.status(200).json({ status: 'success', settings });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load award settings.' });
+  }
+});
+
+router.put('/admin/award-settings', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const settings = await updateAwardSettings(req.body || {});
+    return res.status(200).json({ status: 'success', settings });
+  } catch (err: any) {
+    return res.status(400).json({ status: 'error', message: err.message || 'Invalid award threshold configuration.' });
+  }
+});
+
+router.post('/admin/award-settings/reset', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const settings = await resetAwardSettingsToDefault();
+    return res.status(200).json({ status: 'success', settings });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to reset award settings.' });
+  }
+});
+
+router.get('/admin/award-history', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const data = await getAdminAwardHistory({
+      group: req.query.group as string | undefined,
+      subject: req.query.subject as string | undefined,
+      standard: req.query.standard as string | undefined,
+      unit: req.query.unit as string | undefined,
+      lesson: req.query.lesson as string | undefined,
+      awardType: req.query.awardType as string | undefined,
+      search: req.query.search as string | undefined,
+      limit: req.query.limit ? Number(req.query.limit) : 100,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Admin Award History Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load award history.' });
+  }
+});
+
+router.get('/admin/syllabus-progress', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const data = await getAdminSyllabusProgressOverview();
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Admin Syllabus Progress Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load syllabus progress overview.' });
+  }
+});
+
+router.get('/syllabus-progress', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const groupId = String(req.query.groupId || 'group1');
+    const subjectId = String(req.query.subjectId || 'general-studies');
+    const standardId = parseInt(String(req.query.standardId || '6'), 10) || 6;
+    const rawMode = String(req.query.mode || 'mcq_practice');
+    const mode =
+      rawMode === 'lesson_wise'
+        ? 'lesson_wise'
+        : rawMode === 'all'
+          ? 'all'
+          : 'mcq_practice';
+    const data = await getStudentSyllabusProgress(studentId, { groupId, subjectId, standardId, mode });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Student Syllabus Progress Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load syllabus progress.' });
+  }
+});
+
+router.get('/syllabus-progress/lesson-history', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const groupId = String(req.query.groupId || 'group1');
+    const subjectId = String(req.query.subjectId || 'general-studies');
+    const standardId = parseInt(String(req.query.standardId || '6'), 10) || 6;
+    const unitId = parseInt(String(req.query.unitId || '1'), 10) || 1;
+    const lessonId = req.query.lessonId ? String(req.query.lessonId) : undefined;
+    const lessonTitle = req.query.lessonTitle ? String(req.query.lessonTitle) : undefined;
+    const rawMode = String(req.query.mode || 'all');
+    const mode = rawMode === 'mcq_practice' || rawMode === 'lesson_wise' ? rawMode : 'all';
+    const data = await getLessonAttemptHistory(studentId, {
+      groupId,
+      subjectId,
+      standardId,
+      unitId,
+      lessonId,
+      lessonTitle,
+      mode,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Lesson Attempt History Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load lesson attempt history.' });
+  }
+});
+
+router.get('/syllabus-progress/mock-tests', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const groupId = req.query.groupId ? String(req.query.groupId) : undefined;
+    const data = await getMockTestProgressSummary(studentId, { groupId });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Mock Test Progress Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load mock test progress.' });
   }
 });
 

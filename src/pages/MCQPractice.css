@@ -8,7 +8,7 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.35rem;
 }
 
 /* Top Navigation Bar with Back Button */
@@ -91,57 +91,7 @@
 .practice-header {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
-}
-
-.practice-badge-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.15rem;
-}
-
-.practice-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.9rem;
-  border-radius: 9999px;
-  background: rgba(255, 215, 0, 0.1);
-  border: 1px solid rgba(255, 215, 0, 0.28);
-  color: var(--gold-primary);
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-
-.practice-code-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.9rem;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-
-.practice-code-badge.live-connected {
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
-  border-color: rgba(16, 185, 129, 0.32);
-}
-
-.live-dot {
-  font-size: 0.7rem;
-  color: #34d399;
-  line-height: 1;
+  gap: 0.5rem;
 }
 
 .practice-title {
@@ -156,11 +106,6 @@
 
 .practice-title svg {
   filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.5));
-}
-
-.practice-subtitle {
-  color: var(--text-secondary);
-  font-size: 1.05rem;
 }
 
 /* Glass Category Selector */
@@ -189,12 +134,13 @@
   font-size: 0.875rem;
   font-weight: 600;
   border-radius: 9999px;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
   white-space: nowrap;
   cursor: pointer;
   outline: none;
   position: relative;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .practice-category-tab:hover {
@@ -1490,7 +1436,8 @@
   color: #ffffff;
   text-align: left;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .hierarchy-card:hover {
@@ -1499,10 +1446,11 @@
   transform: translateY(-2px);
 }
 
-.hierarchy-card.selected {
-  border-color: var(--gold-primary);
-  background: linear-gradient(135deg, rgba(255, 215, 0, 0.12), rgba(59, 130, 246, 0.14));
-  box-shadow: 0 0 20px rgba(255, 215, 0, 0.16);
+.hierarchy-card.selected,
+.hierarchy-card.selected-unit {
+  border-color: rgba(168, 85, 247, 0.7);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.22), rgba(59, 130, 246, 0.16));
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.25);
 }
 
 .hierarchy-card-top {
@@ -1604,7 +1552,8 @@
   color: #ffffff;
   cursor: pointer;
   text-align: left;
-  transition: all 0.22s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .hierarchy-lesson-row:hover {
@@ -1655,66 +1604,6 @@
   color: var(--text-muted);
   margin: 0;
   font-size: 0.92rem;
-}
-
-/* Question Navigation Palette */
-.question-nav-palette {
-  margin-top: 1.5rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.question-nav-palette-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.84rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 0.75rem;
-}
-
-.question-nav-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-
-.question-nav-dot {
-  min-width: 34px;
-  height: 34px;
-  padding: 0 0.4rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(15, 23, 42, 0.6);
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.question-nav-dot:hover {
-  border-color: var(--gold-primary);
-  color: #ffffff;
-}
-
-.question-nav-dot.current {
-  border-color: var(--gold-primary);
-  background: rgba(255, 215, 0, 0.18);
-  color: var(--gold-primary);
-}
-
-.question-nav-dot.answered-correct {
-  border-color: rgba(16, 185, 129, 0.5);
-  background: rgba(16, 185, 129, 0.18);
-  color: #34d399;
-}
-
-.question-nav-dot.answered-wrong {
-  border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.18);
-  color: #f87171;
 }
 
 @media (max-width: 640px) {
@@ -2044,4 +1933,331 @@
 .mcq-lang-btn.active {
   background: var(--gradient-primary);
   color: #060913;
+}
+
+/* Unified Standard + Unit Selection Highlight */
+.class-card.active-standard {
+  border-color: rgba(255, 215, 0, 0.78);
+  background: linear-gradient(155deg, rgba(36, 48, 86, 0.88) 0%, rgba(16, 24, 48, 0.94) 100%);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55), 0 0 22px rgba(255, 215, 0, 0.28);
+  transform: translateY(-3px);
+}
+
+.class-card.active-standard .class-num-badge {
+  background: var(--gradient-primary);
+  color: #060913;
+  font-weight: 700;
+}
+
+.unified-units-section {
+  margin-top: 1.5rem;
+}
+
+.practice-header.is-subject-header {
+  margin-bottom: 1rem;
+}
+
+.practice-breadcrumb-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.875rem;
+  width: 100%;
+  margin-bottom: 1.25rem;
+}
+
+.practice-breadcrumb-row .subject-back-btn {
+  flex-shrink: 0;
+  width: fit-content;
+}
+
+.practice-breadcrumb-row .practice-breadcrumb {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  box-sizing: border-box;
+  margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .practice-breadcrumb-row .practice-breadcrumb {
+    flex: 1 1 100%;
+  }
+}
+
+/* =========================================================
+   Compact Subject Cards (Unified Single-Page MCQ Browse)
+   ========================================================= */
+.compact-subjects-section {
+  padding: 1rem 1.25rem;
+}
+
+.compact-header {
+  margin-bottom: 0.75rem;
+}
+
+.compact-subject-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.75rem;
+}
+
+.compact-subject-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.7rem 0.95rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  min-height: 48px;
+}
+
+.compact-subject-card:hover {
+  border-color: rgba(168, 85, 247, 0.55);
+  background: rgba(30, 41, 59, 0.78);
+  transform: translateY(-1px);
+}
+
+.compact-subject-card.selected {
+  border-color: rgba(168, 85, 247, 0.85);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.22), rgba(59, 130, 246, 0.16));
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.28);
+  color: #ffffff;
+}
+
+.compact-subject-left {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.compact-subject-icon {
+  color: var(--gold-primary);
+  flex-shrink: 0;
+}
+
+.compact-subject-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.compact-count-badge {
+  padding: 0.18rem 0.5rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.compact-count-badge.has-qs {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.class-card.active-standard {
+  border-color: var(--gold-primary);
+  background: linear-gradient(155deg, rgba(255, 215, 0, 0.14) 0%, rgba(30, 41, 75, 0.88) 100%);
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.22);
+}
+
+/* =========================================================
+   Unit Card Progress Summary & Lesson Progress Badges
+   ========================================================= */
+.unit-card-progress-summary {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.unit-progress-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 0.6rem;
+  font-size: 0.76rem;
+  color: #94a3b8;
+}
+
+.unit-progress-metrics strong {
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.unit-progress-pct strong {
+  color: var(--gold-primary, #ffd700);
+}
+
+.unit-progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.unit-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #8b5cf6 0%, #ffd700 100%);
+  transition: width 0.3s ease;
+}
+
+.hierarchy-lesson-row {
+  cursor: default;
+}
+
+.hierarchy-lesson-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.hierarchy-lesson-main-col .hierarchy-lesson-info {
+  width: 100%;
+  min-width: 0;
+}
+
+.lesson-num-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: nowrap;
+  min-height: 24px;
+}
+
+.lesson-num-status-row .hierarchy-lesson-num {
+  min-width: 72px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lesson-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  margin: 0;
+  min-height: 26px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.1);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lesson-status-badge.status-completed {
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.14);
+}
+
+.lesson-status-badge.status-in_progress {
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.lesson-grade-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.18rem 0.55rem;
+  border-radius: 9999px;
+  border: 1px solid;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.hierarchy-lesson-meta .lesson-award-summary-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  flex-wrap: nowrap;
+}
+
+.hierarchy-lesson-meta .award-pill-item {
+  gap: 0.28rem;
+  padding: 0.16rem 0.46rem 0.16rem 0.28rem;
+  font-size: 0.69rem;
+  line-height: 1.15;
+}
+
+.hierarchy-lesson-meta .award-shield-svg {
+  width: 19px;
+  height: 19px;
+}
+
+.hierarchy-lesson-meta .award-pill-name {
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+}
+
+.hierarchy-lesson-meta .award-pill-count {
+  font-size: 0.7rem;
+}
+
+.hierarchy-lesson-meta .hierarchy-count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  margin: 0;
+  min-height: 26px;
+  line-height: 1;
+}
+
+.hierarchy-lesson-meta .hierarchy-count-pill,
+.hierarchy-lesson-meta .lesson-status-badge,
+.hierarchy-lesson-meta .award-pill-item,
+.hierarchy-lesson-meta .hierarchy-start-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1080px) {
+  .hierarchy-lesson-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .hierarchy-lesson-meta {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  .hierarchy-lesson-meta .lesson-award-summary-bar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .lesson-num-status-row {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
 }

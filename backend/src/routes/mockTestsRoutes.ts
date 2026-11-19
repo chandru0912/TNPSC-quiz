@@ -20,6 +20,8 @@ import {
   startStudentMockTestSession,
   saveStudentMockTestProgress,
   submitStudentMockTest,
+  startSyllabusMockTestSession,
+  submitSyllabusMockTest,
   MockTestStatus,
 } from '../services/mockTestService';
 
@@ -217,11 +219,34 @@ studentMockTestsRouter.get('/', async (req: Request, res: Response) => {
     const data = await getPublishedMockTestsForStudent({
       group: req.query.group as string | undefined,
       testCategory: req.query.testCategory as string | undefined,
+      subject: req.query.subject as string | undefined,
+      standard: req.query.standard as string | undefined,
     });
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
     console.error('[Student MockTests List Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to load published mock tests.' });
+  }
+});
+
+studentMockTestsRouter.post('/syllabus/start', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const data = await startSyllabusMockTestSession(req.body || {});
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to start syllabus mock test.' });
+  }
+});
+
+studentMockTestsRouter.post('/syllabus/submit', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    const isPreview = Boolean(req.studentUser?.isPreview);
+    const result = await submitSyllabusMockTest(studentId, req.body || {}, isPreview);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    console.error('[Student Syllabus MockTest Submit Error]:', err);
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to submit syllabus mock test.' });
   }
 });
 

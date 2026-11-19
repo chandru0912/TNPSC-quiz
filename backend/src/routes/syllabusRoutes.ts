@@ -250,8 +250,8 @@ router.get('/subjects', async (req: Request, res: Response) => {
 /**
  * GET /api/syllabus/standards?groupId=&subjectId=
  * Returns standards dynamically based on Group and Subject.
- * Group 4 & Aptitude: 6th to 10th (SSLC).
- * Group 1, Group 2 & 2A with General Studies / Tamil / English: 6th to 12th.
+ * Group 4: 6th to 10th (SSLC).
+ * Group 1 and Group 2 & 2A (all subjects including Aptitude): 6th to 12th.
  */
 router.get('/standards', (req: Request, res: Response) => {
   let rawGroup = String(req.query.groupId || 'group4').toLowerCase().trim();
@@ -259,7 +259,7 @@ router.get('/standards', (req: Request, res: Response) => {
   const subjectId = String(req.query.subjectId || 'general-studies').toLowerCase().trim();
 
   let standards = ALL_STANDARDS;
-  if (groupId === 'group4' || subjectId === 'aptitude') {
+  if (groupId === 'group4') {
     standards = ALL_STANDARDS.filter((s) => s.id >= 6 && s.id <= 10);
   }
 

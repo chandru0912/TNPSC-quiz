@@ -7,6 +7,7 @@ interface ErrorBoundaryProps {
   fallbackMessage?: string;
   onRetry?: () => void;
   compact?: boolean;
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
@@ -32,6 +33,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     console.error('[React ErrorBoundary] Caught runtime error:', error, errorInfo);
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps): void {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null });
+    }
   }
 
   handleRetry = (): void => {

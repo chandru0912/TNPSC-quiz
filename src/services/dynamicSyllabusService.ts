@@ -307,11 +307,12 @@ export const dynamicSyllabusService = {
   async getUnits(
     rawExamId: string,
     subjectId: string,
-    standardId?: number | 'all'
+    standardId?: number | 'all',
+    options?: { allowEmpty?: boolean }
   ): Promise<DynamicUnit[]> {
     const examId = rawExamId || 'group1';
     const stdNum = typeof standardId === 'number' ? standardId : undefined;
-    const cacheKey = `${examId}|${subjectId}|${stdNum ?? 'all'}`;
+    const cacheKey = `${examId}|${subjectId}|${stdNum ?? 'all'}${options?.allowEmpty ? '|strict' : ''}`;
 
     if (cache.units.has(cacheKey)) {
       return cache.units.get(cacheKey)!;
@@ -321,7 +322,7 @@ export const dynamicSyllabusService = {
       const url = `/api/syllabus/units?groupId=${encodeURIComponent(examId)}&subjectId=${encodeURIComponent(subjectId)}${stdNum ? `&standardId=${stdNum}` : ''}`;
       const res = await fetch(url);
       const data = await res.json();
-      if (data.success && Array.isArray(data.units) && data.units.length > 0) {
+      if (data.success && Array.isArray(data.units) && (data.units.length > 0 || options?.allowEmpty)) {
         const units: DynamicUnit[] = data.units.map((u: any) => ({
           id: u.id,
           unit_number: u.unit_number != null ? Number(u.unit_number) : (u.unitNum != null ? Number(u.unitNum) : Number(u.id)),
@@ -338,6 +339,10 @@ export const dynamicSyllabusService = {
       }
     } catch (err) {
       console.warn(`[DynamicSyllabus] Failed to fetch units from API:`, err);
+    }
+
+    if (options?.allowEmpty) {
+      return [];
     }
 
     // Fallback units if none in database yet

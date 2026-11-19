@@ -1,5 +1,8 @@
+import { randomUUID } from 'crypto';
 import pool from '../db';
 import { calculateSafePercentage, notifyStudentDashboardUpdate } from './studentDashboardService';
+import { calculateGrade } from './gradeService';
+import { calculateAttemptAward } from './awardService';
 
 export type AssessmentType =
   | 'mock_test'
@@ -38,6 +41,13 @@ export interface SubmitAssessmentInput {
   timeSpentSeconds?: number;
   startedAt?: string;
   responses?: QuestionResponseInput[];
+  groupId?: string;
+  subjectId?: string;
+  standardId?: number | null;
+  unitId?: number | null;
+  lessonId?: string | null;
+  lessonTitle?: string | null;
+  mockTestFormat?: 'mcq_practice' | 'lesson_wise' | 'unit_wise' | 'full_length';
 }
 
 export function normalizeTestKey(testId?: string | null, testTitle?: string): string {
@@ -219,6 +229,23 @@ export async function submitAssessmentAttempt(studentId: number, input: SubmitAs
   const resolvedSubject = inferCanonicalSubject(input.subject || subjectBreakdown[0]?.name, cleanTitle);
   const startedAtDate = input.startedAt ? new Date(input.startedAt) : new Date(Date.now() - tTime * 1000);
   const cleanStartedAt = Number.isNaN(startedAtDate.getTime()) ? new Date() : startedAtDate;
+  const gradeResult = await calculateGrade(percentage);
+  const awardResult = await calculateAttemptAward(percentage);
+  const attemptUuid = randomUUID();
+
+  const rawGroup = String(input.groupId || input.category || 'group1').toLowerCase().trim();
+  const normGroupId =
+    rawGroup.includes('group2') || rawGroup === '2'
+      ? 'group2'
+      : rawGroup.includes('group4') || rawGroup.includes('vao') || rawGroup === '4'
+        ? 'group4'
+        : 'group1';
+  const normSubjectId = input.subjectId ? String(input.subjectId).trim().toLowerCase() : null;
+  const normStandardId = input.standardId != null && !Number.isNaN(Number(input.standardId)) ? Number(input.standardId) : null;
+  const normUnitId = input.unitId != null && !Number.isNaN(Number(input.unitId)) ? Number(input.unitId) : null;
+  const normLessonId = input.lessonId ? String(input.lessonId).trim() : null;
+  const normLessonTitle = input.lessonTitle ? String(input.lessonTitle).trim() : null;
+  const normFormat = input.mockTestFormat || (assessmentType === 'mock_test' ? 'full_length' : 'mcq_practice');
 
   const client = await pool.connect();
   try {
@@ -226,7 +253,7 @@ export async function submitAssessmentAttempt(studentId: number, input: SubmitAs
 
     if (cleanSubmissionToken) {
       const existing = await client.query(
-        `SELECT id, percentage, attempt_number FROM mock_test_attempts WHERE student_id = $1 AND submission_token = $2`,
+        `SELECT id, percentage, attempt_number, award_type FROM mock_test_attempts WHERE student_id = $1 AND submission_token = $2`,
         [studentId, cleanSubmissionToken]
       );
       if (existing.rows.length > 0) {
@@ -236,6 +263,7 @@ export async function submitAssessmentAttempt(studentId: number, input: SubmitAs
           attemptId: existing.rows[0].id,
           attemptNumber: existing.rows[0].attempt_number || 1,
           percentage: parseFloat(existing.rows[0].percentage || '0'),
+          awardType: existing.rows[0].award_type || awardResult.awardType,
           message: 'Assessment submission already recorded.',
         };
       }
@@ -256,8 +284,14 @@ export async function submitAssessmentAttempt(studentId: number, input: SubmitAs
          student_id, test_id, test_key, test_title, category, subject, assessment_type, submission_token,
          attempt_number, total_questions, attempted_questions, correct_answers, incorrect_answers, unanswered_questions,
          score, max_score, percentage, time_spent_seconds, status,
-         subject_breakdown, topic_breakdown, question_responses, started_at, completed_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'completed', $19::jsonb, $20::jsonb, $21::jsonb, $22, CURRENT_TIMESTAMP)
+         subject_breakdown, topic_breakdown, question_responses, started_at, completed_at,
+         group_id, subject_id, standard_id, unit_id, lesson_id, lesson_title, mock_test_format, grade, attempt_uuid,
+         award_type, award_threshold_snapshot
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'completed',
+         $19::jsonb, $20::jsonb, $21::jsonb, $22, CURRENT_TIMESTAMP,
+         $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33::jsonb
+       )
        RETURNING id`,
       [
         studentId,
@@ -282,6 +316,17 @@ export async function submitAssessmentAttempt(studentId: number, input: SubmitAs
         JSON.stringify(topicBreakdown),
         JSON.stringify(responses),
         cleanStartedAt,
+        normGroupId,
+        normSubjectId,
+        normStandardId,
+        normUnitId,
+        normLessonId,
+        normLessonTitle,
+        normFormat,
+        gradeResult.grade,
+        attemptUuid,
+        awardResult.awardType,
+        JSON.stringify(awardResult.snapshot),
       ]
     );
 
@@ -318,7 +363,12 @@ export async function submitAssessmentAttempt(studentId: number, input: SubmitAs
     return {
       duplicate: false,
       attemptId: insertRes.rows[0].id,
+      attemptNumber,
+      attemptUuid,
       percentage,
+      grade: gradeResult.grade,
+      gradeColor: gradeResult.colorHex,
+      awardType: awardResult.awardType,
       message: 'Assessment submission recorded successfully.',
     };
   } catch (err) {

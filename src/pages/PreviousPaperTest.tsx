@@ -15,13 +15,13 @@ import {
   RotateCcw,
   Send,
   ShieldCheck,
-  X,
   XCircle,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { notifyStudentSync } from '../utils/studentSync'
+import { QuestionPalette, type QuestionPaletteStatus } from '../components/exam/QuestionPalette'
 import './PreviousPaperTest.css'
 
 interface PaperMeta {
@@ -720,59 +720,31 @@ const PreviousPaperTest = () => {
         </main>
 
         {/* RIGHT: 1-200 Question Palette */}
-        <aside className={`pyp-palette-sidebar glass ${isPaletteOpenMobile ? 'mobile-open' : ''}`}>
-          <div className="pyp-palette-head">
-            <div>
-              <h3>Question Palette</h3>
-              <span>{student?.fullName || 'Candidate'}</span>
-            </div>
-            <button
-              type="button"
-              className="pyp-palette-close"
-              onClick={() => setIsPaletteOpenMobile(false)}
-              aria-label="Close palette"
-            >
-              <X size={18} />
-            </button>
-          </div>
-
-          <div className="pyp-palette-legend">
-            <div><span className="dot answered" /> Answered ({stats.answered})</div>
-            <div><span className="dot not-answered" /> Not Answered ({stats.notAnswered})</div>
-            <div><span className="dot review" /> Marked ({stats.marked})</div>
-            <div><span className="dot neutral" /> Not Visited ({Math.max(0, stats.total - stats.answered - stats.notAnswered)})</div>
-          </div>
-
-          <div className="pyp-palette-grid">
-            {questions.map((q) => {
-              const st = answers[q.questionNumber]
-              let statusCls = 'neutral'
-              if (st?.isMarkedForReview) statusCls = 'review'
-              else if (st?.selectedOption !== null && st?.selectedOption !== undefined) statusCls = 'answered'
-              else if (st?.isVisited) statusCls = 'not-answered'
-
-              return (
-                <button
-                  key={q.id}
-                  type="button"
-                  className={`pyp-palette-btn ${statusCls} ${q.questionNumber === currentQNum ? 'current' : ''}`}
-                  onClick={() => goToQuestion(q.questionNumber)}
-                >
-                  {q.questionNumber}
-                </button>
-              )
-            })}
-          </div>
-
-          <button
-            type="button"
-            className="btn pyp-submit-trigger-btn pyp-palette-submit"
-            onClick={() => setShowSubmitModal(true)}
-          >
-            <Send size={16} />
-            <span>Submit Test</span>
-          </button>
-        </aside>
+        <QuestionPalette
+          title="Question Palette"
+          subtitle={student?.fullName || 'Candidate'}
+          items={questions.map((q) => {
+            const st = answers[q.questionNumber]
+            const hasAns = st?.selectedOption !== null && st?.selectedOption !== undefined
+            const isMarked = Boolean(st?.isMarkedForReview)
+            let status: QuestionPaletteStatus = 'not-visited'
+            if (hasAns && isMarked) status = 'answered-review'
+            else if (isMarked) status = 'review'
+            else if (hasAns) status = 'answered'
+            else if (st?.isVisited) status = 'not-answered'
+            return {
+              id: q.id,
+              number: q.questionNumber,
+              status,
+            }
+          })}
+          currentNumber={currentQNum}
+          onSelectQuestion={(qNum) => goToQuestion(qNum)}
+          isOpenMobile={isPaletteOpenMobile}
+          onCloseMobile={() => setIsPaletteOpenMobile(false)}
+          submitLabel="Submit Test"
+          onSubmitClick={() => setShowSubmitModal(true)}
+        />
       </div>
 
       {/* Submit Confirmation Modal */}

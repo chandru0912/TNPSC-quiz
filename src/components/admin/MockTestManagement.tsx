@@ -52,6 +52,8 @@ interface MockTestRow {
   randomizePerAttempt?: boolean;
   avoidRepeatedQuestions?: boolean;
   includeIncorrectOnRetake?: boolean;
+  questionLanguage?: 'en' | 'ta' | 'both';
+  randomizeOptions?: boolean;
   startAt: string | null;
   endAt: string | null;
   publishedAt: string | null;
@@ -167,6 +169,8 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
   const [randomizePerAttempt, setRandomizePerAttempt] = useState<boolean>(true);
   const [avoidRepeatedQuestions, setAvoidRepeatedQuestions] = useState<boolean>(true);
   const [includeIncorrectOnRetake, setIncludeIncorrectOnRetake] = useState<boolean>(false);
+  const [questionLanguage, setQuestionLanguage] = useState<'both' | 'en' | 'ta'>('both');
+  const [randomizeOptions, setRandomizeOptions] = useState<boolean>(false);
   const [startAt, setStartAt] = useState('');
   const [endAt, setEndAt] = useState('');
   const [selectedQuestions, setSelectedQuestions] = useState<BankQuestion[]>([]);
@@ -309,6 +313,8 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
     setRandomizePerAttempt(true);
     setAvoidRepeatedQuestions(true);
     setIncludeIncorrectOnRetake(false);
+    setQuestionLanguage('both');
+    setRandomizeOptions(false);
     setStartAt('');
     setEndAt('');
     setSelectedQuestions([]);
@@ -324,9 +330,10 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
 
   const handleTestCategoryChange = (nextCat: 'lesson_wise' | 'unit_wise' | 'full_length') => {
     setTestCategory(nextCat);
+    if (subject === 'Full Syllabus' || !subject) {
+      setSubject('General Studies');
+    }
     if (nextCat === 'full_length') {
-      setSubject('Full Syllabus');
-      setStandard('');
       setUnit('');
       setLesson('');
       setTotalQuestions(200);
@@ -335,7 +342,6 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
       setTotalMarks(Number((200 * marksPerQuestion).toFixed(2)));
       setRandomizePerAttempt(true);
     } else {
-      if (subject === 'Full Syllabus') setSubject('General Studies');
       setRandomizePerAttempt(false);
       if (totalQuestions === 200) {
         setTotalQuestions(25);
@@ -381,6 +387,8 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
       setRandomizePerAttempt(Boolean(t.randomizePerAttempt));
       setAvoidRepeatedQuestions(t.avoidRepeatedQuestions !== false);
       setIncludeIncorrectOnRetake(Boolean(t.includeIncorrectOnRetake));
+      setQuestionLanguage((t.questionLanguage as 'both' | 'en' | 'ta') || 'both');
+      setRandomizeOptions(Boolean(t.randomizeOptions));
       setStartAt(toLocalDatetimeInput(t.startAt));
       setEndAt(toLocalDatetimeInput(t.endAt));
       setSelectedQuestions(data.data.questions || []);
@@ -477,7 +485,7 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
         tnpscGroup,
         testCategory,
         subject,
-        standard: testCategory === 'full_length' ? null : standard || null,
+        standard: standard || null,
         unit: testCategory === 'full_length' ? null : unit || null,
         lesson: testCategory === 'lesson_wise' ? lesson || null : null,
         questionsCount: totalQuestions,
@@ -490,6 +498,8 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
         randomizePerAttempt: testCategory === 'full_length' ? randomizePerAttempt : false,
         avoidRepeatedQuestions,
         includeIncorrectOnRetake,
+        questionLanguage,
+        randomizeOptions,
         startAt: startAt ? new Date(startAt).toISOString() : null,
         endAt: endAt ? new Date(endAt).toISOString() : null,
         questionIds: selectedQuestions.map((q) => q.id),
@@ -1006,30 +1016,43 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
                   </select>
                 </div>
 
+                <div className="mtm-field">
+                  <label className="mtm-label">4. Subject Selection *</label>
+                  <select className="mtm-select" value={subject} onChange={(e) => setSubject(e.target.value)}>
+                    {SUBJECT_OPTIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="mtm-field">
+                  <label className="mtm-label">5. Standard (6th–12th)</label>
+                  <select className="mtm-select" value={standard} onChange={(e) => setStandard(e.target.value)}>
+                    {STANDARD_OPTIONS.map((std) => (
+                      <option key={std || 'all'} value={std}>
+                        {std || 'All Standards'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="mtm-field">
+                  <label className="mtm-label">Question Language</label>
+                  <select
+                    className="mtm-select"
+                    value={questionLanguage}
+                    onChange={(e) => setQuestionLanguage(e.target.value as 'both' | 'en' | 'ta')}
+                  >
+                    <option value="both">Both (English &amp; Tamil)</option>
+                    <option value="en">English Only</option>
+                    <option value="ta">Tamil Only</option>
+                  </select>
+                </div>
+
                 {testCategory !== 'full_length' && (
                   <>
-                    <div className="mtm-field">
-                      <label className="mtm-label">4. Subject Selection *</label>
-                      <select className="mtm-select" value={subject} onChange={(e) => setSubject(e.target.value)}>
-                        {SUBJECT_OPTIONS.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="mtm-field">
-                      <label className="mtm-label">5. Standard (When Applicable)</label>
-                      <select className="mtm-select" value={standard} onChange={(e) => setStandard(e.target.value)}>
-                        {STANDARD_OPTIONS.map((std) => (
-                          <option key={std || 'all'} value={std}>
-                            {std || 'All Standards'}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
                     <div className="mtm-field">
                       <label className="mtm-label">6. Unit Selection {testCategory === 'unit_wise' ? '*' : '(Optional)'}</label>
                       <select className="mtm-select" value={unit} onChange={(e) => setUnit(e.target.value)}>
@@ -1090,6 +1113,14 @@ export const MockTestManagement: React.FC<MockTestManagementProps> = ({
                         onChange={(e) => setIncludeIncorrectOnRetake(e.target.checked)}
                       />
                       <span>Prioritize previously incorrect questions on retakes</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem', color: '#e2e8f0', cursor: 'pointer', marginTop: '0.35rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={randomizeOptions}
+                        onChange={(e) => setRandomizeOptions(e.target.checked)}
+                      />
+                      <span>Randomize answer option order (A/B/C/D)</span>
                     </label>
                   </div>
                 )}

@@ -163,7 +163,7 @@ function AppShell() {
 
       <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''} ${isDashboardRoute ? 'student-dashboard-main-mode' : ''}`}>
         <ErrorBoundary
-          key={location.pathname}
+          resetKey={location.pathname}
           fallbackTitle="Page failed to render"
           fallbackMessage="An unexpected error occurred while displaying this page. Click Retry to recover."
         >
@@ -207,12 +207,7 @@ function AppShell() {
             <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
             <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
             <Route path="/practice" element={<MCQPractice />} />
-            <Route path="/practice/:groupId" element={<MCQPractice />} />
-            <Route path="/practice/:groupId/:subjectId" element={<MCQPractice />} />
-            <Route path="/practice/:groupId/:subjectId/:standardId" element={<MCQPractice />} />
-            <Route path="/practice/:groupId/:subjectId/:standardId/:unitId" element={<MCQPractice />} />
-            <Route path="/practice/:groupId/:subjectId/:standardId/:unitId/:lessonId" element={<MCQPractice />} />
-            <Route path="/practice/:groupId/:subjectId/:standardId/:unitId/:lessonId/test" element={<MCQPractice />} />
+            <Route path="/practice/*" element={<MCQPractice />} />
             <Route path="/mock-tests" element={<MockTests />} />
             <Route path="/previous-papers" element={<PreviousPapers />} />
             <Route path="/previous-papers/test/:paperId" element={<PreviousPaperTest />} />

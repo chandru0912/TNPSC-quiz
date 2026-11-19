@@ -997,9 +997,12 @@ export async function runMigration() {
       ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS randomize_per_attempt BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS avoid_repeated_questions BOOLEAN NOT NULL DEFAULT TRUE;
       ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS include_incorrect_on_retake BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS question_language VARCHAR(20) NOT NULL DEFAULT 'both';
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS randomize_options BOOLEAN NOT NULL DEFAULT FALSE;
       CREATE INDEX IF NOT EXISTS idx_mock_tests_group_category ON mock_tests (category, test_category, status);
 
       ALTER TABLE mock_test_sessions ADD COLUMN IF NOT EXISTS question_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE mock_test_sessions ADD COLUMN IF NOT EXISTS option_orders JSONB NOT NULL DEFAULT '{}'::jsonb;
 
       ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
       ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS assessment_type VARCHAR(40) NOT NULL DEFAULT 'mock_test';
@@ -1017,6 +1020,70 @@ export async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_mock_attempts_student_test_key ON mock_test_attempts (student_id, test_key, attempt_number DESC);
       CREATE INDEX IF NOT EXISTS idx_mock_attempts_student_subject ON mock_test_attempts (student_id, subject, completed_at DESC);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_mock_attempts_submission_token ON mock_test_attempts (student_id, submission_token) WHERE submission_token IS NOT NULL;
+
+      -- Syllabus Lesson Progress, Grade Settings & Attempt UUID columns
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS group_id VARCHAR(40);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS subject_id VARCHAR(100);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS standard_id INT;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS unit_id INT;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS lesson_id TEXT;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS lesson_title TEXT;
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS mock_test_format VARCHAR(30) DEFAULT 'full_length';
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS grade VARCHAR(40);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS attempt_uuid VARCHAR(64);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS award_type VARCHAR(20);
+      ALTER TABLE mock_test_attempts ADD COLUMN IF NOT EXISTS award_threshold_snapshot JSONB;
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_syllabus ON mock_test_attempts (student_id, group_id, subject_id, standard_id, unit_id, lesson_id);
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_format ON mock_test_attempts (student_id, mock_test_format, completed_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_award ON mock_test_attempts (student_id, award_type);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mock_attempts_uuid ON mock_test_attempts (attempt_uuid) WHERE attempt_uuid IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS award_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        gold_min NUMERIC(5,2) NOT NULL DEFAULT 90.00,
+        gold_max NUMERIC(5,2) NOT NULL DEFAULT 100.00,
+        platinum_min NUMERIC(5,2) NOT NULL DEFAULT 75.00,
+        platinum_max NUMERIC(5,2) NOT NULL DEFAULT 89.99,
+        silver_min NUMERIC(5,2) NOT NULL DEFAULT 60.00,
+        silver_max NUMERIC(5,2) NOT NULL DEFAULT 74.99,
+        version INT NOT NULL DEFAULT 1,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO award_settings (id, is_enabled, gold_min, gold_max, platinum_min, platinum_max, silver_min, silver_max, version)
+      VALUES (1, TRUE, 90.00, 100.00, 75.00, 89.99, 60.00, 74.99, 1)
+      ON CONFLICT (id) DO NOTHING;
+
+      -- Backfill historical attempts where award_type is NULL without rewriting already assigned awards
+      UPDATE mock_test_attempts
+      SET award_type = CASE
+            WHEN percentage >= 90 THEN 'GOLD'
+            WHEN percentage >= 75 THEN 'PLATINUM'
+            WHEN percentage >= 60 THEN 'SILVER'
+            ELSE 'NONE'
+          END,
+          award_threshold_snapshot = '{"version":1,"goldMin":90,"platinumMin":75,"silverMin":60}'::jsonb
+      WHERE award_type IS NULL;
+
+      CREATE TABLE IF NOT EXISTS grade_settings (
+        id SERIAL PRIMARY KEY,
+        grade_label VARCHAR(40) NOT NULL UNIQUE,
+        min_percentage NUMERIC(5,2) NOT NULL,
+        max_percentage NUMERIC(5,2) NOT NULL,
+        display_order INT NOT NULL DEFAULT 1,
+        color_hex VARCHAR(20) NOT NULL DEFAULT '#a855f7',
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO grade_settings (grade_label, min_percentage, max_percentage, display_order, color_hex)
+      VALUES
+        ('A+', 90.00, 100.00, 1, '#10b981'),
+        ('A', 80.00, 89.99, 2, '#34d399'),
+        ('B+', 70.00, 79.99, 3, '#60a5fa'),
+        ('B', 60.00, 69.99, 4, '#818cf8'),
+        ('C', 50.00, 59.99, 5, '#fbbf24'),
+        ('D', 40.00, 49.99, 6, '#fb923c'),
+        ('Needs Improvement', 0.00, 39.99, 7, '#f87171')
+      ON CONFLICT (grade_label) DO NOTHING;
 
       INSERT INTO mock_tests (slug, title, category, category_name, questions_count, duration_minutes, difficulty, status)
       VALUES
@@ -1378,7 +1445,21 @@ export function ensureDatabaseSchema(): Promise<void> {
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'mock_test_sessions' AND column_name = 'question_ids'
-              ) AS has_mts_question_ids
+              ) AS has_mts_question_ids,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'mock_tests' AND column_name = 'question_language'
+              ) AS has_mt_lang,
+              to_regclass('public.grade_settings') AS t_grade_settings,
+              to_regclass('public.award_settings') AS t_award_settings,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'mock_test_attempts' AND column_name = 'grade'
+              ) AS has_mta_grade,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'mock_test_attempts' AND column_name = 'award_type'
+              ) AS has_mta_award
           `);
           const row = check.rows[0];
           if (
@@ -1394,7 +1475,12 @@ export function ensureDatabaseSchema(): Promise<void> {
             row?.has_tb_unit &&
             row?.has_pe_retry &&
             row?.has_mt_test_category &&
-            row?.has_mts_question_ids
+            row?.has_mts_question_ids &&
+            row?.has_mt_lang &&
+            row?.t_grade_settings &&
+            row?.t_award_settings &&
+            row?.has_mta_grade &&
+            row?.has_mta_award
           ) {
             return;
           }

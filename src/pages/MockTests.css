@@ -551,4 +551,33 @@
   }
 }
 
+.mocktest-card .lesson-award-summary-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  flex-wrap: wrap;
+}
+
+.mocktest-card .award-pill-item {
+  gap: 0.28rem;
+  padding: 0.16rem 0.46rem 0.16rem 0.28rem;
+  font-size: 0.69rem;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.mocktest-card .award-shield-svg {
+  width: 19px;
+  height: 19px;
+}
+
+.mocktest-card .award-pill-name {
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+}
+
+.mocktest-card .award-pill-count {
+  font-size: 0.7rem;
+}
+
 

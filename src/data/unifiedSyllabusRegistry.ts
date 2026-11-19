@@ -623,14 +623,13 @@ export function getSubjectsForGroup(groupId: 'group1' | 'group2' | 'group2a' | '
 /**
  * Returns standards available for the selected group and subject.
  * - Group 4 is strictly SSLC standard (6th to 10th standard).
- * - Aptitude across all exams is SSLC standard (6th to 10th standard).
- * - General Studies, English, and Tamil for Group 1/2 cover 6th to 12th standard.
+ * - Group 1 and Group 2 & 2A (including Aptitude and Mental Ability) cover 6th to 12th standard.
  */
 export function getStandardsForSubject(
   groupId: 'group1' | 'group2' | 'group2a' | 'group4',
-  subjectId: string
+  _subjectId: string
 ): { id: number; label: string; shortLabel: string }[] {
-  if (groupId === 'group4' || subjectId === 'aptitude') {
+  if (groupId === 'group4') {
     return STANDARDS.filter((s) => s.id >= 6 && s.id <= 10)
   }
   return STANDARDS

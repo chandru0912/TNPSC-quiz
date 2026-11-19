@@ -27,6 +27,8 @@ export interface MockTestConfigInput {
   randomizePerAttempt?: boolean;
   avoidRepeatedQuestions?: boolean;
   includeIncorrectOnRetake?: boolean;
+  questionLanguage?: 'en' | 'ta' | 'both';
+  randomizeOptions?: boolean;
   questionIds: number[];
 }
 
@@ -35,6 +37,55 @@ export function normalizeTestCategory(raw?: string | null): MockTestCategory {
   if (clean === 'lesson_wise' || clean === 'lesson-wise' || clean === 'lesson') return 'lesson_wise';
   if (clean === 'unit_wise' || clean === 'unit-wise' || clean === 'unit') return 'unit_wise';
   return 'full_length';
+}
+
+export function getSubjectAliases(rawSubject?: string | null): string[] | null {
+  const clean = String(rawSubject || '').trim().toLowerCase();
+  if (!clean || clean === 'all' || clean === 'full syllabus' || clean === 'full-syllabus') return null;
+  if (
+    clean === 'general-studies' ||
+    clean === 'general studies' ||
+    clean === 'gs' ||
+    clean === 'general science' ||
+    clean === 'history' ||
+    clean === 'indian polity' ||
+    clean === 'geography' ||
+    clean === 'economy' ||
+    clean === 'unit 8 & unit 9'
+  ) {
+    return [
+      'general-studies',
+      'general studies',
+      'general science',
+      'history',
+      'indian polity',
+      'geography',
+      'economy',
+      'unit 8 & unit 9',
+    ];
+  }
+  if (
+    clean === 'aptitude' ||
+    clean === 'aptitude-and-mental-ability' ||
+    clean === 'aptitude and mental ability' ||
+    clean === 'aptitude & mental ability' ||
+    clean === 'mental ability'
+  ) {
+    return [
+      'aptitude',
+      'aptitude-and-mental-ability',
+      'aptitude and mental ability',
+      'aptitude & mental ability',
+      'mental ability',
+    ];
+  }
+  if (clean === 'general-tamil' || clean === 'general tamil' || clean.includes('tamil')) {
+    return ['general-tamil', 'general tamil'];
+  }
+  if (clean === 'general-english' || clean === 'general english' || clean.includes('english')) {
+    return ['general-english', 'general english'];
+  }
+  return [clean];
 }
 
 export function normalizeGroupToCategory(tnpscGroup: string): {
@@ -123,6 +174,8 @@ function mapAdminMockTestRow(row: any) {
     randomizePerAttempt: Boolean(row.randomize_per_attempt),
     avoidRepeatedQuestions: row.avoid_repeated_questions !== false,
     includeIncorrectOnRetake: Boolean(row.include_incorrect_on_retake),
+    questionLanguage: (row.question_language as 'en' | 'ta' | 'both') || 'both',
+    randomizeOptions: Boolean(row.randomize_options),
     startAt: row.start_at,
     endAt: row.end_at,
     publishedAt: row.published_at,
@@ -400,11 +453,20 @@ export async function autoSelectQuestionsForMockTest(params: {
 
   const res = await pool.query(
     `SELECT
-       id, category, unit_id, class_id, subject, lesson_title, topic,
-       difficulty, question_text, options, correct_answer, explanation, status
-     FROM questions
+       q.id, q.category, q.unit_id, q.class_id, q.subject, q.lesson_title, q.topic,
+       q.difficulty, q.question_text, q.options, q.correct_answer, q.explanation, q.status
+     FROM questions q
      ${whereSql}
-     ORDER BY RANDOM()
+     ORDER BY
+       CASE WHEN EXISTS (
+         SELECT 1
+         FROM mock_test_questions mtq
+         JOIN mock_tests mt ON mt.id = mtq.mock_test_id
+         WHERE mtq.question_id = q.id
+           AND COALESCE(mt.status, 'draft') <> 'archived'
+           AND mt.test_category = 'unit_wise'
+       ) THEN 1 ELSE 0 END ASC,
+       RANDOM()
      LIMIT $${idx}`,
     [...queryParams, requestedCount]
   );
@@ -460,6 +522,7 @@ async function validateForPublish(
     title: string;
     tnpscGroup: string;
     testCategory?: MockTestCategory;
+    standard?: string | null;
     randomizePerAttempt?: boolean;
     questionsCount: number;
     durationMinutes: number;
@@ -522,19 +585,21 @@ async function validateForPublish(
 
   if (isDynamicFullLength) {
     const groupMatches = normalizeQuestionCategoryMatch(config.tnpscGroup);
+    const stdNum = parseStandardNumber(config.standard);
     const bankCheck = await client.query(
       `SELECT COUNT(*)::int AS cnt
        FROM questions
        WHERE status = 'published'
          AND COALESCE(verification_status, 'verified') <> 'rejected'
          AND correct_answer BETWEEN 0 AND 3
-         AND ($1::text[] IS NULL OR LOWER(COALESCE(category, '')) = ANY($1::text[]))`,
-      [groupMatches]
+         AND ($1::text[] IS NULL OR LOWER(COALESCE(category, '')) = ANY($1::text[]))
+         AND ($2::int IS NULL OR class_id = $2 OR standard_id = $2)`,
+      [groupMatches, stdNum]
     );
     const eligible = Number(bankCheck.rows[0]?.cnt || 0);
-    if (eligible === 0) {
+    if (eligible < config.questionsCount) {
       const err: any = new Error(
-        `No published approved questions exist in the Question Bank for ${config.tnpscGroup} yet.`
+        `Insufficient published questions for ${config.tnpscGroup}${config.standard ? ` (${config.standard})` : ''}: ${eligible} eligible found, but ${config.questionsCount} required.`
       );
       err.statusCode = 400;
       throw err;
@@ -638,6 +703,8 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
   const randomizePerAttempt = Boolean(input.randomizePerAttempt) && testCategory === 'full_length';
   const avoidRepeatedQuestions = input.avoidRepeatedQuestions !== false;
   const includeIncorrectOnRetake = Boolean(input.includeIncorrectOnRetake);
+  const questionLanguage = input.questionLanguage === 'en' || input.questionLanguage === 'ta' ? input.questionLanguage : 'both';
+  const randomizeOptions = Boolean(input.randomizeOptions);
 
   const client = await pool.connect();
   try {
@@ -658,6 +725,7 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
           title: input.title,
           tnpscGroup: groupInfo.tnpscGroup,
           testCategory,
+          standard: input.standard?.trim() || null,
           randomizePerAttempt,
           questionsCount: totalQ,
           durationMinutes,
@@ -679,13 +747,15 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
          subject, standard, unit, lesson,
          questions_count, duration_minutes, total_marks, marks_per_question, negative_marking,
          difficulty, status, randomize_per_attempt, avoid_repeated_questions, include_incorrect_on_retake,
+         question_language, randomize_options,
          start_at, end_at, published_at, created_by, updated_at
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7,
          $8, $9, $10, $11,
          $12, $13, $14, $15, $16,
          $17, $18, $19, $20, $21,
-         $22, $23, $24, $25, CURRENT_TIMESTAMP
+         $22, $23,
+         $24, $25, $26, $27, CURRENT_TIMESTAMP
        ) RETURNING *`,
       [
         slug,
@@ -695,10 +765,8 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
         groupInfo.categoryName,
         groupInfo.tnpscGroup,
         testCategory,
-        testCategory === 'full_length'
-          ? input.subject?.trim() || 'Full Syllabus'
-          : input.subject?.trim() || 'General Studies',
-        testCategory === 'full_length' ? null : input.standard?.trim() || null,
+        input.subject?.trim() || 'General Studies',
+        input.standard?.trim() || null,
         testCategory === 'full_length' ? null : input.unit?.trim() || null,
         testCategory === 'lesson_wise' ? input.lesson?.trim() || null : null,
         totalQ,
@@ -711,6 +779,8 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
         randomizePerAttempt,
         avoidRepeatedQuestions,
         includeIncorrectOnRetake,
+        questionLanguage,
+        randomizeOptions,
         input.startAt ? new Date(input.startAt) : null,
         input.endAt ? new Date(input.endAt) : null,
         status === 'published' ? new Date() : null,
@@ -754,6 +824,8 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
   const randomizePerAttempt = Boolean(input.randomizePerAttempt) && testCategory === 'full_length';
   const avoidRepeatedQuestions = input.avoidRepeatedQuestions !== false;
   const includeIncorrectOnRetake = Boolean(input.includeIncorrectOnRetake);
+  const questionLanguage = input.questionLanguage === 'en' || input.questionLanguage === 'ta' ? input.questionLanguage : 'both';
+  const randomizeOptions = Boolean(input.randomizeOptions);
 
   const client = await pool.connect();
   try {
@@ -774,6 +846,7 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
           title: input.title,
           tnpscGroup: groupInfo.tnpscGroup,
           testCategory,
+          standard: input.standard?.trim() || null,
           randomizePerAttempt,
           questionsCount: totalQ,
           durationMinutes,
@@ -813,11 +886,13 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
            randomize_per_attempt = $18,
            avoid_repeated_questions = $19,
            include_incorrect_on_retake = $20,
-           start_at = $21,
-           end_at = $22,
-           published_at = $23,
+           question_language = $21,
+           randomize_options = $22,
+           start_at = $23,
+           end_at = $24,
+           published_at = $25,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $24`,
+       WHERE id = $26`,
       [
         input.title.trim(),
         input.description?.trim() || '',
@@ -825,10 +900,8 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
         groupInfo.categoryName,
         groupInfo.tnpscGroup,
         testCategory,
-        testCategory === 'full_length'
-          ? input.subject?.trim() || 'Full Syllabus'
-          : input.subject?.trim() || 'General Studies',
-        testCategory === 'full_length' ? null : input.standard?.trim() || null,
+        input.subject?.trim() || 'General Studies',
+        input.standard?.trim() || null,
         testCategory === 'full_length' ? null : input.unit?.trim() || null,
         testCategory === 'lesson_wise' ? input.lesson?.trim() || null : null,
         totalQ,
@@ -841,6 +914,8 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
         randomizePerAttempt,
         avoidRepeatedQuestions,
         includeIncorrectOnRetake,
+        questionLanguage,
+        randomizeOptions,
         input.startAt ? new Date(input.startAt) : null,
         input.endAt ? new Date(input.endAt) : null,
         publishedAt,
@@ -968,6 +1043,7 @@ export async function updateAdminMockTestStatus(
           title: row.title,
           tnpscGroup: row.tnpsc_group || row.category_name || 'Group 1',
           testCategory: normalizeTestCategory(row.test_category),
+          standard: row.standard || null,
           randomizePerAttempt: Boolean(row.randomize_per_attempt),
           questionsCount: Number(row.questions_count),
           durationMinutes: Number(row.duration_minutes),
@@ -1089,6 +1165,8 @@ export async function getSyllabusOptionsForMockTests(filters?: {
 export async function getPublishedMockTestsForStudent(filters?: {
   group?: string;
   testCategory?: string;
+  subject?: string;
+  standard?: string;
 }) {
   const where: string[] = [
     `(
@@ -1122,6 +1200,24 @@ export async function getPublishedMockTestsForStudent(filters?: {
     where.push(`COALESCE(mt.test_category, 'full_length') = $${idx}`);
     params.push(normalizeTestCategory(filters.testCategory));
     idx++;
+  }
+
+  if (filters?.subject && filters.subject !== 'all') {
+    const subjectAliases = getSubjectAliases(filters.subject);
+    if (subjectAliases && subjectAliases.length > 0) {
+      where.push(`LOWER(COALESCE(mt.subject, '')) = ANY($${idx}::text[])`);
+      params.push(subjectAliases);
+      idx++;
+    }
+  }
+
+  if (filters?.standard && filters.standard !== 'all') {
+    const stdNum = parseStandardNumber(filters.standard);
+    if (stdNum !== null) {
+      where.push(`(mt.standard IS NULL OR mt.standard ~ ('(^|[^0-9])' || $${idx}::text || '([^0-9]|$)'))`);
+      params.push(String(stdNum));
+      idx++;
+    }
   }
 
   const res = await pool.query(
@@ -1170,6 +1266,8 @@ export async function getPublishedMockTestsForStudent(filters?: {
     difficulty: row.difficulty || 'Medium',
     status: row.status,
     randomizePerAttempt: Boolean(row.randomize_per_attempt),
+    questionLanguage: (row.question_language as 'en' | 'ta' | 'both') || 'both',
+    randomizeOptions: Boolean(row.randomize_options),
     publishedAt: row.published_at || row.created_at,
     attemptsCount: Number(row.attempts_count || 0),
     hasAssignedQuestions: Number(row.assigned_questions_count || 0) > 0,
@@ -1178,6 +1276,8 @@ export async function getPublishedMockTestsForStudent(filters?: {
 
 async function selectFullLengthSyllabusQuestions(mockTest: any, studentId: number) {
   const groupMatches = normalizeQuestionCategoryMatch(mockTest.tnpsc_group || mockTest.category);
+  const stdNum = parseStandardNumber(mockTest.standard);
+  const subjectAliases = getSubjectAliases(mockTest.subject);
   const limit = Math.max(1, Math.min(200, Number(mockTest.questions_count) || 200));
   const avoidRepeated = mockTest.avoid_repeated_questions !== false;
   const includeIncorrect = Boolean(mockTest.include_incorrect_on_retake);
@@ -1240,9 +1340,11 @@ async function selectFullLengthSyllabusQuestions(mockTest: any, studentId: numbe
          AND COALESCE(q.verification_status, 'verified') <> 'rejected'
          AND q.correct_answer BETWEEN 0 AND 3
          AND ($1::text[] IS NULL OR LOWER(COALESCE(q.category, '')) = ANY($1::text[]))
-     ) ranked
-     ORDER BY bucket_rank ASC, RANDOM()`,
-    [groupMatches]
+         AND ($2::int IS NULL OR q.class_id = $2 OR q.standard_id = $2)
+         AND ($3::text[] IS NULL OR LOWER(COALESCE(q.subject, '')) = ANY($3::text[]) OR LOWER(COALESCE(q.subject_id, '')) = ANY($3::text[]))
+       ) ranked
+       ORDER BY bucket_rank ASC, RANDOM()`,
+    [groupMatches, stdNum, subjectAliases]
   );
 
   const allRows = candidatesRes.rows;
@@ -1627,6 +1729,8 @@ export async function submitStudentMockTest(
     };
   }
 
+  const parsedStd = testRow.standard != null ? parseInt(String(testRow.standard).replace(/\D+/g, ''), 10) : NaN;
+  const parsedUnit = testRow.unit != null ? parseInt(String(testRow.unit).replace(/\D+/g, ''), 10) : NaN;
   const submitResult = await submitAssessmentAttempt(studentId, {
     testId: String(testRow.id),
     testTitle: testRow.title,
@@ -1643,6 +1747,12 @@ export async function submitStudentMockTest(
     maxScore,
     timeSpentSeconds,
     responses,
+    groupId: testRow.tnpsc_group || testRow.category,
+    subjectId: testRow.subject || undefined,
+    standardId: !Number.isNaN(parsedStd) ? parsedStd : null,
+    unitId: !Number.isNaN(parsedUnit) ? parsedUnit : null,
+    lessonTitle: testRow.lesson || null,
+    mockTestFormat: normalizeTestCategory(testRow.test_category),
   });
 
   if (payload.sessionId) {
@@ -1670,6 +1780,315 @@ export async function submitStudentMockTest(
     score,
     maxScore,
     percentage: submitResult.percentage,
+    grade: (submitResult as any).grade,
+    gradeColor: (submitResult as any).gradeColor,
+    awardType: (submitResult as any).awardType,
+    timeSpentSeconds,
+    responses,
+    duplicate: Boolean((submitResult as any).duplicate),
+  };
+}
+
+// ====================================================
+// SYLLABUS-DRIVEN MOCK TESTS (Lesson-wise / Unit-wise / Full-length Standard-wise)
+// ====================================================
+export async function startSyllabusMockTestSession(params: {
+  group: string;
+  testCategory: MockTestCategory;
+  subject?: string;
+  standard?: string | number | null;
+  unitId?: number | null;
+  lessonId?: string | null;
+  lessonTitle?: string | null;
+  limit?: number;
+  durationMinutes?: number;
+  marksPerQuestion?: number;
+  negativeMarking?: number;
+  title?: string;
+}) {
+  const groupInfo = normalizeGroupToCategory(params.group);
+  const groupMatches = normalizeQuestionCategoryMatch(params.group);
+  const testCategory = normalizeTestCategory(params.testCategory);
+  const stdNum = parseStandardNumber(params.standard !== undefined && params.standard !== null ? String(params.standard) : null);
+  const unitNum = params.unitId && Number(params.unitId) > 0 ? Number(params.unitId) : null;
+
+  const where: string[] = [
+    `status = 'published'`,
+    `COALESCE(verification_status, 'verified') <> 'rejected'`,
+    `correct_answer BETWEEN 0 AND 3`,
+  ];
+  const queryParams: any[] = [];
+  let idx = 1;
+
+  if (groupMatches && groupMatches.length > 0) {
+    where.push(`LOWER(COALESCE(category, '')) = ANY($${idx}::text[])`);
+    queryParams.push(groupMatches);
+    idx++;
+  }
+
+  if (testCategory !== 'full_length' && params.subject && params.subject !== 'all' && params.subject !== 'Full Syllabus') {
+    const cleanSub = params.subject.trim().toLowerCase();
+    if (cleanSub !== 'general-studies') {
+      where.push(`(LOWER(COALESCE(subject, '')) LIKE $${idx} OR LOWER(COALESCE(subject_id, '')) = $${idx + 1})`);
+      queryParams.push(`%${cleanSub.replace(/-/g, ' ')}%`, cleanSub);
+      idx += 2;
+    }
+  }
+
+  if (stdNum !== null) {
+    where.push(`(class_id = $${idx} OR standard_id = $${idx})`);
+    queryParams.push(stdNum);
+    idx++;
+  }
+
+  if (testCategory === 'unit_wise' || testCategory === 'lesson_wise') {
+    if (unitNum !== null) {
+      where.push(`unit_id = $${idx}`);
+      queryParams.push(unitNum);
+      idx++;
+    }
+  }
+
+  if (testCategory === 'lesson_wise') {
+    if (params.lessonId && params.lessonTitle) {
+      where.push(`(lesson_id = $${idx} OR LOWER(TRIM(COALESCE(lesson_title, ''))) = LOWER(TRIM($${idx + 1})))`);
+      queryParams.push(params.lessonId, params.lessonTitle);
+      idx += 2;
+    } else if (params.lessonId) {
+      where.push(`lesson_id = $${idx}`);
+      queryParams.push(params.lessonId);
+      idx++;
+    } else if (params.lessonTitle) {
+      where.push(`LOWER(TRIM(COALESCE(lesson_title, ''))) = LOWER(TRIM($${idx}))`);
+      queryParams.push(params.lessonTitle);
+      idx++;
+    }
+  }
+
+  const maxLimit = Math.min(200, Math.max(1, Number(params.limit) || (testCategory === 'full_length' ? 200 : 100)));
+  const res = await pool.query(
+    `SELECT
+       id, category, unit_id, class_id, subject, lesson_title, topic,
+       difficulty, question_text, options
+     FROM questions
+     WHERE ${where.join(' AND ')}
+     ORDER BY ${testCategory === 'full_length' ? 'RANDOM()' : 'id ASC'}
+     LIMIT $${idx}`,
+    [...queryParams, maxLimit]
+  );
+
+  // Deduplicate by question ID and normalized text
+  const seenText = new Set<string>();
+  const uniqueRows: any[] = [];
+  for (const r of res.rows) {
+    const key = `${String(r.question_text || '').trim().toLowerCase()}`;
+    if (!seenText.has(key)) {
+      seenText.add(key);
+      uniqueRows.push(r);
+    }
+  }
+
+  if (uniqueRows.length === 0) {
+    const err: any = new Error('No published questions are available for this selection yet.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const marksPerQ = Number(params.marksPerQuestion) || 1.5;
+  const negativeMarking = Number(params.negativeMarking) || 0;
+  const durationMinutes = Number(params.durationMinutes) || Math.max(15, uniqueRows.length);
+  const title =
+    params.title?.trim() ||
+    (testCategory === 'lesson_wise'
+      ? `${params.lessonTitle || 'Lesson'} — Mock Test`
+      : testCategory === 'unit_wise'
+        ? `Unit ${unitNum || ''} — Unit Mock Test`
+        : `${groupInfo.tnpscGroup} ${stdNum ? `${stdNum}th Standard ` : ''}Full-length Mock Test`);
+
+  return {
+    test: {
+      id: 0,
+      slug: `syllabus-${testCategory}-${Date.now()}`,
+      title,
+      category: groupInfo.category,
+      categoryName: groupInfo.categoryName,
+      tnpscGroup: groupInfo.tnpscGroup,
+      testCategory,
+      subject: params.subject || 'General Studies',
+      standard: stdNum ? `${stdNum}th Standard` : null,
+      unit: unitNum ? `Unit ${unitNum}` : null,
+      lesson: params.lessonTitle || null,
+      questionsCount: uniqueRows.length,
+      durationMinutes,
+      totalMarks: Number((uniqueRows.length * marksPerQ).toFixed(2)),
+      marksPerQuestion: marksPerQ,
+      negativeMarking,
+    },
+    questions: uniqueRows.map((r, i) => ({
+      id: r.id,
+      order: i + 1,
+      category: r.category,
+      unitId: r.unit_id,
+      classId: r.class_id,
+      subject: r.subject || params.subject || 'General Studies',
+      lessonTitle: r.lesson_title || title,
+      topic: r.topic || r.lesson_title || 'General',
+      difficulty: r.difficulty || 'Medium',
+      question: r.question_text,
+      options: typeof r.options === 'string' ? JSON.parse(r.options) : r.options || [],
+    })),
+  };
+}
+
+export async function submitSyllabusMockTest(
+  studentId: number,
+  payload: {
+    testTitle: string;
+    group: string;
+    testCategory: MockTestCategory;
+    subject?: string;
+    subjectId?: string;
+    standard?: string;
+    unit?: string;
+    lesson?: string;
+    lessonId?: string;
+    questionIds: number[];
+    answers: Record<string, number>;
+    timeSpentSeconds?: number;
+    marksPerQuestion?: number;
+    negativeMarking?: number;
+    submissionToken?: string;
+  },
+  isPreview = false
+) {
+  const cleanIds = Array.from(new Set((payload.questionIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)));
+  if (cleanIds.length === 0) {
+    const err: any = new Error('No question IDs provided for submission.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const qRes = await pool.query(
+    `SELECT q.id, q.subject, q.topic, q.lesson_title, q.question_text, q.options, q.correct_answer, q.explanation
+     FROM questions q
+     JOIN UNNEST($1::int[]) WITH ORDINALITY AS ord(qid, pos) ON ord.qid = q.id
+     ORDER BY ord.pos ASC`,
+    [cleanIds]
+  );
+
+  const questions: any[] = qRes.rows;
+  const answersMap = payload.answers || {};
+  const marksPerQ = Number(payload.marksPerQuestion) || 1.5;
+  const negativeMarking = Number(payload.negativeMarking) || 0;
+
+  let attemptedQuestions = 0;
+  let correctAnswers = 0;
+  let incorrectAnswers = 0;
+  let unansweredQuestions = 0;
+
+  const responses = questions.map((q) => {
+    const rawSel = answersMap[String(q.id)];
+    const selectedOption =
+      rawSel !== undefined && rawSel !== null && Number.isInteger(Number(rawSel)) && Number(rawSel) >= 0
+        ? Number(rawSel)
+        : null;
+    const isAttempted = selectedOption !== null;
+    const isCorrect = isAttempted && selectedOption === Number(q.correct_answer);
+    if (isAttempted) {
+      attemptedQuestions++;
+      if (isCorrect) correctAnswers++;
+      else incorrectAnswers++;
+    } else {
+      unansweredQuestions++;
+    }
+
+    const opts = typeof q.options === 'string' ? JSON.parse(q.options) : q.options || [];
+    return {
+      questionId: q.id,
+      questionText: q.question_text,
+      options: opts,
+      subject: q.subject || payload.subject || 'General Studies',
+      topic: q.topic || q.lesson_title || payload.testTitle,
+      selectedOption,
+      correctAnswer: Number(q.correct_answer),
+      explanation: q.explanation || '',
+      isCorrect,
+    };
+  });
+
+  const totalQuestions = questions.length;
+  const maxScore = Number((totalQuestions * marksPerQ).toFixed(2));
+  const rawScore = correctAnswers * marksPerQ - incorrectAnswers * negativeMarking;
+  const score = Number(Math.max(0, rawScore).toFixed(2));
+  const percentage = totalQuestions > 0 ? Number(((correctAnswers / totalQuestions) * 100).toFixed(2)) : 0;
+  const timeSpentSeconds = Math.max(1, Math.round(Number(payload.timeSpentSeconds) || 60));
+
+  if (isPreview) {
+    return {
+      attemptId: 0,
+      testTitle: payload.testTitle,
+      totalQuestions,
+      attemptedQuestions,
+      correctAnswers,
+      incorrectAnswers,
+      unansweredQuestions,
+      score,
+      maxScore,
+      percentage,
+      timeSpentSeconds,
+      responses,
+      preview: true,
+    };
+  }
+
+  const groupInfo = normalizeGroupToCategory(payload.group);
+  const parsedStd = payload.standard ? parseInt(String(payload.standard).replace(/\D+/g, ''), 10) : NaN;
+  const parsedUnit = payload.unit ? parseInt(String(payload.unit).replace(/\D+/g, ''), 10) : NaN;
+  const normLessonSlug = payload.lesson ? String(payload.lesson).trim().toLowerCase().replace(/\s+/g, '-') : '';
+  const syllabusTestId =
+    payload.testCategory === 'lesson_wise'
+      ? `syllabus-lesson-${groupInfo.category}-${(payload.subject || 'gs').toLowerCase()}-${!Number.isNaN(parsedStd) ? parsedStd : 0}-${!Number.isNaN(parsedUnit) ? parsedUnit : 0}-${normLessonSlug || 'lesson'}`
+      : `syllabus-unit-${groupInfo.category}-${(payload.subject || 'gs').toLowerCase()}-${!Number.isNaN(parsedStd) ? parsedStd : 0}-${!Number.isNaN(parsedUnit) ? parsedUnit : 0}`;
+  const submitResult = await submitAssessmentAttempt(studentId, {
+    testId: syllabusTestId,
+    testTitle: payload.testTitle,
+    category: groupInfo.category,
+    assessmentType: 'mock_test',
+    subject: payload.subject || 'General Studies',
+    submissionToken: payload.submissionToken,
+    totalQuestions,
+    attemptedQuestions,
+    correctAnswers,
+    incorrectAnswers,
+    unansweredQuestions,
+    score,
+    maxScore,
+    timeSpentSeconds,
+    responses,
+    groupId: payload.group,
+    subjectId: payload.subjectId || payload.subject,
+    standardId: !Number.isNaN(parsedStd) ? parsedStd : null,
+    unitId: !Number.isNaN(parsedUnit) ? parsedUnit : null,
+    lessonId: payload.lessonId || null,
+    lessonTitle: payload.lesson || null,
+    mockTestFormat: payload.testCategory,
+  });
+
+  return {
+    attemptId: submitResult.attemptId,
+    testTitle: payload.testTitle,
+    totalQuestions,
+    attemptedQuestions,
+    correctAnswers,
+    incorrectAnswers,
+    unansweredQuestions,
+    score,
+    maxScore,
+    percentage: submitResult.percentage,
+    grade: (submitResult as any).grade,
+    gradeColor: (submitResult as any).gradeColor,
+    awardType: (submitResult as any).awardType,
+    attemptNumber: (submitResult as any).attemptNumber,
     timeSpentSeconds,
     responses,
     duplicate: Boolean((submitResult as any).duplicate),

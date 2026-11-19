@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   FileText,
   CheckCircle2,
@@ -9,9 +9,7 @@ import {
   ArrowLeft,
   RotateCcw,
   Timer,
-  Layers,
   Sparkles,
-  Filter,
   X,
   BookOpen,
   Award,
@@ -21,17 +19,34 @@ import {
   GraduationCap,
   Play,
   Languages,
+  Clock,
+  Eraser,
+  Grid,
+  Send,
+  History,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
-import { notifyStudentSync } from '../utils/studentSync'
+import { notifyStudentSync, subscribeStudentSync } from '../utils/studentSync'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { useMcqTranslations } from '../hooks/useMcqTranslations'
 import {
+  AwardShieldLogo,
+  LessonAwardSummaryBar,
+  AwardCelebrationModal,
+  type AchievementAwardResult,
+} from '../components/exam/AchievementAwards'
+import { AttemptHistoryModal } from '../components/exam/AttemptHistoryModal'
+import {
   getSubjectsForGroup,
   getStandardsForSubject,
-  getUnitsForSubjectStandard,
-  getLessonsForSelection,
 } from '../data/unifiedSyllabusRegistry'
+import {
+  dynamicSyllabusService,
+  type DynamicUnit,
+  type DynamicLesson,
+} from '../services/dynamicSyllabusService'
+import './PreviousPapers.css'
+import './PreviousPaperTest.css'
 import './MCQPractice.css'
 
 interface QuestionItem {
@@ -58,6 +73,7 @@ const MCQPractice = () => {
   useStudyTimeTracker()
   const navigate = useNavigate()
   const routeParams = useParams<{
+    '*'?: string
     groupId?: string
     subjectId?: string
     standardId?: string
@@ -68,15 +84,22 @@ const MCQPractice = () => {
   const quizStartTimeRef = useRef<number>(Date.now())
   const submissionTokenRef = useRef<string>(`mcq_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`)
 
-  const urlGroup = routeParams.groupId || searchParams.get('group')
-  const urlSubjectId = routeParams.subjectId || searchParams.get('subjectId')
-  const rawStandardParam = routeParams.standardId || searchParams.get('classId')
+  const wildcardSegments = (routeParams['*'] || '').split('/').filter(Boolean).map((s) => decodeURIComponent(s))
+  const paramGroupId = routeParams.groupId || wildcardSegments[0]
+  const paramSubjectId = routeParams.subjectId || wildcardSegments[1]
+  const paramStandardId = routeParams.standardId || wildcardSegments[2]
+  const paramUnitId = routeParams.unitId || wildcardSegments[3]
+  const paramLessonId = routeParams.lessonId || (wildcardSegments[4] && wildcardSegments[4] !== 'test' ? wildcardSegments[4] : undefined)
+
+  const urlGroup = paramGroupId || searchParams.get('group')
+  const urlSubjectId = paramSubjectId || searchParams.get('subjectId')
+  const rawStandardParam = paramStandardId || searchParams.get('classId')
   const urlClassId = rawStandardParam && /^\d+$/.test(rawStandardParam) ? parseInt(rawStandardParam, 10) : null
-  const rawUnitParam = routeParams.unitId || searchParams.get('unitId')
+  const rawUnitParam = paramUnitId || searchParams.get('unitId')
   const urlUnitId = rawUnitParam && /^\d+$/.test(rawUnitParam) ? parseInt(rawUnitParam, 10) : null
   const urlUnitTitle = searchParams.get('unitTitle')
   const urlLesson = searchParams.get('lesson')
-  const urlLessonId = routeParams.lessonId ? decodeURIComponent(routeParams.lessonId) : searchParams.get('lessonId')
+  const urlLessonId = paramLessonId ? decodeURIComponent(paramLessonId) : searchParams.get('lessonId')
   const urlTopic = searchParams.get('topic')
   const isTestActive = Boolean(urlLessonId || urlLesson || searchParams.get('title'))
 
@@ -84,6 +107,9 @@ const MCQPractice = () => {
     urlGroup || 'group1'
   )
   const [activeUnitFilter, setActiveUnitFilter] = useState<number | null>(urlUnitId)
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>(urlSubjectId || 'general-studies')
+  const [selectedStandardId, setSelectedStandardId] = useState<number>(urlClassId || 6)
+  const [selectedUnitId, setSelectedUnitId] = useState<number | null>(urlUnitId || null)
 
   const normalizedGroup: 'group1' | 'group2' | 'group4' =
     selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
@@ -132,19 +158,62 @@ const MCQPractice = () => {
 
   const [currentQuestion, setCurrentQuestion] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
-  const [showResult, setShowResult] = useState(false)
   const [score, setScore] = useState(0)
   const [answeredQuestions, setAnsweredQuestions] = useState(0)
   const [isQuizCompleted, setIsQuizCompleted] = useState(false)
   const [isReviewMode, setIsReviewMode] = useState(false)
   const [userAnswers, setUserAnswers] = useState<Record<number, { selected: number; isCorrect: boolean }>>({})
+  const [markedForReview, setMarkedForReview] = useState<Record<number, boolean>>({})
+  const [visitedQuestions, setVisitedQuestions] = useState<Record<number, boolean>>({ 0: true })
+  const [isPaletteOpenMobile, setIsPaletteOpenMobile] = useState(false)
+  const [showSubmitPracticeModal, setShowSubmitPracticeModal] = useState(false)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [questionLang, setQuestionLang] = useState<'en' | 'ta'>('en')
+  const loggedAttemptRef = useRef<Record<number, number>>({})
 
   // Live Database Questions & Connection State
   const [dbQuestions, setDbQuestions] = useState<QuestionItem[]>([])
   const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true)
-  const [isUsingLiveBank, setIsUsingLiveBank] = useState<boolean>(false)
-  const [activeFilterNotice, setActiveFilterNotice] = useState<string | null>(null)
+  const [dynamicUnits, setDynamicUnits] = useState<DynamicUnit[]>([])
+  const [isUnitsLoading, setIsUnitsLoading] = useState<boolean>(true)
+  const [unitsCountByStandard, setUnitsCountByStandard] = useState<Record<number, number>>({})
+  const [dynamicLessons, setDynamicLessons] = useState<DynamicLesson[]>([])
+  const [isLessonsLoading, setIsLessonsLoading] = useState<boolean>(false)
+  const [syllabusRefreshTick, setSyllabusRefreshTick] = useState<number>(0)
+  const [progressRefreshTick, setProgressRefreshTick] = useState<number>(0)
+  const [unitProgressByNum, setUnitProgressByNum] = useState<Record<number, {
+    totalLessons: number
+    completedLessons: number
+    remainingLessons: number
+    completionPercentage: number
+    totalAttempts: number
+    goldCount: number
+    platinumCount: number
+    silverCount: number
+    totalAwards: number
+  }>>({})
+  const [lessonProgressById, setLessonProgressById] = useState<Record<string, {
+    status: 'not_started' | 'in_progress' | 'completed'
+    totalAttempts: number
+    goldCount: number
+    platinumCount: number
+    silverCount: number
+    totalAwards: number
+    bestGrade: string | null
+    bestGradeColor: string | null
+    lastPracticedAt: string | null
+  }>>({})
+  const [celebrationState, setCelebrationState] = useState<{
+    awardType: AchievementAwardResult
+    percentage: number
+    title?: string
+  } | null>(null)
+  const [lastSubmittedAward, setLastSubmittedAward] = useState<AchievementAwardResult>('NONE')
+  const [historyModalLesson, setHistoryModalLesson] = useState<{
+    lessonId?: string
+    lessonTitle: string
+  } | null>(null)
+  const [lastSubmittedGrade, setLastSubmittedGrade] = useState<{ grade: string; colorHex: string } | null>(null)
   const [syllabusFacets, setSyllabusFacets] = useState<{
     totalQuestions: number
     subjects: { id?: string; name: string; questionCount: number }[]
@@ -169,14 +238,27 @@ const MCQPractice = () => {
   useEffect(() => {
     setSelectedGroup(urlGroup || 'group1')
     setActiveUnitFilter(urlUnitId)
+    if (urlSubjectId) {
+      setSelectedSubjectId(urlSubjectId)
+    }
+    if (urlClassId) {
+      setSelectedStandardId(urlClassId)
+    }
+    if (urlUnitId) {
+      setSelectedUnitId(urlUnitId)
+    }
     setCurrentQuestion(0)
     setSelectedAnswer(null)
-    setShowResult(false)
     setScore(0)
     setAnsweredQuestions(0)
     setIsQuizCompleted(false)
     setIsReviewMode(false)
     setUserAnswers({})
+    setMarkedForReview({})
+    setVisitedQuestions({ 0: true })
+    setShowSubmitPracticeModal(false)
+    setElapsedSeconds(0)
+    loggedAttemptRef.current = {}
   }, [urlGroup, urlUnitId, urlClassId, urlLesson, urlLessonId, urlTopic])
 
   // Fetch live syllabus facets (Group -> Subject -> Standard -> Unit -> Lesson) across Study Materials + Main Practice
@@ -186,10 +268,12 @@ const MCQPractice = () => {
       try {
         const params = new URLSearchParams()
         if (selectedGroup) params.set('category', selectedGroup)
-        if (urlSubjectId && urlSubjectId !== 'all') {
-          params.set('subject', urlSubjectId)
+        const facetSubjectId = urlSubjectId || selectedSubjectId
+        if (facetSubjectId && facetSubjectId !== 'all') {
+          params.set('subject', facetSubjectId)
         }
-        if (urlClassId) params.set('classId', urlClassId.toString())
+        const facetClassId = urlClassId ?? selectedStandardId
+        if (facetClassId) params.set('classId', facetClassId.toString())
         if (activeUnitFilter) params.set('unitId', activeUnitFilter.toString())
 
         const res = await apiFetch(`/api/questions/syllabus-facets?${params.toString()}`)
@@ -212,15 +296,13 @@ const MCQPractice = () => {
     return () => {
       isMounted = false
     }
-  }, [selectedGroup, urlSubjectId, urlClassId, activeUnitFilter])
+  }, [selectedGroup, urlSubjectId, selectedSubjectId, urlClassId, selectedStandardId, activeUnitFilter])
 
   // Fetch directly from PostgreSQL Questions API ONLY when a specific Lesson (or Mock Test) is selected
   useEffect(() => {
     let isMounted = true
     if (!isTestActive) {
       setDbQuestions([])
-      setIsUsingLiveBank(false)
-      setActiveFilterNotice(null)
       setIsInitialLoading(false)
       return () => {
         isMounted = false
@@ -247,7 +329,6 @@ const MCQPractice = () => {
         let res = await apiFetch(`/api/questions?${queryParams.toString()}`)
         let data = res.ok ? await res.json() : null
         let questions: QuestionItem[] = (data?.status === 'success' && Array.isArray(data?.data)) ? data.data : []
-        let notice: string | null = null
 
         // 2. Secondary Relaxation: If 0 questions found with classId and lesson,
         // retry matching the exact lesson across standards (in case question was tagged without classId)
@@ -259,7 +340,6 @@ const MCQPractice = () => {
             const relaxData = await relaxRes.json()
             if (relaxData.status === 'success' && Array.isArray(relaxData.data) && relaxData.data.length > 0) {
               questions = relaxData.data
-              notice = `Found ${questions.length} questions for "${urlLesson || 'this lesson'}" across standards`
             }
           }
         }
@@ -280,7 +360,6 @@ const MCQPractice = () => {
             const fallbackData = await fallbackRes.json()
             if (fallbackData.status === 'success' && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
               questions = fallbackData.data
-              notice = `Displaying ${questions.length} questions for Unit ${activeUnitFilter}.`
             }
           }
         }
@@ -299,20 +378,14 @@ const MCQPractice = () => {
               }
             }
             setDbQuestions(unique)
-            setIsUsingLiveBank(true)
-            setActiveFilterNotice(notice)
           } else {
             setDbQuestions([])
-            setIsUsingLiveBank(false)
-            setActiveFilterNotice(null)
           }
         }
       } catch (err) {
         console.error('Failed to fetch questions:', err)
         if (isMounted) {
           setDbQuestions([])
-          setIsUsingLiveBank(false)
-          setActiveFilterNotice(null)
         }
       } finally {
         if (isMounted && isInitialLoading) {
@@ -344,66 +417,251 @@ const MCQPractice = () => {
     }
   })
 
-  const hierarchyStandards = urlSubjectId
-    ? getStandardsForSubject(normalizedGroup, urlSubjectId).map((st) => {
-        const matched = syllabusFacets.standards.find((f) => Number(f.classId) === st.id)
+  const effectiveSubjectId = urlSubjectId
+    ? urlSubjectId
+    : hierarchySubjects.some((s) => s.id === selectedSubjectId)
+      ? selectedSubjectId
+      : hierarchySubjects[0]?.id || 'general-studies'
+
+  const hierarchyStandards = effectiveSubjectId
+    ? getStandardsForSubject(normalizedGroup, effectiveSubjectId).map((st) => {
+      const matched = syllabusFacets.standards.find((f) => Number(f.classId) === st.id)
+      return {
+        ...st,
+        questionCount: matched ? matched.questionCount : 0,
+      }
+    })
+    : []
+
+  const effectiveClassId: number | null = urlClassId
+    ? urlClassId
+    : hierarchyStandards.length > 0
+      ? hierarchyStandards.some((s) => s.id === selectedStandardId)
+        ? selectedStandardId
+        : hierarchyStandards[0].id
+      : null
+
+  // Subscribe to Study Materials syllabus changes for automatic synchronization
+  useEffect(() => {
+    const unsubscribe = dynamicSyllabusService.subscribe(() => {
+      setSyllabusRefreshTick((t) => t + 1)
+    })
+    return unsubscribe
+  }, [])
+
+  // Subscribe to student sync events to refresh progress live
+  useEffect(() => {
+    return subscribeStudentSync(() => {
+      setProgressRefreshTick((t) => t + 1)
+    })
+  }, [])
+
+  // Fetch authenticated student's Unit & Lesson progress from PostgreSQL
+  useEffect(() => {
+    let isMounted = true
+    const studentToken = localStorage.getItem('tnpsc_student_token')
+    if (!studentToken || !effectiveSubjectId || !effectiveClassId) {
+      setUnitProgressByNum({})
+      setLessonProgressById({})
+      return () => {
+        isMounted = false
+      }
+    }
+
+    const q = new URLSearchParams({
+      groupId: normalizedGroup,
+      subjectId: effectiveSubjectId,
+      standardId: String(effectiveClassId),
+      mode: 'mcq_practice',
+    })
+    apiFetch(`/api/student/syllabus-progress?${q.toString()}`, {
+      headers: { Authorization: `Bearer ${studentToken}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) return
+        const json = await res.json()
+        if (!isMounted || json?.status !== 'success' || !json?.data) return
+        const uMap: Record<number, any> = {}
+        for (const u of json.data.units || []) {
+          uMap[Number(u.unitNumber)] = u
+        }
+        const lMap: Record<string, any> = {}
+        for (const l of json.data.lessons || []) {
+          if (l.lessonId) lMap[String(l.lessonId)] = l
+          if (l.lessonTitle) {
+            const normT = String(l.lessonTitle).trim().toLowerCase()
+            lMap[`title:${normT}`] = l
+            if (l.unitNumber != null) {
+              lMap[`unit:${Number(l.unitNumber)}:title:${normT}`] = l
+            }
+          }
+        }
+        setUnitProgressByNum(uMap)
+        setLessonProgressById(lMap)
+      })
+      .catch(() => {})
+
+    return () => {
+      isMounted = false
+    }
+  }, [normalizedGroup, effectiveSubjectId, effectiveClassId, progressRefreshTick, syllabusRefreshTick])
+
+  // Fetch live Study Materials Units for the selected Group, Subject, and Standard
+  useEffect(() => {
+    let isMounted = true
+    if (!effectiveSubjectId || !effectiveClassId) {
+      setDynamicUnits([])
+      setIsUnitsLoading(false)
+      return () => {
+        isMounted = false
+      }
+    }
+    setIsUnitsLoading(true)
+    dynamicSyllabusService
+      .getUnits(normalizedGroup, effectiveSubjectId, effectiveClassId, { allowEmpty: true })
+      .then((units) => {
+        if (isMounted) {
+          setDynamicUnits(units)
+          setIsUnitsLoading(false)
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setDynamicUnits([])
+          setIsUnitsLoading(false)
+        }
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [normalizedGroup, effectiveSubjectId, effectiveClassId, syllabusRefreshTick])
+
+  // Fetch live Study Materials Unit counts for each Standard card
+  useEffect(() => {
+    let isMounted = true
+    if (!effectiveSubjectId) {
+      setUnitsCountByStandard({})
+      return () => {
+        isMounted = false
+      }
+    }
+    const stdIds = getStandardsForSubject(normalizedGroup, effectiveSubjectId).map((s) => s.id)
+    Promise.all(
+      stdIds.map(async (stdId) => {
+        const units = await dynamicSyllabusService.getUnits(normalizedGroup, effectiveSubjectId, stdId, {
+          allowEmpty: true,
+        })
+        return [stdId, units.length] as const
+      })
+    )
+      .then((entries) => {
+        if (isMounted) {
+          setUnitsCountByStandard(Object.fromEntries(entries))
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setUnitsCountByStandard({})
+        }
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [normalizedGroup, effectiveSubjectId, syllabusRefreshTick])
+
+  // Fetch live Study Materials Lessons for the selected Group, Subject, Standard, and Unit
+  useEffect(() => {
+    let isMounted = true
+    if (!effectiveSubjectId || !effectiveClassId || !activeUnitFilter) {
+      setDynamicLessons([])
+      setIsLessonsLoading(false)
+      return () => {
+        isMounted = false
+      }
+    }
+    setIsLessonsLoading(true)
+    dynamicSyllabusService
+      .getLessons({
+        examId: normalizedGroup,
+        subjectId: effectiveSubjectId,
+        standardNumber: effectiveClassId,
+        unitNumber: activeUnitFilter,
+      })
+      .then((lessons) => {
+        if (isMounted) {
+          setDynamicLessons(lessons)
+          setIsLessonsLoading(false)
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setDynamicLessons([])
+          setIsLessonsLoading(false)
+        }
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [normalizedGroup, effectiveSubjectId, effectiveClassId, activeUnitFilter, syllabusRefreshTick])
+
+  const hierarchyUnits =
+    effectiveSubjectId && effectiveClassId
+      ? dynamicUnits.map((u) => {
+        const unitNum = Number(u.unit_number)
+        const matched = syllabusFacets.units.find((f) => Number(f.unitId) === unitNum)
         return {
-          ...st,
+          id: unitNum,
+          dbUnitId: u.id,
+          unitNumber: u.unitNumber || u.unit_code || `Unit ${unitNum}`,
+          title: u.title,
+          subjectName: u.subjectName || u.subject_name || activeSubjectObjFallback(effectiveSubjectId),
           questionCount: matched ? matched.questionCount : 0,
         }
       })
-    : []
-
-  const hierarchyUnits =
-    urlSubjectId && urlClassId
-      ? getUnitsForSubjectStandard(normalizedGroup, urlSubjectId, urlClassId).map((u) => {
-          const matched = syllabusFacets.units.find((f) => Number(f.unitId) === u.id)
-          return {
-            ...u,
-            questionCount: matched ? matched.questionCount : 0,
-          }
-        })
       : []
+
+  function activeSubjectObjFallback(subId: string) {
+    return hierarchySubjects.find((s) => s.id === subId)?.name || subId
+  }
 
   const hierarchyLessons =
-    urlSubjectId && urlClassId && activeUnitFilter
-      ? getLessonsForSelection(normalizedGroup, urlSubjectId, urlClassId, activeUnitFilter).map((l) => {
-          const normTitle = l.title.trim().toLowerCase()
-          const matched = syllabusFacets.lessons.find(
-            (f) =>
-              (f.lessonId && f.lessonId === l.id) ||
-              f.lessonTitle.trim().toLowerCase() === normTitle
-          )
-          return {
-            ...l,
-            matchedLessonId: matched?.lessonId || l.id,
-            questionCount: matched ? matched.questionCount : 0,
-          }
-        })
+    effectiveSubjectId && effectiveClassId && activeUnitFilter
+      ? dynamicLessons.map((l) => {
+        const normTitle = (l.title || '').trim().toLowerCase()
+        const matched = syllabusFacets.lessons.find(
+          (f) =>
+            (f.lessonId && f.lessonId === l.id) ||
+            f.lessonTitle.trim().toLowerCase() === normTitle
+        )
+        return {
+          id: l.id,
+          lessonNumber: l.lesson_number || '',
+          title: l.title,
+          term: l.term,
+          description: l.description,
+          matchedLessonId: matched?.lessonId || l.id,
+          questionCount: matched ? matched.questionCount : 0,
+        }
+      })
       : []
 
-  const activeSubjectObj = hierarchySubjects.find((s) => s.id === urlSubjectId) || null
-  const activeStandardObj = urlClassId ? hierarchyStandards.find((st) => st.id === urlClassId) || null : null
+  const activeSubjectObj = hierarchySubjects.find((s) => s.id === effectiveSubjectId) || null
   const activeUnitObj = hierarchyUnits.find((u) => u.id === activeUnitFilter) || null
 
   const validGroupIds = new Set(['group1', 'group2', 'group2a', 'group2_2a', 'group4', 'vao', 'group4_vao'])
   const hasInvalidRoute =
-    (routeParams.groupId && !validGroupIds.has(routeParams.groupId.toLowerCase())) ||
-    (urlSubjectId && !activeSubjectObj) ||
-    (rawStandardParam && !activeStandardObj) ||
-    (rawUnitParam && !activeUnitObj)
+    (paramGroupId && !validGroupIds.has(paramGroupId.toLowerCase())) ||
+    (urlSubjectId && !hierarchySubjects.some((s) => s.id === urlSubjectId)) ||
+    (rawStandardParam && (!urlClassId || !hierarchyStandards.some((st) => st.id === urlClassId))) ||
+    (rawUnitParam && !isUnitsLoading && !activeUnitObj)
 
-  const currentView: 'invalid' | 'test' | 'lessons' | 'units' | 'standards' | 'subjects' = hasInvalidRoute
+  const currentView: 'invalid' | 'test' | 'lessons' | 'browse' = hasInvalidRoute
     ? 'invalid'
     : isTestActive
       ? 'test'
       : activeUnitFilter && urlClassId && urlSubjectId
         ? 'lessons'
-        : urlClassId && urlSubjectId
-          ? 'units'
-          : urlSubjectId
-            ? 'standards'
-            : 'subjects'
+        : 'browse'
 
   // Pure database questions (all mock fallback questions completely removed)
   const filteredQuestions: QuestionItem[] = dbQuestions
@@ -431,7 +689,6 @@ const MCQPractice = () => {
   const resetQuizState = () => {
     setCurrentQuestion(0)
     setSelectedAnswer(null)
-    setShowResult(false)
     setScore(0)
     setAnsweredQuestions(0)
     setIsQuizCompleted(false)
@@ -440,13 +697,18 @@ const MCQPractice = () => {
   }
 
   const handleGroupSelect = (group: string) => {
-    const norm =
+    const norm: 'group1' | 'group2' | 'group4' =
       group === 'group2' || group === 'group2a' || group === 'group2_2a'
         ? 'group2'
         : group === 'group4' || group === 'vao' || group === 'group4_vao'
           ? 'group4'
           : 'group1'
+    const defaultSubject = getSubjectsForGroup(norm)[0]?.id || 'general-studies'
+    const defaultStandard = getStandardsForSubject(norm, defaultSubject)[0]?.id || 6
     setSelectedGroup(norm)
+    setSelectedSubjectId(defaultSubject)
+    setSelectedStandardId(defaultStandard)
+    setSelectedUnitId(null)
     setActiveUnitFilter(null)
     resetQuizState()
     navigate(`/practice/${norm}`)
@@ -495,93 +757,146 @@ const MCQPractice = () => {
     navigate(`/practice/${normalizedGroup}`)
   }
 
-  const handleAnswerSelect = (index: number) => {
-    if (showResult || isReviewMode) return
-    setSelectedAnswer(index)
+  // Elapsed practice timer (counts up during active practice)
+  useEffect(() => {
+    if (currentView !== 'test' || isQuizCompleted || filteredQuestions.length === 0) return
+    const interval = window.setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1)
+    }, 1000)
+    return () => window.clearInterval(interval)
+  }, [currentView, isQuizCompleted, filteredQuestions.length])
+
+  const formatElapsedClock = (secs: number) => {
+    const safe = Math.max(0, Math.floor(secs))
+    const hrs = Math.floor(safe / 3600)
+    const mins = Math.floor((safe % 3600) / 60)
+    const rem = safe % 60
+    return [hrs, mins, rem].map((v) => String(v).padStart(2, '0')).join(':')
   }
 
-  const handleSubmit = () => {
-    if (selectedAnswer === null || !questionItem) return
-    const isCorrect = selectedAnswer === questionItem.correctAnswer
-    setShowResult(true)
-    setAnsweredQuestions((prev) => prev + 1)
-    if (isCorrect) {
-      setScore((prev) => prev + 1)
-    }
-    setUserAnswers((prev) => ({
-      ...prev,
-      [activeQuestionIndex]: { selected: selectedAnswer, isCorrect },
-    }))
-
-    // Real-Time Student Activity Tracking in PostgreSQL
+  const logSingleQuestionAttempt = (qItem: QuestionItem, chosenOpt: number, qIndex: number) => {
+    if (loggedAttemptRef.current[qIndex] === chosenOpt) return
+    loggedAttemptRef.current[qIndex] = chosenOpt
     const studentToken = localStorage.getItem('tnpsc_student_token')
-    if (studentToken) {
-      apiFetch('/api/student/question-attempt', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${studentToken}`,
-        },
-        body: JSON.stringify({
-          questionId: typeof rawQuestion?.id === 'number' ? rawQuestion.id : null,
-          category: selectedGroup,
-          subject: rawQuestion?.subject || urlSubjectId || 'General Studies',
-          classId: rawQuestion?.classId || urlClassId,
-          unitId: rawQuestion?.unitId || urlUnitId,
-          lessonId: rawQuestion?.lessonId || urlLessonId,
-          lessonTitle: rawQuestion?.lessonTitle || urlLesson || 'General Practice',
-          topic: rawQuestion?.topic || urlTopic,
-          selectedOption: selectedAnswer,
-          correctAnswer: questionItem.correctAnswer,
-          isCorrect,
-          sourceSystem: searchParams.get('title') ? 'mock_test' : 'mcq_practice',
-          timeSpentSeconds: 15,
-        }),
+    if (!studentToken) return
+
+    const isCorrect = chosenOpt === qItem.correctAnswer
+    apiFetch('/api/student/question-attempt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${studentToken}`,
+      },
+      body: JSON.stringify({
+        questionId: typeof qItem.id === 'number' ? qItem.id : null,
+        category: selectedGroup,
+        subject: qItem.subject || urlSubjectId || 'General Studies',
+        classId: qItem.classId || urlClassId,
+        unitId: qItem.unitId || urlUnitId,
+        lessonId: qItem.lessonId || urlLessonId,
+        lessonTitle: qItem.lessonTitle || urlLesson || 'General Practice',
+        topic: qItem.topic || urlTopic,
+        selectedOption: chosenOpt,
+        correctAnswer: qItem.correctAnswer,
+        isCorrect,
+        sourceSystem: searchParams.get('title') ? 'mock_test' : 'mcq_practice',
+        timeSpentSeconds: 15,
+      }),
+    })
+      .then((res) => {
+        if (res.ok) notifyStudentSync()
       })
-        .then((res) => {
-          if (res.ok) notifyStudentSync()
-        })
-        .catch((err) => console.warn('[StudentTrack] Failed to log question attempt:', err))
+      .catch((err) => console.warn('[StudentTrack] Failed to log question attempt:', err))
+  }
+
+  const goToPracticeQuestion = (idx: number) => {
+    if (idx < 0 || idx >= filteredQuestions.length) return
+    setCurrentQuestion(idx)
+    setVisitedQuestions((prev) => ({ ...prev, [idx]: true }))
+    const existing = userAnswers[idx]
+    if (existing !== undefined) {
+      setSelectedAnswer(existing.selected)
+    } else {
+      setSelectedAnswer(null)
+    }
+    setIsPaletteOpenMobile(false)
+  }
+
+  const handleAnswerSelect = (index: number) => {
+    if (isReviewMode) return
+    if (!questionItem) return
+    const isCorrect = index === questionItem.correctAnswer
+    setSelectedAnswer(index)
+    setVisitedQuestions((prev) => ({ ...prev, [activeQuestionIndex]: true }))
+    setUserAnswers((prev) => {
+      const next = {
+        ...prev,
+        [activeQuestionIndex]: { selected: index, isCorrect },
+      }
+      const nextAnswered = Object.keys(next).length
+      const nextScore = Object.values(next).filter((a) => a.isCorrect).length
+      setAnsweredQuestions(nextAnswered)
+      setScore(nextScore)
+      return next
+    })
+  }
+
+  const handleClearResponse = () => {
+    if (isReviewMode) return
+    setSelectedAnswer(null)
+    setUserAnswers((prev) => {
+      const next = { ...prev }
+      delete next[activeQuestionIndex]
+      const nextAnswered = Object.keys(next).length
+      const nextScore = Object.values(next).filter((a) => a.isCorrect).length
+      setAnsweredQuestions(nextAnswered)
+      setScore(nextScore)
+      return next
+    })
+  }
+
+  const handleSaveAndNext = () => {
+    const chosen = userAnswers[activeQuestionIndex]?.selected ?? selectedAnswer
+    if (chosen !== null && chosen !== undefined && questionItem) {
+      logSingleQuestionAttempt(questionItem, chosen, activeQuestionIndex)
+    }
+    if (activeQuestionIndex < filteredQuestions.length - 1) {
+      goToPracticeQuestion(activeQuestionIndex + 1)
     }
   }
 
   const handleNext = () => {
     if (activeQuestionIndex < filteredQuestions.length - 1) {
-      const nextIndex = activeQuestionIndex + 1
-      setCurrentQuestion(nextIndex)
-      const prevAnswer = userAnswers[nextIndex]
-      if (prevAnswer !== undefined) {
-        setSelectedAnswer(prevAnswer.selected)
-        setShowResult(true)
-      } else {
-        setSelectedAnswer(null)
-        setShowResult(false)
-      }
+      goToPracticeQuestion(activeQuestionIndex + 1)
     }
   }
 
   const handlePrev = () => {
     if (activeQuestionIndex > 0) {
-      const prevIndex = activeQuestionIndex - 1
-      setCurrentQuestion(prevIndex)
-      const prevAnswer = userAnswers[prevIndex]
-      if (prevAnswer !== undefined) {
-        setSelectedAnswer(prevAnswer.selected)
-        setShowResult(true)
-      } else {
-        setSelectedAnswer(null)
-        setShowResult(false)
-      }
+      goToPracticeQuestion(activeQuestionIndex - 1)
     }
   }
 
   const handleFinishQuiz = () => {
+    setShowSubmitPracticeModal(false)
+    const finalAnsweredCount = Object.keys(userAnswers).length
+    const finalScoreCount = Object.values(userAnswers).filter((a) => a.isCorrect).length
+    setAnsweredQuestions(finalAnsweredCount)
+    setScore(finalScoreCount)
     setIsQuizCompleted(true)
     setIsReviewMode(false)
 
+    // Log any answered questions not yet recorded individually
+    filteredQuestions.forEach((q, idx) => {
+      const ans = userAnswers[idx]
+      if (ans !== undefined) {
+        logSingleQuestionAttempt(q, ans.selected, idx)
+      }
+    })
+
     // Record completed Mock Test, Lesson Quiz, or Subject Drill to PostgreSQL
     const studentToken = localStorage.getItem('tnpsc_student_token')
-    if (studentToken && answeredQuestions > 0) {
+    if (studentToken && finalAnsweredCount > 0) {
       const explicitTitle = searchParams.get('title')
       const assessmentType = explicitTitle
         ? 'mock_test'
@@ -594,7 +909,7 @@ const MCQPractice = () => {
         urlUnitTitle ||
         `${selectedGroup.toUpperCase()} ${urlSubjectId} Practice Drill`
       const totalQ = filteredQuestions.length
-      const elapsedSeconds = Math.max(1, Math.round((Date.now() - quizStartTimeRef.current) / 1000))
+      const totalDuration = Math.max(1, elapsedSeconds || Math.round((Date.now() - quizStartTimeRef.current) / 1000))
       const responses = filteredQuestions.map((q, idx) => {
         const ans = userAnswers[idx]
         return {
@@ -609,6 +924,7 @@ const MCQPractice = () => {
         }
       })
 
+      const resolvedLessonTitle = urlLesson ? decodeURIComponent(urlLesson) : testTitle
       apiFetch('/api/student/assessments/submit', {
         method: 'POST',
         headers: {
@@ -616,23 +932,66 @@ const MCQPractice = () => {
           Authorization: `Bearer ${studentToken}`,
         },
         body: JSON.stringify({
+          testId: urlLessonId || `mcq-${normalizedGroup}-${effectiveSubjectId}-${effectiveClassId}-${activeUnitFilter || 0}`,
           testTitle,
           category: selectedGroup,
           assessmentType,
           submissionToken: submissionTokenRef.current,
           totalQuestions: totalQ,
-          attemptedQuestions: answeredQuestions,
-          correctAnswers: score,
-          incorrectAnswers: Math.max(0, answeredQuestions - score),
-          unansweredQuestions: Math.max(0, totalQ - answeredQuestions),
-          score: score * 1.5,
+          attemptedQuestions: finalAnsweredCount,
+          correctAnswers: finalScoreCount,
+          incorrectAnswers: Math.max(0, finalAnsweredCount - finalScoreCount),
+          unansweredQuestions: Math.max(0, totalQ - finalAnsweredCount),
+          score: finalScoreCount * 1.5,
           maxScore: totalQ * 1.5,
-          timeSpentSeconds: elapsedSeconds,
+          timeSpentSeconds: totalDuration,
           responses,
+          groupId: normalizedGroup,
+          subjectId: effectiveSubjectId,
+          standardId: effectiveClassId,
+          unitId: activeUnitFilter,
+          lessonId: urlLessonId,
+          lessonTitle: resolvedLessonTitle,
+          mockTestFormat: 'mcq_practice',
         }),
       })
-        .then((res) => {
-          if (res.ok) notifyStudentSync()
+        .then(async (res) => {
+          if (res.ok) {
+            const json = await res.json().catch(() => null)
+            if (json?.grade) {
+              setLastSubmittedGrade({
+                grade: json.grade,
+                colorHex: json.gradeColor || '#a855f7',
+              })
+            }
+            const earnedPct =
+              typeof json?.percentage === 'number'
+                ? json.percentage
+                : Math.round((finalScoreCount / Math.max(1, totalQ)) * 1000) / 10
+            const earnedAward: AchievementAwardResult =
+              json?.awardType === 'GOLD' ||
+              json?.awardType === 'PLATINUM' ||
+              json?.awardType === 'SILVER' ||
+              json?.awardType === 'NONE'
+                ? json.awardType
+                : earnedPct >= 90
+                  ? 'GOLD'
+                  : earnedPct >= 75
+                    ? 'PLATINUM'
+                    : earnedPct >= 60
+                      ? 'SILVER'
+                      : 'NONE'
+            setLastSubmittedAward(earnedAward)
+            if (!json?.duplicate) {
+              setCelebrationState({
+                awardType: earnedAward,
+                percentage: earnedPct,
+                title: resolvedLessonTitle,
+              })
+            }
+            setProgressRefreshTick((t) => t + 1)
+            notifyStudentSync()
+          }
         })
         .catch((err) => console.warn('[StudentTrack] Failed to log assessment completion:', err))
     }
@@ -641,7 +1000,6 @@ const MCQPractice = () => {
   const handleStartReview = () => {
     setIsReviewMode(true)
     setCurrentQuestion(0)
-    setShowResult(true)
     setSelectedAnswer(userAnswers[0]?.selected ?? null)
   }
 
@@ -652,12 +1010,16 @@ const MCQPractice = () => {
   const handleReset = () => {
     setCurrentQuestion(0)
     setSelectedAnswer(null)
-    setShowResult(false)
     setScore(0)
     setAnsweredQuestions(0)
     setIsQuizCompleted(false)
     setIsReviewMode(false)
     setUserAnswers({})
+    setMarkedForReview({})
+    setVisitedQuestions({ 0: true })
+    setShowSubmitPracticeModal(false)
+    setElapsedSeconds(0)
+    loggedAttemptRef.current = {}
     quizStartTimeRef.current = Date.now()
     submissionTokenRef.current = `mcq_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
   }
@@ -670,8 +1032,8 @@ const MCQPractice = () => {
       selectedGroup === 'group2_2a'
         ? 'Group 2 & 2A'
         : selectedGroup === 'group4_vao'
-        ? 'Group 4 & VAO'
-        : 'Group 1'
+          ? 'Group 4 & VAO'
+          : 'Group 1'
 
     if (q.tag) {
       return q.tag.replace(/^Group 1/i, groupName)
@@ -682,163 +1044,90 @@ const MCQPractice = () => {
   return (
     <div className="practice">
       <div className="practice-container">
-        {/* Top Navigation Bar with Back buttons */}
-        <div className="practice-top-bar">
-          <div className="practice-top-nav-left">
-            <button
-              type="button"
-              className="back-btn glass back-materials-btn"
-              onClick={() => navigate('/materials')}
-              aria-label="Back to Study Materials"
-              title="Navigate directly to main Study Materials page"
-            >
-              <BookOpen size={16} />
-              <span>Back to Study Materials</span>
-            </button>
-
-            {urlClassId ? (
+        {/* Top Navigation Bar with Back buttons (shown only on initial landing page, hidden on subject-specific pages) */}
+        {!urlSubjectId && (
+          <div className="practice-top-bar">
+            <div className="practice-top-nav-left">
               <button
                 type="button"
-                className="back-btn glass"
-                onClick={handleBackToStandard}
-                aria-label="Back to Standard"
-                title={urlClassId ? `Back to ${urlClassId}th Standard` : 'Back to Standard'}
+                className="back-btn glass back-materials-btn"
+                onClick={() => navigate('/materials')}
+                aria-label="Back to Study Materials"
+                title="Navigate directly to main Study Materials page"
               >
-                <ArrowLeft size={16} />
-                <span>Back to Standard</span>
+                <BookOpen size={16} />
+                <span>Back to Study Materials</span>
               </button>
-            ) : urlUnitId ? (
-              <button
-                type="button"
-                className="back-btn glass"
-                onClick={handleBackToStandard}
-                aria-label="Back to Unit"
-                title="Back to Unit"
-              >
-                <ArrowLeft size={16} />
-                <span>Back to Unit</span>
-              </button>
-            ) : null}
-          </div>
-        </div>
 
-        <motion.div
-          className="practice-header"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-        >
-          <div className="practice-badge-row">
-            <span className="practice-badge">
-              <Sparkles size={14} />
-              <span>Interactive Examination Engine</span>
-            </span>
-            {isUsingLiveBank ? (
-              <span className="practice-code-badge live-connected">
-                <span className="live-dot">●</span>
-                <span>
-                  {`Live Database Connected (${filteredQuestions.length} Questions)`}
-                </span>
-              </span>
-            ) : (
-              <span className="practice-code-badge">TNPSC Quizzes</span>
-            )}
+              {urlClassId ? (
+                <button
+                  type="button"
+                  className="back-btn glass"
+                  onClick={handleBackToStandard}
+                  aria-label="Back to Standard"
+                  title={urlClassId ? `Back to ${urlClassId}th Standard` : 'Back to Standard'}
+                >
+                  <ArrowLeft size={16} />
+                  <span>Back to Standard</span>
+                </button>
+              ) : urlUnitId ? (
+                <button
+                  type="button"
+                  className="back-btn glass"
+                  onClick={handleBackToStandard}
+                  aria-label="Back to Unit"
+                  title="Back to Unit"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Back to Unit</span>
+                </button>
+              ) : null}
+            </div>
           </div>
+        )}
 
+        {currentView !== 'test' && (
+        <div className={`practice-header ${urlSubjectId ? 'is-subject-header' : ''}`}>
           <h1 className="practice-title">
             <FileText size={32} />
             <span>
               MCQ <span className="gradient-text">Practice &amp; Quizzes</span>
             </span>
           </h1>
-          <p className="practice-subtitle">
-            Curated Samacheer Kalvi topic-wise questions organized by TNPSC Group 1, TNPSC Group 2 &amp; 2A, and TNPSC Group 4
-          </p>
-        </motion.div>
-
-        {/* Active Filter HUD Banner when redirected from a Lesson, Unit, or Class */}
-        {(activeUnitFilter || urlClassId || urlLesson) && (
-          <motion.div
-            className="filter-notice-hud glass"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <div className="filter-notice-left">
-              <Filter size={18} className="filter-icon" />
-              <div>
-                <span className="filter-title">
-                  Filtered Practice: {urlClassId ? `${urlClassId}th Standard • ` : ''}Unit {activeUnitFilter}
-                  {urlUnitTitle ? ` — ${decodeURIComponent(urlUnitTitle)}` : ''}
-                </span>
-                {urlLesson && (
-                  <span className="filter-lesson-text">
-                    Lesson Focus: <strong>{decodeURIComponent(urlLesson)}</strong>
-                  </span>
-                )}
-                {activeFilterNotice && (
-                  <span style={{ display: 'block', fontSize: '0.78rem', color: '#38bdf8', marginTop: '0.2rem' }}>
-                    ℹ️ {activeFilterNotice}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <button className="filter-clear-btn" onClick={clearUnitFilter} title="View all questions">
-              <X size={14} />
-              <span>Show All Questions</span>
-            </button>
-          </motion.div>
+        </div>
         )}
 
-        {/* Exam Category Tabs */}
-        <div className="practice-categories glass">
-          {groups.map((group) => {
-            const isActive = normalizedGroup === group.id
+        {/* Exam Category Tabs (Visible ONLY on the main MCQ Practice browse selection page) */}
+        {currentView === 'browse' && (
+          <div className="practice-categories glass">
+            {groups.map((group) => {
+              const isActive = normalizedGroup === group.id
 
-            return (
-              <button
-                key={group.id}
-                type="button"
-                className={`practice-category-tab ${isActive ? 'active' : ''}`}
-                onClick={() => handleGroupSelect(group.id)}
-              >
-                {group.name}
-              </button>
-            )
-          })}
-        </div>
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  className={`practice-category-tab ${isActive ? 'active' : ''}`}
+                  onClick={() => handleGroupSelect(group.id)}
+                >
+                  {group.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
-        {/* Interactive Syllabus Breadcrumb */}
-        <nav className="practice-breadcrumb glass" aria-label="Syllabus navigation breadcrumb">
-          <button
-            type="button"
-            className={`breadcrumb-crumb ${!urlSubjectId ? 'current' : ''}`}
-            onClick={() =>
-              updateSyllabusFilter({
-                subjectId: null,
-                classId: null,
-                unitId: null,
-                lessonId: null,
-                lesson: null,
-              })
-            }
-          >
-            {normalizedGroup === 'group2'
-              ? 'TNPSC Group 2 & 2A'
-              : normalizedGroup === 'group4'
-              ? 'TNPSC Group 4'
-              : 'TNPSC Group 1'}
-          </button>
-
-          {activeSubjectObj && (
-            <>
-              <ChevronRight size={14} className="breadcrumb-sep" />
+        {/* Compact Syllabus Breadcrumb (Lessons view only) */}
+        {currentView === 'lessons' && (
+          <div className="practice-breadcrumb-row">
+            {/* Interactive Syllabus Breadcrumb */}
+            <nav className="practice-breadcrumb glass" aria-label="Syllabus navigation breadcrumb">
               <button
                 type="button"
-                className={`breadcrumb-crumb ${!urlClassId ? 'current' : ''}`}
+                className="breadcrumb-crumb"
                 onClick={() =>
                   updateSyllabusFilter({
-                    subjectId: activeSubjectObj.id,
+                    subjectId: null,
                     classId: null,
                     unitId: null,
                     lessonId: null,
@@ -846,59 +1135,77 @@ const MCQPractice = () => {
                   })
                 }
               >
-                {activeSubjectObj.name}
+                {normalizedGroup === 'group2'
+                  ? 'TNPSC Group 2 & 2A'
+                  : normalizedGroup === 'group4'
+                    ? 'TNPSC Group 4'
+                    : 'TNPSC Group 1'}
               </button>
-            </>
-          )}
 
-          {urlClassId && (
-            <>
-              <ChevronRight size={14} className="breadcrumb-sep" />
-              <button
-                type="button"
-                className={`breadcrumb-crumb ${!activeUnitFilter ? 'current' : ''}`}
-                onClick={() =>
-                  updateSyllabusFilter({
-                    classId: urlClassId,
-                    unitId: null,
-                    lessonId: null,
-                    lesson: null,
-                  })
-                }
-              >
-                {`${urlClassId}th Standard`}
-              </button>
-            </>
-          )}
+              {activeSubjectObj && (
+                <>
+                  <ChevronRight size={14} className="breadcrumb-sep" />
+                  <button
+                    type="button"
+                    className="breadcrumb-crumb"
+                    onClick={() => {
+                      setSelectedSubjectId(activeSubjectObj.id)
+                      setActiveUnitFilter(null)
+                      navigate(`/practice/${normalizedGroup}`)
+                    }}
+                  >
+                    {activeSubjectObj.name}
+                  </button>
+                </>
+              )}
 
-          {activeUnitFilter && (
-            <>
-              <ChevronRight size={14} className="breadcrumb-sep" />
-              <button
-                type="button"
-                className={`breadcrumb-crumb ${!isTestActive ? 'current' : ''}`}
-                onClick={() =>
-                  updateSyllabusFilter({
-                    unitId: activeUnitFilter,
-                    lessonId: null,
-                    lesson: null,
-                  })
-                }
-              >
-                {activeUnitObj ? `${activeUnitObj.unitNumber}: ${activeUnitObj.title}` : `Unit ${activeUnitFilter}`}
-              </button>
-            </>
-          )}
+              {effectiveClassId && (
+                <>
+                  <ChevronRight size={14} className="breadcrumb-sep" />
+                  <button
+                    type="button"
+                    className="breadcrumb-crumb"
+                    onClick={() => {
+                      setSelectedStandardId(effectiveClassId)
+                      setActiveUnitFilter(null)
+                      navigate(`/practice/${normalizedGroup}`)
+                    }}
+                  >
+                    {`${effectiveClassId}th Standard`}
+                  </button>
+                </>
+              )}
 
-          {isTestActive && (urlLesson || searchParams.get('title')) && (
-            <>
-              <ChevronRight size={14} className="breadcrumb-sep" />
-              <span className="breadcrumb-crumb current">
-                {decodeURIComponent(urlLesson || searchParams.get('title') || 'Examination')}
-              </span>
-            </>
-          )}
-        </nav>
+              {activeUnitFilter && (
+                <>
+                  <ChevronRight size={14} className="breadcrumb-sep" />
+                  <button
+                    type="button"
+                    className={`breadcrumb-crumb ${!isTestActive ? 'current' : ''}`}
+                    onClick={() =>
+                      updateSyllabusFilter({
+                        unitId: activeUnitFilter,
+                        lessonId: null,
+                        lesson: null,
+                      })
+                    }
+                  >
+                    {activeUnitObj ? `${activeUnitObj.unitNumber}: ${activeUnitObj.title}` : `Unit ${activeUnitFilter}`}
+                  </button>
+                </>
+              )}
+
+              {isTestActive && (urlLesson || searchParams.get('title')) && (
+                <>
+                  <ChevronRight size={14} className="breadcrumb-sep" />
+                  <span className="breadcrumb-crumb current">
+                    {decodeURIComponent(urlLesson || searchParams.get('title') || 'Examination')}
+                  </span>
+                </>
+              )}
+            </nav>
+          </div>
+        )}
 
         {/* Multi-Page Hierarchical Views (One Dedicated Page Per Selection Level) */}
         {currentView === 'invalid' && (
@@ -917,108 +1224,87 @@ const MCQPractice = () => {
           </div>
         )}
 
-        {/* PAGE 1: TNPSC Group & Subject Selection */}
-        {currentView === 'subjects' && (
+        {/* UNIFIED SINGLE-PAGE SELECTION: Group Tabs + Compact Subjects + Standards + Units */}
+        {currentView === 'browse' && (
           <div className="hierarchy-navigator">
-            <section className="hierarchy-section glass">
-              <div className="hierarchy-section-header">
-                <span className="hierarchy-step-badge">Step 2</span>
+            {/* Section 1: Compact Subject Cards */}
+            <section className="hierarchy-section glass compact-subjects-section">
+              <div className="hierarchy-section-header compact-header">
+                <span className="hierarchy-step-badge">Subject</span>
                 <h3>Select Subject</h3>
               </div>
-              <div className="hierarchy-card-grid subject-card-grid">
-                {hierarchySubjects.map((sub) => (
-                  <button
-                    key={sub.id}
-                    type="button"
-                    className="hierarchy-card"
-                    onClick={() =>
-                      updateSyllabusFilter({
-                        subjectId: sub.id,
-                        classId: null,
-                        unitId: null,
-                        lessonId: null,
-                        lesson: null,
-                      })
-                    }
-                  >
-                    <div className="hierarchy-card-top">
-                      <BookOpen size={18} className="hierarchy-card-icon" />
-                      <span className={`hierarchy-count-pill ${sub.questionCount > 0 ? 'has-qs' : ''}`}>
-                        {sub.questionCount} Questions
+              <div className="compact-subject-grid">
+                {hierarchySubjects.map((sub) => {
+                  const isActiveSub = effectiveSubjectId === sub.id
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      className={`compact-subject-card ${isActiveSub ? 'selected' : ''}`}
+                      onClick={() => {
+                        setSelectedSubjectId(sub.id)
+                        setSelectedUnitId(null)
+                        setActiveUnitFilter(null)
+                        if (urlSubjectId || urlClassId) {
+                          navigate(`/practice/${normalizedGroup}`)
+                        }
+                      }}
+                    >
+                      <div className="compact-subject-left">
+                        <BookOpen size={15} className="compact-subject-icon" />
+                        <span className="compact-subject-title">{sub.name}</span>
+                      </div>
+                      <span className={`compact-count-badge ${sub.questionCount > 0 ? 'has-qs' : ''}`}>
+                        {sub.questionCount} Qs
                       </span>
-                    </div>
-                    <span className="hierarchy-card-title">{sub.name}</span>
-                    <div className="hierarchy-card-cta">
-                      <span>Select Subject</span>
-                      <ChevronRight size={14} />
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  )
+                })}
               </div>
             </section>
-          </div>
-        )}
 
-        {/* PAGE 2: Standard Selection Page (Exact Samacheer Kalvi 6th-12th Card Design) */}
-        {currentView === 'standards' && (
-          <div className="hierarchy-navigator">
-            <div className="page-step-back-row">
-              <button
-                type="button"
-                className="back-btn glass"
-                onClick={() =>
-                  updateSyllabusFilter({
-                    subjectId: null,
-                    classId: null,
-                    unitId: null,
-                    lessonId: null,
-                    lesson: null,
-                  })
-                }
-              >
-                <ArrowLeft size={16} />
-                <span>Back to Subjects</span>
-              </button>
-            </div>
-
+            {/* Section 2: Standard Selection (Same Page) */}
             <section className="classes-top-section glass">
               <div className="classes-section-header">
                 <div className="classes-heading-group">
                   <div className="classes-title-badge">
-                    <GraduationCap size={18} />
-                    <span>Samacheer Kalvi School Textbook Mapping</span>
+                    <GraduationCap size={16} />
+                    <span>Samacheer Kalvi Standard Mapping</span>
                   </div>
                   <h2 className="classes-main-heading">
-                    {activeSubjectObj?.name} — Classes: {hierarchyStandards[0]?.id}th to {hierarchyStandards[hierarchyStandards.length - 1]?.id}th Standard
+                    {activeSubjectObj?.name} — Select Standard
                   </h2>
-                  <p className="classes-subheading">
-                    Select any standard below to explore its mapped syllabus units and practice MCQs.
-                  </p>
                 </div>
                 <span className="classes-count-badge">{hierarchyStandards.length} Standards</span>
               </div>
 
               <div className="class-cards-grid">
-                {hierarchyStandards.map((cls, idx) => {
-                  const unitsForStd = urlSubjectId
-                    ? getUnitsForSubjectStandard(normalizedGroup, urlSubjectId, cls.id)
-                    : []
+                {hierarchyStandards.map((cls) => {
+                  const unitCount = unitsCountByStandard[cls.id] ?? 0
+                  const isActiveStd = effectiveClassId === cls.id
                   return (
-                    <motion.div
+                    <div
                       key={cls.id}
-                      className="class-card glass"
-                      initial={{ opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: idx * 0.04 }}
-                      whileHover={{ scale: 1.03, y: -4 }}
-                      onClick={() =>
-                        updateSyllabusFilter({
-                          classId: cls.id,
-                          unitId: null,
-                          lessonId: null,
-                          lesson: null,
-                        })
-                      }
+                      role="button"
+                      tabIndex={0}
+                      className={`class-card glass ${isActiveStd ? 'active-standard' : ''}`}
+                      onClick={() => {
+                        setSelectedStandardId(cls.id)
+                        setSelectedUnitId(null)
+                        if (urlClassId) {
+                          navigate(`/practice/${normalizedGroup}`)
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setSelectedStandardId(cls.id)
+                          setSelectedUnitId(null)
+                          if (urlClassId) {
+                            navigate(`/practice/${normalizedGroup}`)
+                          }
+                        }
+                      }}
                     >
                       <div className="class-card-top">
                         <span className="class-num-badge">{cls.id}th</span>
@@ -1027,81 +1313,86 @@ const MCQPractice = () => {
 
                       <div className="class-card-main">
                         <div className="class-icon-circle">
-                          <GraduationCap size={22} />
+                          <GraduationCap size={20} />
                         </div>
                         <h3 className="class-card-title">{cls.label}</h3>
                         <p className="class-card-desc">
-                          {unitsForStd.length} {unitsForStd.length === 1 ? 'Unit' : 'Units'} • {cls.questionCount} Questions
+                          {unitCount} {unitCount === 1 ? 'Unit' : 'Units'} • {cls.questionCount} Questions
                         </p>
                       </div>
 
                       <div className="class-card-cta">
-                        <span>Explore Class</span>
+                        <span>{isActiveStd ? 'Selected' : 'Select'}</span>
                         <ChevronRight size={14} />
                       </div>
-                    </motion.div>
+                    </div>
                   )
                 })}
               </div>
             </section>
-          </div>
-        )}
 
-        {/* PAGE 3: Unit Selection Page */}
-        {currentView === 'units' && (
-          <div className="hierarchy-navigator">
-            <div className="page-step-back-row">
-              <button
-                type="button"
-                className="back-btn glass"
-                onClick={() =>
-                  updateSyllabusFilter({
-                    classId: null,
-                    unitId: null,
-                    lessonId: null,
-                    lesson: null,
-                  })
-                }
-              >
-                <ArrowLeft size={16} />
-                <span>Back to Standards</span>
-              </button>
-            </div>
-
-            <section className="hierarchy-section glass">
-              <div className="hierarchy-section-header">
-                <span className="hierarchy-step-badge">{urlClassId}th Standard</span>
-                <h3>{activeSubjectObj?.name} — Select Unit</h3>
-              </div>
-              <div className="hierarchy-card-grid">
-                {hierarchyUnits.map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    className="hierarchy-card"
-                    onClick={() =>
-                      updateSyllabusFilter({
-                        unitId: u.id,
-                        lessonId: null,
-                        lesson: null,
-                      })
-                    }
-                  >
-                    <div className="hierarchy-card-top">
-                      <span className="hierarchy-unit-num">{u.unitNumber}</span>
-                      <span className={`hierarchy-count-pill ${u.questionCount > 0 ? 'has-qs' : ''}`}>
-                        {u.questionCount} Questions
-                      </span>
-                    </div>
-                    <span className="hierarchy-card-title">{u.title}</span>
-                    <div className="hierarchy-card-cta">
-                      <span>Explore Unit</span>
-                      <ChevronRight size={14} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
+            {/* Section 3: Unit Selection (Same Page — Clicking Explore Lessons opens Lessons Page) */}
+            {effectiveClassId && (
+              <section className="hierarchy-section glass unified-units-section">
+                <div className="hierarchy-section-header">
+                  <span className="hierarchy-step-badge">{effectiveClassId}th Standard</span>
+                  <h3>Select Unit — {effectiveClassId}th Standard ({activeSubjectObj?.name})</h3>
+                </div>
+                {isUnitsLoading && hierarchyUnits.length === 0 ? (
+                  <p className="hierarchy-empty-note">Loading units from Study Materials...</p>
+                ) : hierarchyUnits.length > 0 ? (
+                  <div className="hierarchy-card-grid">
+                    {hierarchyUnits.map((u) => {
+                      const uProg = unitProgressByNum[u.id]
+                      const totalL = uProg?.totalLessons ?? 0
+                      const completedL = uProg?.completedLessons ?? 0
+                      const remainingL = uProg?.remainingLessons ?? totalL
+                      const pctL = uProg?.completionPercentage ?? 0
+                      return (
+                        <button
+                          key={u.id}
+                          type="button"
+                          className={`hierarchy-card ${selectedUnitId === u.id ? 'selected-unit' : ''}`}
+                          onClick={() => {
+                            setSelectedUnitId(u.id)
+                            updateSyllabusFilter({
+                              subjectId: effectiveSubjectId,
+                              classId: effectiveClassId,
+                              unitId: u.id,
+                              lessonId: null,
+                              lesson: null,
+                            })
+                          }}
+                        >
+                          <div className="hierarchy-card-top">
+                            <span className="hierarchy-unit-num">{u.unitNumber}</span>
+                            <span className={`hierarchy-count-pill ${u.questionCount > 0 ? 'has-qs' : ''}`}>
+                              {u.questionCount} Questions
+                            </span>
+                          </div>
+                          <span className="hierarchy-card-title">{u.title}</span>
+                          <div className="unit-card-progress-summary">
+                            <div className="unit-progress-metrics">
+                              <span>Lessons: <strong>{totalL}</strong></span>
+                              <span>Completed: <strong>{completedL}</strong></span>
+                              <span>Remaining: <strong>{remainingL}</strong></span>
+                              <span className="unit-progress-pct">Progress: <strong>{pctL}%</strong></span>
+                            </div>
+                            <div className="unit-progress-track" aria-label={`Unit progress ${pctL}%`}>
+                              <div className="unit-progress-fill" style={{ width: `${Math.min(100, Math.max(0, pctL))}%` }} />
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="hierarchy-empty-note">
+                    No units mapped in Study Materials for {effectiveClassId}th Standard ({activeSubjectObj?.name}).
+                  </p>
+                )}
+              </section>
+            )}
           </div>
         )}
 
@@ -1132,37 +1423,92 @@ const MCQPractice = () => {
                   {activeUnitObj?.title || 'Lessons'} — {urlClassId}th Standard
                 </h3>
               </div>
-              {hierarchyLessons.length > 0 ? (
+              {isLessonsLoading ? (
+                <p className="hierarchy-empty-note">
+                  Loading lessons from Study Materials...
+                </p>
+              ) : hierarchyLessons.length > 0 ? (
                 <div className="hierarchy-lesson-list">
-                  {hierarchyLessons.map((l) => (
-                    <button
-                      key={l.id}
-                      type="button"
-                      className="hierarchy-lesson-row"
-                      onClick={() =>
-                        updateSyllabusFilter({
-                          lessonId: l.matchedLessonId,
-                          lesson: l.title,
-                        })
-                      }
-                    >
-                      <div className="hierarchy-lesson-info">
-                        <span className="hierarchy-lesson-num">
-                          Lesson {l.lessonNumber}
-                        </span>
-                        <span className="hierarchy-lesson-title">{l.title}</span>
+                  {hierarchyLessons.map((l) => {
+                    const normTitle = l.title.trim().toLowerCase()
+                    const lProg =
+                      lessonProgressById[String(l.id)] ||
+                      (l.matchedLessonId ? lessonProgressById[String(l.matchedLessonId)] : undefined) ||
+                      (activeUnitFilter != null ? lessonProgressById[`unit:${Number(activeUnitFilter)}:title:${normTitle}`] : undefined) ||
+                      lessonProgressById[`title:${normTitle}`]
+                    const status = lProg?.status || 'not_started'
+                    const statusLabel =
+                      status === 'completed'
+                        ? 'Completed'
+                        : status === 'in_progress'
+                          ? 'In Progress'
+                          : 'Not Started'
+                    const ctaLabel =
+                      status === 'completed'
+                        ? 'Practice Again →'
+                        : status === 'in_progress'
+                          ? 'Continue Practice →'
+                          : 'Start Practice →'
+                    return (
+                      <div key={l.id} className={`hierarchy-lesson-row lesson-status-${status}`}>
+                        <div className="hierarchy-lesson-main-col">
+                          <div className="hierarchy-lesson-info">
+                            <span className="hierarchy-lesson-num">
+                              Lesson {l.lessonNumber}
+                            </span>
+                            <span className="hierarchy-lesson-title">{l.title}</span>
+                          </div>
+                        </div>
+                        <div className="hierarchy-lesson-meta">
+                          {lProg?.totalAttempts > 0 ? (
+                            <button
+                              type="button"
+                              className={`lesson-status-badge status-${status}`}
+                              style={{ cursor: 'pointer', gap: '0.3rem' }}
+                              title="View Attempt History & Award Progression"
+                              onClick={() =>
+                                setHistoryModalLesson({
+                                  lessonId: l.matchedLessonId || String(l.id),
+                                  lessonTitle: l.title,
+                                })
+                              }
+                            >
+                              <span>{statusLabel}</span>
+                              <History size={11} />
+                            </button>
+                          ) : (
+                            <span className={`lesson-status-badge status-${status}`}>
+                              {statusLabel}
+                            </span>
+                          )}
+                          <span className={`hierarchy-count-pill ${l.questionCount > 0 ? 'has-qs' : ''}`}>
+                            {l.questionCount} Questions
+                          </span>
+                          <LessonAwardSummaryBar
+                            goldCount={lProg?.goldCount ?? 0}
+                            platinumCount={lProg?.platinumCount ?? 0}
+                            silverCount={lProg?.silverCount ?? 0}
+                            compact
+                            showTotal={false}
+                            hideZero
+                          />
+                          <button
+                            type="button"
+                            className="table-action-btn table-action-primary hierarchy-start-btn"
+                            onClick={() =>
+                              updateSyllabusFilter({
+                                lessonId: l.matchedLessonId,
+                                lesson: l.title,
+                              })
+                            }
+                          >
+                            <Play size={14} fill="currentColor" />
+                            <span>{ctaLabel}</span>
+                          </button>
+                        </div>
                       </div>
-                      <div className="hierarchy-lesson-meta">
-                        <span className={`hierarchy-count-pill ${l.questionCount > 0 ? 'has-qs' : ''}`}>
-                          {l.questionCount} Questions
-                        </span>
-                        <span className="hierarchy-start-pill">
-                          <Play size={13} />
-                          <span>Start Practice</span>
-                        </span>
-                      </div>
-                    </button>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <p className="hierarchy-empty-note">
@@ -1173,40 +1519,116 @@ const MCQPractice = () => {
           </div>
         )}
 
-        {/* PAGE 5: MCQ Examination Page (Shown ONLY after selecting a Lesson) */}
+        {/* PAGE 5: MCQ Examination Page (Two-Column Previous Year Papers Layout) */}
         {currentView === 'test' && (
-        <>
-        <div className="page-step-back-row page-step-test-bar">
-          <button
-            type="button"
-            className="back-btn glass"
-            onClick={() =>
-              updateSyllabusFilter({
-                lessonId: null,
-                lesson: null,
-              })
-            }
-          >
-            <ArrowLeft size={16} />
-            <span>Back to Lessons</span>
-          </button>
+          <div className="pyp-exam-page mcq-pyp-exam-page">
+            {/* A. Examination Header */}
+            <header className="pyp-exam-topbar glass">
+              <div className="pyp-topbar-left">
+                <button
+                  type="button"
+                  className="pyp-leave-btn"
+                  onClick={() =>
+                    updateSyllabusFilter({
+                      lessonId: null,
+                      lesson: null,
+                    })
+                  }
+                  title="Return to Lessons"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Back to Lessons</span>
+                </button>
+                <div>
+                  <div className="pyp-brand-line">
+                    <span className="pyp-hub-tag">TNPSC Study Hub</span>
+                    <span className="pyp-status-dot">
+                      ● {isQuizCompleted && !isReviewMode ? 'Completed' : isReviewMode ? 'Review Mode' : 'Practice In Progress'}
+                    </span>
+                  </div>
+                  <h1 className="pyp-exam-heading">
+                    {normalizedGroup === 'group2'
+                      ? 'TNPSC Group 2 & 2A'
+                      : normalizedGroup === 'group4'
+                        ? 'TNPSC Group 4'
+                        : 'TNPSC Group 1'}
+                    {' – '}
+                    {activeSubjectObj?.name || 'General Studies'}
+                  </h1>
+                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.15rem' }}>
+                    {[
+                      urlClassId ? `${urlClassId}th Standard` : null,
+                      activeUnitFilter ? `Unit ${activeUnitFilter}` : null,
+                      urlLesson ? decodeURIComponent(urlLesson) : searchParams.get('title') ? decodeURIComponent(searchParams.get('title')!) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' | ')}
+                  </div>
+                </div>
+              </div>
 
-          {filteredQuestions.length > 0 && (
-            <div className="mcq-lang-toolbar">
-              {questionLang === 'ta' && (
+              <div className="pyp-topbar-meta">
+                <div className="pyp-meta-pill">
+                  <span>Total</span>
+                  <strong>{filteredQuestions.length}</strong>
+                </div>
+                <div className="pyp-meta-pill">
+                  <span>Answered</span>
+                  <strong style={{ color: '#34d399' }}>{Object.keys(userAnswers).length}</strong>
+                </div>
+                <div className="pyp-meta-pill">
+                  <span>Remaining</span>
+                  <strong>{Math.max(0, filteredQuestions.length - Object.keys(userAnswers).length)}</strong>
+                </div>
+                <div className="pyp-timer-pill" title="Elapsed Practice Time">
+                  <Clock size={16} />
+                  <span>{formatElapsedClock(elapsedSeconds)}</span>
+                </div>
+
+                {filteredQuestions.length > 0 && (
+                  <div className="mcq-lang-switch glass" role="group" aria-label="Question language">
+                    <Languages size={14} className="mcq-lang-icon" />
+                    <button
+                      type="button"
+                      className={`mcq-lang-btn ${questionLang === 'en' ? 'active' : ''}`}
+                      onClick={() => setQuestionLang('en')}
+                    >
+                      EN
+                    </button>
+                    <button
+                      type="button"
+                      className={`mcq-lang-btn ${questionLang === 'ta' ? 'active' : ''}`}
+                      onClick={() => setQuestionLang('ta')}
+                    >
+                      {isTranslating && questionLang === 'ta' ? 'தமிழ்…' : 'தமிழ்'}
+                    </button>
+                  </div>
+                )}
+
+                {!isQuizCompleted && filteredQuestions.length > 0 && (
+                  <button
+                    type="button"
+                    className="pyp-mobile-palette-toggle"
+                    onClick={() => setIsPaletteOpenMobile((v) => !v)}
+                  >
+                    <Grid size={16} />
+                    <span>Palette</span>
+                  </button>
+                )}
+              </div>
+            </header>
+
+            {questionLang === 'ta' && filteredQuestions.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem' }}>
                 <div className={`mcq-translation-status status-${translationStatus}`}>
                   {translationStatus === 'completed' ? (
-                    <span>{`✓ ${translatedCount}/${filteredQuestions.length} Ready`}</span>
+                    <span>{`✓ ${translatedCount}/${filteredQuestions.length} Tamil Ready`}</span>
                   ) : translationStatus === 'processing' ? (
                     <span>{`${translatedCount}/${filteredQuestions.length} Translated • ${filteredQuestions.length - translatedCount} Remaining`}</span>
                   ) : failedTranslationIds.length > 0 ? (
                     <>
                       <span>{`${translatedCount}/${filteredQuestions.length} Translated • ${failedTranslationIds.length} Failed`}</span>
-                      <button
-                        type="button"
-                        className="mcq-retry-btn"
-                        onClick={retryTranslations}
-                      >
+                      <button type="button" className="mcq-retry-btn" onClick={retryTranslations}>
                         Retry
                       </button>
                     </>
@@ -1214,335 +1636,298 @@ const MCQPractice = () => {
                     <span>{`${translatedCount}/${filteredQuestions.length} Pending`}</span>
                   )}
                 </div>
-              )}
-
-              <div className="mcq-lang-switch glass" role="group" aria-label="Question language">
-                <Languages size={15} className="mcq-lang-icon" />
-                <button
-                  type="button"
-                  className={`mcq-lang-btn ${questionLang === 'en' ? 'active' : ''}`}
-                  onClick={() => setQuestionLang('en')}
-                >
-                  English
-                </button>
-                <button
-                  type="button"
-                  className={`mcq-lang-btn ${questionLang === 'ta' ? 'active' : ''}`}
-                  onClick={() => setQuestionLang('ta')}
-                >
-                  {isTranslating && questionLang === 'ta' ? 'தமிழ்…' : 'தமிழ்'}
-                </button>
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        <div className="practice-stats">
-          <div className="practice-stat-card glass">
-            <Timer size={18} />
-            <span>
-              {`Question ${filteredQuestions.length > 0 ? activeQuestionIndex + 1 : 0} of ${filteredQuestions.length}`}
-            </span>
-          </div>
-          <div className="practice-stat-card glass">
-            <CheckCircle2 size={18} />
-            <span>
-              {`Answered: ${answeredQuestions} • Unanswered: ${Math.max(0, filteredQuestions.length - answeredQuestions)}`}
-            </span>
-          </div>
-          <div className="practice-stat-card glass">
-            <Award size={18} />
-            <span>
-              {`Score: ${score} / ${answeredQuestions}`}
-            </span>
-          </div>
-          <div className="practice-stat-card glass">
-            <Layers size={18} />
-            <span>
-              {normalizedGroup === 'group2'
-                ? 'TNPSC Group 2 & 2A'
-                : normalizedGroup === 'group4'
-                ? 'TNPSC Group 4'
-                : 'TNPSC Group 1'}
-            </span>
-          </div>
-        </div>
-
-        {/* Question Card / Scorecard / Empty State */}
-        {isQuizCompleted && !isReviewMode ? (
-          <motion.div
-            className="quiz-completion-card glass"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.35 }}
-          >
-            <div className="completion-trophy-wrap">
-              <Trophy size={48} className="completion-trophy-icon" />
-            </div>
-
-            <div className="completion-header">
-              <span className="completion-badge">
-                <Sparkles size={14} />
-                <span>Assessment Completed</span>
-              </span>
-              <h2 className="completion-title">Quiz Completed!</h2>
-              <p className="completion-subtitle">
-                {selectedGroup === 'group2_2a'
-                  ? 'TNPSC Group 2 & 2A'
-                  : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
-                  ? 'TNPSC Group 4 & VAO'
-                  : 'TNPSC Group 1'}
-                {activeUnitFilter ? ` • Unit ${activeUnitFilter}` : ''}
-                {urlLesson ? ` • ${decodeURIComponent(urlLesson)}` : ''}
-              </p>
-            </div>
-
-            {/* Score Ring Display */}
-            <div className="completion-score-box">
-              <div className="score-ring">
-                <span className="score-numbers">
-                  {score} <span className="score-total">/ {filteredQuestions.length}</span>
-                </span>
-                <span className="score-percentage-pill">
-                  {Math.round((score / Math.max(1, filteredQuestions.length)) * 100)}% Accuracy
-                </span>
-              </div>
-              <div className="score-evaluation-text">
-                {Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 80 ? (
-                  <span className="eval-outstanding">
-                    🌟 Outstanding Performance! Excellent preparation for TNPSC prelims.
-                  </span>
-                ) : Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 60 ? (
-                  <span className="eval-good">
-                    🎯 Good Job! Review the missed questions to reinforce key concepts.
-                  </span>
-                ) : (
-                  <span className="eval-practice">
-                    📖 Keep Practicing! Read the syllabus study notes and re-attempt.
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Metrics Breakdown Grid */}
-            <div className="completion-stats-grid">
-              <div className="completion-stat-tile glass stat-correct">
-                <CheckCircle2 size={22} className="stat-icon-correct" />
-                <div>
-                  <span className="stat-num">{score}</span>
-                  <span className="stat-label">Correct</span>
+            {/* Question Card / Scorecard / Empty State */}
+            {isQuizCompleted && !isReviewMode ? (
+              <motion.div
+                className="quiz-completion-card glass"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.35 }}
+              >
+                <div className="completion-trophy-wrap">
+                  <Trophy size={48} className="completion-trophy-icon" />
                 </div>
-              </div>
-              <div className="completion-stat-tile glass stat-incorrect">
-                <XCircle size={22} className="stat-icon-wrong" />
-                <div>
-                  <span className="stat-num">{Math.max(0, answeredQuestions - score)}</span>
-                  <span className="stat-label">Incorrect</span>
-                </div>
-              </div>
-              <div className="completion-stat-tile glass stat-total">
-                <BarChart2 size={22} className="stat-icon-total" />
-                <div>
-                  <span className="stat-num">{filteredQuestions.length}</span>
-                  <span className="stat-label">Total Questions</span>
-                </div>
-              </div>
-            </div>
 
-            {/* Primary Action Buttons */}
-            <div className="completion-actions">
-              <button className="btn btn-secondary review-answers-btn" onClick={handleStartReview}>
-                <FileText size={18} />
-                <span>Review All Answers</span>
-              </button>
-              <button className="btn btn-primary retake-btn" onClick={handleReset}>
-                <RotateCcw size={18} />
-                <span>Retake Test</span>
-              </button>
-            </div>
-          </motion.div>
-        ) : isInitialLoading ? (
-          <div className="empty-practice-state glass">
-            <div className="empty-icon-wrap">
-              <Timer size={36} className="empty-icon" />
-            </div>
-            <h3>Loading Practice Questions...</h3>
-            <p>Fetching syllabus-verified MCQs from the question bank.</p>
-          </div>
-        ) : questionItem ? (
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`question-${questionItem.id}`}
-              className="question-card glass"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
-            >
-              {isReviewMode && (
-                <div className="review-mode-hud glass">
-                  <div className="review-mode-info">
-                    <span className="review-badge">
-                      {`Review Mode • Question ${activeQuestionIndex + 1} of ${filteredQuestions.length}`}
+                <div className="completion-header">
+                  <span className="completion-badge">
+                    <Sparkles size={14} />
+                    <span>Practice Completed</span>
+                  </span>
+                  <h2 className="completion-title">Practice Completed!</h2>
+                  <p className="completion-subtitle">
+                    {normalizedGroup === 'group2'
+                      ? 'TNPSC Group 2 & 2A'
+                      : normalizedGroup === 'group4'
+                        ? 'TNPSC Group 4 & VAO'
+                        : 'TNPSC Group 1'}
+                    {activeUnitFilter ? ` • Unit ${activeUnitFilter}` : ''}
+                    {urlLesson ? ` • ${decodeURIComponent(urlLesson)}` : ''}
+                  </p>
+                </div>
+
+                <div className="completion-score-box">
+                  <div className="score-ring">
+                    <span className="score-numbers">
+                      {score} <span className="score-total">/ {filteredQuestions.length}</span>
                     </span>
-                    <span className="review-score-preview">
-                      {`Score: ${score}/${filteredQuestions.length}`}
+                    <span className="score-percentage-pill">
+                      {Math.round((score / Math.max(1, filteredQuestions.length)) * 100)}% Accuracy
                     </span>
+                    {lastSubmittedAward !== 'NONE' && (
+                      <div
+                        className={`award-pill-item tier-${lastSubmittedAward.toLowerCase()}`}
+                        style={{ marginTop: '0.5rem', padding: '0.32rem 0.78rem 0.32rem 0.45rem' }}
+                      >
+                        <AwardShieldLogo tier={lastSubmittedAward} size={28} showLabel={false} />
+                        <span className="award-pill-name">{lastSubmittedAward} AWARD EARNED</span>
+                      </div>
+                    )}
+                    {lastSubmittedGrade && (
+                      <span
+                        className="lesson-grade-badge"
+                        style={{
+                          marginTop: '0.35rem',
+                          borderColor: `${lastSubmittedGrade.colorHex}66`,
+                          backgroundColor: `${lastSubmittedGrade.colorHex}1f`,
+                          color: lastSubmittedGrade.colorHex,
+                        }}
+                      >
+                        Grade: {lastSubmittedGrade.grade}
+                      </span>
+                    )}
                   </div>
-                  <button type="button" className="btn btn-secondary btn-sm back-scorecard-btn" onClick={handleBackToScorecard}>
-                    <Award size={15} />
-                    <span>Back to Scorecard</span>
-                  </button>
-                </div>
-              )}
-
-              <div className="question-header">
-                <span className="question-category-tag">{formatTag(questionItem)}</span>
-                <span className="question-number">
-                  {`Question ${activeQuestionIndex + 1} of ${filteredQuestions.length}`}
-                </span>
-              </div>
-
-              {/* Examination Progress Bar */}
-              <div className="exam-progress-wrap">
-                <div className="exam-progress-meta">
-                  <span>Progress: {answeredQuestions} of {filteredQuestions.length} Answered</span>
-                  <span>{Math.round((answeredQuestions / Math.max(1, filteredQuestions.length)) * 100)}%</span>
-                </div>
-                <div className="exam-progress-track">
-                  <div
-                    className="exam-progress-fill"
-                    style={{ width: `${Math.round(((activeQuestionIndex + 1) / Math.max(1, filteredQuestions.length)) * 100)}%` }}
-                  />
-                </div>
-              </div>
-
-              <h2 className="question-text">{displayedQuestion}</h2>
-
-              <div className="options-list">
-                {displayedOptions.map((option, index) => {
-                  let optionClass = 'option'
-                  if (showResult) {
-                    if (index === questionItem.correctAnswer) {
-                      optionClass += ' option-correct'
-                    } else if (index === selectedAnswer && index !== questionItem.correctAnswer) {
-                      optionClass += ' option-wrong'
-                    } else {
-                      optionClass += ' option-disabled'
-                    }
-                  } else if (selectedAnswer === index) {
-                    optionClass += ' option-selected'
-                  }
-
-                  return (
-                    <button
-                      key={index}
-                      className={optionClass}
-                      onClick={() => handleAnswerSelect(index)}
-                      disabled={showResult}
-                    >
-                      <span className="option-letter">{String.fromCharCode(65 + index)}</span>
-                      <span className="option-text">{option}</span>
-                      {showResult && index === questionItem.correctAnswer && (
-                        <CheckCircle2 size={20} className="option-icon option-icon-correct" />
-                      )}
-                      {showResult && index === selectedAnswer && index !== questionItem.correctAnswer && (
-                        <XCircle size={20} className="option-icon option-icon-wrong" />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="question-actions">
-                <div className="action-group-left">
-                  {activeQuestionIndex > 0 && (
-                    <button type="button" className="btn btn-secondary prev-btn" onClick={handlePrev}>
-                      <ArrowLeft size={18} />
-                      <span>Previous</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="action-group-right">
-                  {!showResult && (
-                    <button
-                      className="btn btn-primary submit-btn"
-                      onClick={handleSubmit}
-                      disabled={selectedAnswer === null}
-                    >
-                      <span>Check Answer</span>
-                      <ArrowRight size={18} />
-                    </button>
-                  )}
-                  {!isLastQuestion && (
-                    <button type="button" className="btn btn-secondary next-btn" onClick={handleNext}>
-                      <span>Next</span>
-                      <ArrowRight size={18} />
-                    </button>
-                  )}
-                  {(isLastQuestion || answeredQuestions > 0) && (
-                    <button type="button" className="btn btn-primary complete-btn" onClick={handleFinishQuiz}>
-                      <Award size={18} />
-                      <span>Submit Test</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Concise Examination Answer Feedback (No Study Notes or Textbook Explanations) */}
-              {showResult && (
-                <motion.div
-                  className={`explanation-box ${
-                    selectedAnswer === questionItem.correctAnswer ? 'explanation-correct' : 'explanation-wrong'
-                  }`}
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <div className="explanation-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <span className="explanation-status">
-                        {selectedAnswer === questionItem.correctAnswer ? 'Correct!' : 'Incorrect'}
+                  <div className="score-evaluation-text">
+                    {Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 80 ? (
+                      <span className="eval-outstanding">
+                        🌟 Outstanding Performance! Excellent preparation for TNPSC prelims.
                       </span>
-                      <span className="correct-answer-label">
-                        {`Correct Answer: Option ${String.fromCharCode(65 + questionItem.correctAnswer)}`}
+                    ) : Math.round((score / Math.max(1, filteredQuestions.length)) * 100) >= 60 ? (
+                      <span className="eval-good">
+                        🎯 Good Job! Review the missed questions to reinforce key concepts.
                       </span>
+                    ) : (
+                      <span className="eval-practice">
+                        📖 Keep Practicing! Review the answers and re-attempt.
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="completion-stats-grid">
+                  <div className="completion-stat-tile glass stat-correct">
+                    <CheckCircle2 size={22} className="stat-icon-correct" />
+                    <div>
+                      <span className="stat-num">{score}</span>
+                      <span className="stat-label">Correct</span>
                     </div>
                   </div>
-                </motion.div>
-              )}
-              {/* Question Navigation Palette */}
-              {filteredQuestions.length > 1 && (
-                <div className="question-nav-palette">
-                  <div className="question-nav-palette-header">
-                    <span>Question Navigation</span>
-                    <span>
-                      {answeredQuestions} / {filteredQuestions.length} Answered
-                    </span>
+                  <div className="completion-stat-tile glass stat-incorrect">
+                    <XCircle size={22} className="stat-icon-wrong" />
+                    <div>
+                      <span className="stat-num">{Math.max(0, answeredQuestions - score)}</span>
+                      <span className="stat-label">Incorrect</span>
+                    </div>
                   </div>
-                  <div className="question-nav-grid">
+                  <div className="completion-stat-tile glass stat-total">
+                    <BarChart2 size={22} className="stat-icon-total" />
+                    <div>
+                      <span className="stat-num">{filteredQuestions.length}</span>
+                      <span className="stat-label">Total Questions</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="completion-actions">
+                  <button className="btn btn-secondary review-answers-btn" onClick={handleStartReview}>
+                    <FileText size={18} />
+                    <span>Review All Answers</span>
+                  </button>
+                  <button className="btn btn-primary retake-btn" onClick={handleReset}>
+                    <RotateCcw size={18} />
+                    <span>Retake Practice</span>
+                  </button>
+                </div>
+              </motion.div>
+            ) : isInitialLoading ? (
+              <div className="empty-practice-state glass">
+                <div className="empty-icon-wrap">
+                  <Timer size={36} className="empty-icon" />
+                </div>
+                <h3>Loading Practice Questions...</h3>
+                <p>Fetching syllabus-verified MCQs from the question bank.</p>
+              </div>
+            ) : questionItem ? (
+              <div className="pyp-exam-workspace">
+                {/* LEFT SIDE: Question Panel */}
+                <main className="pyp-question-panel glass">
+                  {isReviewMode && (
+                    <div className="review-mode-hud glass">
+                      <div className="review-mode-info">
+                        <span className="review-badge">
+                          {`Review Mode • Question ${activeQuestionIndex + 1} of ${filteredQuestions.length}`}
+                        </span>
+                        <span className="review-score-preview">
+                          {`Score: ${score}/${filteredQuestions.length}`}
+                        </span>
+                      </div>
+                      <button type="button" className="btn btn-secondary btn-sm back-scorecard-btn" onClick={handleBackToScorecard}>
+                        <Award size={15} />
+                        <span>Back to Scorecard</span>
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="pyp-q-header">
+                    <span className="pyp-q-num-badge">
+                      Question {activeQuestionIndex + 1} of {filteredQuestions.length}
+                    </span>
+                    <span className="pyp-q-subject-tag">{formatTag(questionItem)}</span>
+                    {markedForReview[activeQuestionIndex] && (
+                      <span className="pyp-q-review-tag">Marked for Review</span>
+                    )}
+                  </div>
+
+                  <h2 className="pyp-q-text">{displayedQuestion}</h2>
+
+                  <div
+                    className="pyp-options-list"
+                    role="radiogroup"
+                    aria-label={`Question ${activeQuestionIndex + 1} options`}
+                  >
+                    {displayedOptions.map((option, index) => {
+                      const currentSelected = userAnswers[activeQuestionIndex]?.selected ?? selectedAnswer
+                      const isSelected = currentSelected === index
+                      let extraCls = isSelected ? 'selected' : ''
+                      if (isReviewMode) {
+                        if (index === questionItem.correctAnswer) extraCls = 'selected'
+                      }
+                      return (
+                        <label
+                          key={index}
+                          className={`pyp-option-card ${extraCls}`}
+                          style={
+                            isReviewMode && index === questionItem.correctAnswer
+                              ? { borderColor: '#10b981', background: 'rgba(16, 185, 129, 0.16)' }
+                              : isReviewMode && isSelected && index !== questionItem.correctAnswer
+                                ? { borderColor: '#ef4444', background: 'rgba(239, 68, 68, 0.16)' }
+                                : undefined
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name={`mcq-q-${questionItem.id}`}
+                            checked={isSelected}
+                            disabled={isReviewMode}
+                            onChange={() => handleAnswerSelect(index)}
+                          />
+                          <span className="pyp-opt-letter">{String.fromCharCode(65 + index)}</span>
+                          <span className="pyp-opt-text">{option}</span>
+                          {isReviewMode && index === questionItem.correctAnswer && (
+                            <CheckCircle2 size={18} style={{ color: '#34d399', marginLeft: 'auto', flexShrink: 0 }} />
+                          )}
+                          {isReviewMode && isSelected && index !== questionItem.correctAnswer && (
+                            <XCircle size={18} style={{ color: '#f87171', marginLeft: 'auto', flexShrink: 0 }} />
+                          )}
+                        </label>
+                      )
+                    })}
+                  </div>
+
+                  {/* Examination Controls */}
+                  <div className="pyp-q-controls">
+                    <div className="pyp-q-controls-left">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={activeQuestionIndex <= 0}
+                        onClick={handlePrev}
+                      >
+                        <ArrowLeft size={16} />
+                        <span>Previous</span>
+                      </button>
+                      {!isReviewMode && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={handleClearResponse}
+                          disabled={(userAnswers[activeQuestionIndex]?.selected ?? selectedAnswer) === null}
+                        >
+                          <Eraser size={16} />
+                          <span>Clear Response</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="pyp-q-controls-right">
+                      {!isReviewMode ? (
+                        <button type="button" className="btn btn-primary" onClick={handleSaveAndNext}>
+                          <span>Save &amp; Next</span>
+                          <ArrowRight size={16} />
+                        </button>
+                      ) : (
+                        !isLastQuestion && (
+                          <button type="button" className="btn btn-primary" onClick={handleNext}>
+                            <span>Next</span>
+                            <ArrowRight size={16} />
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </main>
+
+                {/* RIGHT SIDE: Question Palette */}
+                <aside className={`pyp-palette-sidebar glass ${isPaletteOpenMobile ? 'mobile-open' : ''}`}>
+                  <div className="pyp-palette-head">
+                    <div>
+                      <h3>Question Palette</h3>
+                      <span>Practice Session</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="pyp-palette-close"
+                      onClick={() => setIsPaletteOpenMobile(false)}
+                      aria-label="Close palette"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {(() => {
+                    const answeredCnt = Object.keys(userAnswers).length
+                    const markedCnt = Object.values(markedForReview).filter(Boolean).length
+                    const visitedCnt = Object.keys(visitedQuestions).length
+                    const notAnsweredCnt = Math.max(0, visitedCnt - answeredCnt)
+                    const notVisitedCnt = Math.max(0, filteredQuestions.length - visitedCnt)
+                    return (
+                      <div className="pyp-palette-legend">
+                        <div><span className="dot answered" /> Answered ({answeredCnt})</div>
+                        <div><span className="dot not-answered" /> Not Answered ({notAnsweredCnt})</div>
+                        <div><span className="dot review" /> Marked ({markedCnt})</div>
+                        <div><span className="dot neutral" /> Not Visited ({notVisitedCnt})</div>
+                      </div>
+                    )
+                  })()}
+
+                  <div className="pyp-palette-grid">
                     {filteredQuestions.map((fq, idx) => {
-                      const ans = userAnswers[idx]
-                      let navClass = 'question-nav-dot'
-                      if (idx === activeQuestionIndex) navClass += ' current'
-                      if (ans) navClass += ans.isCorrect ? ' answered-correct' : ' answered-wrong'
+                      const hasAns = userAnswers[idx] !== undefined
+                      const isMarked = Boolean(markedForReview[idx])
+                      const isVisited = Boolean(visitedQuestions[idx])
+                      let statusCls = 'neutral'
+                      if (isMarked) statusCls = 'review'
+                      else if (hasAns) statusCls = 'answered'
+                      else if (isVisited) statusCls = 'not-answered'
+
                       return (
                         <button
                           key={fq.id}
                           type="button"
-                          className={navClass}
-                          onClick={() => {
-                            setCurrentQuestion(idx)
-                            if (ans !== undefined) {
-                              setSelectedAnswer(ans.selected)
-                              setShowResult(true)
-                            } else {
-                              setSelectedAnswer(null)
-                              setShowResult(false)
-                            }
-                          }}
+                          className={`pyp-palette-btn ${statusCls} ${idx === activeQuestionIndex ? 'current' : ''}`}
+                          onClick={() => goToPracticeQuestion(idx)}
                           aria-label={`Go to question ${idx + 1}`}
                         >
                           {idx + 1}
@@ -1550,70 +1935,128 @@ const MCQPractice = () => {
                       )
                     })}
                   </div>
+
+                  {!isReviewMode && (
+                    <button
+                      type="button"
+                      className="btn pyp-submit-trigger-btn pyp-palette-submit"
+                      onClick={() => setShowSubmitPracticeModal(true)}
+                    >
+                      <Send size={16} />
+                      <span>Submit Practice</span>
+                    </button>
+                  )}
+                </aside>
+              </div>
+            ) : (
+              <div className="empty-practice-state glass">
+                <div className="empty-icon-wrap">
+                  <FileText size={36} className="empty-icon" />
                 </div>
-              )}
-            </motion.div>
-          </AnimatePresence>
-        ) : (
-          <div className="empty-practice-state glass">
-            <div className="empty-icon-wrap">
-              <FileText size={36} className="empty-icon" />
-            </div>
-            <h3>No Practice MCQs Available</h3>
-            <p>
-              {urlLesson ? (
-                <>No questions found for <strong>{decodeURIComponent(urlLesson)}</strong> in {urlClassId ? `${urlClassId}th Standard ` : ''}Unit {activeUnitFilter}.</>
-              ) : urlClassId ? (
-                <>No questions mapped yet for <strong>{urlClassId}th Standard</strong>{activeUnitFilter ? ` Unit ${activeUnitFilter}` : ''}.</>
-              ) : activeUnitFilter ? (
-                <>No questions mapped yet for <strong>Unit {activeUnitFilter}</strong>.</>
-              ) : (
-                <>No practice questions found for the selected examination filter.</>
-              )}
-            </p>
-            <div className="empty-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => updateSyllabusFilter({ lessonId: null, lesson: null })}
-              >
-                <ArrowLeft size={16} />
-                <span>Back to Lessons</span>
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={clearUnitFilter}>
-                <RotateCcw size={16} />
-                <span>Reset Syllabus Filter</span>
-              </button>
-            </div>
+                <h3>No Practice MCQs Available</h3>
+                <p>
+                  {urlLesson ? (
+                    <>No questions found for <strong>{decodeURIComponent(urlLesson)}</strong> in {urlClassId ? `${urlClassId}th Standard ` : ''}Unit {activeUnitFilter}.</>
+                  ) : urlClassId ? (
+                    <>No questions mapped yet for <strong>{urlClassId}th Standard</strong>{activeUnitFilter ? ` Unit ${activeUnitFilter}` : ''}.</>
+                  ) : activeUnitFilter ? (
+                    <>No questions mapped yet for <strong>Unit {activeUnitFilter}</strong>.</>
+                  ) : (
+                    <>No practice questions found for the selected examination filter.</>
+                  )}
+                </p>
+                <div className="empty-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => updateSyllabusFilter({ lessonId: null, lesson: null })}
+                  >
+                    <ArrowLeft size={16} />
+                    <span>Back to Lessons</span>
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={clearUnitFilter}>
+                    <RotateCcw size={16} />
+                    <span>Reset Syllabus Filter</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Submit Practice Confirmation Modal */}
+            {showSubmitPracticeModal && (
+              <div className="pyp-modal-backdrop">
+                <div className="pyp-modal-card glass">
+                  <h3>Submit Practice?</h3>
+                  <p>Review your attempt summary before submitting your practice session.</p>
+                  <div className="pyp-modal-summary">
+                    <div><span>Total Questions</span><strong>{filteredQuestions.length}</strong></div>
+                    <div><span>Answered</span><strong className="green">{Object.keys(userAnswers).length}</strong></div>
+                    <div><span>Unanswered</span><strong className="amber">{Math.max(0, filteredQuestions.length - Object.keys(userAnswers).length)}</strong></div>
+                    <div><span>Marked for Review</span><strong className="purple">{Object.values(markedForReview).filter(Boolean).length}</strong></div>
+                  </div>
+                  <div className="pyp-modal-actions">
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowSubmitPracticeModal(false)}>
+                      Return to Practice
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={handleFinishQuiz}>
+                      Confirm &amp; Submit Practice
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-        </>
         )}
 
         {/* Back Link to General Studies */}
-        <div className="practice-footer-nav">
-          <Link
-            to={
-              selectedGroup === 'group2_2a'
-                ? `/materials/group2/${urlSubjectId}`
-                : selectedGroup === 'group4_vao'
-                ? `/materials/group4/${urlSubjectId}`
-                : '/materials/group1/general-studies'
-            }
-            className="back-btn glass"
-          >
-            <BookOpen size={16} />
-            <span>
-              Back to{' '}
-              {selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
-                ? 'TNPSC Group 2 & 2A Study Materials'
-                : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
-                ? 'TNPSC Group 4 Study Materials'
-                : 'Group 1 General Studies'}
-            </span>
-          </Link>
-        </div>
+        {currentView !== 'test' && (
+          <div className="practice-footer-nav">
+            <Link
+              to={
+                selectedGroup === 'group2_2a'
+                  ? `/materials/group2/${urlSubjectId}`
+                  : selectedGroup === 'group4_vao'
+                    ? `/materials/group4/${urlSubjectId}`
+                    : '/materials/group1/general-studies'
+              }
+              className="back-btn glass"
+            >
+              <BookOpen size={16} />
+              <span>
+                Back to{' '}
+                {selectedGroup === 'group2' || selectedGroup === 'group2a' || selectedGroup === 'group2_2a'
+                  ? 'TNPSC Group 2 & 2A Study Materials'
+                  : selectedGroup === 'group4' || selectedGroup === 'vao' || selectedGroup === 'group4_vao'
+                    ? 'TNPSC Group 4 Study Materials'
+                    : 'Group 1 General Studies'}
+              </span>
+            </Link>
+          </div>
+        )}
       </div>
+
+      {celebrationState && (
+        <AwardCelebrationModal
+          isOpen={Boolean(celebrationState)}
+          onClose={() => setCelebrationState(null)}
+          awardType={celebrationState.awardType}
+          percentage={celebrationState.percentage}
+          title={celebrationState.title}
+        />
+      )}
+      {historyModalLesson && effectiveSubjectId && effectiveClassId && activeUnitFilter && (
+        <AttemptHistoryModal
+          isOpen={Boolean(historyModalLesson)}
+          onClose={() => setHistoryModalLesson(null)}
+          groupId={normalizedGroup}
+          subjectId={effectiveSubjectId}
+          standardId={effectiveClassId}
+          unitId={activeUnitFilter}
+          lessonId={historyModalLesson.lessonId}
+          lessonTitle={historyModalLesson.lessonTitle}
+          mode="mcq_practice"
+        />
+      )}
     </div>
   )
 }

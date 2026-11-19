@@ -55,6 +55,7 @@ import { AdminTopHeader } from '../components/admin/AdminTopHeader'
 import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
 import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
+import { GradeAndProgressSettings } from '../components/admin/GradeAndProgressSettings'
 import { NewStudentPage } from '../components/admin/pages/NewStudentPage'
 import { RestoreStudentPage } from '../components/admin/pages/RestoreStudentPage'
 import { StudentPerformancePage } from '../components/admin/pages/StudentPerformancePage'
@@ -5846,6 +5847,7 @@ const Admin = () => {
           <div className="admin-mock-tests-mgmt-section" style={{ width: '100%' }}>
             <ErrorBoundary key="mtm" compact fallbackTitle="Mock Test Management failed to render">
               <MockTestManagement token={token} onPublishedCountChange={setPublishedMockTestsCount} />
+              <GradeAndProgressSettings token={token} />
             </ErrorBoundary>
           </div>
         )}
