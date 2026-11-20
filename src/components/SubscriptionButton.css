@@ -1,0 +1,165 @@
+/* =========================================================
+   TNPSC STUDY HUB – SHARED PREMIUM SUBSCRIPTION BUTTON
+   Deep Navy Glass • Gold-to-Purple Gradient Border • Warm Gold Glow
+   ========================================================= */
+
+.tnpsc-sub-btn {
+  --sub-gold-bright: #fde047;
+  --sub-gold-metal: #ffd700;
+  --sub-gold-deep: #f59e0b;
+  --sub-purple: #8b5cf6;
+  --sub-purple-deep: #6d28d9;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 0.55rem;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-sizing: border-box;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  color: #fffbeb;
+
+  /* Layered deep navy glass fill + true gold-to-purple gradient border */
+  border: 1.5px solid transparent;
+  background-image:
+    linear-gradient(
+      135deg,
+      rgba(36, 30, 56, 0.92) 0%,
+      rgba(22, 24, 52, 0.94) 52%,
+      rgba(15, 21, 42, 0.96) 100%
+    ),
+    linear-gradient(
+      135deg,
+      rgba(253, 224, 71, 0.92) 0%,
+      rgba(245, 158, 11, 0.85) 38%,
+      rgba(139, 92, 246, 0.82) 100%
+    );
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  box-shadow:
+    inset 0 1px 0 rgba(254, 240, 138, 0.34),
+    inset 0 0 18px rgba(250, 204, 21, 0.09),
+    0 0 18px rgba(245, 158, 11, 0.22),
+    0 6px 18px rgba(0, 0, 0, 0.38);
+
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    background-image 0.22s ease,
+    color 0.22s ease;
+}
+
+.tnpsc-sub-btn:hover {
+  transform: translateY(-1px);
+  color: #ffffff;
+  background-image:
+    linear-gradient(
+      135deg,
+      rgba(52, 40, 68, 0.94) 0%,
+      rgba(34, 30, 74, 0.95) 52%,
+      rgba(19, 25, 52, 0.96) 100%
+    ),
+    linear-gradient(
+      135deg,
+      #fef08a 0%,
+      #facc15 42%,
+      #a78bfa 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(254, 249, 195, 0.52),
+    inset 0 0 22px rgba(250, 204, 21, 0.16),
+    0 0 24px rgba(250, 204, 21, 0.34),
+    0 8px 22px rgba(109, 40, 217, 0.24);
+}
+
+.tnpsc-sub-btn:hover .tnpsc-sub-btn-crown {
+  filter: drop-shadow(0 0 9px rgba(255, 215, 0, 0.85));
+}
+
+.tnpsc-sub-btn:active {
+  transform: translateY(0);
+}
+
+.tnpsc-sub-btn:focus-visible {
+  outline: 2px solid var(--sub-gold-bright);
+  outline-offset: 2px;
+}
+
+.tnpsc-sub-btn.active {
+  color: #ffffff;
+  background-image:
+    linear-gradient(
+      135deg,
+      rgba(62, 46, 70, 0.96) 0%,
+      rgba(44, 34, 88, 0.96) 54%,
+      rgba(22, 27, 56, 0.98) 100%
+    ),
+    linear-gradient(
+      135deg,
+      #fef08a 0%,
+      #ffd700 45%,
+      #a855f7 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(254, 249, 195, 0.56),
+    inset 0 0 24px rgba(250, 204, 21, 0.2),
+    0 0 0 1px rgba(250, 204, 21, 0.35),
+    0 0 26px rgba(245, 158, 11, 0.36);
+}
+
+.tnpsc-sub-btn-crown {
+  color: var(--sub-gold-metal);
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.55));
+  transition: filter 0.22s ease;
+}
+
+.tnpsc-sub-btn-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+/* Variant 1: Dashboard Top-Right Header Pill */
+.tnpsc-sub-btn--header {
+  padding: 0.53rem 1.05rem;
+  border-radius: 50px;
+  font-size: 0.8125rem;
+}
+
+/* Variant 2: Student Sidebar Full-Width Button */
+.tnpsc-sub-btn--sidebar {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 0.7rem;
+  padding: 0.68rem 0.95rem;
+  border-radius: 14px;
+  font-size: 0.86rem;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .tnpsc-sub-btn--header {
+    padding: 0.48rem 0.88rem;
+    font-size: 0.78rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tnpsc-sub-btn,
+  .tnpsc-sub-btn-crown {
+    transition: none;
+  }
+
+  .tnpsc-sub-btn:hover {
+    transform: none;
+  }
+}

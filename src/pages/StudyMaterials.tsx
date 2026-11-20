@@ -21,6 +21,8 @@ import {
 } from '../data/group1SyllabusData'
 import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { apiFetch } from '../utils/api'
+import { useStudentAuth } from '../context/StudentAuthContext'
+import { buildAuthRedirectUrl, savePostLoginRedirect } from '../utils/authRedirect'
 import './StudyMaterials.css'
 
 type GroupId = 'group1' | 'group2_2a' | 'group4_vao'
@@ -45,8 +47,20 @@ const getStoredGroup = (): GroupId => {
 
 const StudyMaterials = () => {
   const navigate = useNavigate()
+  const { isAuthenticated } = useStudentAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
+
+  const navigateProtected = (targetPath: string, navState?: Record<string, unknown>) => {
+    if (!isAuthenticated) {
+      savePostLoginRedirect(targetPath)
+      navigate(buildAuthRedirectUrl('login', targetPath), {
+        state: { from: targetPath },
+      })
+      return
+    }
+    navigate(targetPath, navState ? { state: navState } : undefined)
+  }
     
   const rawUrlParam = searchParams.get('group') || searchParams.get('tab')
   const groupFromUrl = normalizeGroup(rawUrlParam)
@@ -196,7 +210,7 @@ const StudyMaterials = () => {
             {/* Card 1: General Studies */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group1/general-studies')}
+              onClick={() => navigateProtected('/materials/group1/general-studies')}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part A • Degree Standard'}</span>
@@ -252,7 +266,7 @@ const StudyMaterials = () => {
             {/* Card 2: Aptitude */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group1/aptitude')}
+              onClick={() => navigateProtected('/materials/group1/aptitude')}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part B • SSLC Standard'}</span>
@@ -322,7 +336,7 @@ const StudyMaterials = () => {
             {/* Card 1: General Studies */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group2/general-studies', { state: { selectedGroup: 'group2_2a' } })}
+              onClick={() => navigateProtected('/materials/group2/general-studies', { selectedGroup: 'group2_2a' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part A • Degree Standard'}</span>
@@ -378,7 +392,7 @@ const StudyMaterials = () => {
             {/* Card 2: Aptitude and Mental Ability */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group2/aptitude', { state: { selectedGroup: 'group2_2a' } })}
+              onClick={() => navigateProtected('/materials/group2/aptitude', { selectedGroup: 'group2_2a' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part B • SSLC Standard'}</span>
@@ -434,7 +448,7 @@ const StudyMaterials = () => {
             {/* Card 3: General English */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group2/general-english', { state: { selectedGroup: 'group2_2a' } })}
+              onClick={() => navigateProtected('/materials/group2/general-english', { selectedGroup: 'group2_2a' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part C • SSLC Standard'}</span>
@@ -490,7 +504,7 @@ const StudyMaterials = () => {
             {/* Card 4: General Tamil */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group2/general-tamil', { state: { selectedGroup: 'group2_2a' } })}
+              onClick={() => navigateProtected('/materials/group2/general-tamil', { selectedGroup: 'group2_2a' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part C • SSLC Standard'}</span>
@@ -560,7 +574,7 @@ const StudyMaterials = () => {
             {/* Card 1: General Studies */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group4/general-studies', { state: { selectedGroup: 'group4_vao' } })}
+              onClick={() => navigateProtected('/materials/group4/general-studies', { selectedGroup: 'group4_vao' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part A • SSLC Standard'}</span>
@@ -616,7 +630,7 @@ const StudyMaterials = () => {
             {/* Card 2: Aptitude and Mental Ability */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group4/aptitude', { state: { selectedGroup: 'group4_vao' } })}
+              onClick={() => navigateProtected('/materials/group4/aptitude', { selectedGroup: 'group4_vao' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part B • SSLC Standard'}</span>
@@ -672,7 +686,7 @@ const StudyMaterials = () => {
             {/* Card 3: General Tamil */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group4/general-tamil', { state: { selectedGroup: 'group4_vao' } })}
+              onClick={() => navigateProtected('/materials/group4/general-tamil', { selectedGroup: 'group4_vao' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part C • SSLC Standard'}</span>
@@ -728,7 +742,7 @@ const StudyMaterials = () => {
             {/* Card 4: General English */}
             <div
               className="group1-main-card glass"
-              onClick={() => navigate('/materials/group4/general-english', { state: { selectedGroup: 'group4_vao' } })}
+              onClick={() => navigateProtected('/materials/group4/general-english', { selectedGroup: 'group4_vao' })}
             >
               <div className="group1-card-top">
                 <span className="group1-part-tag">{'Part C • SSLC Standard'}</span>

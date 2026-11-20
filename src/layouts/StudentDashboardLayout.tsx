@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Menu, Sparkles } from 'lucide-react';
 import { StudentSidebar } from '../components/StudentSidebar';
+import { StudentAvatar } from '../components/StudentAvatar';
 import TargetGroupOnboardingModal from '../components/TargetGroupOnboardingModal';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useStudentAuth } from '../context/StudentAuthContext';
@@ -32,6 +33,9 @@ export const StudentDashboardLayout: React.FC = () => {
     const p = location.pathname.toLowerCase();
     if (p === '/dashboard') {
       return { title: 'My Dashboard', category: 'Overview & Telemetry' };
+    }
+    if (p.startsWith('/dashboard/subscription')) {
+      return { title: 'Subscription Plans', category: 'Unlock Premium Access' };
     }
     if (p.startsWith('/materials')) {
       return { title: 'Study Materials', category: 'Syllabus & Textbooks' };
@@ -106,21 +110,13 @@ export const StudentDashboardLayout: React.FC = () => {
               <span>TNPSC</span>
             </div>
             {student && (
-              <div
-                className="student-mobile-avatar-pill"
-                title={student.fullName || 'Student'}
-              >
-                {student.avatarUrl ? (
-                  <img
-                    src={student.avatarUrl}
-                    alt={student.fullName || 'Student'}
-                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  student.fullName ? student.fullName.charAt(0).toUpperCase() : 'S'
-                )}
-              </div>
+              <StudentAvatar
+                studentId={student.id}
+                fullName={student.fullName}
+                email={student.email}
+                avatarUrl={student.avatarUrl}
+                size={32}
+              />
             )}
           </div>
         </header>

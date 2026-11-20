@@ -10,6 +10,7 @@ import {
   Activity,
   Globe,
   CreditCard,
+  Receipt,
   UserPlus,
   RotateCcw,
   Award,
@@ -21,6 +22,7 @@ import {
   Eye,
   Shield,
   Users,
+  LogIn,
   LogOut,
   X,
   Layers,
@@ -37,6 +39,8 @@ export type AdminSectionType =
   | 'notes'
   | 'study-materials-management'
   | 'mock-tests'
+  | 'mock-test-generator'
+  | 'previous-year-papers'
   | 'gdrive'
   | 'claude'
   | 'dashboard-view';
@@ -47,6 +51,8 @@ export type AnalyticsTabType =
   | 'live'
   | 'traffic'
   | 'subscriptions'
+  | 'login-history'
+  | 'subscription-history'
   | 'new-student'
   | 'restore-student'
   | 'performance'
@@ -197,7 +203,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                 <span className="nav-section-title-interactive">ANALYTICS</span>
               </div>
               <div className="section-header-right">
-                <span className="modules-pill">9 Pages</span>
+                <span className="modules-pill">10 Pages</span>
                 {isAnalyticsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </div>
             </button>
@@ -259,6 +265,30 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                   >
                     <CreditCard size={15} className="btn-lead-icon" />
                     <span className="btn-label-text">Subscription Overview</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    className={`nav-tree-btn sub-btn ${isItemActive('/admin/analytics/login-history') ? 'active' : ''}`}
+                    onClick={() => handleNavClick('/admin/analytics/login-history')}
+                    title="Real-Time Day-by-Day Student Login History Register"
+                  >
+                    <LogIn size={15} className="btn-lead-icon" />
+                    <span className="btn-label-text">Student Login History</span>
+                    <span className="btn-tag cyan">LIVE</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    className={`nav-tree-btn sub-btn ${isItemActive('/admin/analytics/subscription-history') ? 'active' : ''}`}
+                    onClick={() => handleNavClick('/admin/analytics/subscription-history')}
+                    title="Verified Student Subscription Purchases & Payment Ledger"
+                  >
+                    <Receipt size={15} className="btn-lead-icon" />
+                    <span className="btn-label-text">Student Subscription History</span>
+                    <span className="btn-tag cyan">LIVE</span>
                   </button>
                 </li>
                 <li>
@@ -372,6 +402,30 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                   <ClipboardCheck size={17} className="btn-lead-icon" />
                   <span className="btn-label-text">Mock Test Management</span>
                   <span className="item-count-badge">{counts.mockTests ?? 0}</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className={`nav-tree-btn ${isItemActive('/admin/mock-test-generator') ? 'active' : ''}`}
+                  onClick={() => handleNavClick('/admin/mock-test-generator')}
+                  title="Mock Test MCQ Generator (Lesson-wise, Unit-wise & Full-length Generator)"
+                >
+                  <Award size={17} className="btn-lead-icon" />
+                  <span className="btn-label-text">Mock Test MCQ Generator</span>
+                  <span className="btn-tag cyan">New</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className={`nav-tree-btn ${isItemActive('/admin/previous-year-papers') ? 'active' : ''}`}
+                  onClick={() => handleNavClick('/admin/previous-year-papers')}
+                  title="Previous Year Papers Management (PDF Upload, Extraction & Publishing)"
+                >
+                  <FileText size={17} className="btn-lead-icon" />
+                  <span className="btn-label-text">Previous Year Papers</span>
+                  <span className="btn-tag cyan">PDF</span>
                 </button>
               </li>
             </ul>

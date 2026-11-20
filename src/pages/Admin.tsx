@@ -55,11 +55,15 @@ import { AdminTopHeader } from '../components/admin/AdminTopHeader'
 import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
 import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
+import { MockTestMcqGenerator } from '../components/admin/MockTestMcqGenerator'
+import { PreviousYearPapersManager } from '../components/admin/PreviousYearPapersManager'
 import { GradeAndProgressSettings } from '../components/admin/GradeAndProgressSettings'
 import { NewStudentPage } from '../components/admin/pages/NewStudentPage'
 import { RestoreStudentPage } from '../components/admin/pages/RestoreStudentPage'
 import { StudentPerformancePage } from '../components/admin/pages/StudentPerformancePage'
 import { SubscriptionOverviewPage } from '../components/admin/pages/SubscriptionOverviewPage'
+import { StudentLoginHistoryPage } from '../components/admin/pages/StudentLoginHistoryPage'
+import { StudentSubscriptionHistoryPage } from '../components/admin/pages/StudentSubscriptionHistoryPage'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
@@ -198,6 +202,8 @@ const Admin = () => {
   const isLiveMonitor = rawPath === '/admin/analytics/live-monitor'
   const isTraffic = rawPath === '/admin/analytics/traffic'
   const isSubscriptions = rawPath === '/admin/analytics/subscriptions'
+  const isLoginHistory = rawPath === '/admin/analytics/login-history'
+  const isSubscriptionHistory = rawPath === '/admin/analytics/subscription-history'
   const isNewStudent = rawPath === '/admin/analytics/new-student'
   const isRestoreStudent = rawPath === '/admin/analytics/restore-student'
   const isPerformance = rawPath === '/admin/analytics/student-performance'
@@ -207,12 +213,16 @@ const Admin = () => {
   const isNotes = rawPath === '/admin/study-notes'
   const isStudyMaterialsManagement = rawPath === '/admin/study-materials-management'
   const isMockTests = rawPath === '/admin/mock-tests'
+  const isMockTestGenerator = rawPath === '/admin/mock-test-generator'
+  const isPreviousYearPapers = rawPath === '/admin/previous-year-papers'
   const isGdrive = rawPath === '/admin/google-drive'
   const isClaude = rawPath === '/admin/ai-private-hub'
   const isDashboardView = rawPath === '/admin/dashboard-view'
 
   const resolvedSection: AdminSectionType =
     isStudyMaterialsManagement ? 'study-materials-management' :
+    isPreviousYearPapers ? 'previous-year-papers' :
+    isMockTestGenerator ? 'mock-test-generator' :
     isMockTests ? 'mock-tests' :
     isQuestions ? 'questions' :
     isTextbooks ? 'textbooks' :
@@ -228,6 +238,8 @@ const Admin = () => {
     isLiveMonitor ? 'live' :
     isTraffic ? 'traffic' :
     isSubscriptions ? 'subscriptions' :
+    isLoginHistory ? 'login-history' :
+    isSubscriptionHistory ? 'subscription-history' :
     isNewStudent ? 'new-student' :
     isRestoreStudent ? 'restore-student' :
     isPerformance ? 'performance' :
@@ -3919,7 +3931,7 @@ const Admin = () => {
         />
 
         <div className="admin-enterprise-body-content">
-          <div className={`admin-page ${(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isGdrive || isClaude) ? 'is-content-page' : ''}`}>
+          <div className={`admin-page ${(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isMockTestGenerator || isPreviousYearPapers || isGdrive || isClaude) ? 'is-content-page' : ''}`}>
             <div className="admin-container">
         {/* Toast Notification */}
         {actionMessage && (
@@ -3989,6 +4001,18 @@ const Admin = () => {
         {isSubscriptions && (
           <ErrorBoundary key="subs" compact fallbackTitle="Subscription Overview failed to render">
             <SubscriptionOverviewPage token={token} />
+          </ErrorBoundary>
+        )}
+
+        {isLoginHistory && (
+          <ErrorBoundary key="login-history" compact fallbackTitle="Student Login History failed to render">
+            <StudentLoginHistoryPage token={token} />
+          </ErrorBoundary>
+        )}
+
+        {isSubscriptionHistory && (
+          <ErrorBoundary key="subscription-history" compact fallbackTitle="Student Subscription History failed to render">
+            <StudentSubscriptionHistoryPage token={token} />
           </ErrorBoundary>
         )}
 
@@ -4080,13 +4104,13 @@ const Admin = () => {
         )}
 
         {/* 5. Header for Content Management & Integration Pages (Zero Horizontal Tabs) */}
-        {(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isGdrive || isClaude) && (
+        {(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isMockTestGenerator || isPreviousYearPapers || isGdrive || isClaude) && (
           <div className="admin-header">
             <div className="admin-header-main">
               <div className="admin-badge-row">
                 <span className="admin-badge">
                   <Sparkles size={13} />
-                  {isQuestions ? 'Question Bank' : isTextbooks ? 'Textbook Management' : isNotes ? 'Study Notes' : isStudyMaterialsManagement ? 'Study Materials Management' : isMockTests ? 'Mock Test Management' : isGdrive ? 'Google Drive' : 'AI Provider Hub'}
+                  {isQuestions ? 'Question Bank' : isTextbooks ? 'Textbook Management' : isNotes ? 'Study Notes' : isStudyMaterialsManagement ? 'Study Materials Management' : isPreviousYearPapers ? 'Previous Year Papers Management' : isMockTestGenerator ? 'Mock Test MCQ Generator' : isMockTests ? 'Mock Test Management' : isGdrive ? 'Google Drive' : 'AI Provider Hub'}
                 </span>
                 <span className="admin-user-pill admin-db-pill">
                   <Database size={13} />
@@ -4111,6 +4135,8 @@ const Admin = () => {
                 {isNotes && 'Study Notes Management'}
                 {isStudyMaterialsManagement && 'Study Materials Management'}
                 {isMockTests && 'Mock Test Management'}
+                {isMockTestGenerator && 'Mock Test MCQ Generator'}
+                {isPreviousYearPapers && 'Previous Year Papers Management'}
                 {isGdrive && 'Google Drive PDF Materials'}
                 {isClaude && 'AI Provider Hub (Claude & Gemini)'}
               </h1>
@@ -4120,6 +4146,8 @@ const Admin = () => {
                 {isNotes && 'Review, edit, stage, and publish comprehensive TNPSC Complete Study Notes directly into the database.'}
                 {isStudyMaterialsManagement && 'Manage syllabus hierarchy dynamically across Exam, Subject, Standard (6th–12th), Units, Lessons, Topics, and Study Notes.'}
                 {isMockTests && 'Create, configure, schedule, and publish full-length TNPSC Mock Tests using real questions from the Question Bank.'}
+                {isMockTestGenerator && 'Generate Lesson-wise, Unit-wise, and Full-length (6th–12th Standard) Mock Tests from the existing Question Bank with staging review and publishing.'}
+                {isPreviousYearPapers && 'Upload official TNPSC previous-year question paper PDFs, extract and verify questions with answer keys, and publish online examinations.'}
                 {isGdrive && 'Connect your personal Google Drive account to store and stream official PDF textbooks and study materials with zero serverless size limits.'}
                 {isClaude && 'Configure Anthropic Claude AI and Google Gemini AI as two completely independent providers with separate keys, models, prompts, and generation logs.'}
               </p>
@@ -5848,6 +5876,24 @@ const Admin = () => {
             <ErrorBoundary key="mtm" compact fallbackTitle="Mock Test Management failed to render">
               <MockTestManagement token={token} onPublishedCountChange={setPublishedMockTestsCount} />
               <GradeAndProgressSettings token={token} />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* Mock Test MCQ Generator Module */}
+        {isMockTestGenerator && (
+          <div className="admin-mock-tests-mgmt-section" style={{ width: '100%' }}>
+            <ErrorBoundary key="mtmg" compact fallbackTitle="Mock Test MCQ Generator failed to render">
+              <MockTestMcqGenerator token={token} onPublishedCountChange={setPublishedMockTestsCount} />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* Previous Year Papers Management Module */}
+        {isPreviousYearPapers && (
+          <div className="admin-mock-tests-mgmt-section" style={{ width: '100%' }}>
+            <ErrorBoundary key="pypm" compact fallbackTitle="Previous Year Papers Management failed to render">
+              <PreviousYearPapersManager token={token} />
             </ErrorBoundary>
           </div>
         )}

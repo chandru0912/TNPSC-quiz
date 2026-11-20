@@ -508,6 +508,31 @@ export async function getMockTestProgressSummary(
     unitWiseByTestId[k] = computeStatsFromAttempts(list, boundaries);
   }
 
+  const lessonWiseRows = rows.filter((r) => resolveModeForAttempt(r) === 'lesson_wise');
+  const lessonWiseByTestId: Record<string, ReturnType<typeof computeStatsFromAttempts>> = {};
+  const groupedLessonWise = new Map<string, any[]>();
+  for (const r of lessonWiseRows) {
+    const key = String(r.test_id || '');
+    if (!key) continue;
+    if (!groupedLessonWise.has(key)) groupedLessonWise.set(key, []);
+    groupedLessonWise.get(key)!.push(r);
+  }
+  for (const [k, list] of groupedLessonWise.entries()) {
+    lessonWiseByTestId[k] = computeStatsFromAttempts(list, boundaries);
+  }
+
+  const allByTestId: Record<string, ReturnType<typeof computeStatsFromAttempts>> = {};
+  const groupedAll = new Map<string, any[]>();
+  for (const r of rows) {
+    const key = String(r.test_id || '');
+    if (!key) continue;
+    if (!groupedAll.has(key)) groupedAll.set(key, []);
+    groupedAll.get(key)!.push(r);
+  }
+  for (const [k, list] of groupedAll.entries()) {
+    allByTestId[k] = computeStatsFromAttempts(list, boundaries);
+  }
+
   const inProgressTestIds = inProgRes.rows.map((r) => Number(r.mock_test_id)).filter(Boolean);
   const totalTimeSpentSeconds = rows.reduce((s, r) => s + Number(r.time_spent_seconds || 0), 0);
 
@@ -526,6 +551,8 @@ export async function getMockTestProgressSummary(
     totalTimeSpentSeconds,
     byTestId,
     unitWiseByTestId,
+    lessonWiseByTestId,
+    allByTestId,
     inProgressTestIds,
     gradeBoundaries: boundaries,
     awardSettings,

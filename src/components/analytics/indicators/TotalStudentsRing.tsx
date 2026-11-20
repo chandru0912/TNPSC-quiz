@@ -5,7 +5,8 @@ import { AnimatedCountUp } from '../AnimatedCountUp';
 interface TotalStudentsRingProps {
   totalStudents: number;
   activeStudents: number;
-  growthPercentage: number;
+  verifiedStudents?: number;
+  growthPercentage: number | null;
   trend: 'up' | 'down' | 'neutral';
   comparisonText?: string;
   onClick?: () => void;
@@ -14,9 +15,10 @@ interface TotalStudentsRingProps {
 export const TotalStudentsRing: React.FC<TotalStudentsRingProps> = ({
   totalStudents,
   activeStudents,
+  verifiedStudents = 0,
   growthPercentage,
   trend,
-  comparisonText = 'vs previous period',
+  comparisonText = 'Insufficient historical data',
   onClick,
 }) => {
   const [offset, setOffset] = useState<number>(251.2); // Circumference for r=40 is 2*PI*40 ~= 251.32
@@ -121,7 +123,7 @@ export const TotalStudentsRing: React.FC<TotalStudentsRingProps> = ({
               {activeStudents} Active
             </span>
             <span className="ring-mini-pill">
-              100% Verified
+              {verifiedStudents} Verified
             </span>
           </div>
         </div>
@@ -133,7 +135,7 @@ export const TotalStudentsRing: React.FC<TotalStudentsRingProps> = ({
           {trend === 'up' && <TrendingUp size={12} />}
           {trend === 'down' && <TrendingDown size={12} />}
           {trend === 'neutral' && <Minus size={12} />}
-          <span>{growthPercentage > 0 ? `+${growthPercentage}%` : `${growthPercentage}%`}</span>
+          <span>{growthPercentage === null ? '—' : growthPercentage > 0 ? `+${growthPercentage}%` : `${growthPercentage}%`}</span>
         </span>
         <span className="fic-footer-label">{comparisonText}</span>
       </div>

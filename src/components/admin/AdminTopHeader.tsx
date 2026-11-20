@@ -42,6 +42,10 @@ export const AdminTopHeader: React.FC<AdminTopHeaderProps> = ({
             return { group: 'Analytics', page: 'Live Traffic & Web Monitor' };
           case 'subscriptions':
             return { group: 'Analytics', page: 'Subscription Overview' };
+          case 'login-history':
+            return { group: 'Analytics', page: 'Student Login History' };
+          case 'subscription-history':
+            return { group: 'Analytics', page: 'Student Subscription History' };
           case 'performance':
             return { group: 'Analytics', page: 'Student Performance' };
           case 'reports':
@@ -59,6 +63,8 @@ export const AdminTopHeader: React.FC<AdminTopHeaderProps> = ({
         return { group: 'Content Management', page: 'Textbook Management' };
       case 'mock-tests':
         return { group: 'Content Management', page: 'Mock Test Management' };
+      case 'mock-test-generator':
+        return { group: 'Content Management', page: 'Mock Test MCQ Generator' };
       case 'notes':
         return { group: 'Content Management', page: 'Study Notes' };
       case 'gdrive':

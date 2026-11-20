@@ -18,7 +18,7 @@ interface OverviewCard {
   title: string;
   value: number;
   formatted: string;
-  change: number;
+  change: number | null;
   trend: 'up' | 'down' | 'neutral';
   category: string;
   badge: string;

@@ -26,13 +26,14 @@ import claudeRouter from './routes/claudeRoutes';
 import geminiRouter from './routes/geminiRoutes';
 import driveRouter from './routes/drive';
 import studentRouter from './routes/student';
-import previousPapersRouter from './routes/previousPapersRoutes';
+import previousPapersRouter, { adminPreviousPapersRouter } from './routes/previousPapersRoutes';
 import { getStudentDashboardData } from './services/studentDashboardService';
 import analyticsRouter from './routes/analyticsRoutes';
 import studyManagementRouter from './routes/studyMaterialsManagementRoutes';
 import aiSyllabusImportRouter from './routes/aiSyllabusImportRoutes';
 import mcqGenerationJobsRouter from './routes/mcqGenerationJobs';
 import { adminMockTestsRouter, studentMockTestsRouter } from './routes/mockTestsRoutes';
+import subscriptionsRouter, { adminSubscriptionsRouter } from './routes/subscriptionsRoutes';
 import { AISyllabusJobService } from './services/aiSyllabusJobService';
 
 const app = express();
@@ -377,6 +378,7 @@ app.use('/api/student', requireSchemaMiddleware, studentRouter);
 app.use('/student', requireSchemaMiddleware, studentRouter);
 app.use('/api/api/student', requireSchemaMiddleware, studentRouter);
 
+app.use(['/api/admin/previous-papers', '/admin/previous-papers', '/api/api/admin/previous-papers'], requireSchemaMiddleware, adminPreviousPapersRouter);
 app.use(['/api/previous-papers', '/previous-papers', '/api/api/previous-papers'], requireSchemaMiddleware, previousPapersRouter);
 
 app.get(['/api/dashboard/performance', '/dashboard/performance'], requireSchemaMiddleware, requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
@@ -401,6 +403,9 @@ app.use('/api/api/study-management', requireSchemaMiddleware, studyManagementRou
 
 app.use(['/api/admin/mock-tests', '/admin/mock-tests', '/api/api/admin/mock-tests'], requireSchemaMiddleware, adminMockTestsRouter);
 app.use(['/api/mock-tests', '/mock-tests', '/api/api/mock-tests'], requireSchemaMiddleware, studentMockTestsRouter);
+
+app.use(['/api/admin/subscriptions', '/admin/subscriptions', '/api/api/admin/subscriptions'], requireSchemaMiddleware, adminSubscriptionsRouter);
+app.use(['/api/subscriptions', '/subscriptions', '/api/api/subscriptions'], requireSchemaMiddleware, subscriptionsRouter);
 
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {

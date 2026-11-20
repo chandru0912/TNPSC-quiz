@@ -69,6 +69,23 @@ export function getApiUrl(path: string): string {
   return normalizedPath;
 }
 
+export function getActiveAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const isAdminPath = window.location.pathname.startsWith('/admin');
+  if (isAdminPath) {
+    return localStorage.getItem('tnpsc_admin_token') || localStorage.getItem('tnpsc_student_token');
+  }
+  return localStorage.getItem('tnpsc_student_token');
+}
+
+export function getAuthenticatedApiUrl(path: string): string {
+  const baseUrl = getApiUrl(path);
+  const token = getActiveAuthToken();
+  if (!token) return baseUrl;
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${sep}token=${encodeURIComponent(token)}`;
+}
+
 export interface ApiFetchOptions extends RequestInit {
   timeoutMs?: number;
 }
@@ -77,9 +94,18 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
   const { timeoutMs = 30000, cache = 'no-store', ...fetchOptions } = options;
   const primaryUrl = getApiUrl(path);
 
+  const mergedHeaders = new Headers(fetchOptions.headers || {});
+  if (!mergedHeaders.has('Authorization')) {
+    const activeToken = getActiveAuthToken();
+    if (activeToken) {
+      mergedHeaders.set('Authorization', `Bearer ${activeToken}`);
+    }
+  }
+
   const executeFetch = async (targetUrl: string, signal?: AbortSignal): Promise<Response> => {
     return await fetch(targetUrl, {
       ...fetchOptions,
+      headers: mergedHeaders,
       cache,
       signal,
     });
@@ -124,6 +150,38 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
           } catch {
             // continue
           }
+        }
+      }
+
+      // Intercept backend Single-Device Session Revocation / Expiration (HTTP 401)
+      if (
+        response.status === 401 &&
+        typeof window !== 'undefined' &&
+        !window.location.pathname.startsWith('/admin') &&
+        localStorage.getItem('tnpsc_student_token')
+      ) {
+        try {
+          const cloned = response.clone();
+          const body = await cloned.json().catch(() => null);
+          const code = body?.code;
+          if (
+            code === 'SESSION_REVOKED_OTHER_DEVICE' ||
+            code === 'SESSION_EXPIRED' ||
+            code === 'SESSION_LOGGED_OUT'
+          ) {
+            window.dispatchEvent(
+              new CustomEvent('tnpsc:student-session-revoked', {
+                detail: {
+                  code,
+                  message:
+                    body?.message ||
+                    'Your account has been logged in on another device. Please log in again to continue.',
+                },
+              })
+            );
+          }
+        } catch {
+          // non-JSON 401 body
         }
       }
 

@@ -580,4 +580,71 @@
   font-size: 0.7rem;
 }
 
+/* Self-contained Start Test / Continue Test / Practice Again button styling
+   (prevents missing styles before PreviousPapers.css loads and prevents Admin.css 34px overrides) */
+.practice .hierarchy-lesson-meta .table-action-btn.table-action-primary.hierarchy-start-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: auto;
+  height: auto;
+  min-width: 124px;
+  padding: 0.55rem 1.1rem;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #4f46e5 100%);
+  border: 1px solid rgba(216, 180, 254, 0.5);
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.practice .hierarchy-lesson-meta .table-action-btn.table-action-primary.hierarchy-start-btn::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 10%;
+  right: 10%;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, transparent 100%);
+  border-radius: 9999px 9999px 60% 60%;
+  pointer-events: none;
+}
+
+.practice .hierarchy-lesson-meta .table-action-btn.table-action-primary.hierarchy-start-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #6366f1 100%);
+  border-color: rgba(216, 180, 254, 0.75);
+  color: #ffffff;
+  box-shadow: 0 6px 22px rgba(124, 58, 237, 0.55), 0 0 18px rgba(168, 85, 247, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.practice .hierarchy-lesson-meta .table-action-btn.table-action-primary.hierarchy-start-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+}
+
+.practice .hierarchy-lesson-meta .table-action-btn.table-action-primary.hierarchy-start-btn:disabled,
+.mocktest-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.lesson-status-badge.status-loading {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
 

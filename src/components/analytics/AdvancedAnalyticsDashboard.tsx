@@ -71,6 +71,8 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
   const [overviewData, setOverviewData] = useState<any>(null);
   const [kpiSummary, setKpiSummary] = useState<any[]>([]);
   const [geographicData, setGeographicData] = useState<any[]>([]);
+  const [geographicRanking, setGeographicRanking] = useState<any>(null);
+  const [sseStatus, setSseStatus] = useState<'connected' | 'reconnecting' | 'polling'>('polling');
   const [liveData, setLiveData] = useState<any>({
     activeVisitors: 0,
     activeStudents: 0,
@@ -144,6 +146,9 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
         setGeographicData(dGeo.data.districts);
         setDistrictsList(dGeo.data.districts.map((d: any) => d.district));
       }
+      if (dGeo.data?.ranking) {
+        setGeographicRanking(dGeo.data.ranking);
+      }
       if (dLive.data) setLiveData(dLive.data);
       if (dTraff.data) setTrafficData(dTraff.data);
       if (dSub.data) setSubscriptionData(dSub.data);
@@ -164,6 +169,79 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
   useEffect(() => {
     fetchAllAnalytics();
   }, [fetchAllAnalytics]);
+
+  // Real-Time SSE subscription for Tamil Nadu Map Analytics & live updates (no full-page reload)
+  useEffect(() => {
+    const activeToken =
+      token ||
+      localStorage.getItem('tnpsc_admin_token') ||
+      localStorage.getItem('adminToken') ||
+      localStorage.getItem('token') ||
+      '';
+    if (!activeToken || typeof EventSource === 'undefined') {
+      setSseStatus('polling');
+      return;
+    }
+
+    let es: EventSource | null = null;
+    let reconnectTimer: number | null = null;
+    let closed = false;
+
+    const refreshActiveTabData = async () => {
+      const headers = { Authorization: `Bearer ${activeToken}` };
+      try {
+        if (activeTab === 'geographic') {
+          const res = await apiFetch(`/api/analytics/geographic?range=${dateRange}`, { headers });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json?.data?.districts) {
+            setGeographicData(json.data.districts);
+            if (json.data.ranking) setGeographicRanking(json.data.ranking);
+            setLastUpdated(new Date());
+          }
+        } else if (activeTab === 'live') {
+          const res = await apiFetch('/api/analytics/live', { headers });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json?.data) {
+            setLiveData(json.data);
+            setLastUpdated(new Date());
+          }
+        } else {
+          await fetchAllAnalytics(true);
+        }
+      } catch {
+        // Silent background refresh
+      }
+    };
+
+    const connect = () => {
+      if (closed) return;
+      try {
+        const streamUrl = `/api/analytics/stream?token=${encodeURIComponent(activeToken)}&range=${encodeURIComponent(dateRange)}`;
+        es = new EventSource(streamUrl);
+        es.addEventListener('connected', () => {
+          setSseStatus('connected');
+        });
+        es.addEventListener('metrics_updated', () => {
+          void refreshActiveTabData();
+        });
+        es.onerror = () => {
+          es?.close();
+          if (closed) return;
+          setSseStatus('reconnecting');
+          reconnectTimer = window.setTimeout(connect, 5000);
+        };
+      } catch {
+        setSseStatus('polling');
+      }
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      es?.close();
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+    };
+  }, [token, dateRange, districtFilter, activeTab, fetchAllAnalytics]);
 
   // Periodic polling for live monitor (every 10s if active on live tab, or every 45s generally)
   useEffect(() => {
@@ -189,9 +267,25 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
       {/* Top Global Control Toolbar */}
       <div className="dashboard-global-toolbar glass">
         <div className="toolbar-left">
-          <div className="brand-logo-pill">
-            <span className="live-dot-pulse" />
-            <span className="brand-pill-text">Analytics Engine</span>
+          <div className="brand-logo-pill" title={`Stream status: ${sseStatus}`}>
+            <span
+              className="live-dot-pulse"
+              style={{
+                background:
+                  sseStatus === 'connected'
+                    ? '#10b981'
+                    : sseStatus === 'reconnecting'
+                      ? '#f59e0b'
+                      : '#38bdf8',
+              }}
+            />
+            <span className="brand-pill-text">
+              {sseStatus === 'connected'
+                ? 'Live SSE Connected'
+                : sseStatus === 'reconnecting'
+                  ? 'Reconnecting...'
+                  : 'Polling Sync'}
+            </span>
           </div>
 
           <div className="last-sync-badge">
@@ -214,7 +308,7 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
               <option value="7d">Last 7 Days</option>
               <option value="30d">Last 30 Days</option>
               <option value="90d">Last 90 Days</option>
-              <option value="yearly">Past 12 Months</option>
+              <option value="all">All Time</option>
             </select>
           </div>
 
@@ -307,6 +401,9 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
           {activeTab === 'geographic' && (
             <TamilNaduMap
               districtsData={geographicData}
+              ranking={geographicRanking}
+              sseStatus={sseStatus}
+              lastUpdated={lastUpdated}
               activeMetric={geoMetric}
               onMetricChange={setGeoMetric}
               selectedDistrict={selectedGeoDistrict}

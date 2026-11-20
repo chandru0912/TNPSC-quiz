@@ -13,9 +13,17 @@ import {
 
 export interface DistrictMetric {
   district: string;
+  districtId?: string;
   visitors: number;
   uniqueVisitors: number;
   students: number;
+  registeredStudents?: number;
+  uniqueLoginStudents?: number;
+  totalLoginEvents?: number;
+  todayUniqueLogins?: number;
+  last7dUniqueLogins?: number;
+  last30dUniqueLogins?: number;
+  usagePercentage?: number;
   subscribers: number;
   freeStudents: number;
   conversionRate: number;
@@ -30,8 +38,33 @@ export interface DistrictMetric {
   }[];
 }
 
+export interface DistrictRankEntry {
+  district: string;
+  uniqueLoginStudents: number;
+  totalLoginEvents: number;
+  registeredStudents: number;
+  usagePercentage: number;
+}
+
+export interface DistrictRankingSummary {
+  mostActiveDistrict: DistrictRankEntry | null;
+  secondMostActiveDistrict: DistrictRankEntry | null;
+  thirdMostActiveDistrict: DistrictRankEntry | null;
+  leastActiveDistrict: DistrictRankEntry | null;
+  totalDistrictsWithRegisteredStudents: number;
+  totalDistrictsWithActivity: number;
+  totalUniqueLoginStudents: number;
+  totalLoginEvents: number;
+  todayTotalUniqueLogins: number;
+  outsideTamilNaduCount: number;
+  unavailableLocationCount: number;
+}
+
 interface TamilNaduMapProps {
   districtsData: DistrictMetric[];
+  ranking?: DistrictRankingSummary | null;
+  sseStatus?: 'connected' | 'reconnecting' | 'polling';
+  lastUpdated?: Date;
   activeMetric: 'visitors' | 'students' | 'subscribers' | 'revenue' | 'activeToday';
   onMetricChange: (metric: 'visitors' | 'students' | 'subscribers' | 'revenue' | 'activeToday') => void;
   selectedDistrict: string | null;
@@ -99,6 +132,9 @@ const DISTRICT_GEOMETRIES: DistrictGeo[] = [
 
 export const TamilNaduMap: React.FC<TamilNaduMapProps> = ({
   districtsData,
+  ranking = null,
+  sseStatus = 'polling',
+  lastUpdated,
   activeMetric,
   onMetricChange,
   selectedDistrict,
@@ -407,40 +443,58 @@ export const TamilNaduMap: React.FC<TamilNaduMapProps> = ({
 
               <div className="drawer-kpi-grid">
                 <div className="drawer-kpi-card">
-                  <div className="kpi-icon-wrap" style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#c084fc' }}>
-                    <Eye size={16} />
-                  </div>
-                  <div className="kpi-info">
-                    <span className="kpi-lbl">Total Visitors</span>
-                    <strong className="kpi-num">{activeDistrictRecord.visitors.toLocaleString('en-IN')}</strong>
-                  </div>
-                </div>
-                <div className="drawer-kpi-card">
                   <div className="kpi-icon-wrap" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
                     <Users size={16} />
                   </div>
                   <div className="kpi-info">
-                    <span className="kpi-lbl">Total Students</span>
-                    <strong className="kpi-num">{activeDistrictRecord.students.toLocaleString('en-IN')}</strong>
+                    <span className="kpi-lbl">Registered Students</span>
+                    <strong className="kpi-num">
+                      {(activeDistrictRecord.registeredStudents ?? activeDistrictRecord.students).toLocaleString('en-IN')}
+                    </strong>
                   </div>
                 </div>
                 <div className="drawer-kpi-card">
-                  <div className="kpi-icon-wrap" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
-                    <Award size={16} />
+                  <div className="kpi-icon-wrap" style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#c084fc' }}>
+                    <Eye size={16} />
                   </div>
                   <div className="kpi-info">
-                    <span className="kpi-lbl">Subscribers</span>
-                    <strong className="kpi-num">{activeDistrictRecord.subscribers}</strong>
+                    <span className="kpi-lbl">Unique Students Logged In</span>
+                    <strong className="kpi-num">
+                      {(activeDistrictRecord.uniqueLoginStudents ?? 0).toLocaleString('en-IN')}
+                    </strong>
                   </div>
                 </div>
                 <div className="drawer-kpi-card">
                   <div className="kpi-icon-wrap" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
+                    <Award size={16} />
+                  </div>
+                  <div className="kpi-info">
+                    <span className="kpi-lbl">Today&apos;s Unique Logins</span>
+                    <strong className="kpi-num">
+                      {(activeDistrictRecord.todayUniqueLogins ?? 0).toLocaleString('en-IN')}
+                    </strong>
+                  </div>
+                </div>
+                <div className="drawer-kpi-card">
+                  <div className="kpi-icon-wrap" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
                     <CreditCard size={16} />
                   </div>
                   <div className="kpi-info">
-                    <span className="kpi-lbl">Total Revenue</span>
-                    <strong className="kpi-num">₹{activeDistrictRecord.revenue.toLocaleString('en-IN')}</strong>
+                    <span className="kpi-lbl">Usage Share</span>
+                    <strong className="kpi-num">{activeDistrictRecord.usagePercentage ?? 0}%</strong>
                   </div>
+                </div>
+              </div>
+
+              <div className="drawer-conversion-card">
+                <div className="conversion-header">
+                  <span className="conversion-title">Login Activity Breakdown</span>
+                  <span className="conversion-pct">{activeDistrictRecord.totalLoginEvents ?? 0} Total Logins</span>
+                </div>
+                <div className="conversion-breakdown" style={{ marginTop: '0.45rem' }}>
+                  <span>Last 7 Days: <strong>{activeDistrictRecord.last7dUniqueLogins ?? 0}</strong></span>
+                  <span>Last 30 Days: <strong>{activeDistrictRecord.last30dUniqueLogins ?? 0}</strong></span>
+                  <span>Visitors: <strong>{activeDistrictRecord.visitors}</strong></span>
                 </div>
               </div>
 
@@ -495,9 +549,61 @@ export const TamilNaduMap: React.FC<TamilNaduMapProps> = ({
               <div className="list-panel-header">
                 <div>
                   <h4 className="list-panel-title">All 38 Districts Overview</h4>
-                  <p className="list-panel-subtitle">Select any district on map or list to inspect details</p>
+                  <p className="list-panel-subtitle">
+                    {sseStatus === 'connected' ? 'Live SSE Connected' : sseStatus === 'reconnecting' ? 'Reconnecting...' : 'Auto-Sync Active'}
+                    {lastUpdated ? ` • Synced ${lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+                  </p>
                 </div>
               </div>
+
+              {ranking && (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    gap: '0.5rem',
+                    marginBottom: '0.75rem',
+                    fontSize: '0.76rem',
+                  }}
+                >
+                  <div className="drawer-kpi-card" style={{ padding: '0.55rem 0.7rem' }}>
+                    <div className="kpi-info">
+                      <span className="kpi-lbl">Most Active</span>
+                      <strong className="kpi-num" style={{ fontSize: '0.88rem' }}>
+                        {ranking.mostActiveDistrict
+                          ? `${ranking.mostActiveDistrict.district} (${ranking.mostActiveDistrict.uniqueLoginStudents})`
+                          : 'No Logins Yet'}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="drawer-kpi-card" style={{ padding: '0.55rem 0.7rem' }}>
+                    <div className="kpi-info">
+                      <span className="kpi-lbl">2nd / 3rd Active</span>
+                      <strong className="kpi-num" style={{ fontSize: '0.82rem' }}>
+                        {ranking.secondMostActiveDistrict?.district || '—'} / {ranking.thirdMostActiveDistrict?.district || '—'}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="drawer-kpi-card" style={{ padding: '0.55rem 0.7rem' }}>
+                    <div className="kpi-info">
+                      <span className="kpi-lbl">Least Active</span>
+                      <strong className="kpi-num" style={{ fontSize: '0.84rem' }}>
+                        {ranking.leastActiveDistrict
+                          ? `${ranking.leastActiveDistrict.district} (${ranking.leastActiveDistrict.uniqueLoginStudents})`
+                          : '—'}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="drawer-kpi-card" style={{ padding: '0.55rem 0.7rem' }}>
+                    <div className="kpi-info">
+                      <span className="kpi-lbl">Districts w/ Students</span>
+                      <strong className="kpi-num" style={{ fontSize: '0.84rem' }}>
+                        {ranking.totalDistrictsWithRegisteredStudents} / 38 · {ranking.totalUniqueLoginStudents} Unique ({ranking.totalLoginEvents} Logins)
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="district-ranking-scroll">
                 {districtsData

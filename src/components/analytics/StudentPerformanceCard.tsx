@@ -40,39 +40,40 @@ export const StudentPerformanceCard: React.FC<StudentPerformanceCardProps> = ({
   const avgScore =
     performanceSummary?.averageTestScore ??
     mockTests?.averageScore ??
-    78;
+    0;
 
-  const highCount = performanceSummary?.highPerformersCount ?? 4;
-  const avgCount = performanceSummary?.averagePerformersCount ?? 2;
-  const needSupport = performanceSummary?.needSupportCount ?? 1;
+  const highCount = performanceSummary?.highPerformersCount ?? 0;
+  const avgCount = performanceSummary?.averagePerformersCount ?? 0;
+  const needSupport = performanceSummary?.needSupportCount ?? 0;
 
   const accuracy =
     performanceSummary?.overallAccuracy ??
     overallAccuracy ??
-    80;
+    0;
 
   const totalAttempts =
     performanceSummary?.totalMcqAttempts ??
     totalMcqAttempts ??
-    1450;
+    0;
 
   const totalMocks =
     performanceSummary?.mockTestPerformance?.totalAttempts ??
     mockTests?.totalAttempts ??
-    4;
+    0;
 
   const passedMocks =
     performanceSummary?.mockTestPerformance?.passedCount ??
     mockTests?.passedCount ??
-    4;
+    0;
 
   const passRate =
-    totalMocks > 0 ? Math.round((passedMocks / totalMocks) * 100) : 100;
+    totalMocks > 0 ? Math.round((passedMocks / totalMocks) * 100) : 0;
 
-  const totalPerformers = Math.max(1, highCount + avgCount + needSupport);
-  const highPct = Math.round((highCount / totalPerformers) * 100);
-  const avgPct = Math.round((avgCount / totalPerformers) * 100);
-  const supportPct = Math.round((needSupport / totalPerformers) * 100);
+  const totalPerformers = highCount + avgCount + needSupport;
+  const highPct = totalPerformers > 0 ? Math.round((highCount / totalPerformers) * 100) : 0;
+  const avgPct = totalPerformers > 0 ? Math.round((avgCount / totalPerformers) * 100) : 0;
+  const supportPct = totalPerformers > 0 ? Math.round((needSupport / totalPerformers) * 100) : 0;
+  const mcqBarWidth = totalAttempts > 0 ? Math.min(100, Math.max(8, Math.round((accuracy || 0)))) : 0;
 
   return (
     <div className="student-performance-card glass">
@@ -113,7 +114,7 @@ export const StudentPerformanceCard: React.FC<StudentPerformanceCardProps> = ({
           <div className="animated-progress-track">
             <div
               className="animated-progress-fill gradient-purple"
-              style={{ width: '85%' }}
+              style={{ width: `${mcqBarWidth}%` }}
             />
           </div>
         </div>

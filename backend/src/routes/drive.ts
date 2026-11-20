@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { Router, Request, Response, NextFunction } from 'express';
 import pool from '../db';
-import { requireAdminAuth, AuthenticatedRequest } from '../middleware/auth';
+import { requireAdminAuth, requireStudentOrAdminAuth, AuthenticatedRequest } from '../middleware/auth';
 import {
   getAuthorizationUrl,
   handleOAuthCallback,
@@ -689,7 +689,7 @@ router.get(['/extract/:id/status', '/materials/:id/extraction-status'], async (r
  * GET /api/drive/extract/:id/pages and /api/drive/materials/:id/extracted-pages
  * Admin: Returns all extracted pages for inspection in the Admin Review modal.
  */
-router.get(['/extract/:id/pages', '/materials/:id/extracted-pages'], async (req: Request, res: Response) => {
+router.get(['/extract/:id/pages', '/materials/:id/extracted-pages'], requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const materialId = parseInt(req.params.id, 10);
     if (!materialId || isNaN(materialId)) {
@@ -1277,7 +1277,7 @@ router.get('/materials', async (req: Request, res: Response) => {
  * GET /api/drive/materials/:id
  * Retrieves metadata for a single PDF material.
  */
-router.get('/materials/:id', async (req: Request, res: Response) => {
+router.get('/materials/:id', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) {
@@ -1328,7 +1328,7 @@ router.get('/materials/:id', async (req: Request, res: Response) => {
  * Secure PDF streaming and viewing endpoint for students and administrators.
  * Supports HTTP Range headers for fast chunked loading and page seeking in browser.
  */
-router.get('/view/:id', async (req: Request, res: Response) => {
+router.get('/view/:id', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) {

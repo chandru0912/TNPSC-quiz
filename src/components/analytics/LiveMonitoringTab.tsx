@@ -18,7 +18,9 @@ import './LiveMonitoringTab.css';
 interface LiveMonitoringTabProps {
   liveData: {
     activeVisitors: number;
+    activeSessions?: number;
     activeStudents: number;
+    anonymousVisitors?: number;
     pageViewsToday?: number;
     sessionsToday?: number;
     deviceBreakdown: {
@@ -29,13 +31,21 @@ interface LiveMonitoringTabProps {
     mostVisitedPages?: { path: string; views: number; visitors: number }[];
     trafficSources?: { source: string; count: number }[];
     visitorTrends?: { time: string; pageViews: number; visitors: number }[];
+    recentEvents?: {
+      id: number;
+      eventType: string;
+      title: string;
+      studentName: string;
+      district: string | null;
+      timestamp: string;
+    }[];
     activityStream: {
       id: number;
       sessionId: string;
       pagePath: string;
       pageTitle: string;
-      district: string;
-      city: string;
+      district: string | null;
+      city: string | null;
       deviceCategory: string;
       browser: string;
       isReturning: boolean;
@@ -69,12 +79,14 @@ export const LiveMonitoringTab: React.FC<LiveMonitoringTabProps> = ({
   const {
     activeVisitors,
     activeStudents,
+    anonymousVisitors = Math.max(0, activeVisitors - activeStudents),
     pageViewsToday = 0,
     sessionsToday = 0,
     deviceBreakdown,
     mostVisitedPages = [],
     trafficSources = [],
     visitorTrends = [],
+    recentEvents = [],
     activityStream,
   } = liveData;
 
@@ -130,7 +142,9 @@ export const LiveMonitoringTab: React.FC<LiveMonitoringTabProps> = ({
               <Sparkles size={20} className="sparkle-pulse" />
             </div>
           </div>
-          <p className="live-kpi-caption">Active users navigating study hub now</p>
+          <p className="live-kpi-caption">
+            {activeStudents} logged-in &bull; {anonymousVisitors} anonymous visitors
+          </p>
         </div>
 
         {/* Card 2: Active Authenticated Students */}
@@ -318,9 +332,9 @@ export const LiveMonitoringTab: React.FC<LiveMonitoringTabProps> = ({
                     <td className="location-cell">
                       <div className="loc-district">
                         <MapPin size={13} className="loc-pin" />
-                        <span>{event.district || 'Chennai'}</span>
+                        <span>{event.district || 'Location unavailable'}</span>
                       </div>
-                      <div className="loc-city">{event.city || 'Central'}</div>
+                      {event.city && <div className="loc-city">{event.city}</div>}
                     </td>
                     <td className="device-cell">
                       <span className="device-pill">
@@ -346,6 +360,64 @@ export const LiveMonitoringTab: React.FC<LiveMonitoringTabProps> = ({
                       ) : (
                         <span className="new-badge-pill">New Visitor</span>
                       )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Real-Time Backend Student & Platform Activity Feed */}
+      <div className="live-stream-panel glass" style={{ marginTop: '1.25rem' }}>
+        <div className="stream-header">
+          <div>
+            <h4 className="stream-title">Latest Student & Platform Events</h4>
+            <p className="stream-subtitle">Genuine logins, registrations, assessments, and account actions from PostgreSQL</p>
+          </div>
+          <span className="stream-count-badge">{recentEvents.length} Events</span>
+        </div>
+
+        <div className="stream-table-wrapper">
+          <table className="live-stream-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Student</th>
+                <th>Event</th>
+                <th>District</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentEvents.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="empty-stream-cell">
+                    No real student activity events recorded yet.
+                  </td>
+                </tr>
+              ) : (
+                recentEvents.map((ev) => (
+                  <tr key={ev.id} className="stream-row">
+                    <td className="time-cell">
+                      <Clock size={12} className="time-clock-icon" />
+                      <span>{formatTimeAgo(ev.timestamp)}</span>
+                    </td>
+                    <td>
+                      <span className="student-badge-pill">
+                        <Users size={12} />
+                        <span>{ev.studentName}</span>
+                      </span>
+                    </td>
+                    <td className="path-cell">
+                      <div className="page-path-text">{ev.title}</div>
+                      <div className="page-title-text">{ev.eventType}</div>
+                    </td>
+                    <td className="location-cell">
+                      <div className="loc-district">
+                        <MapPin size={13} className="loc-pin" />
+                        <span>{ev.district || 'Location unavailable'}</span>
+                      </div>
                     </td>
                   </tr>
                 ))

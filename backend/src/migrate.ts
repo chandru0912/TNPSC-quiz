@@ -1138,19 +1138,30 @@ export async function runMigration() {
         session_id VARCHAR(64) UNIQUE NOT NULL,
         visitor_id VARCHAR(64) NOT NULL,
         student_id INT REFERENCES students(id) ON DELETE SET NULL,
-        district VARCHAR(100) NOT NULL DEFAULT 'Chennai',
-        city VARCHAR(100) DEFAULT 'Anna Nagar',
+        country VARCHAR(100),
+        state VARCHAR(100),
+        district VARCHAR(100),
+        city VARCHAR(100),
+        location_source VARCHAR(30),
         device_category VARCHAR(50) NOT NULL DEFAULT 'desktop',
-        browser VARCHAR(50) NOT NULL DEFAULT 'Chrome',
-        os VARCHAR(50) NOT NULL DEFAULT 'Windows',
+        browser VARCHAR(50) NOT NULL DEFAULT 'Other',
+        os VARCHAR(50) NOT NULL DEFAULT 'Other',
         referrer TEXT,
         entry_path VARCHAR(255) NOT NULL DEFAULT '/',
         current_path VARCHAR(255) NOT NULL DEFAULT '/',
         is_returning BOOLEAN NOT NULL DEFAULT false,
         is_active BOOLEAN NOT NULL DEFAULT true,
         started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        last_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        last_heartbeat TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        ended_at TIMESTAMP WITH TIME ZONE
       );
+      ALTER TABLE visitor_sessions ALTER COLUMN district DROP NOT NULL;
+      ALTER TABLE visitor_sessions ALTER COLUMN district DROP DEFAULT;
+      ALTER TABLE visitor_sessions ALTER COLUMN city DROP DEFAULT;
+      ALTER TABLE visitor_sessions ADD COLUMN IF NOT EXISTS country VARCHAR(100);
+      ALTER TABLE visitor_sessions ADD COLUMN IF NOT EXISTS state VARCHAR(100);
+      ALTER TABLE visitor_sessions ADD COLUMN IF NOT EXISTS location_source VARCHAR(30);
+      ALTER TABLE visitor_sessions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP WITH TIME ZONE;
       CREATE INDEX IF NOT EXISTS idx_visitor_sessions_id ON visitor_sessions (session_id);
       CREATE INDEX IF NOT EXISTS idx_visitor_sessions_visitor ON visitor_sessions (visitor_id);
       CREATE INDEX IF NOT EXISTS idx_visitor_sessions_student ON visitor_sessions (student_id);
@@ -1166,11 +1177,14 @@ export async function runMigration() {
         student_id INT REFERENCES students(id) ON DELETE SET NULL,
         page_path VARCHAR(255) NOT NULL,
         page_title VARCHAR(255),
-        district VARCHAR(100) NOT NULL DEFAULT 'Chennai',
-        city VARCHAR(100) DEFAULT 'Anna Nagar',
+        district VARCHAR(100),
+        city VARCHAR(100),
         device_category VARCHAR(50) NOT NULL DEFAULT 'desktop',
         viewed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE page_views ALTER COLUMN district DROP NOT NULL;
+      ALTER TABLE page_views ALTER COLUMN district DROP DEFAULT;
+      ALTER TABLE page_views ALTER COLUMN city DROP DEFAULT;
       CREATE INDEX IF NOT EXISTS idx_page_views_session ON page_views (session_id);
       CREATE INDEX IF NOT EXISTS idx_page_views_visitor ON page_views (visitor_id);
       CREATE INDEX IF NOT EXISTS idx_page_views_path ON page_views (page_path);
@@ -1185,130 +1199,62 @@ export async function runMigration() {
         amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
         currency VARCHAR(10) NOT NULL DEFAULT 'INR',
         status VARCHAR(50) NOT NULL DEFAULT 'active',
-        payment_method VARCHAR(50) NOT NULL DEFAULT 'UPI',
-        district VARCHAR(100) NOT NULL DEFAULT 'Chennai',
-        city VARCHAR(100) DEFAULT 'Anna Nagar',
+        payment_method VARCHAR(50) NOT NULL DEFAULT 'Razorpay',
+        district VARCHAR(100),
+        city VARCHAR(100),
         starts_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMP WITH TIME ZONE,
         transaction_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE student_subscriptions ALTER COLUMN district DROP NOT NULL;
+      ALTER TABLE student_subscriptions ALTER COLUMN district DROP DEFAULT;
+      ALTER TABLE student_subscriptions ALTER COLUMN city DROP DEFAULT;
       CREATE INDEX IF NOT EXISTS idx_student_subscriptions_student ON student_subscriptions (student_id);
       CREATE INDEX IF NOT EXISTS idx_student_subscriptions_district ON student_subscriptions (district);
       CREATE INDEX IF NOT EXISTS idx_student_subscriptions_status ON student_subscriptions (status);
       CREATE INDEX IF NOT EXISTS idx_student_subscriptions_date ON student_subscriptions (transaction_date);
+
+      CREATE TABLE IF NOT EXISTS analytics_events (
+        id SERIAL PRIMARY KEY,
+        event_id VARCHAR(120) UNIQUE,
+        event_type VARCHAR(64) NOT NULL,
+        student_id INT REFERENCES students(id) ON DELETE SET NULL,
+        visitor_id VARCHAR(64),
+        session_id VARCHAR(64),
+        page_path VARCHAR(255),
+        district VARCHAR(100),
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_analytics_events_type_ts ON analytics_events (event_type, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_events_student_ts ON analytics_events (student_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_events_ts ON analytics_events (created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS payment_events (
+        id SERIAL PRIMARY KEY,
+        payment_event_id VARCHAR(120) UNIQUE NOT NULL,
+        student_id INT REFERENCES students(id) ON DELETE SET NULL,
+        subscription_id INT REFERENCES student_subscriptions(id) ON DELETE SET NULL,
+        razorpay_order_id VARCHAR(120),
+        razorpay_payment_id VARCHAR(120),
+        plan_id VARCHAR(64),
+        plan_name VARCHAR(120),
+        amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+        status VARCHAR(40) NOT NULL DEFAULT 'pending',
+        verified_by_signature BOOLEAN NOT NULL DEFAULT FALSE,
+        district VARCHAR(100),
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_payment_events_status_ts ON payment_events (status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_payment_events_student ON payment_events (student_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_payment_events_order ON payment_events (razorpay_order_id);
+
+      -- Remove only previously seeded synthetic visitor sessions/page_views (never touch real user rows)
+      DELETE FROM page_views WHERE session_id LIKE 'seed_sess_%' OR visitor_id LIKE 'seed_vis_%';
+      DELETE FROM visitor_sessions WHERE session_id LIKE 'seed_sess_%' OR visitor_id LIKE 'seed_vis_%';
     `);
-
-    // Assign districts to existing students if null and seed starter analytics baseline if empty
-    try {
-      const studentRows = await client.query('SELECT id, full_name FROM students WHERE district IS NULL');
-      const distPool = [
-        { district: 'Chennai', city: 'Anna Nagar' },
-        { district: 'Coimbatore', city: 'Gandhipuram' },
-        { district: 'Madurai', city: 'Goripalayam' },
-        { district: 'Tiruchirappalli', city: 'Thillai Nagar' },
-        { district: 'Salem', city: 'Fairlands' },
-        { district: 'Tirunelveli', city: 'Palayamkottai' },
-        { district: 'Vellore', city: 'Katpadi' },
-        { district: 'Erode', city: 'Perundurai' },
-        { district: 'Thanjavur', city: 'Kumbakonam' },
-        { district: 'Dindigul', city: 'Palani' },
-      ];
-      for (let i = 0; i < studentRows.rows.length; i++) {
-        const d = distPool[i % distPool.length];
-        const isPaid = i % 2 === 0;
-        await client.query(
-          `UPDATE students SET
-            district = $1,
-            city = $2,
-            subscription_tier = $3,
-            subscription_status = 'active',
-            last_login_at = CURRENT_TIMESTAMP - (INTERVAL '1 hour' * $4)
-           WHERE id = $5`,
-          [d.district, d.city, isPaid ? 'pro' : 'free', i * 3, studentRows.rows[i].id]
-        );
-      }
-
-      // Check if student_subscriptions needs diverse subscription tiers (Monthly, Quarterly, Half-Yearly, Yearly, Expired)
-      const subPlanCheck = await client.query("SELECT COUNT(DISTINCT plan_id) as distinct_plans FROM student_subscriptions");
-      if (parseInt(subPlanCheck.rows[0].distinct_plans, 10) <= 1) {
-        const proStudents = await client.query("SELECT id, district, city FROM students ORDER BY id ASC");
-        const samplePlans = [
-          { planId: 'tnpsc_pro_monthly', planName: 'TNPSC Pro Monthly Pass', amount: 199.00, status: 'active', daysAgo: 5, expiresDays: 25 },
-          { planId: 'tnpsc_pro_quarterly', planName: 'TNPSC Pro Quarterly Pass', amount: 499.00, status: 'active', daysAgo: 20, expiresDays: 70 },
-          { planId: 'tnpsc_pro_half_yearly', planName: 'TNPSC Pro Half-Yearly Pass', amount: 899.00, status: 'active', daysAgo: 45, expiresDays: 135 },
-          { planId: 'tnpsc_pro_yearly', planName: 'TNPSC Pro Annual Pass', amount: 1499.00, status: 'active', daysAgo: 10, expiresDays: 355 },
-          { planId: 'tnpsc_pro_monthly_expired', planName: 'TNPSC Pro Monthly Pass (Expired)', amount: 199.00, status: 'expired', daysAgo: 40, expiresDays: -10 },
-        ];
-
-        for (let i = 0; i < proStudents.rows.length; i++) {
-          const st = proStudents.rows[i];
-          const plan = samplePlans[i % samplePlans.length];
-          await client.query(
-            `INSERT INTO student_subscriptions (student_id, plan_id, plan_name, amount, currency, status, payment_method, district, city, starts_at, expires_at, transaction_date)
-             VALUES ($1, $2, $3, $4, 'INR', $5, 'UPI', $6, $7,
-                     CURRENT_TIMESTAMP - (INTERVAL '1 day' * $8),
-                     CURRENT_TIMESTAMP + (INTERVAL '1 day' * $9),
-                     CURRENT_TIMESTAMP - (INTERVAL '1 day' * $8))
-             ON CONFLICT DO NOTHING`,
-            [st.id, plan.planId, plan.planName, plan.amount, plan.status, st.district || 'Chennai', st.city || 'Anna Nagar', plan.daysAgo, plan.expiresDays]
-          );
-        }
-      }
-
-      // Seed baseline traffic data if visitor_sessions is empty
-      const sessCheck = await client.query('SELECT COUNT(*) as count FROM visitor_sessions');
-      if (parseInt(sessCheck.rows[0].count, 10) === 0) {
-        const districtsList = [
-          'Chennai', 'Coimbatore', 'Madurai', 'Tiruchirappalli', 'Salem', 'Tirunelveli',
-          'Vellore', 'Erode', 'Tiruppur', 'Dindigul', 'Thanjavur', 'Kanyakumari',
-          'Cuddalore', 'Kanchipuram', 'Chengalpattu', 'Tiruvallur', 'Tiruvannamalai',
-          'Viluppuram', 'Kallakurichi', 'Dharmapuri', 'Krishnagiri', 'Ranipet', 'Tirupathur',
-          'Namakkal', 'Karur', 'Nilgiris', 'Perambalur', 'Ariyalur', 'Pudukkottai',
-          'Sivaganga', 'Ramanathapuram', 'Virudhunagar', 'Theni', 'Tenkasi', 'Thoothukudi',
-          'Nagapattinam', 'Mayiladuthurai', 'Tiruvarur'
-        ];
-        const devices = ['desktop', 'mobile', 'tablet'];
-        const browsers = ['Chrome', 'Firefox', 'Safari', 'Edge'];
-        const pages = ['/', '/practice', '/mock-test', '/study-materials', '/dashboard'];
-
-        for (let i = 0; i < 60; i++) {
-          const dist = districtsList[i % districtsList.length];
-          const dev = devices[i % devices.length];
-          const br = browsers[i % browsers.length];
-          const pg = pages[i % pages.length];
-          const daysAgo = Math.floor(i / 2);
-          const isReturning = i % 3 === 0;
-          const sessId = `seed_sess_${i}_${Date.now()}`;
-          const visId = `seed_vis_${i % 25}_${Date.now()}`;
-          const isRecent = i < 5; // 5 active in last 5 minutes
-
-          await client.query(
-            `INSERT INTO visitor_sessions (
-              session_id, visitor_id, district, city, device_category, browser, os,
-              referrer, entry_path, current_path, is_returning, is_active, started_at, last_heartbeat
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, 'Windows',
-              'https://google.com', '/', $7, $8, $9,
-              CURRENT_TIMESTAMP - (INTERVAL '1 day' * $10) - (INTERVAL '15 minute' * ($11 % 10)),
-              CURRENT_TIMESTAMP - (CASE WHEN $9 THEN INTERVAL '1 minute' * ($11 % 4) ELSE (INTERVAL '1 day' * $10) END)
-            )`,
-            [sessId, visId, dist, dist + ' Central', dev, br, pg, isReturning, isRecent, daysAgo, i]
-          );
-
-          await client.query(
-            `INSERT INTO page_views (
-              session_id, visitor_id, page_path, page_title, district, city, device_category, viewed_at
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7,
-              CURRENT_TIMESTAMP - (INTERVAL '1 day' * $8) - (INTERVAL '15 minute' * ($9 % 10))
-            )`,
-            [sessId, visId, pg, 'TNPSC Study Hub - ' + pg, dist, dist + ' Central', dev, daysAgo, i]
-          );
-        }
-      }
-    } catch (baselineErr: any) {
-      console.warn('[Migration] Non-fatal notice during baseline analytics seeding:', baselineErr?.message);
-    }
 
     // Previous Year Papers Online Mock Test System tables
     await client.query(`
@@ -1376,6 +1322,48 @@ export async function runMigration() {
 
       CREATE INDEX IF NOT EXISTS idx_student_test_answers_session
       ON student_test_answers (session_id, question_number);
+
+      CREATE TABLE IF NOT EXISTS student_login_locations (
+        id SERIAL PRIMARY KEY,
+        login_event_id VARCHAR(120) NOT NULL UNIQUE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        district_id VARCHAR(64),
+        district_name VARCHAR(100),
+        location_status VARCHAR(40) NOT NULL DEFAULT 'unavailable',
+        location_source VARCHAR(30) NOT NULL DEFAULT 'unavailable',
+        accuracy_category VARCHAR(30),
+        login_timestamp TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_locations_student_ts
+      ON student_login_locations (student_id, login_timestamp DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_locations_district_ts
+      ON student_login_locations (district_id, login_timestamp DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_locations_ts
+      ON student_login_locations (login_timestamp DESC);
+
+      CREATE TABLE IF NOT EXISTS student_login_events (
+        id SERIAL PRIMARY KEY,
+        event_id VARCHAR(120) NOT NULL UNIQUE,
+        student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        student_email_snapshot VARCHAR(255) NOT NULL,
+        authentication_method VARCHAR(40) NOT NULL,
+        login_status VARCHAR(20) NOT NULL DEFAULT 'Successful',
+        login_timestamp TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        session_id VARCHAR(120),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_events_ts
+      ON student_login_events (login_timestamp DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_events_student_ts
+      ON student_login_events (student_id, login_timestamp DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_events_email_ts
+      ON student_login_events (LOWER(student_email_snapshot), login_timestamp DESC);
     `);
 
     await client.query('COMMIT');
@@ -1459,7 +1447,15 @@ export function ensureDatabaseSchema(): Promise<void> {
               EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = 'mock_test_attempts' AND column_name = 'award_type'
-              ) AS has_mta_award
+              ) AS has_mta_award,
+              to_regclass('public.student_login_locations') AS t_login_locations,
+              to_regclass('public.student_login_events') AS t_login_events,
+              to_regclass('public.analytics_events') AS t_analytics_events,
+              to_regclass('public.payment_events') AS t_payment_events,
+              EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'visitor_sessions' AND column_name = 'ended_at'
+              ) AS has_vs_ended_at
           `);
           const row = check.rows[0];
           if (
@@ -1480,7 +1476,12 @@ export function ensureDatabaseSchema(): Promise<void> {
             row?.t_grade_settings &&
             row?.t_award_settings &&
             row?.has_mta_grade &&
-            row?.has_mta_award
+            row?.has_mta_award &&
+            row?.t_login_locations &&
+            row?.t_login_events &&
+            row?.t_analytics_events &&
+            row?.t_payment_events &&
+            row?.has_vs_ended_at
           ) {
             return;
           }

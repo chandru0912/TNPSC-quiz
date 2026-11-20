@@ -570,6 +570,47 @@
   box-shadow: 0 0 16px rgba(255, 215, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
+.dash-chip-subscription {
+  text-decoration: none;
+  color: #f8fafc;
+  font-weight: 700;
+  white-space: nowrap;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 215, 0, 0.16) 0%,
+    rgba(139, 92, 246, 0.22) 100%
+  );
+  border-color: rgba(255, 215, 0, 0.42);
+  box-shadow:
+    0 0 16px rgba(139, 92, 246, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  cursor: pointer;
+}
+
+.dash-chip-subscription:hover {
+  transform: translateY(-1px);
+  color: #ffffff;
+  border-color: rgba(255, 215, 0, 0.8);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 215, 0, 0.25) 0%,
+    rgba(139, 92, 246, 0.34) 100%
+  );
+  box-shadow:
+    0 6px 20px rgba(245, 158, 11, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.dash-chip-subscription:active {
+  transform: translateY(0);
+}
+
+.dash-chip-sub-icon {
+  color: #ffd700;
+  flex-shrink: 0;
+}
+
 /* ---------- Top Summary Metrics Strip (Matching KezaBank Header Pills) ---------- */
 .dash-summary-strip {
   display: flex;

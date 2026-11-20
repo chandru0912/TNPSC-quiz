@@ -29,6 +29,8 @@ import { apiFetch, getApiUrl } from '../utils/api'
 import { subscribeStudentSync } from '../utils/studentSync'
 import { CloudAiGeneratorModal } from '../components/CloudAiGeneratorModal'
 import { AwardShieldLogo } from '../components/exam/AchievementAwards'
+import { SubscriptionButton } from '../components/SubscriptionButton'
+import { resolveStudentDisplayName } from '../utils/studentProfile'
 
 interface DashboardData {
   student: {
@@ -376,7 +378,7 @@ const Dashboard = () => {
     }
   }, [token, student?.id, fetchDashboardStats, applyDashboardPayload])
 
-  const userName = student?.fullName || data.student.fullName || 'Student'
+  const userName = resolveStudentDisplayName(student, data.student.fullName)
   const userGroup =
     student?.targetGroup === 'group1'
       ? 'Group 1 Aspirant'
@@ -464,6 +466,7 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="dash-header-meta">
+            <SubscriptionButton variant="header" />
             <DateCalendarPopover />
             <div className="dash-chip dash-chip-gold">
               <Flame size={16} />

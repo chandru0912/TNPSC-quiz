@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { PoolClient } from 'pg';
 import pool from '../db';
-import { requireAdminAuth, verifyAdminToken } from '../middleware/auth';
+import { requireAdminAuth, verifyAdminToken, requireStudentOrAdminAuth } from '../middleware/auth';
 import {
   isSemanticallyDuplicate,
   isValidQuestionText,
@@ -199,7 +199,7 @@ router.post('/admin/apply-explanations', requireAdminAuth, async (req: Request, 
  * Filter by: category, unitId, classId, lesson, status, limit, offset
  * Defaults to status='published' so staging questions are never exposed to students.
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const { category, unitId, classId, lesson, lessonId, topic, subject, status, limit = '200', offset = '0' } = req.query;
 
@@ -502,7 +502,7 @@ router.get('/syllabus-facets', async (req: Request, res: Response) => {
  * Supports cacheOnly=true for instant (<50ms) retrieval of cached Tamil translations
  * and parallel batched AI translation for missing question IDs.
  */
-router.post('/translate', async (req: Request, res: Response) => {
+router.post('/translate', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const rawLanguage = String(req.body?.targetLanguage || req.body?.language || 'ta').trim().toLowerCase();
     if (!['ta', 'tamil'].includes(rawLanguage)) {
@@ -864,7 +864,7 @@ router.get('/metrics', async (req: Request, res: Response) => {
  * GET /api/questions/:id
  * Fetch single question by ID
  */
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {

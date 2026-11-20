@@ -11,7 +11,7 @@ interface SubscriptionsDonutProps {
   yearlyPass: number;
   distribution: { name: string; count: number; percentage: number; color: string }[];
   trend: 'up' | 'down' | 'neutral';
-  change: number;
+  change: number | null;
   comparisonText?: string;
   onClick?: () => void;
 }
@@ -26,16 +26,16 @@ export const SubscriptionsDonut: React.FC<SubscriptionsDonutProps> = ({
   distribution,
   trend,
   change,
-  comparisonText = 'vs previous period',
+  comparisonText = 'Insufficient historical data',
   onClick,
 }) => {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
-  // Fallback distribution if none provided
+  const fallbackTotal = (monthlyPass || 0) + (yearlyPass || 0) + (expiredSubscriptions || 0);
   const items = Array.isArray(distribution) && distribution.length > 0 ? distribution : [
-    { name: 'Monthly', count: monthlyPass || 0, percentage: 20, color: '#3b82f6' },
-    { name: 'Yearly', count: yearlyPass || 0, percentage: 65, color: '#10b981' },
-    { name: 'Expired', count: expiredSubscriptions || 0, percentage: 15, color: '#64748b' },
+    { name: 'Monthly', count: monthlyPass || 0, percentage: fallbackTotal > 0 ? Math.round(((monthlyPass || 0) / fallbackTotal) * 100) : 0, color: '#3b82f6' },
+    { name: 'Yearly', count: yearlyPass || 0, percentage: fallbackTotal > 0 ? Math.round(((yearlyPass || 0) / fallbackTotal) * 100) : 0, color: '#10b981' },
+    { name: 'Expired', count: expiredSubscriptions || 0, percentage: fallbackTotal > 0 ? Math.round(((expiredSubscriptions || 0) / fallbackTotal) * 100) : 0, color: '#64748b' },
   ];
 
   const totalCount = items.reduce((acc, item) => acc + item.count, 0) || 1;
@@ -151,7 +151,7 @@ export const SubscriptionsDonut: React.FC<SubscriptionsDonutProps> = ({
           {trend === 'up' && <TrendingUp size={12} />}
           {trend === 'down' && <TrendingDown size={12} />}
           {trend === 'neutral' && <Minus size={12} />}
-          <span>{change > 0 ? `+${change}%` : `${change}%`}</span>
+          <span>{change === null ? '—' : change > 0 ? `+${change}%` : `${change}%`}</span>
         </span>
         <span className="fic-footer-label">{comparisonText}</span>
       </div>

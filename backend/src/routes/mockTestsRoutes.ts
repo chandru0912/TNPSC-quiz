@@ -10,6 +10,10 @@ import {
   getAdminMockTestDetail,
   searchQuestionBankForMockTest,
   autoSelectQuestionsForMockTest,
+  getGeneratorPoolAvailability,
+  generateMockTestQuestionPool,
+  getGeneratorQuestionBankList,
+  validateSelectedMockTestQuestions,
   getSyllabusOptionsForMockTests,
   createAdminMockTest,
   updateAdminMockTest,
@@ -105,6 +109,128 @@ adminMockTestsRouter.post('/auto-select', async (req: Request, res: Response) =>
   }
 });
 
+adminMockTestsRouter.get('/generator/availability', async (req: Request, res: Response) => {
+  try {
+    const mode = (req.query.mode as 'lesson_wise' | 'unit_wise' | 'full_length') || 'lesson_wise';
+    const standardsRaw = String(req.query.standards || '')
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 6 && n <= 12);
+    const unitsRaw = String(req.query.units || '')
+      .split(',')
+      .map((u) => Number(u.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+    const data = await getGeneratorPoolAvailability({
+      mode,
+      group: req.query.group as string | undefined,
+      subject: req.query.subject as string | undefined,
+      standards: standardsRaw,
+      units: unitsRaw,
+      lesson: req.query.lesson as string | undefined,
+      difficulty: req.query.difficulty as string | undefined,
+      questionType: req.query.questionType as string | undefined,
+      language: req.query.language as string | undefined,
+      includeStaging: req.query.includeStaging === 'true',
+      search: req.query.search as string | undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Admin MockTest Generator Availability Error]:', err);
+    return res.status(err.statusCode || 500).json({
+      status: 'error',
+      message: err.message || 'Failed to check question availability.',
+    });
+  }
+});
+
+adminMockTestsRouter.get('/generator/questions', async (req: Request, res: Response) => {
+  try {
+    const mode = (req.query.mode as 'lesson_wise' | 'unit_wise' | 'full_length') || 'lesson_wise';
+    const standardsRaw = String(req.query.standards || '')
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 6 && n <= 12);
+    const unitsRaw = String(req.query.units || '')
+      .split(',')
+      .map((u) => Number(u.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+    const data = await getGeneratorQuestionBankList({
+      mode,
+      group: req.query.group as string | undefined,
+      subject: req.query.subject as string | undefined,
+      standards: standardsRaw,
+      units: unitsRaw,
+      lesson: req.query.lesson as string | undefined,
+      difficulty: req.query.difficulty as string | undefined,
+      questionType: req.query.questionType as string | undefined,
+      language: req.query.language as string | undefined,
+      includeStaging: req.query.includeStaging === 'true',
+      search: req.query.search as string | undefined,
+      limit: req.query.limit ? Number(req.query.limit) : 15,
+      offset: req.query.offset ? Number(req.query.offset) : 0,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Admin MockTest Generator Questions Error]:', err);
+    return res.status(err.statusCode || 500).json({
+      status: 'error',
+      message: err.message || 'Failed to load Question Bank items.',
+    });
+  }
+});
+
+adminMockTestsRouter.post('/generator/validate-selection', async (req: Request, res: Response) => {
+  try {
+    const { questionIds, includeStaging } = req.body || {};
+    const data = await validateSelectedMockTestQuestions(
+      Array.isArray(questionIds) ? questionIds : [],
+      Boolean(includeStaging)
+    );
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({
+      status: 'error',
+      message: err.message || 'Failed to validate selected questions.',
+    });
+  }
+});
+
+adminMockTestsRouter.post('/generator/generate', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const mode = (body.mode as 'lesson_wise' | 'unit_wise' | 'full_length') || 'lesson_wise';
+    const data = await generateMockTestQuestionPool({
+      mode,
+      group: body.group,
+      subject: body.subject,
+      standards: Array.isArray(body.standards) ? body.standards.map(Number) : [],
+      units: Array.isArray(body.units) ? body.units.map(Number) : [],
+      lesson: body.lesson,
+      difficulty: body.difficulty,
+      questionType: body.questionType,
+      language: body.language,
+      includeStaging: Boolean(body.includeStaging),
+      totalQuestions: Number(body.totalQuestions) || 25,
+      difficultyDistribution: body.difficultyDistribution,
+      standardDistribution: body.standardDistribution,
+      distributeAcrossLessons: Boolean(body.distributeAcrossLessons),
+      distributeAcrossStandards: Boolean(body.distributeAcrossStandards),
+      randomizeSelection: body.randomizeSelection !== false,
+      randomizeOrder: body.randomizeOrder !== false,
+      excludeIds: Array.isArray(body.excludeIds) ? body.excludeIds.map(Number) : [],
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({
+      status: 'error',
+      message: err.message || 'Failed to generate mock test questions.',
+      eligibleCount: err.eligibleCount,
+    });
+  }
+});
+
 adminMockTestsRouter.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
@@ -169,9 +295,9 @@ adminMockTestsRouter.patch('/:id/status', async (req: Request, res: Response) =>
       return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
     }
     const { status, startAt, endAt } = req.body || {};
-    const validStatuses: MockTestStatus[] = ['draft', 'published', 'scheduled', 'archived'];
+    const validStatuses: MockTestStatus[] = ['draft', 'staging', 'published', 'scheduled', 'archived'];
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ status: 'error', message: 'Invalid status. Use draft, published, scheduled, or archived.' });
+      return res.status(400).json({ status: 'error', message: 'Invalid status. Use draft, staging, published, scheduled, or archived.' });
     }
     const updated = await updateAdminMockTestStatus(id, status, startAt, endAt);
     return res.status(200).json({ status: 'success', data: updated });

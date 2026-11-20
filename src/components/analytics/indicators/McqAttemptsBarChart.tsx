@@ -5,11 +5,13 @@ import { AnimatedCountUp } from '../AnimatedCountUp';
 interface McqAttemptsBarChartProps {
   totalAttempts: number;
   attemptsToday: number;
+  attempts3d?: number;
   attemptsWeekly: number;
+  attempts14d?: number;
   attemptsMonthly: number;
   participatingStudents: number;
   trend: 'up' | 'down' | 'neutral';
-  change: number;
+  change: number | null;
   comparisonText?: string;
   onClick?: () => void;
 }
@@ -17,23 +19,25 @@ interface McqAttemptsBarChartProps {
 export const McqAttemptsBarChart: React.FC<McqAttemptsBarChartProps> = ({
   totalAttempts,
   attemptsToday,
+  attempts3d = 0,
   attemptsWeekly,
+  attempts14d = 0,
   attemptsMonthly,
   participatingStudents,
   trend,
   change,
-  comparisonText = 'vs previous period',
+  comparisonText = 'Insufficient historical data',
   onClick,
 }) => {
-  // Generate vertical bar distribution based on actual DB stats
-  // 5 bar segments: Today, 3d, 7d, 14d, 30d
-  const maxVal = Math.max(attemptsMonthly, totalAttempts, 1);
+  // Real PostgreSQL bucket counts only (zero fabricated multipliers or fake minimum bar heights)
+  const maxVal = Math.max(attemptsToday, attempts3d, attemptsWeekly, attempts14d, attemptsMonthly, 1);
+  const toHeight = (val: number) => (val <= 0 ? 0 : Math.max(6, Math.round((val / maxVal) * 100)));
   const bars = [
-    { label: 'T', val: attemptsToday, height: Math.max(10, Math.round((attemptsToday / maxVal) * 100)) },
-    { label: '3d', val: Math.round(attemptsWeekly * 0.4), height: Math.max(16, Math.round(((attemptsWeekly * 0.4) / maxVal) * 100)) },
-    { label: '7d', val: attemptsWeekly, height: Math.max(22, Math.round((attemptsWeekly / maxVal) * 100)) },
-    { label: '14d', val: Math.round(attemptsMonthly * 0.7), height: Math.max(30, Math.round(((attemptsMonthly * 0.7) / maxVal) * 100)) },
-    { label: '30d', val: attemptsMonthly, height: Math.max(40, Math.round((attemptsMonthly / maxVal) * 100)) },
+    { label: 'T', val: attemptsToday, height: toHeight(attemptsToday) },
+    { label: '3d', val: attempts3d, height: toHeight(attempts3d) },
+    { label: '7d', val: attemptsWeekly, height: toHeight(attemptsWeekly) },
+    { label: '14d', val: attempts14d, height: toHeight(attempts14d) },
+    { label: '30d', val: attemptsMonthly, height: toHeight(attemptsMonthly) },
   ];
 
   return (
@@ -94,7 +98,7 @@ export const McqAttemptsBarChart: React.FC<McqAttemptsBarChartProps> = ({
           {trend === 'up' && <TrendingUp size={12} />}
           {trend === 'down' && <TrendingDown size={12} />}
           {trend === 'neutral' && <Minus size={12} />}
-          <span>{change > 0 ? `+${change}%` : `${change}%`}</span>
+          <span>{change === null ? '—' : change > 0 ? `+${change}%` : `${change}%`}</span>
         </span>
         <span className="fic-footer-label">{comparisonText}</span>
       </div>

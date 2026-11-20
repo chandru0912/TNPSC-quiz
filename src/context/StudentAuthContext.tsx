@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { apiFetch } from '../utils/api'
+import { endVisitorSession, sendSessionHeartbeat } from '../utils/visitorTracker'
+import { normalizeStudentAvatarUrl } from '../utils/studentProfile'
 
 export interface StudentUser {
   id: number
@@ -22,6 +24,8 @@ interface StudentAuthContextType {
   isAuthenticated: boolean
   isLoading: boolean
   isPreviewMode: boolean
+  pendingLoginLocationEventId: string | null
+  clearPendingLoginLocation: () => void
   login: (token: string, student: StudentUser) => void
   logout: () => void
   refreshProfile: () => Promise<void>
@@ -34,6 +38,10 @@ const StudentAuthContext = createContext<StudentAuthContextType | undefined>(und
 const TOKEN_KEY = 'tnpsc_student_token'
 const USER_KEY = 'tnpsc_student_user'
 const PREVIEW_KEY = 'tnpsc_admin_preview_active'
+const PENDING_LOGIN_LOCATION_KEY = 'tnpsc_pending_login_location_event'
+const SESSION_REVOKED_MSG_KEY = 'tnpsc_session_revoked_msg'
+const DEFAULT_REVOKED_MESSAGE =
+  'Your account has been logged in on another device. Please log in again to continue.'
 
 export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => {
@@ -65,16 +73,42 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
   })
 
   const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [pendingLoginLocationEventId, setPendingLoginLocationEventId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem(PENDING_LOGIN_LOCATION_KEY)
+    }
+    return null
+  })
 
-  // Standard student login handler
+  const clearPendingLoginLocation = useCallback(() => {
+    setPendingLoginLocationEventId(null)
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(PENDING_LOGIN_LOCATION_KEY)
+    }
+  }, [])
+
+  // Standard student login handler (clears any previous account state to prevent cross-account leakage)
   const login = useCallback((newToken: string, newStudent: StudentUser) => {
+    const normalizedStudent: StudentUser = {
+      ...newStudent,
+      fullName: String(newStudent.fullName || '').trim() || String(newStudent.email || '').split('@')[0] || 'Student',
+      avatarUrl: normalizeStudentAvatarUrl(newStudent.avatarUrl),
+    }
     localStorage.removeItem(PREVIEW_KEY)
     localStorage.removeItem('tnpsc_study_tab_leader')
+    localStorage.removeItem(USER_KEY)
     setIsPreviewMode(false)
     setToken(newToken)
-    setStudent(newStudent)
+    setStudent(normalizedStudent)
     localStorage.setItem(TOKEN_KEY, newToken)
-    localStorage.setItem(USER_KEY, JSON.stringify(newStudent))
+    localStorage.setItem(USER_KEY, JSON.stringify(normalizedStudent))
+    const eventId = `login_${normalizedStudent.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    setPendingLoginLocationEventId(eventId)
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(PENDING_LOGIN_LOCATION_KEY, eventId)
+      // Associate active visitor session with newly logged-in student immediately
+      sendSessionHeartbeat()
+    }
   }, [])
 
   // Standard student logout handler with server-side token revocation
@@ -82,6 +116,7 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const curToken = localStorage.getItem(TOKEN_KEY)
     const isPrev = localStorage.getItem(PREVIEW_KEY) === 'true'
     if (curToken && !isPrev) {
+      endVisitorSession()
       apiFetch('/api/student/logout', {
         method: 'POST',
         headers: {
@@ -97,8 +132,32 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsPreviewMode(false)
     setToken(null)
     setStudent(null)
+    setPendingLoginLocationEventId(null)
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(PENDING_LOGIN_LOCATION_KEY)
+    }
+  }, [])
+
+  // Force immediate local logout & redirect to Login when backend revokes this device's session
+  const handleForceSessionRevoked = useCallback((message?: string) => {
+    const notice = message || DEFAULT_REVOKED_MESSAGE
+    localStorage.removeItem(PREVIEW_KEY)
+    localStorage.removeItem('tnpsc_study_tab_leader')
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USER_KEY)
+    setIsPreviewMode(false)
+    setToken(null)
+    setStudent(null)
+    setPendingLoginLocationEventId(null)
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(PENDING_LOGIN_LOCATION_KEY)
+      sessionStorage.setItem(SESSION_REVOKED_MSG_KEY, notice)
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.replace('/login?reason=session_revoked')
+      }
+    }
   }, [])
 
   // Start Admin Student Preview Mode
@@ -142,7 +201,12 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const json = await res.json()
       if (res.ok && json.status === 'success' && json.student) {
         const isPreviewActive = localStorage.getItem(PREVIEW_KEY) === 'true'
-        const updated = { ...json.student, ...(isPreviewActive ? { isPreview: true } : {}) }
+        const updated: StudentUser = {
+          ...json.student,
+          fullName: String(json.student.fullName || '').trim() || String(json.student.email || '').split('@')[0] || 'Student',
+          avatarUrl: normalizeStudentAvatarUrl(json.student.avatarUrl),
+          ...(isPreviewActive ? { isPreview: true } : {}),
+        }
         setStudent(updated)
         localStorage.setItem(USER_KEY, JSON.stringify(updated))
       } else {
@@ -175,12 +239,55 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
 
     window.addEventListener('storage', handleStorageChange)
+    const handleRevokedEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ code?: string; message?: string }>).detail
+      handleForceSessionRevoked(detail?.message)
+    }
+    window.addEventListener('tnpsc:student-session-revoked', handleRevokedEvent)
     refreshProfile()
 
     return () => {
       window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('tnpsc:student-session-revoked', handleRevokedEvent)
     }
-  }, [refreshProfile])
+  }, [refreshProfile, handleForceSessionRevoked])
+
+  // Real-time SSE listener for instant logout when another device signs into this account
+  useEffect(() => {
+    if (!token || isPreviewMode || typeof EventSource === 'undefined') return
+    let es: EventSource | null = null
+    let reconnectTimer: number | null = null
+    let closed = false
+
+    const connect = () => {
+      if (closed) return
+      try {
+        es = new EventSource(`/api/student/session-stream?token=${encodeURIComponent(token)}`)
+        es.addEventListener('session_revoked', (ev: MessageEvent) => {
+          try {
+            const payload = JSON.parse(ev.data || '{}')
+            handleForceSessionRevoked(payload.message || DEFAULT_REVOKED_MESSAGE)
+          } catch {
+            handleForceSessionRevoked(DEFAULT_REVOKED_MESSAGE)
+          }
+        })
+        es.onerror = () => {
+          es?.close()
+          if (closed) return
+          reconnectTimer = window.setTimeout(connect, 10000)
+        }
+      } catch {
+        // Fallback: backend still enforces session validity on every API request
+      }
+    }
+
+    connect()
+    return () => {
+      closed = true
+      es?.close()
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+    }
+  }, [token, isPreviewMode, handleForceSessionRevoked])
 
   return (
     <StudentAuthContext.Provider
@@ -190,6 +297,8 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
         isAuthenticated: Boolean(token && student),
         isLoading,
         isPreviewMode,
+        pendingLoginLocationEventId,
+        clearPendingLoginLocation,
         login,
         logout,
         refreshProfile,

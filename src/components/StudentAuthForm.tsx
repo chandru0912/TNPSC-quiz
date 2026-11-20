@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   GraduationCap,
   Mail,
@@ -17,6 +17,7 @@ import {
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { apiFetch } from '../utils/api'
 import { requestGoogleOAuthCode, GoogleSignInCancelledError } from '../utils/googleOAuth'
+import { resolvePostLoginRedirect, clearPostLoginRedirect } from '../utils/authRedirect'
 
 export type AuthMode = 'login' | 'register'
 type AuthStep = 'landing' | 'email-login' | 'email-register' | 'forgot-password'
@@ -76,6 +77,7 @@ export const StudentAuthForm = ({
   onSwitchMode,
 }: StudentAuthFormProps) => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login } = useStudentAuth()
 
   const [mode, setMode] = useState<AuthMode>(initialMode)
@@ -112,9 +114,25 @@ export const StudentAuthForm = ({
     setMode(initialMode)
     setStep('landing')
     setFieldErrors({})
-    setServerError(null)
     setInfoBanner(null)
-  }, [initialMode])
+
+    if (typeof window !== 'undefined') {
+      const revokedMsg = sessionStorage.getItem('tnpsc_session_revoked_msg')
+      const params = new URLSearchParams(location.search)
+      if (revokedMsg) {
+        setServerError(revokedMsg)
+        sessionStorage.removeItem('tnpsc_session_revoked_msg')
+      } else if (params.get('reason') === 'session_revoked') {
+        setServerError(
+          'Your account has been logged in on another device. Please log in again to continue.'
+        )
+      } else {
+        setServerError(null)
+      }
+    } else {
+      setServerError(null)
+    }
+  }, [initialMode, location.search])
 
   const clearFeedback = () => {
     setFieldErrors({})
@@ -134,7 +152,9 @@ export const StudentAuthForm = ({
   const completeStudentSession = (token: string, student: any) => {
     login(token, student)
     onSuccess?.()
-    navigate('/dashboard')
+    const destination = resolvePostLoginRedirect(location.search, location.state)
+    clearPostLoginRedirect()
+    navigate(destination, { replace: true })
   }
 
   // 1. Continue with Google (Real OAuth Popup + Backend Token Exchange)

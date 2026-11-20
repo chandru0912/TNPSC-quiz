@@ -1,9 +1,16 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import pool from '../db';
+import { broadcastAnalyticsEvent } from '../services/analyticsEventBus';
+import { AnalyticsService } from '../services/analyticsService';
+import {
+  detectTamilNaduDistrict,
+  normalizeTamilNaduDistrict,
+} from '../services/tamilNaduDistrictService';
 import { StudyManagementService } from '../services/studyManagementService';
 import {
   generateStudentToken,
+  verifyStudentToken,
   requireStudentAuth,
   optionalStudentAuth,
   requireAdminAuth,
@@ -12,8 +19,15 @@ import {
   StudentAuthenticatedRequest,
 } from '../middleware/auth';
 import {
+  createSingleActiveStudentSession,
+  revokeStudentSessionOnLogout,
+  validateActiveStudentSession,
+  studentSessionEventBus,
+} from '../services/studentSessionService';
+import {
   getGoogleOAuthPublicConfig,
   verifyGoogleCredentialOrCode,
+  normalizeGoogleAvatarUrl,
   GoogleAuthError,
 } from '../services/googleAuthService';
 import {
@@ -52,6 +66,48 @@ import {
 
 const router = Router();
 
+// Sliding-window rate limiter on authentication endpoints (max 30 attempts / minute per IP)
+const authRateMap = new Map<string, { count: number; resetAt: number }>();
+function checkAuthRateLimit(req: Request, res: Response): boolean {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = authRateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    authRateMap.set(ip, { count: 1, resetAt: now + 60_000 });
+    return true;
+  }
+  entry.count += 1;
+  if (entry.count > 30) {
+    res.status(429).json({
+      status: 'error',
+      message: 'Too many authentication attempts. Please wait a minute and try again.',
+    });
+    return false;
+  }
+  return true;
+}
+
+function setStudentSessionCookie(res: Response, sessionId: string, expiresAt: Date) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const maxAgeSec = Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+  const parts = [
+    `tnpsc_student_sid=${encodeURIComponent(sessionId)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${maxAgeSec}`,
+  ];
+  if (isProd) parts.push('Secure');
+  res.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function clearStudentSessionCookie(res: Response) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const parts = ['tnpsc_student_sid=', 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+  if (isProd) parts.push('Secure');
+  res.setHeader('Set-Cookie', parts.join('; '));
+}
+
 const ALLOWED_TARGET_GROUPS = new Set(['group1', 'group2', 'group2a', 'group4']);
 
 function normalizeTargetGroup(group?: unknown): string {
@@ -63,11 +119,11 @@ function normalizeTargetGroup(group?: unknown): string {
 function formatStudentResponse(row: any) {
   return {
     id: row.id,
-    fullName: row.full_name,
+    fullName: String(row.full_name || '').trim() || String(row.email || '').split('@')[0] || 'Student',
     email: row.email,
     mobile: row.mobile ?? null,
     targetGroup: row.target_group || 'group4',
-    avatarUrl: row.avatar_url ?? null,
+    avatarUrl: normalizeGoogleAvatarUrl(row.avatar_url),
     authProvider: row.auth_provider || 'email',
     emailVerified: Boolean(row.email_verified),
     onboardingCompleted: row.onboarding_completed !== false,
@@ -132,6 +188,7 @@ router.post('/auth/check-email', async (req: Request, res: Response) => {
 // 0B. GOOGLE OAUTH LOGIN / AUTO-REGISTER / ACCOUNT LINKING
 // ====================================================
 router.post('/auth/google', async (req: Request, res: Response) => {
+  if (!checkAuthRateLimit(req, res)) return;
   try {
     const { code, idToken, redirectUri } = req.body || {};
 
@@ -180,8 +237,8 @@ router.post('/auth/google', async (req: Request, res: Response) => {
 
         const updated = await client.query(
           `UPDATE students
-           SET avatar_url = COALESCE($1, avatar_url),
-               full_name = CASE WHEN full_name IS NULL OR TRIM(full_name) = '' THEN $2 ELSE full_name END,
+           SET avatar_url = COALESCE(NULLIF(TRIM($1), ''), avatar_url),
+               full_name = COALESCE(NULLIF(TRIM($2), ''), full_name),
                email_verified = true,
                role = 'student',
                last_login_at = CURRENT_TIMESTAMP,
@@ -233,15 +290,16 @@ router.post('/auth/google', async (req: Request, res: Response) => {
             `UPDATE students
              SET google_id = $1,
                  auth_provider = $2,
-                 avatar_url = COALESCE(avatar_url, $3),
+                 avatar_url = COALESCE(NULLIF(TRIM($3), ''), avatar_url),
+                 full_name = COALESCE(NULLIF(TRIM($4), ''), full_name),
                  email_verified = true,
                  role = 'student',
                  last_login_at = CURRENT_TIMESTAMP,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $4
+             WHERE id = $5
              RETURNING id, full_name, email, mobile, target_group, google_id, auth_provider,
                        avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
-            [googleProfile.googleId, nextProvider, googleProfile.avatarUrl, existing.id]
+            [googleProfile.googleId, nextProvider, googleProfile.avatarUrl, googleProfile.fullName, existing.id]
           );
           studentRow = linked.rows[0];
           linkedAccount = true;
@@ -274,6 +332,17 @@ router.post('/auth/google', async (req: Request, res: Response) => {
         }
       }
 
+      // Record genuine successful Google OAuth student login event (never Admin, never failed attempts)
+      const normalizedGoogleEmail = String(studentRow.email || '').trim().toLowerCase();
+      const googleLoginEventId = `login_google_${studentRow.id}_${crypto.randomUUID()}`;
+      await client.query(
+        `INSERT INTO student_login_events (
+          event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp
+        ) VALUES ($1, $2, $3, 'Google OAuth', 'Successful', CURRENT_TIMESTAMP)
+        ON CONFLICT (event_id) DO NOTHING`,
+        [googleLoginEventId, studentRow.id, normalizedGoogleEmail]
+      );
+
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK');
@@ -282,14 +351,32 @@ router.post('/auth/google', async (req: Request, res: Response) => {
       client.release();
     }
 
+    // Enforce Single Active Device Session (atomically revokes any previous device)
+    const activeSession = await createSingleActiveStudentSession({
+      studentId: Number(studentRow.id),
+      authMethod: 'google',
+      userAgent: req.headers['user-agent'] || null,
+    });
+
     const token = generateStudentToken(
       studentRow.id,
       studentRow.email,
       studentRow.full_name,
       studentRow.target_group || 'group4',
       false,
-      studentRow.token_version || 1
+      activeSession.tokenVersion,
+      activeSession.sessionId,
+      activeSession.expiresAt.getTime()
     );
+    setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt);
+
+    await AnalyticsService.touchStudentLiveSession(Number(studentRow.id)).catch(() => {});
+    if (isNewUser) {
+      broadcastAnalyticsEvent('student_registered', {
+        studentId: studentRow.id,
+        provider: 'google',
+      });
+    }
 
     return res.status(isNewUser ? 201 : 200).json({
       status: 'success',
@@ -323,6 +410,7 @@ router.post('/auth/google', async (req: Request, res: Response) => {
 // 1. STUDENT AUTHENTICATION: REGISTER
 // ====================================================
 router.post('/register', async (req: Request, res: Response) => {
+  if (!checkAuthRateLimit(req, res)) return;
   try {
     const { fullName, email, mobile, password, confirmPassword, targetGroup } = req.body;
 
@@ -382,15 +470,27 @@ router.post('/register', async (req: Request, res: Response) => {
       [newStudent.id, String(newStudent.id), JSON.stringify({ targetGroup: cleanGroup, authProvider: 'email' })]
     );
 
-    // Generate JWT token
+    // Enforce Single Active Device Session
+    const activeSession = await createSingleActiveStudentSession({
+      studentId: Number(newStudent.id),
+      authMethod: 'register',
+      userAgent: req.headers['user-agent'] || null,
+    });
+
+    // Generate JWT token bound to active session
     const token = generateStudentToken(
       newStudent.id,
       newStudent.email,
       newStudent.full_name,
       newStudent.target_group,
       false,
-      newStudent.token_version || 1
+      activeSession.tokenVersion,
+      activeSession.sessionId,
+      activeSession.expiresAt.getTime()
     );
+    setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt);
+
+    broadcastAnalyticsEvent('student_registered', { studentId: newStudent.id });
 
     return res.status(201).json({
       status: 'success',
@@ -408,6 +508,7 @@ router.post('/register', async (req: Request, res: Response) => {
 // 2. STUDENT AUTHENTICATION: LOGIN
 // ====================================================
 router.post('/login', async (req: Request, res: Response) => {
+  if (!checkAuthRateLimit(req, res)) return;
   try {
     const { email, password } = req.body;
 
@@ -458,18 +559,39 @@ router.post('/login', async (req: Request, res: Response) => {
       [student.id, String(student.id), JSON.stringify({ provider: 'email', time: new Date().toISOString() })]
     );
 
-    // Update last_login_at timestamp
-    await pool.query('UPDATE students SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [student.id]);
+    // Record genuine successful Email & Password student login event (idempotent, never Admin, never failed attempts)
+    const normalizedEmail = String(student.email || cleanEmail).trim().toLowerCase();
+    const emailLoginEventId = `login_email_${student.id}_${crypto.randomUUID()}`;
+    await pool.query(
+      `INSERT INTO student_login_events (
+        event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp
+      ) VALUES ($1, $2, $3, 'Email & Password', 'Successful', CURRENT_TIMESTAMP)
+      ON CONFLICT (event_id) DO NOTHING`,
+      [emailLoginEventId, student.id, normalizedEmail]
+    );
 
-    // Generate JWT token
+    // Enforce Single Active Device Session (atomically revokes previous device & increments token_version)
+    const activeSession = await createSingleActiveStudentSession({
+      studentId: Number(student.id),
+      authMethod: 'email',
+      userAgent: req.headers['user-agent'] || null,
+    });
+
+    // Generate JWT token bound to the single active session
     const token = generateStudentToken(
       student.id,
       student.email,
       student.full_name,
       student.target_group || 'group4',
       false,
-      student.token_version || 1
+      activeSession.tokenVersion,
+      activeSession.sessionId,
+      activeSession.expiresAt.getTime()
     );
+    setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt);
+
+    await AnalyticsService.touchStudentLiveSession(Number(student.id)).catch(() => {});
+    await AnalyticsService.recordGenuineLoginEvent(Number(student.id), 'email').catch(() => {});
 
     return res.status(200).json({
       status: 'success',
@@ -484,18 +606,189 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // ====================================================
+// 2A. ONE-TIME CONSENT-BASED LOGIN DISTRICT RECORDING
+// ====================================================
+router.post('/login-location', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    if (req.studentUser?.isPreview) {
+      return res.status(200).json({ status: 'success', data: { skippedPreview: true } });
+    }
+
+    const {
+      loginEventId,
+      source = 'unavailable',
+      latitude,
+      longitude,
+      accuracyMeters,
+      manualDistrict,
+      permissionStatus,
+    } = req.body || {};
+
+    const cleanEventId = String(loginEventId || '').trim().slice(0, 120);
+    if (!cleanEventId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'A valid loginEventId is required for idempotent location recording.',
+      });
+    }
+
+    let districtId: string | null = null;
+    let districtName: string | null = null;
+    let locationStatus: string = 'unavailable';
+    let locationSource: 'gps' | 'manual' | 'unavailable' = 'unavailable';
+    let accuracyCategory: string | null = null;
+
+    if (source === 'gps' && latitude !== undefined && longitude !== undefined) {
+      const detected = detectTamilNaduDistrict(
+        Number(latitude),
+        Number(longitude),
+        accuracyMeters !== undefined && accuracyMeters !== null ? Number(accuracyMeters) : null
+      );
+      districtId = detected.districtId;
+      districtName = detected.districtName;
+      locationStatus = detected.locationStatus;
+      locationSource = 'gps';
+      accuracyCategory = detected.accuracyCategory;
+    } else if (source === 'manual' && manualDistrict) {
+      const normalized = normalizeTamilNaduDistrict(String(manualDistrict));
+      if (!normalized) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Please select a valid Tamil Nadu district.',
+        });
+      }
+      districtId = normalized.id;
+      districtName = normalized.name;
+      locationStatus = 'manual';
+      locationSource = 'manual';
+      accuracyCategory = null;
+    } else {
+      locationStatus = permissionStatus === 'denied' ? 'denied' : 'unavailable';
+      locationSource = 'unavailable';
+    }
+
+    // Idempotent insert: never creates duplicates on browser refresh or retries; never stores raw lat/lng
+    const insertRes = await pool.query(
+      `INSERT INTO student_login_locations (
+         login_event_id, student_id, district_id, district_name,
+         location_status, location_source, accuracy_category, login_timestamp
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+       ON CONFLICT (login_event_id) DO NOTHING
+       RETURNING id`,
+      [
+        cleanEventId,
+        studentId,
+        districtId,
+        districtName,
+        locationStatus,
+        locationSource,
+        accuracyCategory,
+      ]
+    );
+
+    const inserted = insertRes.rows.length > 0;
+
+    // Safely update student's confirmed district ONLY when detected with sufficient confidence or manually selected
+    if (districtName && (locationStatus === 'detected' || locationStatus === 'manual')) {
+      await pool.query(
+        `UPDATE students SET district = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [districtName, studentId]
+      );
+    }
+
+    if (inserted) {
+      broadcastAnalyticsEvent('student_login', {
+        studentId,
+        districtId,
+        districtName,
+        locationStatus,
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        recorded: inserted,
+        duplicate: !inserted,
+        districtId,
+        districtName,
+        locationStatus,
+        locationSource,
+        accuracyCategory,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Student Login Location Error]:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to record login district.',
+    });
+  }
+});
+
+// ====================================================
+// 2B-SSE. REAL-TIME STUDENT SESSION STREAM (Instant Revocation Push)
+// ====================================================
+router.get('/session-stream', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const queryToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  const token = headerToken || queryToken;
+
+  if (!token) {
+    return res.status(401).json({ status: 'error', message: 'Missing student token.' });
+  }
+
+  const verified = verifyStudentToken(token);
+  if (!verified || verified.isPreview || !verified.sessionId) {
+    return res.status(401).json({ status: 'error', message: 'Invalid student session stream token.' });
+  }
+
+  const check = await validateActiveStudentSession(verified.studentId, verified.sessionId);
+  if (!check.valid) {
+    return res.status(401).json({
+      status: 'error',
+      code: check.code || 'SESSION_REVOKED_OTHER_DEVICE',
+      message: check.message,
+    });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const clientId = studentSessionEventBus.addClient(verified.studentId, verified.sessionId, res);
+  req.on('close', () => {
+    studentSessionEventBus.removeClient(clientId);
+  });
+});
+
+// ====================================================
 // 2B. LOGOUT (SERVER-SIDE SESSION REVOCATION)
 // ====================================================
 router.post('/logout', optionalStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
+    clearStudentSessionCookie(res);
     const user = req.studentUser;
     if (user && !user.isPreview && user.studentId) {
+      await revokeStudentSessionOnLogout(Number(user.studentId), user.sessionId).catch(() => {});
+      await AnalyticsService.endStudentLiveSessions(Number(user.studentId)).catch(() => {});
+      broadcastAnalyticsEvent('student_logout', { studentId: user.studentId });
       await pool.query(
         'UPDATE students SET token_version = COALESCE(token_version, 1) + 1 WHERE id = $1',
         [user.studentId]
       );
       await pool.query(
         `UPDATE study_sessions
+         SET is_active = false, ended_at = CURRENT_TIMESTAMP
+         WHERE student_id = $1 AND is_active = true`,
+        [user.studentId]
+      );
+      await pool.query(
+        `UPDATE visitor_sessions
          SET is_active = false, ended_at = CURRENT_TIMESTAMP
          WHERE student_id = $1 AND is_active = true`,
         [user.studentId]
@@ -1184,38 +1477,123 @@ router.post('/assessments/submit', requireStudentAuth, handleAssessmentSubmit);
 // ====================================================
 // 7B. MARK LIST & DETAILED SCORECARDS (STUDENT-ISOLATED)
 // ====================================================
+function parseOptionalStrictPositiveInt(raw: unknown, paramName: string): { value?: number; error?: string } {
+  if (raw === undefined || raw === null) return {};
+  const str = String(raw).trim();
+  if (!str || str.toLowerCase() === 'all') return {};
+  if (!/^\d+$/.test(str)) {
+    return { error: `Invalid ${paramName} filter: expected a positive integer.` };
+  }
+  const num = Number(str);
+  if (!Number.isSafeInteger(num) || num <= 0) {
+    return { error: `Invalid ${paramName} filter: expected a positive integer.` };
+  }
+  return { value: num };
+}
+
 router.get('/mark-list', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  const correlationId = crypto.randomUUID();
   try {
     const studentId = req.studentUser!.studentId;
+
+    const stdCheck = parseOptionalStrictPositiveInt(req.query.standard, 'standard');
+    if (stdCheck.error) {
+      return res.status(400).json({ status: 'error', message: stdCheck.error, correlationId });
+    }
+    const unitCheck = parseOptionalStrictPositiveInt(req.query.unit, 'unit');
+    if (unitCheck.error) {
+      return res.status(400).json({ status: 'error', message: unitCheck.error, correlationId });
+    }
+    const yearCheck = parseOptionalStrictPositiveInt(req.query.year, 'year');
+    if (yearCheck.error) {
+      return res.status(400).json({ status: 'error', message: yearCheck.error, correlationId });
+    }
+    const pageCheck = parseOptionalStrictPositiveInt(req.query.page, 'page');
+    if (pageCheck.error) {
+      return res.status(400).json({ status: 'error', message: pageCheck.error, correlationId });
+    }
+    const limitCheck = parseOptionalStrictPositiveInt(req.query.limit, 'limit');
+    if (limitCheck.error) {
+      return res.status(400).json({ status: 'error', message: limitCheck.error, correlationId });
+    }
+
+    const fromRaw = typeof req.query.from === 'string' ? req.query.from.trim() : '';
+    const toRaw = typeof req.query.to === 'string' ? req.query.to.trim() : '';
+    if (fromRaw && !/^\d{4}-\d{2}-\d{2}$/.test(fromRaw)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid start date format. Use YYYY-MM-DD.', correlationId });
+    }
+    if (toRaw && !/^\d{4}-\d{2}-\d{2}$/.test(toRaw)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid end date format. Use YYYY-MM-DD.', correlationId });
+    }
+
     const data = await getStudentMarkList(studentId, {
       type: typeof req.query.type === 'string' ? req.query.type : 'all',
-      from: typeof req.query.from === 'string' ? req.query.from : undefined,
-      to: typeof req.query.to === 'string' ? req.query.to : undefined,
-      page: req.query.page ? Number(req.query.page) : 1,
-      limit: req.query.limit ? Number(req.query.limit) : 25,
+      category: typeof req.query.category === 'string' ? req.query.category : undefined,
+      testCategory: typeof req.query.testCategory === 'string' ? req.query.testCategory : undefined,
+      group: typeof req.query.group === 'string' ? req.query.group : undefined,
+      subject: typeof req.query.subject === 'string' ? req.query.subject : undefined,
+      standard: stdCheck.value,
+      unit: unitCheck.value,
+      lesson: typeof req.query.lesson === 'string' ? req.query.lesson : undefined,
+      year: yearCheck.value,
+      from: fromRaw || undefined,
+      to: toRaw || undefined,
+      page: pageCheck.value ?? 1,
+      limit: limitCheck.value ?? 25,
     });
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Mark List Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load mark list.' });
+    console.error('[Mark List Error]:', {
+      correlationId,
+      endpoint: '/api/student/mark-list',
+      code: err?.code || null,
+      message: err?.message || 'Unknown error',
+    });
+    return res.status(500).json({
+      status: 'error',
+      message: 'Unable to load your mark list right now. Please try again shortly.',
+      correlationId,
+    });
   }
 });
 
-router.get('/mark-list/:attemptId(\\d+)', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+router.get('/mark-list/:attemptId', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  const correlationId = crypto.randomUUID();
   try {
     const studentId = req.studentUser!.studentId;
-    const attemptId = Number(req.params.attemptId);
-    if (!Number.isInteger(attemptId) || attemptId <= 0) {
-      return res.status(400).json({ status: 'error', message: 'Valid assessment ID is required.' });
+    const rawAttemptId = String(req.params.attemptId || '').trim();
+    if (!/^\d+$/.test(rawAttemptId)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid numeric assessment attempt ID is required.',
+        correlationId,
+      });
+    }
+    const attemptId = Number(rawAttemptId);
+    if (!Number.isSafeInteger(attemptId) || attemptId <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid numeric assessment attempt ID is required.',
+        correlationId,
+      });
     }
     const detail = await getStudentScorecardDetail(studentId, attemptId);
     if (!detail) {
-      return res.status(404).json({ status: 'error', message: 'Scorecard not found.' });
+      return res.status(404).json({ status: 'error', message: 'Scorecard not found.', correlationId });
     }
     return res.status(200).json({ status: 'success', data: detail });
   } catch (err: any) {
-    console.error('[Scorecard Detail Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load scorecard detail.' });
+    console.error('[Scorecard Detail Error]:', {
+      correlationId,
+      endpoint: '/api/student/mark-list/:attemptId',
+      code: err?.code || null,
+      message: err?.message || 'Unknown error',
+    });
+    return res.status(500).json({
+      status: 'error',
+      message: 'Unable to load detailed scorecard right now. Please try again shortly.',
+      correlationId,
+    });
   }
 });
 
@@ -1831,6 +2209,7 @@ router.post('/admin/restore/:studentId', requireAdminAuth, async (req: Request, 
          VALUES ($1, 'account_restored', $1::text, 'Account Restored', $2::jsonb)`,
         [studentId, JSON.stringify({ restoredAt: new Date().toISOString() })]
       );
+      broadcastAnalyticsEvent('student_restored', { studentId });
     } catch (actErr) {
       console.warn('[Admin Restore Student] Activity log notice:', actErr);
     }
@@ -1874,6 +2253,7 @@ router.post('/admin/deactivate/:studentId', requireAdminAuth, async (req: Reques
          VALUES ($1, 'account_restored', $1::text, 'Account Restored', $2::jsonb)`,
         [studentId, JSON.stringify({ restoredAt: new Date().toISOString() })]
       );
+      broadcastAnalyticsEvent('student_restored', { studentId });
     } catch (actErr) {
       console.warn('[Admin Restore Student] Activity log notice:', actErr);
     }

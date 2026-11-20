@@ -16,9 +16,11 @@ import {
   LogOut,
   User,
   ArrowLeft,
-  X,
 } from 'lucide-react';
 import { useStudentAuth } from '../context/StudentAuthContext';
+import { StudentAvatar } from './StudentAvatar';
+import { resolveStudentDisplayName } from '../utils/studentProfile';
+import { SubscriptionButton } from './SubscriptionButton';
 import './StudentSidebar.css';
 
 interface StudentSidebarProps {
@@ -35,17 +37,17 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
   const location = useLocation();
   const { student, isAuthenticated, logout } = useStudentAuth();
 
-  const userName = student?.fullName || 'Student Aspirant';
+  const activeStudent = isAuthenticated ? student : null;
+  const userName = resolveStudentDisplayName(activeStudent);
+  const userEmail = activeStudent?.email?.trim() || '';
   const userGroup =
-    student?.targetGroup === 'group1'
+    activeStudent?.targetGroup === 'group1'
       ? 'Group 1 Aspirant'
-      : student?.targetGroup === 'group2a'
+      : activeStudent?.targetGroup === 'group2a'
         ? 'Group 2A Aspirant'
-        : student?.targetGroup === 'group2'
+        : activeStudent?.targetGroup === 'group2'
           ? 'Group 2 & 2A Aspirant'
           : 'Group 4 & VAO Aspirant';
-
-  const userInitial = userName.trim().charAt(0).toUpperCase() || 'S';
 
   // 8 Required Learning Navigation Items
   const navItems = [
@@ -105,37 +107,30 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
             <span className="student-brand-sub">TNPSC Premium</span>
           </div>
         </Link>
-        {onCloseMobile && (
-          <button
-            type="button"
-            className="student-sidebar-close-btn"
-            onClick={onCloseMobile}
-            aria-label="Close navigation sidebar"
-          >
-            <X size={18} />
-          </button>
-        )}
       </div>
 
       {/* 2. Student Profile Card */}
-      <div className="student-sidebar-profile">
-        <div className="student-profile-avatar">
-          {student?.avatarUrl ? (
-            <img
-              src={student.avatarUrl}
-              alt={userName}
-              style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            userInitial
-          )}
-        </div>
+      <div
+        className="student-sidebar-profile"
+        title={userEmail ? `${userName} (${userEmail})` : userName}
+      >
+        <StudentAvatar
+          studentId={activeStudent?.id}
+          fullName={userName}
+          email={userEmail}
+          avatarUrl={activeStudent?.avatarUrl}
+          size={40}
+        />
         <div className="student-profile-info">
           <span className="student-profile-name" title={userName}>
             {userName}
           </span>
           <span className="student-profile-role">{userGroup}</span>
+          {userEmail && (
+            <span className="student-profile-email" title={userEmail}>
+              {userEmail}
+            </span>
+          )}
         </div>
       </div>
 
@@ -178,6 +173,9 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 4B. Dedicated Subscription Navigation Button (Directly below 5 Day Streak) */}
+      <SubscriptionButton variant="sidebar" onClick={handleLinkClick} />
 
       {/* 5. Sidebar Bottom Actions: Sign-in / Logout & Back to Home */}
       <div className="student-sidebar-footer">

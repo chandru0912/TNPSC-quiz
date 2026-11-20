@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { PoolClient } from 'pg';
 import pool from '../db';
-import { requireAdminAuth } from '../middleware/auth';
+import { requireAdminAuth, requireStudentOrAdminAuth } from '../middleware/auth';
 import {
   isSemanticallyDuplicate,
   isValidQuestionText,
@@ -26,7 +26,7 @@ router.use(platformContentSyncMiddleware);
  * NEVER returns Main MCQ Practice questions.
  * Filter by: group (category), subject (subjectId), standard (classId), unitId, lessonId, lesson (lessonTitle), language.
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const {
       group,
@@ -370,7 +370,7 @@ router.get('/admin', requireAdminAuth, async (req: Request, res: Response) => {
  * Only the translation cache is written; original questions, options and correct answers are never modified.
  * English is intentionally not served here: students receive the original canonical English row directly.
  */
-router.post('/translate', async (req: Request, res: Response) => {
+router.post('/translate', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const rawLanguage = String(req.body?.targetLanguage || req.body?.language || 'ta').trim().toLowerCase();
     if (!['ta', 'tamil'].includes(rawLanguage)) {

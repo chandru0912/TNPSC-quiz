@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db';
-import { requireAdminAuth, verifyAdminToken } from '../middleware/auth';
+import { requireAdminAuth, verifyAdminToken, requireStudentOrAdminAuth } from '../middleware/auth';
 import { cleanTamilUnicodeText } from '../services/tamilUnicodeCleaner';
 import {
   computeContentHash,
@@ -58,8 +58,8 @@ function mapRowToNote(row: any) {
   };
 }
 
-// Public: Get notes
-router.get('/', async (req: Request, res: Response) => {
+// Protected: Get study notes (Authenticated Student or Admin)
+router.get('/', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const {
       category,

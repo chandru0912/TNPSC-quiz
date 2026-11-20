@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -35,8 +35,9 @@ interface OverviewCardData {
   title: string;
   value: number;
   formatted: string;
-  change: number;
+  change: number | null;
   trend: 'up' | 'down' | 'neutral';
+  hasHistoricalData?: boolean;
   comparisonText: string;
   icon: string;
   category: string;
@@ -47,11 +48,19 @@ interface OverviewCardData {
 interface UnifiedOverviewData {
   overviewCards: OverviewCardData[];
   kpiSummary?: any[];
+  liveTrackingActivatedAt?: string;
   studentAnalytics: {
     totalStudents: number;
+    verifiedStudents?: number;
+    onlineStudents?: number;
+    lastActiveAt?: string | null;
     activeStudents: number;
+    recentlyActiveStudents?: number;
     activePercentage?: number;
     newStudents: number;
+    newSinceActivation?: number;
+    totalLoginEvents?: number;
+    uniqueStudentsLoggedIn?: number;
     newToday?: number;
     newWeekly?: number;
     newMonthly?: number;
@@ -72,9 +81,14 @@ interface UnifiedOverviewData {
   };
   studentPerformance: {
     overallAccuracy: number;
+    mcqPracticeAccuracy?: number;
+    mockTestAccuracy?: number;
+    previousPaperAccuracy?: number;
     totalMcqAttempts: number;
     attemptsToday?: number;
+    attempts3d?: number;
     attemptsWeekly?: number;
+    attempts14d?: number;
     attemptsMonthly?: number;
     correctAnswers?: number;
     incorrectAnswers?: number;
@@ -132,7 +146,7 @@ interface UnifiedDashboardOverviewProps {
   onOpenStudentPreview?: () => void;
 }
 
-export type RangeFilterType = 'today' | '7d' | '30d' | '90d';
+export type RangeFilterType = 'today' | '7d' | '30d' | '90d' | 'all';
 
 export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> = ({
   token,
@@ -149,6 +163,11 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
   const [lastSyncTime, setLastSyncTime] = useState<string>('');
   const [data, setData] = useState<UnifiedOverviewData | null>(null);
   const [selectedRange, setSelectedRange] = useState<RangeFilterType>('30d');
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'live' | 'reconnecting' | 'polling'>('connecting');
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(true);
+  const sseRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef<number>(0);
 
   // Active hover states for charts
   const [hoveredTrendIdx, setHoveredTrendIdx] = useState<number | null>(null);
@@ -234,13 +253,114 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
   );
 
   useEffect(() => {
-    fetchDashboardData(false, selectedRange);
-    // Live polling interval every 45s for fresh real-time analytics
-    const interval = setInterval(() => {
-      fetchDashboardData(false, selectedRange);
-    }, 45000);
-    return () => clearInterval(interval);
+    void fetchDashboardData(false, selectedRange);
   }, [fetchDashboardData, selectedRange]);
+
+  // Real-Time Server-Sent Events (SSE) synchronization with automatic reconnect & polling fallback
+  useEffect(() => {
+    const cleanupSse = () => {
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+    };
+
+    if (!autoRefreshEnabled) {
+      cleanupSse();
+      setConnectionStatus('polling');
+      return;
+    }
+
+    const activeToken =
+      token ||
+      localStorage.getItem('tnpsc_admin_token') ||
+      localStorage.getItem('adminToken') ||
+      localStorage.getItem('token') ||
+      '';
+
+    if (!activeToken || typeof EventSource === 'undefined') {
+      setConnectionStatus('polling');
+      const fallbackInterval = window.setInterval(() => {
+        void fetchDashboardData(false, selectedRange);
+      }, 30000);
+      return () => {
+        window.clearInterval(fallbackInterval);
+      };
+    }
+
+    let cancelled = false;
+    let fallbackPollId: number | null = null;
+
+    const startFallbackPolling = () => {
+      if (fallbackPollId !== null) return;
+      setConnectionStatus('polling');
+      fallbackPollId = window.setInterval(() => {
+        void fetchDashboardData(false, selectedRange);
+      }, 30000);
+    };
+
+    const stopFallbackPolling = () => {
+      if (fallbackPollId !== null) {
+        window.clearInterval(fallbackPollId);
+        fallbackPollId = null;
+      }
+    };
+
+    const connectSse = () => {
+      if (cancelled) return;
+      cleanupSse();
+      setConnectionStatus(reconnectAttemptsRef.current > 0 ? 'reconnecting' : 'connecting');
+
+      const streamUrl = `/api/analytics/stream?range=${encodeURIComponent(selectedRange)}&token=${encodeURIComponent(activeToken)}`;
+      const es = new EventSource(streamUrl);
+      sseRef.current = es;
+
+      es.addEventListener('connected', () => {
+        if (cancelled) return;
+        reconnectAttemptsRef.current = 0;
+        stopFallbackPolling();
+        setConnectionStatus('live');
+      });
+
+      es.addEventListener('metrics_updated', () => {
+        if (cancelled) return;
+        void fetchDashboardData(false, selectedRange);
+      });
+
+      es.onerror = () => {
+        if (cancelled) return;
+        es.close();
+        sseRef.current = null;
+        reconnectAttemptsRef.current += 1;
+
+        if (reconnectAttemptsRef.current >= 4) {
+          // After 4 failed reconnects, switch gracefully to controlled 30s polling fallback
+          startFallbackPolling();
+          reconnectTimerRef.current = window.setTimeout(() => {
+            reconnectAttemptsRef.current = 1;
+            connectSse();
+          }, 45000);
+          return;
+        }
+
+        setConnectionStatus('reconnecting');
+        const delayMs = Math.min(15000, 2000 * Math.pow(2, reconnectAttemptsRef.current - 1));
+        reconnectTimerRef.current = window.setTimeout(connectSse, delayMs);
+      };
+    };
+
+    connectSse();
+
+    return () => {
+      cancelled = true;
+      stopFallbackPolling();
+      cleanupSse();
+    };
+  }, [token, selectedRange, autoRefreshEnabled, fetchDashboardData]);
 
   const handleRangeChange = (newRange: RangeFilterType) => {
     if (newRange === selectedRange) return;
@@ -253,9 +373,10 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
     const cards = Array.isArray(data?.overviewCards) ? data.overviewCards : [];
     return (
       cards.find((c) => c?.id === id) || {
-        change: 0,
+        change: null as number | null,
         trend: 'neutral' as const,
-        comparisonText: 'vs previous period',
+        hasHistoricalData: false,
+        comparisonText: 'Insufficient historical data',
         sparkline: [],
         badgeText: '',
       }
@@ -400,10 +521,80 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
               {currentDateFormatted}
             </span>
 
-            <div className="ud-status-indicator" title="Connected to PostgreSQL Database">
-              <span className="ud-pulse-dot" />
-              <span className="ud-status-label">PostgreSQL Live</span>
+            <div
+              className="ud-status-indicator"
+              title={
+                connectionStatus === 'live'
+                  ? 'Real-time Server-Sent Events (SSE) connected to PostgreSQL'
+                  : connectionStatus === 'reconnecting'
+                    ? 'SSE stream interrupted — attempting automatic reconnect'
+                    : connectionStatus === 'polling'
+                      ? 'Auto-sync active via controlled 30s polling fallback'
+                      : 'Establishing real-time telemetry stream...'
+              }
+              style={{
+                borderColor:
+                  connectionStatus === 'live'
+                    ? 'rgba(16, 185, 129, 0.4)'
+                    : connectionStatus === 'reconnecting'
+                      ? 'rgba(245, 158, 11, 0.45)'
+                      : 'rgba(56, 189, 248, 0.4)',
+              }}
+            >
+              <span
+                className="ud-pulse-dot"
+                style={{
+                  background:
+                    connectionStatus === 'live'
+                      ? '#10b981'
+                      : connectionStatus === 'reconnecting'
+                        ? '#f59e0b'
+                        : '#38bdf8',
+                }}
+              />
+              <span className="ud-status-label">
+                {connectionStatus === 'live'
+                  ? 'Live System Active'
+                  : connectionStatus === 'reconnecting'
+                    ? 'Reconnecting...'
+                    : connectionStatus === 'polling'
+                      ? autoRefreshEnabled
+                        ? 'Auto-Sync (Polling)'
+                        : 'Auto-Sync Paused'
+                      : 'Connecting...'}
+              </span>
             </div>
+
+            {data?.liveTrackingActivatedAt && (
+              <span
+                className="ud-date-chip"
+                title={`Production Live Tracking Baseline Activated: ${new Date(data.liveTrackingActivatedAt).toLocaleString('en-IN')}`}
+              >
+                Live Since{' '}
+                {new Date(data.liveTrackingActivatedAt).toLocaleDateString('en-IN', {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </span>
+            )}
+
+            {lastSyncTime && (
+              <span className="ud-date-chip" title="Last database synchronization timestamp">
+                <RefreshCw size={12} />
+                Synced {lastSyncTime}
+              </span>
+            )}
+
+            <button
+              type="button"
+              className="ud-date-chip"
+              onClick={() => setAutoRefreshEnabled((v) => !v)}
+              title="Toggle real-time automatic synchronization"
+              style={{ cursor: 'pointer', borderColor: autoRefreshEnabled ? 'rgba(52, 211, 153, 0.35)' : 'rgba(148, 163, 184, 0.3)' }}
+            >
+              Auto-Sync: <strong>{autoRefreshEnabled ? 'ON' : 'OFF'}</strong>
+            </button>
 
             {data?.websiteTrafficAnalytics?.currentVisitors !== undefined && (
               <span className="ud-live-pulse-badge" title="Visitors Active Right Now">
@@ -417,7 +608,7 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
           <div className="ud-action-cluster">
             {/* Interactive Date Range Filter Buttons */}
             <div className="ud-range-filter-group" role="group" aria-label="Timeframe selection">
-              {(['today', '7d', '30d', '90d'] as const).map((r) => (
+              {(['today', '7d', '30d', '90d', 'all'] as const).map((r) => (
                 <button
                   key={r}
                   type="button"
@@ -427,7 +618,7 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
                 >
                   <Calendar size={12} />
                   <span>
-                    {r === 'today' ? 'Today' : r === '7d' ? '7 Days' : r === '30d' ? '30 Days' : '90 Days'}
+                    {r === 'today' ? 'Today' : r === '7d' ? '7 Days' : r === '30d' ? '30 Days' : r === '90d' ? '90 Days' : 'All Time'}
                   </span>
                 </button>
               ))}
@@ -476,7 +667,14 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
       {lastSyncTime && (
         <div className="ud-sync-bar">
           <span className="ud-sync-text">
-            Range: <strong>{selectedRange.toUpperCase()}</strong> &bull; Last synced: <strong>{lastSyncTime}</strong> &bull; Auto-refresh active (45s)
+            Range: <strong>{selectedRange === 'all' ? 'ALL TIME' : selectedRange.toUpperCase()}</strong> (IST) &bull; Last synced: <strong>{lastSyncTime}</strong> &bull;{' '}
+            {connectionStatus === 'live'
+              ? 'Real-Time SSE Connected'
+              : connectionStatus === 'reconnecting'
+                ? 'Reconnecting SSE...'
+                : autoRefreshEnabled
+                  ? 'Polling Fallback (30s)'
+                  : 'Auto-Sync Paused'}
           </span>
         </div>
       )}
@@ -521,6 +719,7 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
             <TotalStudentsRing
               totalStudents={data?.studentAnalytics?.totalStudents || 0}
               activeStudents={data?.studentAnalytics?.activeStudents || 0}
+              verifiedStudents={data?.studentAnalytics?.verifiedStudents || 0}
               growthPercentage={cardTotalStudents.change}
               trend={cardTotalStudents.trend}
               comparisonText={cardTotalStudents.comparisonText}
@@ -609,8 +808,10 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
             <McqAttemptsBarChart
               totalAttempts={data?.studentPerformance?.totalMcqAttempts || 0}
               attemptsToday={data?.studentPerformance?.attemptsToday || 0}
-              attemptsWeekly={data?.studentPerformance?.attemptsWeekly || (data?.studentPerformance?.totalMcqAttempts || 0)}
-              attemptsMonthly={data?.studentPerformance?.attemptsMonthly || (data?.studentPerformance?.totalMcqAttempts || 0)}
+              attempts3d={data?.studentPerformance?.attempts3d || 0}
+              attemptsWeekly={data?.studentPerformance?.attemptsWeekly || 0}
+              attempts14d={data?.studentPerformance?.attempts14d || 0}
+              attemptsMonthly={data?.studentPerformance?.attemptsMonthly || 0}
               participatingStudents={data?.studentPerformance?.participatingStudents || 0}
               trend={cardMcq.trend}
               change={cardMcq.change}

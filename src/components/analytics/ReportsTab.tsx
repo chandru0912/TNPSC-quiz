@@ -89,7 +89,9 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
                 <span className="kpi-cell-lbl">{c.title}</span>
                 <span className="kpi-cell-val">{c.formatted}</span>
                 <span className={`kpi-cell-trend ${c.trend}`}>
-                  {c.trend === 'up' ? '▲' : c.trend === 'down' ? '▼' : '—'} {c.change}% vs prev
+                  {c.change === null || c.change === undefined
+                    ? 'Insufficient historical data'
+                    : `${c.trend === 'up' ? '▲' : c.trend === 'down' ? '▼' : '—'} ${c.change}% vs prev`}
                 </span>
               </div>
             ))}
@@ -129,28 +131,34 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
           </table>
         </div>
 
-        {/* Section 3: Strategic Recommendations */}
+        {/* Section 3: Live Data-Derived Observations */}
         <div className="report-section">
-          <h4 className="report-sec-heading">3. Growth Insights & Recommendations</h4>
+          <h4 className="report-sec-heading">3. Database-Derived Observations</h4>
           <div className="insights-list">
-            <div className="insight-bullet">
-              <span className="bullet-dot" />
-              <div>
-                <strong>High-Converting Tier Optimization:</strong> Districts with high mobile traffic (Coimbatore, Chennai, Madurai) demonstrate above-average conversion when introduced to 1-month and annual exam passes.
+            {topDistricts.filter((d) => (d.students || 0) > 0 || (d.revenue || 0) > 0).length === 0 ? (
+              <div className="insight-bullet">
+                <span className="bullet-dot" />
+                <div>No real district adoption data available yet for this reporting window.</div>
               </div>
-            </div>
-            <div className="insight-bullet">
-              <span className="bullet-dot" />
-              <div>
-                <strong>Syllabus Focus Expansion:</strong> General Tamil and Aptitude & Mental Ability account for the highest practice frequency. Adding unit-wise mock checkpoints drives direct student retention.
-              </div>
-            </div>
-            <div className="insight-bullet">
-              <span className="bullet-dot" />
-              <div>
-                <strong>Geographic Outlier Acceleration:</strong> Delta and Southern districts (Tirunelveli, Thanjavur, Salem) show strong organic visitor engagement that can be converted through district-specific study material packs.
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="insight-bullet">
+                  <span className="bullet-dot" />
+                  <div>
+                    <strong>Top District by Enrolled Students / Revenue:</strong>{' '}
+                    {topDistricts[0].district} ({topDistricts[0].students} enrolled students,{' '}
+                    {topDistricts[0].subscribers} paid subscribers, ₹{Number(topDistricts[0].revenue || 0).toLocaleString('en-IN')} revenue).
+                  </div>
+                </div>
+                <div className="insight-bullet">
+                  <span className="bullet-dot" />
+                  <div>
+                    <strong>Active District Coverage:</strong>{' '}
+                    {geographicData.filter((d) => (d.students || 0) > 0).length} of 38 Tamil Nadu districts currently have registered students in PostgreSQL.
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

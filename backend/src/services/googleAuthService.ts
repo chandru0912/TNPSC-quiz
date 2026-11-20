@@ -20,6 +20,33 @@ export class GoogleAuthError extends Error {
   }
 }
 
+export function normalizeGoogleAvatarUrl(rawUrl?: string | null): string | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+  // Upgrade low-resolution Google OAuth thumbnails (=s96-c, =s64-c, etc.) to crisp 256px circular-ready quality
+  if (/googleusercontent\.com/i.test(trimmed)) {
+    if (/=s\d+-c/i.test(trimmed)) {
+      return trimmed.replace(/=s\d+-c/i, '=s256-c');
+    }
+    if (!/=s\d+/i.test(trimmed)) {
+      return `${trimmed}=s256-c`;
+    }
+  }
+  return trimmed;
+}
+
+function resolveGoogleFullName(info: { name?: string | null; given_name?: string | null; family_name?: string | null; email: string }): string {
+  const direct = String(info.name || '').trim();
+  if (direct) return direct;
+  const combined = [info.given_name, info.family_name]
+    .map((p) => String(p || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  if (combined) return combined;
+  return info.email.split('@')[0].trim();
+}
+
 export function cleanEnvValue(val?: string | null): string {
   if (!val || typeof val !== 'string') return '';
   return val
@@ -127,8 +154,13 @@ export async function verifyGoogleCredentialOrCode(params: {
         googleId: info.id,
         email: info.email.trim().toLowerCase(),
         emailVerified: true,
-        fullName: (info.name || info.email.split('@')[0]).trim(),
-        avatarUrl: info.picture || null,
+        fullName: resolveGoogleFullName({
+          name: info.name,
+          given_name: info.given_name,
+          family_name: info.family_name,
+          email: info.email,
+        }),
+        avatarUrl: normalizeGoogleAvatarUrl(info.picture),
       };
     }
   }
@@ -169,7 +201,12 @@ export async function verifyGoogleCredentialOrCode(params: {
     googleId: String(payload.sub),
     email: String(payload.email).trim().toLowerCase(),
     emailVerified: true,
-    fullName: String(payload.name || payload.email.split('@')[0]).trim(),
-    avatarUrl: payload.picture ? String(payload.picture) : null,
+    fullName: resolveGoogleFullName({
+      name: payload.name,
+      given_name: payload.given_name,
+      family_name: payload.family_name,
+      email: String(payload.email),
+    }),
+    avatarUrl: normalizeGoogleAvatarUrl(payload.picture ? String(payload.picture) : null),
   };
 }

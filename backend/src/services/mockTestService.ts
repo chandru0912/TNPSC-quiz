@@ -1788,7 +1788,6 @@ export async function submitStudentMockTest(
     duplicate: Boolean((submitResult as any).duplicate),
   };
 }
-
 // ====================================================
 // SYLLABUS-DRIVEN MOCK TESTS (Lesson-wise / Unit-wise / Full-length Standard-wise)
 // ====================================================
@@ -1900,9 +1899,9 @@ export async function startSyllabusMockTestSession(params: {
   const title =
     params.title?.trim() ||
     (testCategory === 'lesson_wise'
-      ? `${params.lessonTitle || 'Lesson'} — Mock Test`
+      ? `${params.lessonTitle || 'Lesson'} â€” Mock Test`
       : testCategory === 'unit_wise'
-        ? `Unit ${unitNum || ''} — Unit Mock Test`
+        ? `Unit ${unitNum || ''} â€” Unit Mock Test`
         : `${groupInfo.tnpscGroup} ${stdNum ? `${stdNum}th Standard ` : ''}Full-length Mock Test`);
 
   return {
@@ -2092,5 +2091,500 @@ export async function submitSyllabusMockTest(
     timeSpentSeconds,
     responses,
     duplicate: Boolean((submitResult as any).duplicate),
+  };
+}
+
+// ====================================================
+// MOCK TEST MCQ GENERATOR — POOL AVAILABILITY & GENERATION
+// ====================================================
+export interface GeneratorPoolFilter {
+  mode: MockTestCategory;
+  group?: string;
+  subject?: string;
+  standards?: number[];
+  units?: number[];
+  lesson?: string;
+  difficulty?: string;
+  questionType?: string;
+  language?: string;
+  includeStaging?: boolean;
+  search?: string;
+  excludeIds?: number[];
+}
+
+function buildGeneratorPoolWhere(filters: GeneratorPoolFilter): { whereSql: string; params: any[] } {
+  const statusClause = filters.includeStaging
+    ? `status IN ('published', 'staging')`
+    : `status = 'published'`;
+  const where: string[] = [
+    statusClause,
+    `COALESCE(verification_status, 'verified') <> 'rejected'`,
+    `correct_answer BETWEEN 0 AND 3`,
+  ];
+  const params: any[] = [];
+  let idx = 1;
+
+  const groupMatches = normalizeQuestionCategoryMatch(filters.group);
+  if (groupMatches && groupMatches.length > 0) {
+    where.push(`LOWER(COALESCE(category, '')) = ANY($${idx}::text[])`);
+    params.push(groupMatches);
+    idx++;
+  }
+
+  if (filters.subject && filters.subject !== 'all') {
+    const aliases = getSubjectAliases(filters.subject);
+    if (aliases && aliases.length > 0) {
+      where.push(
+        `(LOWER(COALESCE(subject, '')) = ANY($${idx}::text[]) OR LOWER(COALESCE(subject_id, '')) = ANY($${idx}::text[]))`
+      );
+      params.push(aliases);
+      idx++;
+    }
+  }
+
+  const cleanStandards = Array.isArray(filters.standards)
+    ? filters.standards.map(Number).filter((n) => Number.isInteger(n) && n >= 6 && n <= 12)
+    : [];
+  if (cleanStandards.length > 0) {
+    // Lesson-wise & Unit-wise strictly enforce a single Standard (never mix 6th/7th/8th)
+    const enforcedStandards =
+      filters.mode === 'full_length' ? cleanStandards : [cleanStandards[0]];
+    where.push(`(class_id = ANY($${idx}::int[]) OR standard_id = ANY($${idx}::int[]))`);
+    params.push(enforcedStandards);
+    idx++;
+  }
+
+  const cleanUnits = Array.isArray(filters.units)
+    ? filters.units.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : [];
+  if (cleanUnits.length > 0) {
+    const enforcedUnits = filters.mode === 'full_length' ? cleanUnits : [cleanUnits[0]];
+    where.push(`unit_id = ANY($${idx}::int[])`);
+    params.push(enforcedUnits);
+    idx++;
+  }
+
+  // Allow lesson filter in both lesson_wise and optional lesson narrowing in unit_wise
+  if (filters.lesson?.trim() && filters.lesson !== 'all') {
+    const cleanLesson = filters.lesson.trim().toLowerCase();
+    where.push(
+      `(LOWER(COALESCE(lesson_title, '')) = $${idx} OR LOWER(COALESCE(lesson_id, '')) = $${idx} OR LOWER(COALESCE(lesson_title, '')) LIKE $${idx + 1})`
+    );
+    params.push(cleanLesson, `%${cleanLesson}%`);
+    idx += 2;
+  }
+
+  if (filters.difficulty && filters.difficulty !== 'all') {
+    where.push(`LOWER(COALESCE(difficulty, '')) = $${idx}`);
+    params.push(filters.difficulty.trim().toLowerCase());
+    idx++;
+  }
+
+  if (filters.questionType && filters.questionType !== 'all') {
+    where.push(`LOWER(COALESCE(target_system, 'main_practice')) = $${idx}`);
+    params.push(filters.questionType.trim().toLowerCase());
+    idx++;
+  }
+
+  if (filters.language && filters.language !== 'all') {
+    const lang = filters.language.trim().toLowerCase();
+    if (lang === 'tamil' || lang === 'ta') {
+      where.push(`(LOWER(COALESCE(language, '')) IN ('tamil', 'ta') OR question_text ~ '[\\u0B80-\\u0BFF]')`);
+    } else if (lang === 'english' || lang === 'en') {
+      where.push(`(LOWER(COALESCE(language, 'english')) IN ('english', 'en') AND question_text !~ '[\\u0B80-\\u0BFF]')`);
+    }
+  }
+
+  if (filters.search?.trim()) {
+    const rawSearch = filters.search.trim();
+    const numericId = /^\d+$/.test(rawSearch) ? Number(rawSearch) : null;
+    if (numericId !== null) {
+      where.push(`(id = $${idx} OR LOWER(question_text) LIKE $${idx + 1})`);
+      params.push(numericId, `%${rawSearch.toLowerCase()}%`);
+      idx += 2;
+    } else {
+      where.push(
+        `(LOWER(question_text) LIKE $${idx} OR LOWER(COALESCE(lesson_title, '')) LIKE $${idx} OR LOWER(COALESCE(topic, '')) LIKE $${idx})`
+      );
+      params.push(`%${rawSearch.toLowerCase()}%`);
+      idx++;
+    }
+  }
+
+  const cleanExclude = Array.isArray(filters.excludeIds)
+    ? filters.excludeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    : [];
+  if (cleanExclude.length > 0) {
+    where.push(`NOT (id = ANY($${idx}::int[]))`);
+    params.push(cleanExclude);
+    idx++;
+  }
+
+  return { whereSql: `WHERE ${where.join(' AND ')}`, params };
+}
+
+export async function getGeneratorPoolAvailability(filters: GeneratorPoolFilter) {
+  const { whereSql, params } = buildGeneratorPoolWhere(filters);
+  const res = await pool.query(
+    `SELECT
+       COALESCE(standard_id, class_id) AS std_id,
+       unit_id,
+       COALESCE(NULLIF(TRIM(lesson_title), ''), 'General') AS lesson_title,
+       COALESCE(difficulty, 'Medium') AS difficulty,
+       COUNT(*)::int AS cnt
+     FROM questions
+     ${whereSql}
+     GROUP BY 1, 2, 3, 4
+     ORDER BY 1 ASC NULLS LAST, 2 ASC NULLS LAST, 3 ASC`,
+    params
+  );
+
+  let totalAvailable = 0;
+  const byDifficulty: Record<'Easy' | 'Medium' | 'Hard', number> = { Easy: 0, Medium: 0, Hard: 0 };
+  const lessonMap = new Map<string, { lessonTitle: string; standardId: number | null; unitId: number | null; count: number }>();
+  const stdMap = new Map<number, number>();
+
+  for (const r of res.rows) {
+    const count = Number(r.cnt || 0);
+    totalAvailable += count;
+    const diff = String(r.difficulty || 'Medium');
+    if (diff === 'Easy') byDifficulty.Easy += count;
+    else if (diff === 'Hard') byDifficulty.Hard += count;
+    else byDifficulty.Medium += count;
+
+    const stdId = r.std_id != null ? Number(r.std_id) : null;
+    const unitId = r.unit_id != null ? Number(r.unit_id) : null;
+    if (stdId != null) {
+      stdMap.set(stdId, (stdMap.get(stdId) || 0) + count);
+    }
+    const lKey = `${stdId ?? 0}::${unitId ?? 0}::${String(r.lesson_title).toLowerCase()}`;
+    const existing = lessonMap.get(lKey);
+    if (existing) {
+      existing.count += count;
+    } else {
+      lessonMap.set(lKey, {
+        lessonTitle: String(r.lesson_title),
+        standardId: stdId,
+        unitId,
+        count,
+      });
+    }
+  }
+
+  return {
+    totalAvailable,
+    byDifficulty,
+    byLesson: Array.from(lessonMap.values()),
+    byStandard: Array.from(stdMap.entries())
+      .map(([standardId, count]) => ({ standardId, count }))
+      .sort((a, b) => a.standardId - b.standardId),
+  };
+}
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+export async function generateMockTestQuestionPool(input: GeneratorPoolFilter & {
+  totalQuestions: number;
+  difficultyDistribution?: { easyPct?: number; mediumPct?: number; hardPct?: number };
+  standardDistribution?: Record<number, number>;
+  distributeAcrossLessons?: boolean;
+  distributeAcrossStandards?: boolean;
+  randomizeSelection?: boolean;
+  randomizeOrder?: boolean;
+}) {
+  const requestedCount = Math.max(1, Math.min(200, Number(input.totalQuestions) || 25));
+  const { whereSql, params } = buildGeneratorPoolWhere({
+    mode: input.mode,
+    group: input.group,
+    subject: input.subject,
+    standards: input.standards,
+    units: input.units,
+    lesson: input.lesson,
+    difficulty: input.difficulty,
+    questionType: input.questionType,
+    language: input.language,
+    includeStaging: input.includeStaging,
+    search: input.search,
+    excludeIds: input.excludeIds,
+  });
+
+  const rowsRes = await pool.query(
+    `SELECT
+       id, category, unit_id, COALESCE(standard_id, class_id) AS class_id,
+       subject, lesson_title, topic, difficulty, question_text, options,
+       correct_answer, explanation, status
+     FROM questions
+     ${whereSql}
+     ORDER BY id ASC`,
+    params
+  );
+
+  const allCandidates = rowsRes.rows.map((r) => ({
+    id: Number(r.id),
+    category: r.category,
+    unitId: r.unit_id != null ? Number(r.unit_id) : null,
+    classId: r.class_id != null ? Number(r.class_id) : null,
+    subject: r.subject || 'General Studies',
+    lessonTitle: r.lesson_title || 'General',
+    topic: r.topic || null,
+    difficulty: (r.difficulty === 'Easy' || r.difficulty === 'Hard' ? r.difficulty : 'Medium') as 'Easy' | 'Medium' | 'Hard',
+    question: r.question_text,
+    options: typeof r.options === 'string' ? JSON.parse(r.options) : r.options || [],
+    correctAnswer: Number(r.correct_answer),
+    explanation: r.explanation || '',
+    status: r.status || 'published',
+  }));
+
+  if (allCandidates.length < requestedCount) {
+    const err: any = new Error(
+      `Insufficient questions in Question Bank: only ${allCandidates.length} eligible question${allCandidates.length === 1 ? '' : 's'} match the selected syllabus scope, but ${requestedCount} were requested.`
+    );
+    err.statusCode = 400;
+    err.eligibleCount = allCandidates.length;
+    throw err;
+  }
+
+  const randomizeSel = input.randomizeSelection !== false;
+  const poolItems = randomizeSel ? shuffleArray(allCandidates) : allCandidates;
+  const picked: typeof allCandidates = [];
+  const pickedIds = new Set<number>();
+
+  const takeOne = (item: (typeof allCandidates)[number]) => {
+    if (picked.length >= requestedCount || pickedIds.has(item.id)) return false;
+    pickedIds.add(item.id);
+    picked.push(item);
+    return true;
+  };
+
+  // Helper: round-robin selection across a grouping key (lesson or standard/unit)
+  const pickRoundRobin = (items: typeof allCandidates, targetCount: number, keyFn: (it: (typeof allCandidates)[number]) => string) => {
+    const buckets = new Map<string, typeof allCandidates>();
+    for (const it of items) {
+      if (pickedIds.has(it.id)) continue;
+      const k = keyFn(it);
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k)!.push(it);
+    }
+    const keys = randomizeSel ? shuffleArray(Array.from(buckets.keys())) : Array.from(buckets.keys());
+    let added = 0;
+    let progress = true;
+    while (added < targetCount && picked.length < requestedCount && progress) {
+      progress = false;
+      for (const k of keys) {
+        if (added >= targetCount || picked.length >= requestedCount) break;
+        const list = buckets.get(k);
+        if (list && list.length > 0) {
+          const nextItem = list.shift()!;
+          if (takeOne(nextItem)) {
+            added++;
+            progress = true;
+          }
+        }
+      }
+    }
+  };
+
+  const useDifficultySplit =
+    (!input.difficulty || input.difficulty === 'all') &&
+    input.difficultyDistribution &&
+    ((Number(input.difficultyDistribution.easyPct) || 0) +
+      (Number(input.difficultyDistribution.mediumPct) || 0) +
+      (Number(input.difficultyDistribution.hardPct) || 0)) > 0;
+
+  const bucketKeyFn =
+    input.mode === 'unit_wise' && input.distributeAcrossLessons
+      ? (it: (typeof allCandidates)[number]) => String(it.lessonTitle || 'General').toLowerCase()
+      : input.mode === 'full_length' && input.distributeAcrossStandards
+        ? (it: (typeof allCandidates)[number]) => `${it.classId ?? 0}::${it.unitId ?? 0}`
+        : null;
+
+  // Optional per-Standard explicit quota distribution for Full-length Mock Tests
+  if (input.mode === 'full_length' && input.standardDistribution && typeof input.standardDistribution === 'object') {
+    const entries = Object.entries(input.standardDistribution)
+      .map(([stdKey, qCount]) => [Number(stdKey), Math.max(0, Number(qCount) || 0)] as [number, number])
+      .filter(([stdNum, qCount]) => Number.isInteger(stdNum) && stdNum >= 6 && stdNum <= 12 && qCount > 0);
+
+    for (const [stdNum, quota] of entries) {
+      const stdPool = poolItems.filter((q) => q.classId === stdNum);
+      let takenForStd = 0;
+      for (const item of stdPool) {
+        if (takenForStd >= quota || picked.length >= requestedCount) break;
+        if (takeOne(item)) takenForStd++;
+      }
+    }
+  }
+
+  if (useDifficultySplit && input.difficultyDistribution) {
+    const easyPct = Math.max(0, Number(input.difficultyDistribution.easyPct) || 0);
+    const mediumPct = Math.max(0, Number(input.difficultyDistribution.mediumPct) || 0);
+    const hardPct = Math.max(0, Number(input.difficultyDistribution.hardPct) || 0);
+    const pctSum = easyPct + mediumPct + hardPct;
+    const easyTarget = Math.round((easyPct / pctSum) * requestedCount);
+    const mediumTarget = Math.round((mediumPct / pctSum) * requestedCount);
+    const hardTarget = Math.max(0, requestedCount - easyTarget - mediumTarget);
+
+    const targets: Array<['Easy' | 'Medium' | 'Hard', number]> = [
+      ['Easy', easyTarget],
+      ['Medium', mediumTarget],
+      ['Hard', hardTarget],
+    ];
+    for (const [diff, target] of targets) {
+      if (target <= 0) continue;
+      const matchingDiff = poolItems.filter((q) => q.difficulty === diff);
+      if (bucketKeyFn) {
+        pickRoundRobin(matchingDiff, target, bucketKeyFn);
+      } else {
+        let count = 0;
+        for (const item of matchingDiff) {
+          if (count >= target) break;
+          if (takeOne(item)) count++;
+        }
+      }
+    }
+  }
+
+  // Fill remaining slots (with balanced round-robin if enabled)
+  if (picked.length < requestedCount) {
+    if (bucketKeyFn) {
+      pickRoundRobin(poolItems, requestedCount - picked.length, bucketKeyFn);
+    } else {
+      for (const item of poolItems) {
+        if (picked.length >= requestedCount) break;
+        takeOne(item);
+      }
+    }
+  }
+
+  const finalQuestions = input.randomizeOrder !== false ? shuffleArray(picked) : picked;
+
+  return {
+    eligibleCount: allCandidates.length,
+    selectedCount: finalQuestions.length,
+    questions: finalQuestions,
+  };
+}
+
+export async function getGeneratorQuestionBankList(
+  filters: GeneratorPoolFilter & { limit?: number; offset?: number }
+) {
+  const { whereSql, params } = buildGeneratorPoolWhere(filters);
+  const limit = Math.min(100, Math.max(5, Number(filters.limit) || 20));
+  const offset = Math.max(0, Number(filters.offset) || 0);
+  const nextIdx = params.length + 1;
+
+  const [countRes, rowsRes] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int AS total FROM questions ${whereSql}`, params),
+    pool.query(
+      `SELECT
+         id, category, unit_id, COALESCE(standard_id, class_id) AS class_id,
+         subject, lesson_title, topic, difficulty, question_text, options,
+         correct_answer, explanation, status,
+         COALESCE(language, 'english') AS language,
+         COALESCE(target_system, 'main_practice') AS target_system
+       FROM questions
+       ${whereSql}
+       ORDER BY id DESC
+       LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
+      [...params, limit, offset]
+    ),
+  ]);
+
+  return {
+    total: Number(countRes.rows[0]?.total || 0),
+    questions: rowsRes.rows.map((r) => ({
+      id: Number(r.id),
+      category: r.category,
+      unitId: r.unit_id != null ? Number(r.unit_id) : null,
+      classId: r.class_id != null ? Number(r.class_id) : null,
+      subject: r.subject || 'General Studies',
+      lessonTitle: r.lesson_title || 'General',
+      topic: r.topic || null,
+      difficulty: (r.difficulty === 'Easy' || r.difficulty === 'Hard' ? r.difficulty : 'Medium') as 'Easy' | 'Medium' | 'Hard',
+      question: r.question_text,
+      options: typeof r.options === 'string' ? JSON.parse(r.options) : r.options || [],
+      correctAnswer: Number(r.correct_answer),
+      explanation: r.explanation || '',
+      status: r.status || 'published',
+      language: r.language || 'english',
+      targetSystem: r.target_system || 'main_practice',
+    })),
+  };
+}
+
+export async function validateSelectedMockTestQuestions(
+  questionIds: number[],
+  includeStaging = false
+) {
+  const rawIds = Array.isArray(questionIds) ? questionIds.map(Number) : [];
+  const seen = new Set<number>();
+  const duplicateIds: number[] = [];
+  const uniqueIds: number[] = [];
+
+  for (const id of rawIds) {
+    if (!Number.isInteger(id) || id <= 0) continue;
+    if (seen.has(id)) {
+      duplicateIds.push(id);
+    } else {
+      seen.add(id);
+      uniqueIds.push(id);
+    }
+  }
+
+  if (uniqueIds.length === 0) {
+    return {
+      valid: false,
+      uniqueCount: 0,
+      duplicateIds,
+      missingIds: [],
+      invalidIds: [],
+      message: 'Please select at least 1 valid question from the Question Bank.',
+    };
+  }
+
+  const res = await pool.query(
+    `SELECT id, status, COALESCE(verification_status, 'verified') AS verification_status, correct_answer
+     FROM questions
+     WHERE id = ANY($1::int[])`,
+    [uniqueIds]
+  );
+
+  const byId = new Map<number, any>();
+  for (const r of res.rows) byId.set(Number(r.id), r);
+
+  const missingIds: number[] = [];
+  const invalidIds: number[] = [];
+  const allowedStatuses = includeStaging ? ['published', 'staging'] : ['published'];
+
+  for (const id of uniqueIds) {
+    const row = byId.get(id);
+    if (!row) {
+      missingIds.push(id);
+    } else if (
+      !allowedStatuses.includes(String(row.status || '').toLowerCase()) ||
+      String(row.verification_status || '').toLowerCase() === 'rejected' ||
+      Number(row.correct_answer) < 0 ||
+      Number(row.correct_answer) > 3
+    ) {
+      invalidIds.push(id);
+    }
+  }
+
+  const valid = duplicateIds.length === 0 && missingIds.length === 0 && invalidIds.length === 0;
+  return {
+    valid,
+    uniqueCount: uniqueIds.length,
+    duplicateIds,
+    missingIds,
+    invalidIds,
+    message: valid
+      ? `All ${uniqueIds.length} selected questions are verified and unique.`
+      : `Validation issues: ${duplicateIds.length} duplicates, ${missingIds.length} missing, ${invalidIds.length} ineligible.`,
   };
 }

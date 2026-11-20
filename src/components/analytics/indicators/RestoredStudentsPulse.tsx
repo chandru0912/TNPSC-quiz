@@ -8,7 +8,7 @@ interface RestoredStudentsPulseProps {
   prevRestored7d: number;
   deactivatedCount: number;
   trend: 'up' | 'down' | 'neutral';
-  change: number;
+  change: number | null;
   badgeText?: string;
   onClick?: () => void;
 }
@@ -85,7 +85,7 @@ export const RestoredStudentsPulse: React.FC<RestoredStudentsPulseProps> = ({
           {trend === 'up' && <TrendingUp size={12} />}
           {trend === 'down' && <TrendingDown size={12} />}
           {trend === 'neutral' && <Minus size={12} />}
-          <span>{change > 0 ? `+${change}%` : `${change}%`}</span>
+          <span>{change === null ? '—' : change > 0 ? `+${change}%` : `${change}%`}</span>
         </span>
         <span className="fic-footer-label">
           {restored7d > 0 ? `${restored7d} in past 7d` : 'No recent drops'}

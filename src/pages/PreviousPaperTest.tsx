@@ -11,7 +11,6 @@ import {
   Eraser,
   FileText,
   Grid,
-  LogIn,
   RotateCcw,
   Send,
   ShieldCheck,
@@ -21,6 +20,7 @@ import { apiFetch } from '../utils/api'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { notifyStudentSync } from '../utils/studentSync'
+import { buildAuthRedirectUrl, savePostLoginRedirect } from '../utils/authRedirect'
 import { QuestionPalette, type QuestionPaletteStatus } from '../components/exam/QuestionPalette'
 import './PreviousPaperTest.css'
 
@@ -383,24 +383,16 @@ const PreviousPaperTest = () => {
     }
   }
 
+  useEffect(() => {
+    if (token) return
+    const query = searchParams.toString()
+    const target = `/previous-papers/test/${paperId || ''}${query ? `?${query}` : ''}`
+    savePostLoginRedirect(target)
+    navigate(buildAuthRedirectUrl('login', target), { replace: true, state: { from: target } })
+  }, [token, paperId, searchParams, navigate])
+
   if (!token) {
-    return (
-      <div className="pyp-exam-page">
-        <div className="pyp-auth-card glass">
-          <LogIn size={40} className="pyp-auth-icon" />
-          <h2>Student Sign-In Required</h2>
-          <p>Please sign in to start this timed 200-question Previous Year Paper mock examination and track your score.</p>
-          <div className="pyp-auth-actions">
-            <button type="button" className="btn btn-primary" onClick={() => navigate('/login')}>
-              Sign In to Continue
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={() => navigate('/previous-papers')}>
-              Back to Previous Year Papers
-            </button>
-          </div>
-        </div>
-      </div>
-    )
+    return null
   }
 
   if (loading) {

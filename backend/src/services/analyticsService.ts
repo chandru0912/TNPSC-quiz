@@ -1,10 +1,25 @@
 import pool from '../db';
+import { broadcastAnalyticsEvent } from './analyticsEventBus';
+import { normalizeTamilNaduDistrict } from './tamilNaduDistrictService';
+import { recordVerifiedSubscriptionTransaction } from './subscriptionHistoryService';
+import { grantPlanEntitlements } from './subscriptionPlansService';
 
 export interface DistrictMetric {
   district: string;
+  districtId?: string;
   visitors: number;
   uniqueVisitors: number;
   students: number;
+  registeredStudents?: number;
+  uniqueLoginStudents?: number;
+  totalLoginEvents?: number;
+  todayUniqueLogins?: number;
+  last7dUniqueLogins?: number;
+  last30dUniqueLogins?: number;
+  usagePercentage?: number;
+  onlineStudents?: number;
+  mcqAttempts?: number;
+  mockTestAttempts?: number;
   subscribers: number;
   freeStudents: number;
   conversionRate: number;
@@ -61,6 +76,8 @@ export const TN_DISTRICTS: { name: string; defaultCity: string; cities: string[]
   { name: 'Virudhunagar', defaultCity: 'Sivakasi', cities: ['Sivakasi', 'Virudhunagar Town', 'Rajapalayam', 'Aruppukkottai'] },
 ];
 
+const IST_TODAY_START = "(DATE_TRUNC('day', CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')";
+
 function getIntervalFromRange(range: string): string {
   switch (range) {
     case 'today':
@@ -78,20 +95,135 @@ function getIntervalFromRange(range: string): string {
   }
 }
 
-function calculateChange(current: number, previous: number): { change: number; trend: 'up' | 'down' | 'neutral' } {
-  if (previous === 0) {
-    return { change: current > 0 ? 100 : 0, trend: current > 0 ? 'up' : 'neutral' };
+function getRangeCondition(column: string, range: string): string {
+  if (range === 'all') return 'TRUE';
+  if (range === 'today') return `${column} >= ${IST_TODAY_START}`;
+  return `${column} >= CURRENT_TIMESTAMP - ${getIntervalFromRange(range)}`;
+}
+
+function getPrevRangeCondition(column: string, range: string): string {
+  if (range === 'all') return 'FALSE';
+  if (range === 'today') {
+    return `${column} >= (${IST_TODAY_START} - INTERVAL '1 day') AND ${column} < ${IST_TODAY_START}`;
+  }
+  const interval = getIntervalFromRange(range);
+  return `${column} >= CURRENT_TIMESTAMP - (${interval} * 2) AND ${column} < CURRENT_TIMESTAMP - ${interval}`;
+}
+
+function calculateChange(
+  current: number,
+  previous: number,
+  range: string = '30d'
+): { change: number | null; trend: 'up' | 'down' | 'neutral'; hasHistoricalData: boolean } {
+  if (range === 'all' || previous <= 0) {
+    return { change: null, trend: 'neutral', hasHistoricalData: false };
   }
   const diff = ((current - previous) / previous) * 100;
   const rounded = Math.round(diff * 10) / 10;
   return {
     change: Math.abs(rounded),
     trend: rounded > 0 ? 'up' : rounded < 0 ? 'down' : 'neutral',
+    hasHistoricalData: true,
   };
 }
 
+const GENUINE_STUDENT_SQL = (alias: string = 's') => `(
+  COALESCE(${alias}.role, 'student') = 'student'
+  AND ${alias}.deleted_at IS NULL
+  AND COALESCE(${alias}.is_active, true) = true
+  AND LOWER(TRIM(COALESCE(${alias}.email, ''))) NOT LIKE '%@example.com'
+  AND LOWER(TRIM(COALESCE(${alias}.email, ''))) NOT LIKE 'test_%'
+  AND LOWER(TRIM(COALESCE(${alias}.email, ''))) NOT LIKE 'preview_%'
+  AND LOWER(TRIM(COALESCE(${alias}.email, ''))) NOT LIKE 'demo_%'
+)`;
+
+const GENUINE_SUB_SQL = (subAlias: string = 'sub', stuAlias: string = 's') => `(
+  ${GENUINE_STUDENT_SQL(stuAlias)}
+  AND ${subAlias}.transaction_date >= (${stuAlias}.created_at - INTERVAL '1 hour')
+)`;
+
+let cachedLiveActivationIso: string | null = null;
+
 export class AnalyticsService {
-  // 1. Record visitor tracking beacon
+  // Ensure clean Live Analytics Activation Timestamp exists once in PostgreSQL
+  static async ensureLiveAnalyticsBaseline(): Promise<string> {
+    if (cachedLiveActivationIso) return cachedLiveActivationIso;
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS analytics_settings (
+        key VARCHAR(64) PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    const nowIso = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO analytics_settings (key, value)
+       VALUES ('live_tracking_activated_at', $1)
+       ON CONFLICT (key) DO NOTHING`,
+      [nowIso]
+    );
+    const res = await pool.query(
+      `SELECT value FROM analytics_settings WHERE key = 'live_tracking_activated_at' LIMIT 1`
+    );
+    cachedLiveActivationIso = res.rows[0]?.value || nowIso;
+    return cachedLiveActivationIso!;
+  }
+
+  // Mark student online immediately on successful login (deduplicated per student)
+  static async touchStudentLiveSession(studentId: number): Promise<void> {
+    if (!Number.isInteger(studentId) || studentId <= 0) return;
+    const sessionId = `auth_student_${studentId}`;
+    const visitorId = `stu_${studentId}`;
+    await pool.query(
+      `INSERT INTO visitor_sessions (session_id, visitor_id, student_id, is_active, started_at, last_heartbeat, ended_at)
+       VALUES ($1, $2, $3, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+       ON CONFLICT (session_id) DO UPDATE SET
+         student_id = EXCLUDED.student_id,
+         is_active = true,
+         ended_at = NULL,
+         last_heartbeat = CURRENT_TIMESTAMP`,
+      [sessionId, visitorId, studentId]
+    );
+  }
+
+  // End all active sessions immediately when student logs out
+  static async endStudentLiveSessions(studentId: number): Promise<void> {
+    if (!Number.isInteger(studentId) || studentId <= 0) return;
+    await pool.query(
+      `UPDATE visitor_sessions
+       SET is_active = false,
+           ended_at = CURRENT_TIMESTAMP
+       WHERE student_id = $1 AND (is_active = true OR ended_at IS NULL)`,
+      [studentId]
+    );
+  }
+
+  // Idempotent genuine login event recorder (prevents duplicates from retries/OAuth callbacks within 3s)
+  static async recordGenuineLoginEvent(studentId: number, provider: 'email' | 'google'): Promise<void> {
+    if (!Number.isInteger(studentId) || studentId <= 0) return;
+    const dupCheck = await pool.query(
+      `SELECT id FROM student_activity
+       WHERE student_id = $1
+         AND activity_type IN ('login', 'google_login')
+         AND created_at >= CURRENT_TIMESTAMP - INTERVAL '3 seconds'
+       LIMIT 1`,
+      [studentId]
+    );
+    if (dupCheck.rows.length > 0) return;
+    await pool.query(
+      `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [
+        studentId,
+        provider === 'google' ? 'google_login' : 'login',
+        String(studentId),
+        provider === 'google' ? 'Logged In with Google' : 'Logged In',
+        JSON.stringify({ provider, recordedAt: new Date().toISOString() }),
+      ]
+    );
+  }
+
+  // 1. Record visitor tracking beacon (page_view, heartbeat, or session_end)
   static async recordHit(data: {
     sessionId: string;
     visitorId: string;
@@ -104,6 +236,7 @@ export class AnalyticsService {
     browser?: string;
     os?: string;
     referrer?: string;
+    eventType?: 'page_view' | 'heartbeat' | 'session_end';
   }) {
     const {
       sessionId,
@@ -117,210 +250,541 @@ export class AnalyticsService {
       browser,
       os,
       referrer,
+      eventType = 'page_view',
     } = data;
 
-    const resolvedDistrict = district || 'Chennai';
-    const resolvedCity = city || 'Anna Nagar';
+    // Never count Admin pages or internal health checks as website visitor traffic
+    if (String(pagePath || '').toLowerCase().startsWith('/admin')) {
+      return { success: true, ignored: true };
+    }
+
+    // Session end (tab close / logout): mark session inactive immediately
+    if (eventType === 'session_end') {
+      await pool.query(
+        `UPDATE visitor_sessions
+         SET is_active = false, ended_at = CURRENT_TIMESTAMP, last_heartbeat = CURRENT_TIMESTAMP
+         WHERE session_id = $1`,
+        [sessionId]
+      );
+      broadcastAnalyticsEvent('visitor_hit', { pagePath, eventType: 'session_end' });
+      return { success: true };
+    }
+
+    // Never fabricate Chennai/Anna Nagar: only use explicit district or student's confirmed DB district
+    let resolvedDistrict: string | null = district ? district.trim() : null;
+    let resolvedCity: string | null = city ? city.trim() : null;
+    let locationSource: string | null = resolvedDistrict ? 'reported' : null;
+
+    if (!resolvedDistrict && studentId) {
+      const stuRes = await pool.query('SELECT district, city FROM students WHERE id = $1', [studentId]);
+      if (stuRes.rows[0]?.district) {
+        resolvedDistrict = stuRes.rows[0].district;
+        resolvedCity = stuRes.rows[0].city || null;
+        locationSource = 'student_profile';
+      }
+    }
+
     const resolvedDevice = deviceCategory || 'desktop';
-    const resolvedBrowser = browser || 'Chrome';
-    const resolvedOs = os || 'Windows';
+    const resolvedBrowser = browser || 'Other';
+    const resolvedOs = os || 'Other';
+
+    // Check if returning visitor (has a different earlier session)
+    const priorRes = await pool.query(
+      `SELECT 1 FROM visitor_sessions WHERE visitor_id = $1 AND session_id <> $2 LIMIT 1`,
+      [visitorId, sessionId]
+    );
+    const isReturning = priorRes.rows.length > 0;
 
     // Upsert session
     await pool.query(
       `INSERT INTO visitor_sessions (
-        session_id, visitor_id, student_id, district, city, device_category,
-        browser, os, referrer, entry_path, current_path, is_returning, is_active,
-        started_at, last_heartbeat
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, false, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        session_id, visitor_id, student_id, country, state, district, city, location_source,
+        device_category, browser, os, referrer, entry_path, current_path,
+        is_returning, is_active, started_at, last_heartbeat, ended_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $13,
+        $14, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+      )
       ON CONFLICT (session_id) DO UPDATE SET
         student_id = COALESCE($3, visitor_sessions.student_id),
-        current_path = $10,
+        district = COALESCE($6, visitor_sessions.district),
+        city = COALESCE($7, visitor_sessions.city),
+        location_source = COALESCE($8, visitor_sessions.location_source),
+        current_path = $13,
         is_active = true,
+        ended_at = NULL,
         last_heartbeat = CURRENT_TIMESTAMP`,
       [
         sessionId,
         visitorId,
         studentId || null,
+        resolvedDistrict ? 'India' : null,
+        resolvedDistrict ? 'Tamil Nadu' : null,
         resolvedDistrict,
         resolvedCity,
+        locationSource,
         resolvedDevice,
         resolvedBrowser,
         resolvedOs,
         referrer || null,
         pagePath,
+        isReturning,
       ]
     );
 
-    // Insert page view record
-    await pool.query(
-      `INSERT INTO page_views (
-        session_id, visitor_id, student_id, page_path, page_title, district, city, device_category, viewed_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
-      [
-        sessionId,
-        visitorId,
-        studentId || null,
-        pagePath,
-        pageTitle || null,
-        resolvedDistrict,
-        resolvedCity,
-        resolvedDevice,
-      ]
-    );
+    // Only insert a page_views row on actual page_view events (never duplicate on heartbeats)
+    if (eventType === 'page_view') {
+      await pool.query(
+        `INSERT INTO page_views (
+          session_id, visitor_id, student_id, page_path, page_title, district, city, device_category, viewed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
+        [
+          sessionId,
+          visitorId,
+          studentId || null,
+          pagePath,
+          pageTitle || null,
+          resolvedDistrict,
+          resolvedCity,
+          resolvedDevice,
+        ]
+      );
+    }
 
+    broadcastAnalyticsEvent('visitor_hit', { pagePath, eventType });
     return { success: true };
   }
 
-  // 2. Main Analytics Overview (12 Cards with previous period comparison)
-  static async getOverview(range: string = '30d', districtFilter?: string) {
-    const interval = getIntervalFromRange(range);
-    const distParam = districtFilter && districtFilter !== 'all' ? districtFilter : null;
+  // 1B. Record idempotent learning / platform event
+  static async recordAnalyticsEvent(data: {
+    eventId?: string;
+    eventType: string;
+    studentId?: number | null;
+    visitorId?: string | null;
+    sessionId?: string | null;
+    pagePath?: string | null;
+    metadata?: Record<string, any>;
+  }) {
+    let district: string | null = null;
+    if (data.studentId) {
+      const sRes = await pool.query('SELECT district FROM students WHERE id = $1', [data.studentId]);
+      district = sRes.rows[0]?.district || null;
+    }
 
-    // Current period queries
+    await pool.query(
+      `INSERT INTO analytics_events (
+        event_id, event_type, student_id, visitor_id, session_id, page_path, district, metadata, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, CURRENT_TIMESTAMP)
+      ON CONFLICT (event_id) DO NOTHING`,
+      [
+        data.eventId || null,
+        data.eventType,
+        data.studentId || null,
+        data.visitorId || null,
+        data.sessionId || null,
+        data.pagePath || null,
+        district,
+        JSON.stringify(data.metadata || {}),
+      ]
+    );
+
+    broadcastAnalyticsEvent('learning_activity', { eventType: data.eventType, studentId: data.studentId });
+    return { success: true };
+  }
+
+  // 1C. Record signature-verified Razorpay webhook event (idempotent)
+  static async recordVerifiedRazorpayWebhook(payload: any) {
+    const eventName = String(payload?.event || '').trim();
+    const paymentEntity = payload?.payload?.payment?.entity || {};
+    const subEntity = payload?.payload?.subscription?.entity || {};
+    const refundEntity = payload?.payload?.refund?.entity || {};
+
+    const razorpayPaymentId = paymentEntity.id || refundEntity.payment_id || null;
+    const razorpayOrderId = paymentEntity.order_id || null;
+    const notes = paymentEntity.notes || subEntity.notes || {};
+    const studentId = Number.isInteger(Number(notes.student_id)) && Number(notes.student_id) > 0
+      ? Number(notes.student_id)
+      : null;
+    const planId = String(notes.plan_id || subEntity.plan_id || 'razorpay_plan').slice(0, 64);
+    const planName = String(notes.plan_name || 'TNPSC Pro Pass').slice(0, 120);
+    const amountPaise = Number(paymentEntity.amount ?? refundEntity.amount ?? 0);
+    const amountInr = Math.round((amountPaise / 100) * 100) / 100;
+    const currency = String(paymentEntity.currency || 'INR').toUpperCase().slice(0, 10);
+
+    let status = 'pending';
+    if (eventName === 'payment.captured' || eventName === 'subscription.activated' || eventName === 'subscription.charged') {
+      status = 'success';
+    } else if (eventName === 'payment.failed') {
+      status = 'failed';
+    } else if (eventName === 'subscription.cancelled') {
+      status = 'cancelled';
+    } else if (eventName === 'refund.processed' || eventName === 'payment.refunded') {
+      status = 'refunded';
+    }
+
+    const paymentEventId = `rzp_${eventName}_${razorpayPaymentId || subEntity.id || Date.now()}`.slice(0, 120);
+    let district: string | null = null;
+    if (studentId) {
+      const sRes = await pool.query('SELECT district FROM students WHERE id = $1', [studentId]);
+      district = sRes.rows[0]?.district || null;
+    }
+
+      await pool.query(
+        `INSERT INTO payment_events (
+        payment_event_id, student_id, razorpay_order_id, razorpay_payment_id,
+        plan_id, plan_name, amount, currency, status, verified_by_signature, district, metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11::jsonb)
+      ON CONFLICT (payment_event_id) DO NOTHING`,
+        [
+          paymentEventId,
+          studentId,
+          razorpayOrderId,
+          razorpayPaymentId,
+          planId,
+          planName,
+          amountInr,
+          currency,
+          status,
+          district,
+          JSON.stringify({ event: eventName, method: paymentEntity.method || null }),
+        ]
+      );
+
+      // Persist verified subscription transaction idempotently into subscription_transactions
+      const normalizedPaymentStatus: 'success' | 'pending' | 'failed' | 'refunded' =
+        status === 'success'
+          ? 'success'
+          : status === 'failed'
+            ? 'failed'
+            : status === 'refunded'
+              ? 'refunded'
+              : 'pending';
+
+      const txRow = await recordVerifiedSubscriptionTransaction({
+        studentId,
+        studentEmail: notes.student_email || paymentEntity.email || null,
+        planId,
+        planName,
+        amountPaid: amountInr,
+        refundAmount: status === 'refunded' ? amountInr : 0,
+        currency,
+        paymentProvider: 'razorpay',
+        paymentMethod: paymentEntity.method || null,
+        cardType: paymentEntity.card?.type || null,
+        gatewayOrderId: razorpayOrderId,
+        gatewayPaymentId: razorpayPaymentId || paymentEventId,
+        paymentStatus: normalizedPaymentStatus,
+        subscriptionStatus: status === 'cancelled' ? 'cancelled' : undefined,
+        metadata: { event: eventName, paymentEventId },
+      });
+
+      if (studentId && status === 'success') {
+        await grantPlanEntitlements({
+          studentId,
+          planId,
+          transactionId: txRow?.id ? Number(txRow.id) : null,
+          expiresAt: txRow?.expires_at ? new Date(txRow.expires_at) : null,
+        });
+        await pool.query(
+          `INSERT INTO student_subscriptions (
+          student_id, plan_id, plan_name, amount, currency, status, payment_method, district, starts_at, expires_at, transaction_date
+        ) VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP)`,
+          [studentId, planId, planName, amountInr, currency, paymentEntity.method || null, district, txRow?.expires_at || null]
+        );
+        await pool.query(
+          `UPDATE students SET subscription_tier = $2, subscription_status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [studentId, planId === 'test_batch' ? 'test_batch' : 'pro']
+        );
+      } else if (studentId && status === 'cancelled') {
+        await pool.query(
+          `UPDATE student_subscriptions SET status = 'cancelled' WHERE student_id = $1 AND status = 'active'`,
+          [studentId]
+        );
+        await pool.query(
+          `UPDATE students SET subscription_status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [studentId]
+        );
+      }
+
+    broadcastAnalyticsEvent('payment_event', { eventName, status, studentId });
+    broadcastAnalyticsEvent('subscription_updated', { status, studentId });
+    return { success: true };
+  }
+
+  // 2. Main Analytics Overview (100% PostgreSQL-backed, Asia/Kolkata aligned, zero fabricated fallbacks)
+  static async getOverview(range: string = '30d', districtFilter?: string) {
+    const distParam = districtFilter && districtFilter !== 'all' ? districtFilter : null;
+    const isAllTime = range === 'all';
+    const liveTrackingActivatedAt = await AnalyticsService.ensureLiveAnalyticsBaseline();
+
+    const rangeLabel =
+      range === 'today'
+        ? 'vs previous day'
+        : range === '7d'
+          ? 'vs previous 7 days'
+          : range === '90d'
+            ? 'vs previous 90 days'
+            : isAllTime
+              ? 'all time'
+              : 'vs previous 30 days';
+
+    const formatTrendMeta = (
+      current: number,
+      previous: number,
+      label: string = rangeLabel
+    ) => {
+      const res = calculateChange(current, previous, range);
+      return {
+        change: res.change,
+        trend: res.trend,
+        hasHistoricalData: res.hasHistoricalData,
+        comparisonText: res.hasHistoricalData ? label : 'Insufficient historical data',
+      };
+    };
+
     const qStudents = await pool.query(
       `SELECT
-        COUNT(*) as total,
-        COUNT(CASE WHEN created_at >= CURRENT_TIMESTAMP - ${interval} THEN 1 END) as new_in_range,
-        COUNT(CASE WHEN created_at >= CURRENT_DATE THEN 1 END) as new_today,
-        COUNT(CASE WHEN created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END) as new_7d,
-        COUNT(CASE WHEN created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END) as new_30d,
-        COUNT(CASE WHEN subscription_tier != 'free' AND subscription_status = 'active' THEN 1 END) as paid_subscribers,
-        COUNT(CASE WHEN subscription_tier = 'free' OR subscription_tier IS NULL THEN 1 END) as free_students
-       FROM students
-       WHERE ($1::text IS NULL OR district = $1)`,
-      [distParam]
+        COUNT(DISTINCT LOWER(TRIM(s.email)))::int as total,
+        COUNT(DISTINCT CASE WHEN s.email_verified = true THEN LOWER(TRIM(s.email)) END)::int as verified_students,
+        MAX(s.last_login_at) as last_active_at,
+        COUNT(DISTINCT CASE WHEN ${getRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as new_in_range,
+        COUNT(DISTINCT CASE WHEN ${getPrevRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as prev_new_in_range,
+        COUNT(DISTINCT CASE WHEN s.created_at >= $2::timestamptz THEN LOWER(TRIM(s.email)) END)::int as new_since_activation,
+        COUNT(DISTINCT CASE WHEN s.created_at >= ${IST_TODAY_START} THEN LOWER(TRIM(s.email)) END)::int as new_today,
+        COUNT(DISTINCT CASE WHEN s.created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN LOWER(TRIM(s.email)) END)::int as new_7d,
+        COUNT(DISTINCT CASE WHEN s.created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN LOWER(TRIM(s.email)) END)::int as new_30d,
+        COUNT(DISTINCT CASE WHEN s.subscription_tier != 'free' AND s.subscription_status = 'active' THEN LOWER(TRIM(s.email)) END)::int as paid_subscribers,
+        COUNT(DISTINCT CASE WHEN s.subscription_tier = 'free' OR s.subscription_tier IS NULL THEN LOWER(TRIM(s.email)) END)::int as free_students
+       FROM students s
+       WHERE ${GENUINE_STUDENT_SQL('s')}
+         AND ($1::text IS NULL OR s.district = $1)`,
+      [distParam, liveTrackingActivatedAt]
+    );
+
+    const qOnlineStudents = await pool.query(
+      `SELECT COUNT(DISTINCT vs.student_id)::int as online_students
+       FROM visitor_sessions vs
+       JOIN students s ON s.id = vs.student_id
+       WHERE vs.student_id IS NOT NULL
+         AND vs.is_active = true
+         AND vs.ended_at IS NULL
+         AND vs.last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+         AND ${GENUINE_STUDENT_SQL('s')}`
+    );
+
+    const qMockAttemptsAgg = await pool.query(
+      `SELECT
+        COUNT(*)::int as all_time_attempts,
+        COUNT(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN 1 END)::int as attempts_in_range,
+        COUNT(CASE WHEN ${getPrevRangeCondition('a.completed_at', range)} THEN 1 END)::int as prev_attempts_in_range,
+        COUNT(CASE WHEN a.completed_at >= ${IST_TODAY_START} THEN 1 END)::int as attempts_today,
+        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '3 days' THEN 1 END)::int as attempts_3d,
+        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as attempts_7d,
+        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' THEN 1 END)::int as attempts_14d,
+        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END)::int as attempts_30d,
+        COALESCE(SUM(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN a.correct_answers ELSE 0 END), 0)::int as correct_in_range,
+        COALESCE(SUM(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN a.incorrect_answers ELSE 0 END), 0)::int as incorrect_in_range,
+        COALESCE(SUM(a.correct_answers), 0)::int as all_time_correct,
+        COALESCE(SUM(a.incorrect_answers), 0)::int as all_time_incorrect,
+        COUNT(DISTINCT a.student_id)::int as participating_students,
+        COALESCE(ROUND(
+          100.0 * SUM(CASE WHEN a.assessment_type IN ('lesson_quiz', 'study_material_quiz', 'subject_drill') OR COALESCE(a.mock_test_format, '') = 'mcq_practice' THEN a.correct_answers ELSE 0 END)
+          / NULLIF(SUM(CASE WHEN a.assessment_type IN ('lesson_quiz', 'study_material_quiz', 'subject_drill') OR COALESCE(a.mock_test_format, '') = 'mcq_practice' THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
+        , 1), 0) as mcq_practice_accuracy,
+        COALESCE(ROUND(
+          100.0 * SUM(CASE WHEN a.assessment_type = 'mock_test' OR COALESCE(a.mock_test_format, '') IN ('lesson_wise', 'unit_wise', 'full_length') THEN a.correct_answers ELSE 0 END)
+          / NULLIF(SUM(CASE WHEN a.assessment_type = 'mock_test' OR COALESCE(a.mock_test_format, '') IN ('lesson_wise', 'unit_wise', 'full_length') THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
+        , 1), 0) as mock_test_accuracy,
+        COALESCE(ROUND(
+          100.0 * SUM(CASE WHEN a.assessment_type = 'previous_paper' THEN a.correct_answers ELSE 0 END)
+          / NULLIF(SUM(CASE WHEN a.assessment_type = 'previous_paper' THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
+        , 1), 0) as previous_paper_accuracy
+       FROM mock_test_attempts a
+       JOIN students s ON s.id = a.student_id
+       WHERE COALESCE(a.status, 'completed') = 'completed'
+         AND a.attempted_questions > 0
+         AND ${GENUINE_STUDENT_SQL('s')}`
     );
 
     const qActiveToday = await pool.query(
-      `SELECT COUNT(DISTINCT s.id) as active_today
+      `SELECT
+        COUNT(DISTINCT CASE WHEN (s.last_login_at >= ${IST_TODAY_START} OR EXISTS (
+          SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= ${IST_TODAY_START}
+        )) THEN s.id END)::int as active_today,
+        COUNT(DISTINCT CASE WHEN (
+          (s.last_login_at >= (${IST_TODAY_START} - INTERVAL '1 day') AND s.last_login_at < ${IST_TODAY_START})
+          OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= (${IST_TODAY_START} - INTERVAL '1 day') AND ss.started_at < ${IST_TODAY_START})
+        ) THEN s.id END)::int as active_yesterday
        FROM students s
-       WHERE (s.last_login_at >= CURRENT_DATE OR EXISTS (
-         SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= CURRENT_DATE
-       )) AND ($1::text IS NULL OR s.district = $1)`,
+       WHERE ${GENUINE_STUDENT_SQL('s')}
+         AND ($1::text IS NULL OR s.district = $1)`,
       [distParam]
     );
 
     const qTraffic = await pool.query(
       `SELECT
-        COUNT(*) as total_visitors,
-        COUNT(DISTINCT visitor_id) as unique_visitors
+        COUNT(DISTINCT visitor_id)::int as total_visitors,
+        COUNT(DISTINCT visitor_id)::int as unique_visitors,
+        COUNT(DISTINCT CASE WHEN student_id IS NOT NULL THEN visitor_id END)::int as authenticated_visits,
+        COUNT(DISTINCT CASE WHEN student_id IS NULL THEN visitor_id END)::int as anonymous_visits
        FROM visitor_sessions
-       WHERE started_at >= CURRENT_TIMESTAMP - ${interval}
+       WHERE started_at >= $2::timestamptz
+         AND ${getRangeCondition('started_at', range)}
          AND ($1::text IS NULL OR district = $1)`,
-      [distParam]
+      [distParam, liveTrackingActivatedAt]
     );
 
     const qPageViews = await pool.query(
-      `SELECT COUNT(*) as total_page_views
+      `SELECT COUNT(*)::int as total_page_views
        FROM page_views
-       WHERE viewed_at >= CURRENT_TIMESTAMP - ${interval}
+       WHERE viewed_at >= $2::timestamptz
+         AND ${getRangeCondition('viewed_at', range)}
+         AND page_path NOT LIKE '/admin%'
          AND ($1::text IS NULL OR district = $1)`,
-      [distParam]
+      [distParam, liveTrackingActivatedAt]
     );
 
     const qLogins = await pool.query(
-      `SELECT COUNT(*) as total_logins
+      `SELECT
+        COUNT(CASE WHEN ${getRangeCondition('sa.created_at', range)} THEN 1 END)::int as total_logins,
+        COUNT(CASE WHEN ${getPrevRangeCondition('sa.created_at', range)} THEN 1 END)::int as prev_logins,
+        COUNT(CASE WHEN sa.created_at >= $2::timestamptz THEN 1 END)::int as login_events_since_activation,
+        COUNT(DISTINCT CASE WHEN sa.created_at >= $2::timestamptz THEN sa.student_id END)::int as unique_students_logged_in
        FROM student_activity sa
        JOIN students s ON sa.student_id = s.id
-       WHERE sa.activity_type = 'login'
-         AND sa.created_at >= CURRENT_TIMESTAMP - ${interval}
+       WHERE sa.activity_type IN ('login', 'google_login')
+         AND ${GENUINE_STUDENT_SQL('s')}
          AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam]
+      [distParam, liveTrackingActivatedAt]
     );
 
     const qRevenue = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0) as total_revenue
-       FROM student_subscriptions
-       WHERE status = 'active'
-         AND transaction_date >= CURRENT_TIMESTAMP - ${interval}
-         AND ($1::text IS NULL OR district = $1)`,
+      `SELECT COALESCE(SUM(sub.amount), 0) as total_revenue
+       FROM student_subscriptions sub
+       JOIN students s ON s.id = sub.student_id
+       WHERE sub.status = 'active'
+         AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP)
+         AND ${GENUINE_SUB_SQL('sub', 's')}
+         AND ${getRangeCondition('sub.transaction_date', range)}
+         AND ($1::text IS NULL OR sub.district = $1)`,
       [distParam]
     );
 
     const qMcq = await pool.query(
       `SELECT
-        COUNT(*) as total_attempts,
-        COUNT(CASE WHEN qa.attempted_at >= CURRENT_DATE THEN 1 END) as attempts_today,
-        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END) as attempts_7d,
-        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END) as attempts_30d,
-        COUNT(CASE WHEN qa.is_correct = true THEN 1 END) as correct_count,
-        COUNT(CASE WHEN qa.is_correct = false THEN 1 END) as incorrect_count,
-        COUNT(DISTINCT qa.student_id) as participating_students,
-        COALESCE(ROUND(AVG(CASE WHEN is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
+        COUNT(*)::int as total_attempts,
+        COUNT(CASE WHEN qa.attempted_at >= ${IST_TODAY_START} THEN 1 END)::int as attempts_today,
+        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '3 days' THEN 1 END)::int as attempts_3d,
+        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as attempts_7d,
+        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' THEN 1 END)::int as attempts_14d,
+        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END)::int as attempts_30d,
+        COUNT(CASE WHEN qa.is_correct = true THEN 1 END)::int as correct_count,
+        COUNT(CASE WHEN qa.is_correct = false THEN 1 END)::int as incorrect_count,
+        COUNT(DISTINCT qa.student_id)::int as participating_students,
+        COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
        FROM question_attempts qa
        JOIN students s ON qa.student_id = s.id
-       WHERE qa.attempted_at >= CURRENT_TIMESTAMP - ${interval}
+       WHERE ${GENUINE_STUDENT_SQL('s')}
+         AND ${getRangeCondition('qa.attempted_at', range)}
          AND ($1::text IS NULL OR s.district = $1)`,
       [distParam]
     );
 
     const qAllTimeMcq = await pool.query(
       `SELECT
-        COUNT(*) as all_time_attempts,
-        COUNT(CASE WHEN is_correct = true THEN 1 END) as all_time_correct,
-        COUNT(CASE WHEN is_correct = false THEN 1 END) as all_time_incorrect,
-        COUNT(DISTINCT student_id) as all_time_participating_students,
-        COALESCE(ROUND(AVG(CASE WHEN is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as all_time_accuracy
-       FROM question_attempts`
+        COUNT(*)::int as all_time_attempts,
+        COUNT(CASE WHEN qa.is_correct = true THEN 1 END)::int as all_time_correct,
+        COUNT(CASE WHEN qa.is_correct = false THEN 1 END)::int as all_time_incorrect,
+        COUNT(DISTINCT qa.student_id)::int as all_time_participating_students,
+        COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as all_time_accuracy
+       FROM question_attempts qa
+       JOIN students s ON qa.student_id = s.id
+       WHERE ${GENUINE_STUDENT_SQL('s')}`
     );
 
-    // Previous period queries for calculating trends
+    // Previous period queries for calculating genuine trends (no fabricated multipliers)
     const qPrevTraffic = await pool.query(
       `SELECT
-        COUNT(*) as total_visitors,
-        COUNT(DISTINCT visitor_id) as unique_visitors
+        COUNT(DISTINCT visitor_id)::int as total_visitors,
+        COUNT(DISTINCT visitor_id)::int as unique_visitors
        FROM visitor_sessions
-       WHERE started_at >= CURRENT_TIMESTAMP - (${interval} * 2)
-         AND started_at < CURRENT_TIMESTAMP - ${interval}
+       WHERE started_at >= $2::timestamptz
+         AND ${getPrevRangeCondition('started_at', range)}
          AND ($1::text IS NULL OR district = $1)`,
-      [distParam]
+      [distParam, liveTrackingActivatedAt]
     );
 
     const qPrevPageViews = await pool.query(
-      `SELECT COUNT(*) as total_page_views
+      `SELECT COUNT(*)::int as total_page_views
        FROM page_views
-       WHERE viewed_at >= CURRENT_TIMESTAMP - (${interval} * 2)
-         AND viewed_at < CURRENT_TIMESTAMP - ${interval}
+       WHERE viewed_at >= $2::timestamptz
+         AND ${getPrevRangeCondition('viewed_at', range)}
+         AND page_path NOT LIKE '/admin%'
          AND ($1::text IS NULL OR district = $1)`,
-      [distParam]
+      [distParam, liveTrackingActivatedAt]
     );
 
     const qPrevRevenue = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0) as total_revenue
-       FROM student_subscriptions
-       WHERE status = 'active'
-         AND transaction_date >= CURRENT_TIMESTAMP - (${interval} * 2)
-         AND transaction_date < CURRENT_TIMESTAMP - ${interval}
-         AND ($1::text IS NULL OR district = $1)`,
+      `SELECT COALESCE(SUM(sub.amount), 0) as total_revenue
+       FROM student_subscriptions sub
+       JOIN students s ON s.id = sub.student_id
+       WHERE sub.status = 'active'
+         AND ${GENUINE_SUB_SQL('sub', 's')}
+         AND ${getPrevRangeCondition('sub.transaction_date', range)}
+         AND ($1::text IS NULL OR sub.district = $1)`,
       [distParam]
     );
 
     const qPrevMcq = await pool.query(
       `SELECT
-        COUNT(*) as total_attempts,
-        COALESCE(ROUND(AVG(CASE WHEN is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
+        COUNT(*)::int as total_attempts,
+        COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
        FROM question_attempts qa
        JOIN students s ON qa.student_id = s.id
-       WHERE qa.attempted_at >= CURRENT_TIMESTAMP - (${interval} * 2)
-         AND qa.attempted_at < CURRENT_TIMESTAMP - ${interval}
+       WHERE ${GENUINE_STUDENT_SQL('s')}
+         AND ${getPrevRangeCondition('qa.attempted_at', range)}
          AND ($1::text IS NULL OR s.district = $1)`,
       [distParam]
     );
 
+    // Real 7-day unique visitor sparkline from PostgreSQL (IST days, post-activation only)
+    const qVisitorSparkline = await pool.query(
+      `SELECT
+        d.day,
+        COUNT(DISTINCT vs.visitor_id)::int as visitors
+       FROM (
+         SELECT generate_series(
+           ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days')::date,
+           (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date,
+           '1 day'::interval
+         )::date as day
+       ) d
+       LEFT JOIN visitor_sessions vs
+         ON (vs.started_at AT TIME ZONE 'Asia/Kolkata')::date = d.day
+         AND vs.started_at >= $2::timestamptz
+         AND ($1::text IS NULL OR vs.district = $1)
+       GROUP BY d.day
+       ORDER BY d.day ASC`,
+      [distParam, liveTrackingActivatedAt]
+    );
+    const realVisitorSparkline = qVisitorSparkline.rows.map((r) => Number(r.visitors || 0));
+
     const totalStudents = parseInt(qStudents.rows[0].total, 10);
     const activeStudentsToday = parseInt(qActiveToday.rows[0].active_today, 10);
+    const activeStudentsYesterday = parseInt(qActiveToday.rows[0].active_yesterday, 10);
     const newRegistrations = parseInt(qStudents.rows[0].new_in_range, 10);
     const totalVisitors = parseInt(qTraffic.rows[0].total_visitors, 10);
     const uniqueVisitors = parseInt(qTraffic.rows[0].unique_visitors, 10);
     const totalPageViews = parseInt(qPageViews.rows[0].total_page_views, 10);
     const totalLogins = parseInt(qLogins.rows[0].total_logins, 10);
+    const prevLogins = parseInt(qLogins.rows[0].prev_logins, 10);
     const paidSubscribers = parseInt(qStudents.rows[0].paid_subscribers, 10);
     const freeStudents = parseInt(qStudents.rows[0].free_students, 10);
     const revenue = parseFloat(qRevenue.rows[0].total_revenue);
     const totalMcq = parseInt(qMcq.rows[0].total_attempts, 10);
     const avgAccuracy = parseFloat(qMcq.rows[0].avg_accuracy);
 
-    // Prev values
     const prevVisitors = parseInt(qPrevTraffic.rows[0].total_visitors, 10);
     const prevUnique = parseInt(qPrevTraffic.rows[0].unique_visitors, 10);
     const prevPageViews = parseInt(qPrevPageViews.rows[0].total_page_views, 10);
@@ -328,58 +792,46 @@ export class AnalyticsService {
     const prevMcq = parseInt(qPrevMcq.rows[0].total_attempts, 10);
     const prevAccuracy = parseFloat(qPrevMcq.rows[0].avg_accuracy);
 
-    // Exact 7-day comparison queries for the 5 Core KPI cards
+    // Exact period comparison queries for Core KPI cards (genuine students only)
     const q7dStudents = await pool.query(
       `SELECT
-        COUNT(*)::int as total,
-        COUNT(CASE WHEN created_at < CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as prev_total,
-        COUNT(CASE WHEN created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as new_7d,
-        COUNT(CASE WHEN created_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' AND created_at < CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as prev_new_7d
-       FROM students
-       WHERE ($1::text IS NULL OR district = $1)`,
-      [distParam]
-    );
-
-    const q7dActive = await pool.query(
-      `SELECT
-        COUNT(DISTINCT CASE WHEN (s.last_login_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= CURRENT_TIMESTAMP - INTERVAL '7 days')) THEN s.id END)::int as active_7d,
-        COUNT(DISTINCT CASE WHEN ((s.last_login_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' AND s.last_login_at < CURRENT_TIMESTAMP - INTERVAL '7 days') OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' AND ss.started_at < CURRENT_TIMESTAMP - INTERVAL '7 days')) THEN s.id END)::int as prev_active_7d
+        COUNT(DISTINCT LOWER(TRIM(s.email)))::int as total,
+        COUNT(DISTINCT CASE WHEN NOT (${getRangeCondition('s.created_at', range)}) THEN LOWER(TRIM(s.email)) END)::int as prev_total,
+        COUNT(DISTINCT CASE WHEN ${getRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as new_in_period,
+        COUNT(DISTINCT CASE WHEN ${getPrevRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as prev_new_in_period
        FROM students s
-       WHERE ($1::text IS NULL OR s.district = $1)`,
+       WHERE ${GENUINE_STUDENT_SQL('s')}
+         AND ($1::text IS NULL OR s.district = $1)`,
       [distParam]
     );
 
-    const q7dVisitors = await pool.query(
+    const qPeriodActive = await pool.query(
       `SELECT
-        COUNT(CASE WHEN started_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as visitors_7d,
-        COUNT(CASE WHEN started_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' AND started_at < CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as prev_visitors_7d
-       FROM visitor_sessions
-       WHERE ($1::text IS NULL OR district = $1)`,
+        COUNT(DISTINCT CASE WHEN (${getRangeCondition('s.last_login_at', range)} OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ${getRangeCondition('ss.started_at', range)})) THEN s.id END)::int as active_cur,
+        COUNT(DISTINCT CASE WHEN (${getPrevRangeCondition('s.last_login_at', range)} OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ${getPrevRangeCondition('ss.started_at', range)})) THEN s.id END)::int as active_prev
+       FROM students s
+       WHERE ${GENUINE_STUDENT_SQL('s')}
+         AND ($1::text IS NULL OR s.district = $1)`,
       [distParam]
     );
 
-    const q7dSubs = await pool.query(
+    const qPeriodSubs = await pool.query(
       `SELECT
-        COUNT(CASE WHEN status = 'active' THEN 1 END)::int as active_subs,
-        COUNT(CASE WHEN status = 'active' AND transaction_date < CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as prev_active_subs
-       FROM student_subscriptions
-       WHERE ($1::text IS NULL OR district = $1)`,
+        COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as active_subs,
+        COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) AND NOT (${getRangeCondition('sub.transaction_date', range)}) THEN 1 END)::int as prev_active_subs
+       FROM student_subscriptions sub
+       JOIN students s ON s.id = sub.student_id
+       WHERE ${GENUINE_SUB_SQL('sub', 's')}
+         AND ($1::text IS NULL OR sub.district = $1)`,
       [distParam]
     );
 
     const curTotalStudents = q7dStudents.rows[0].total;
-    const prevTotalStudents = q7dStudents.rows[0].prev_total;
-    const curNew7d = q7dStudents.rows[0].new_7d;
-    const prevNew7d = q7dStudents.rows[0].prev_new_7d;
-
-    const curActive7d = Math.max(activeStudentsToday, q7dActive.rows[0].active_7d);
-    const prevActive7d = q7dActive.rows[0].prev_active_7d;
-
-    const curVisitors7d = q7dVisitors.rows[0].visitors_7d;
-    const prevVisitors7d = q7dVisitors.rows[0].prev_visitors_7d;
-
-    const curActiveSubs = q7dSubs.rows[0].active_subs;
-    const prevActiveSubs = q7dSubs.rows[0].prev_active_subs;
+    const prevTotalStudents = isAllTime ? 0 : q7dStudents.rows[0].prev_total;
+    const curActiveInRange = Math.max(activeStudentsToday, qPeriodActive.rows[0].active_cur);
+    const prevActiveInRange = qPeriodActive.rows[0].active_prev;
+    const curActiveSubs = qPeriodSubs.rows[0].active_subs;
+    const prevActiveSubs = isAllTime ? 0 : qPeriodSubs.rows[0].prev_active_subs;
 
     // 1. Question Bank Aggregates
     const qQuestions = await pool.query(`
@@ -387,15 +839,15 @@ export class AnalyticsService {
         COUNT(*)::int as total,
         COUNT(CASE WHEN status='published' THEN 1 END)::int as published,
         COUNT(CASE WHEN status='staging' THEN 1 END)::int as staging,
-        COUNT(CASE WHEN created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as new_7d,
-        COUNT(CASE WHEN created_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' AND created_at < CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as prev_new_7d
+        COUNT(CASE WHEN ${getRangeCondition('created_at', range)} THEN 1 END)::int as new_in_range,
+        COUNT(CASE WHEN ${getPrevRangeCondition('created_at', range)} THEN 1 END)::int as prev_new_in_range
       FROM questions
     `);
     const totalQuestions = qQuestions.rows[0]?.total || 0;
     const publishedQuestions = qQuestions.rows[0]?.published || 0;
     const stagingQuestions = qQuestions.rows[0]?.staging || 0;
-    const newQuestions7d = qQuestions.rows[0]?.new_7d || 0;
-    const prevNewQuestions7d = qQuestions.rows[0]?.prev_new_7d || 0;
+    const newQuestionsInRange = qQuestions.rows[0]?.new_in_range || 0;
+    const prevNewQuestionsInRange = qQuestions.rows[0]?.prev_new_in_range || 0;
 
     const qQuestionsBySubj = await pool.query(`
       SELECT COALESCE(subject, 'General Studies') as subject, COUNT(*)::int as count
@@ -443,81 +895,97 @@ export class AnalyticsService {
       LIMIT 8
     `);
 
-    // 3. Restored Students & Deactivated Status
+    // 3. Restored Students & Deactivated Status (genuine accounts only)
     const qRestored = await pool.query(`
       SELECT
-        (SELECT COUNT(*)::int FROM student_activity WHERE activity_type = 'account_restored') as restored_total,
-        (SELECT COUNT(*)::int FROM student_activity WHERE activity_type = 'account_restored' AND created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days') as restored_7d,
-        (SELECT COUNT(*)::int FROM student_activity WHERE activity_type = 'account_restored' AND created_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' AND created_at < CURRENT_TIMESTAMP - INTERVAL '7 days') as prev_restored_7d,
-        COUNT(CASE WHEN is_active = false OR deleted_at IS NOT NULL THEN 1 END)::int as deactivated_count
-      FROM students
+        (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')}) as restored_total,
+        (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')} AND ${getRangeCondition('sa.created_at', range)}) as restored_in_range,
+        (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')} AND ${getPrevRangeCondition('sa.created_at', range)}) as prev_restored_in_range,
+        COUNT(CASE WHEN (s.is_active = false OR s.deleted_at IS NOT NULL) AND LOWER(TRIM(COALESCE(s.email, ''))) NOT LIKE '%@example.com' THEN 1 END)::int as deactivated_count
+      FROM students s
     `);
     const restoredTotal = qRestored.rows[0]?.restored_total || 0;
-    const restored7d = qRestored.rows[0]?.restored_7d || 0;
-    const prevRestored7d = qRestored.rows[0]?.prev_restored_7d || 0;
+    const restored7d = qRestored.rows[0]?.restored_in_range || 0;
+    const prevRestored7d = qRestored.rows[0]?.prev_restored_in_range || 0;
     const deactivatedCount = qRestored.rows[0]?.deactivated_count || 0;
 
-    // 4. Registration Trends (Dynamic range)
+    // 4. Registration Trends (Dynamic range, IST date, genuine students only)
     const trendDays = range === 'today' ? 1 : range === '7d' ? 6 : range === '90d' ? 89 : 29;
     const qRegTrends = await pool.query(`
       SELECT
         TO_CHAR(d.day, 'YYYY-MM-DD') as date,
         TO_CHAR(d.day, 'Mon DD') as label,
-        COUNT(s.id)::int as count
+        COUNT(DISTINCT LOWER(TRIM(s.email)))::int as count
       FROM (
-        SELECT generate_series(CURRENT_DATE - INTERVAL '${trendDays} days', CURRENT_DATE, '1 day'::interval)::date as day
+        SELECT generate_series(
+          ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '${trendDays} days')::date,
+          (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date,
+          '1 day'::interval
+        )::date as day
       ) d
-      LEFT JOIN students s ON DATE(s.created_at) = d.day
+      LEFT JOIN students s
+        ON (s.created_at AT TIME ZONE 'Asia/Kolkata')::date = d.day
+        AND ${GENUINE_STUDENT_SQL('s')}
       GROUP BY d.day
       ORDER BY d.day ASC
     `);
 
-    // 5. Traffic Stats (Daily, Weekly, Monthly, Current, Sources)
-    const qTrafficOverview = await pool.query(`
-      SELECT
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM page_views WHERE viewed_at >= CURRENT_DATE) as daily_visitors,
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= CURRENT_TIMESTAMP - INTERVAL '7 days') as weekly_visitors,
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= CURRENT_TIMESTAMP - INTERVAL '30 days') as monthly_visitors,
-        (SELECT COUNT(*)::int FROM visitor_sessions WHERE last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes') as current_visitors,
-        (SELECT COUNT(*)::int FROM visitor_sessions) as total_visitors
-    `);
-    const trafficSourcesRes = await pool.query(`
-      SELECT
+    // 5. Traffic Stats (Post-activation unique visitors only — Asia/Kolkata aligned)
+    const qTrafficOverview = await pool.query(
+      `SELECT
+        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, ${IST_TODAY_START})) as daily_visitors,
+        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, CURRENT_TIMESTAMP - INTERVAL '7 days')) as weekly_visitors,
+        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, CURRENT_TIMESTAMP - INTERVAL '30 days')) as monthly_visitors,
+        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= $1::timestamptz AND is_active = true AND ended_at IS NULL AND last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes') as current_visitors,
+        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= $1::timestamptz) as total_visitors`,
+      [liveTrackingActivatedAt]
+    );
+    const trafficSourcesRes = await pool.query(
+      `SELECT
         COALESCE(CASE
           WHEN referrer ILIKE '%google%' THEN 'Google Search'
           WHEN referrer ILIKE '%facebook%' OR referrer ILIKE '%instagram%' OR referrer ILIKE '%twitter%' OR referrer ILIKE '%t.co%' THEN 'Social Media'
           WHEN referrer IS NULL OR referrer = '' THEN 'Direct Traffic'
           ELSE 'Referral / Others'
         END, 'Direct Traffic') as source,
-        COUNT(*)::int as count
-      FROM visitor_sessions
-      WHERE started_at >= CURRENT_TIMESTAMP - INTERVAL '30 days'
-      GROUP BY source
-      ORDER BY count DESC
-    `);
-    const totalSourceCount = trafficSourcesRes.rows.reduce((acc, r) => acc + parseInt(r.count, 10), 0) || 1;
+        COUNT(DISTINCT visitor_id)::int as count
+       FROM visitor_sessions
+       WHERE started_at >= $1::timestamptz
+         AND ${getRangeCondition('started_at', range)}
+       GROUP BY source
+       ORDER BY count DESC`,
+      [liveTrackingActivatedAt]
+    );
+    const totalSourceCount = trafficSourcesRes.rows.reduce((acc, r) => acc + parseInt(r.count, 10), 0);
     const trafficSources = trafficSourcesRes.rows.map((r) => ({
       source: r.source,
       count: parseInt(r.count, 10),
-      percentage: Math.round((parseInt(r.count, 10) / totalSourceCount) * 100),
+      percentage: totalSourceCount > 0 ? Math.round((parseInt(r.count, 10) / totalSourceCount) * 100) : 0,
     }));
 
-    // 6. Academic Performance & Mock Tests
+    // 6. Academic Performance & Mock Tests (genuine students only)
     const qMockPerf = await pool.query(`
       SELECT
         COUNT(*)::int as total_mocks,
-        COALESCE(ROUND(AVG(percentage), 1), 0) as avg_score,
-        COUNT(CASE WHEN percentage >= 50 THEN 1 END)::int as passed_count
-      FROM mock_test_attempts
+        COALESCE(ROUND(AVG(a.percentage), 1), 0) as avg_score,
+        COUNT(CASE WHEN a.percentage >= 50 THEN 1 END)::int as passed_count
+      FROM mock_test_attempts a
+      JOIN students s ON s.id = a.student_id
+      WHERE COALESCE(a.status, 'completed') = 'completed'
+        AND a.attempted_questions > 0
+        AND ${GENUINE_STUDENT_SQL('s')}
     `);
     const qPerfCohorts = await pool.query(`
       WITH student_acc AS (
         SELECT
           s.id,
-          COUNT(qa.id) as attempts,
-          COALESCE(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 0) as accuracy
+          COUNT(a.id) as attempts,
+          COALESCE(AVG(a.percentage), 0) as accuracy
         FROM students s
-        JOIN question_attempts qa ON s.id = qa.student_id
+        JOIN mock_test_attempts a ON s.id = a.student_id
+        WHERE COALESCE(a.status, 'completed') = 'completed'
+          AND a.attempted_questions > 0
+          AND ${GENUINE_STUDENT_SQL('s')}
         GROUP BY s.id
       )
       SELECT
@@ -534,17 +1002,19 @@ export class AnalyticsService {
     const avgPerfCount = qPerfCohorts.rows[0]?.avg_performers || 0;
     const supportCount = qPerfCohorts.rows[0]?.need_support || 0;
 
-    // 7. Subscription Tier Breakdown & Donut Distribution
+    // 7. Subscription Tier Breakdown & Donut Distribution (genuine student subscriptions only)
     const qSubTiers = await pool.query(`
       SELECT
-        COUNT(CASE WHEN status = 'active' THEN 1 END)::int as total_active,
-        COUNT(CASE WHEN (plan_name ILIKE '%month%' OR plan_id ILIKE '%month%') AND plan_name NOT ILIKE '%half%' AND status = 'active' THEN 1 END)::int as monthly,
-        COUNT(CASE WHEN (plan_name ILIKE '%quarter%' OR plan_id ILIKE '%quarter%') AND status = 'active' THEN 1 END)::int as quarterly,
-        COUNT(CASE WHEN (plan_name ILIKE '%half%' OR plan_id ILIKE '%half%') AND status = 'active' THEN 1 END)::int as half_yearly,
-        COUNT(CASE WHEN (plan_name ILIKE '%year%' OR plan_name ILIKE '%annual%' OR plan_id ILIKE '%year%') AND status = 'active' THEN 1 END)::int as yearly,
-        COUNT(CASE WHEN status = 'expired' THEN 1 END)::int as expired,
-        COUNT(CASE WHEN transaction_date >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END)::int as new_subscriptions
-      FROM student_subscriptions
+        COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as total_active,
+        COUNT(CASE WHEN (sub.plan_name ILIKE '%month%' OR sub.plan_id ILIKE '%month%') AND sub.plan_name NOT ILIKE '%half%' AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as monthly,
+        COUNT(CASE WHEN (sub.plan_name ILIKE '%quarter%' OR sub.plan_id ILIKE '%quarter%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as quarterly,
+        COUNT(CASE WHEN (sub.plan_name ILIKE '%half%' OR sub.plan_id ILIKE '%half%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as half_yearly,
+        COUNT(CASE WHEN (sub.plan_name ILIKE '%year%' OR sub.plan_name ILIKE '%annual%' OR sub.plan_id ILIKE '%year%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as yearly,
+        COUNT(CASE WHEN sub.status = 'expired' OR (sub.expires_at IS NOT NULL AND sub.expires_at <= CURRENT_TIMESTAMP) THEN 1 END)::int as expired,
+        COUNT(CASE WHEN ${getRangeCondition('sub.transaction_date', range)} THEN 1 END)::int as new_subscriptions
+      FROM student_subscriptions sub
+      JOIN students s ON s.id = sub.student_id
+      WHERE ${GENUINE_SUB_SQL('sub', 's')}
     `);
     const subRow = qSubTiers.rows[0] || {};
     const subActive = subRow.total_active || 0;
@@ -580,86 +1050,110 @@ export class AnalyticsService {
       LIMIT 12
     `);
 
-    // 9 CORE ANIMATED OVERVIEW CARDS (The exact 9 requested by prompt)
+    const mockAgg = qMockAttemptsAgg.rows[0] || {};
+    const mockAllTimeAttempts = parseInt(mockAgg.all_time_attempts || '0', 10);
+    const mockAttemptsInRange = parseInt(mockAgg.attempts_in_range || '0', 10);
+    const mockPrevAttemptsInRange = parseInt(mockAgg.prev_attempts_in_range || '0', 10);
+    const mockCorrectInRange = parseInt(mockAgg.correct_in_range || '0', 10);
+    const mockIncorrectInRange = parseInt(mockAgg.incorrect_in_range || '0', 10);
+    const mockAllTimeCorrect = parseInt(mockAgg.all_time_correct || '0', 10);
+    const mockAllTimeIncorrect = parseInt(mockAgg.all_time_incorrect || '0', 10);
+
+    // Combine real completed assessment attempts (mock_test_attempts) with question_attempts without double-counting
+    const effectiveCorrect = mockAllTimeCorrect > 0
+      ? (isAllTime ? mockAllTimeCorrect : mockCorrectInRange)
+      : parseInt(qMcq.rows[0]?.correct_count || '0', 10);
+    const effectiveIncorrect = mockAllTimeIncorrect > 0
+      ? (isAllTime ? mockAllTimeIncorrect : mockIncorrectInRange)
+      : parseInt(qMcq.rows[0]?.incorrect_count || '0', 10);
+    const effectiveAnswered = effectiveCorrect + effectiveIncorrect;
+    const effectiveAccuracy =
+      effectiveAnswered > 0
+        ? Math.round((effectiveCorrect / effectiveAnswered) * 1000) / 10
+        : avgAccuracy;
+
+    const effectiveTotalAttempts =
+      mockAllTimeAttempts > 0
+        ? (isAllTime ? mockAllTimeAttempts : mockAttemptsInRange)
+        : totalMcq;
+    const effectivePrevAttempts = mockAllTimeAttempts > 0 ? mockPrevAttemptsInRange : prevMcq;
+    const effectiveAttemptsToday =
+      mockAllTimeAttempts > 0
+        ? parseInt(mockAgg.attempts_today || '0', 10)
+        : parseInt(qMcq.rows[0]?.attempts_today || '0', 10);
+    const effectiveAttempts3d =
+      mockAllTimeAttempts > 0
+        ? parseInt(mockAgg.attempts_3d || '0', 10)
+        : parseInt(qMcq.rows[0]?.attempts_3d || '0', 10);
+    const effectiveAttemptsWeekly =
+      mockAllTimeAttempts > 0
+        ? parseInt(mockAgg.attempts_7d || '0', 10)
+        : parseInt(qMcq.rows[0]?.attempts_7d || '0', 10);
+    const effectiveAttempts14d =
+      mockAllTimeAttempts > 0
+        ? parseInt(mockAgg.attempts_14d || '0', 10)
+        : parseInt(qMcq.rows[0]?.attempts_14d || '0', 10);
+    const effectiveAttemptsMonthly =
+      mockAllTimeAttempts > 0
+        ? parseInt(mockAgg.attempts_30d || '0', 10)
+        : parseInt(qMcq.rows[0]?.attempts_30d || '0', 10);
+    const effectiveParticipating = Math.max(
+      parseInt(mockAgg.participating_students || '0', 10),
+      parseInt(qMcq.rows[0]?.participating_students || qAllTimeMcq.rows[0]?.all_time_participating_students || '0', 10)
+    );
+    const verifiedStudents = parseInt(qStudents.rows[0]?.verified_students || '0', 10);
+    const onlineStudents = parseInt(qOnlineStudents.rows[0]?.online_students || '0', 10);
+    const lastActiveAt = qStudents.rows[0]?.last_active_at || null;
+    const prevNewInRange = parseInt(qStudents.rows[0]?.prev_new_in_range || '0', 10);
+
+    // 9 CORE OVERVIEW CARDS (100% genuine DB metrics, real sparklines, honest historical comparisons)
     const overviewCards = [
       {
         id: 'total_students',
         title: 'Total Students',
         value: curTotalStudents,
         formatted: curTotalStudents.toLocaleString('en-IN'),
-        ...calculateChange(curTotalStudents, prevTotalStudents),
-        comparisonText: 'vs previous 7 days',
+        ...formatTrendMeta(curTotalStudents, prevTotalStudents),
         icon: 'Users',
         category: 'students',
-        sparkline: [
-          Math.max(0, curTotalStudents - 4),
-          Math.max(0, curTotalStudents - 3),
-          Math.max(0, curTotalStudents - 2),
-          Math.max(0, curTotalStudents - 1),
-          curTotalStudents,
-        ],
       },
       {
         id: 'active_students',
         title: 'Active Students',
-        value: curActive7d,
-        formatted: curActive7d.toLocaleString('en-IN'),
-        ...calculateChange(curActive7d, prevActive7d),
-        comparisonText: 'vs previous 7 days',
+        value: onlineStudents,
+        formatted: onlineStudents.toLocaleString('en-IN'),
+        ...formatTrendMeta(curActiveInRange, prevActiveInRange),
         icon: 'UserCheck',
         category: 'engagement',
-        sparkline: [
-          Math.max(0, curActive7d - 2),
-          Math.max(0, curActive7d - 1),
-          curActive7d,
-          Math.max(0, curActive7d - 1),
-          curActive7d,
-        ],
+        badgeText: onlineStudents > 0 ? `${onlineStudents} Online Now` : 'Offline',
       },
       {
         id: 'website_visitors',
         title: 'Website Visitors',
-        value: curVisitors7d,
-        formatted: curVisitors7d.toLocaleString('en-IN'),
-        ...calculateChange(curVisitors7d, prevVisitors7d),
-        comparisonText: 'vs previous 7 days',
+        value: uniqueVisitors,
+        formatted: uniqueVisitors.toLocaleString('en-IN'),
+        ...formatTrendMeta(uniqueVisitors, prevUnique),
         icon: 'Globe',
         category: 'traffic',
-        sparkline: [
-          Math.max(0, curVisitors7d - 8),
-          Math.max(0, curVisitors7d - 5),
-          Math.max(0, curVisitors7d - 3),
-          Math.max(0, curVisitors7d - 1),
-          curVisitors7d,
-        ],
+        sparkline: realVisitorSparkline,
       },
       {
         id: 'new_students',
         title: 'New Students',
-        value: curNew7d,
-        formatted: curNew7d.toLocaleString('en-IN'),
-        ...calculateChange(curNew7d, prevNew7d),
-        comparisonText: 'vs previous 7 days',
+        value: newRegistrations,
+        formatted: newRegistrations.toLocaleString('en-IN'),
+        ...formatTrendMeta(newRegistrations, prevNewInRange),
         icon: 'UserPlus',
         category: 'growth',
-        sparkline: [
-          Math.max(0, curNew7d - 3),
-          Math.max(0, curNew7d - 2),
-          Math.max(0, curNew7d - 1),
-          curNew7d,
-          curNew7d,
-        ],
       },
       {
         id: 'restored_students',
         title: 'Restored Students',
         value: restoredTotal,
         formatted: restoredTotal.toLocaleString('en-IN'),
-        ...calculateChange(restored7d, prevRestored7d),
-        comparisonText: 'vs previous 7 days',
+        ...formatTrendMeta(restored7d, prevRestored7d),
         icon: 'RotateCcw',
         category: 'management',
-        sparkline: [0, 0, Math.max(0, restoredTotal - 1), restoredTotal, restoredTotal],
         badgeText: deactivatedCount > 0 ? `${deactivatedCount} Inactive` : 'All Active',
       },
       {
@@ -667,69 +1161,37 @@ export class AnalyticsService {
         title: 'Active Subscriptions',
         value: curActiveSubs,
         formatted: curActiveSubs.toLocaleString('en-IN'),
-        ...calculateChange(curActiveSubs, prevActiveSubs),
-        comparisonText: 'vs previous 7 days',
+        ...formatTrendMeta(curActiveSubs, prevActiveSubs),
         icon: 'CreditCard',
         category: 'revenue',
-        sparkline: [
-          Math.max(0, curActiveSubs - 1),
-          curActiveSubs,
-          curActiveSubs,
-          curActiveSubs,
-          curActiveSubs,
-        ],
       },
       {
         id: 'total_questions',
         title: 'Total Questions',
         value: totalQuestions,
         formatted: totalQuestions.toLocaleString('en-IN'),
-        ...calculateChange(newQuestions7d, prevNewQuestions7d),
-        comparisonText: 'new questions in 7d',
+        ...formatTrendMeta(newQuestionsInRange, prevNewQuestionsInRange),
         icon: 'Database',
         category: 'content',
-        sparkline: [
-          Math.max(0, totalQuestions - 5),
-          Math.max(0, totalQuestions - 3),
-          Math.max(0, totalQuestions - 1),
-          totalQuestions,
-          totalQuestions,
-        ],
         badgeText: `${publishedQuestions} Published`,
       },
       {
         id: 'total_mcq_attempts',
         title: 'Total MCQ Attempts',
-        value: totalMcq,
-        formatted: totalMcq.toLocaleString('en-IN'),
-        ...calculateChange(totalMcq, prevMcq),
-        comparisonText: 'vs previous period',
+        value: effectiveTotalAttempts,
+        formatted: effectiveTotalAttempts.toLocaleString('en-IN'),
+        ...formatTrendMeta(effectiveTotalAttempts, effectivePrevAttempts),
         icon: 'Award',
         category: 'practice',
-        sparkline: [
-          Math.max(0, totalMcq - 20),
-          Math.max(0, totalMcq - 15),
-          Math.max(0, totalMcq - 8),
-          Math.max(0, totalMcq - 3),
-          totalMcq,
-        ],
       },
       {
         id: 'student_performance',
         title: 'Overall Accuracy',
-        value: avgAccuracy,
-        formatted: `${avgAccuracy}%`,
-        ...calculateChange(avgAccuracy, prevAccuracy),
-        comparisonText: 'accuracy across all tests',
+        value: effectiveAccuracy,
+        formatted: `${effectiveAccuracy}%`,
+        ...formatTrendMeta(effectiveAccuracy, prevAccuracy, 'accuracy (unanswered excluded)'),
         icon: 'Target',
         category: 'performance',
-        sparkline: [
-          Math.max(0, avgAccuracy - 5),
-          Math.max(0, avgAccuracy - 2),
-          avgAccuracy,
-          avgAccuracy,
-          avgAccuracy,
-        ],
       },
     ];
 
@@ -738,14 +1200,25 @@ export class AnalyticsService {
     return {
       overviewCards,
       kpiSummary,
+      range,
+      timezone: 'Asia/Kolkata',
+      serverTimestamp: new Date().toISOString(),
+      liveTrackingActivatedAt,
       studentAnalytics: {
         totalStudents: curTotalStudents,
-        activeStudents: curActive7d,
-        activePercentage: curTotalStudents > 0 ? Math.round((curActive7d / curTotalStudents) * 100) : 0,
-        newStudents: curNew7d,
+        verifiedStudents,
+        onlineStudents,
+        lastActiveAt,
+        activeStudents: onlineStudents,
+        recentlyActiveStudents: curActiveInRange,
+        activePercentage: curTotalStudents > 0 ? Math.round((onlineStudents / curTotalStudents) * 100) : 0,
+        newStudents: newRegistrations,
+        newSinceActivation: parseInt(qStudents.rows[0]?.new_since_activation || '0', 10),
         newToday: parseInt(qStudents.rows[0]?.new_today || '0', 10),
         newWeekly: parseInt(qStudents.rows[0]?.new_7d || '0', 10),
         newMonthly: parseInt(qStudents.rows[0]?.new_30d || '0', 10),
+        totalLoginEvents: parseInt(qLogins.rows[0]?.login_events_since_activation || '0', 10),
+        uniqueStudentsLoggedIn: parseInt(qLogins.rows[0]?.unique_students_logged_in || '0', 10),
         restoredStudents: restoredTotal,
         restored7d,
         prevRestored7d,
@@ -761,7 +1234,11 @@ export class AnalyticsService {
         })),
       },
       websiteTrafficAnalytics: {
-        totalVisitors: qTrafficOverview.rows[0]?.total_visitors || totalVisitors,
+        totalVisitors: uniqueVisitors,
+        uniqueVisitors,
+        pageViews: totalPageViews,
+        authenticatedVisits: parseInt(qTraffic.rows[0]?.authenticated_visits || '0', 10),
+        anonymousVisits: parseInt(qTraffic.rows[0]?.anonymous_visits || '0', 10),
         currentVisitors: qTrafficOverview.rows[0]?.current_visitors || 0,
         dailyVisitors: qTrafficOverview.rows[0]?.daily_visitors || 0,
         weeklyVisitors: qTrafficOverview.rows[0]?.weekly_visitors || 0,
@@ -769,16 +1246,21 @@ export class AnalyticsService {
         trafficSources,
       },
       studentPerformance: {
-        overallAccuracy: avgAccuracy || parseFloat(qAllTimeMcq.rows[0]?.all_time_accuracy || '0'),
-        totalMcqAttempts: totalMcq || parseInt(qAllTimeMcq.rows[0]?.all_time_attempts || '0', 10),
-        attemptsToday: parseInt(qMcq.rows[0]?.attempts_today || '0', 10),
-        attemptsWeekly: parseInt(qMcq.rows[0]?.attempts_7d || '0', 10),
-        attemptsMonthly: parseInt(qMcq.rows[0]?.attempts_30d || '0', 10),
-        correctAnswers: parseInt(qMcq.rows[0]?.correct_count || qAllTimeMcq.rows[0]?.all_time_correct || '0', 10),
-        incorrectAnswers: parseInt(qMcq.rows[0]?.incorrect_count || qAllTimeMcq.rows[0]?.all_time_incorrect || '0', 10),
-        participatingStudents: parseInt(qMcq.rows[0]?.participating_students || qAllTimeMcq.rows[0]?.all_time_participating_students || '0', 10),
+        overallAccuracy: effectiveAccuracy,
+        mcqPracticeAccuracy: parseFloat(mockAgg.mcq_practice_accuracy || '0'),
+        mockTestAccuracy: parseFloat(mockAgg.mock_test_accuracy || '0'),
+        previousPaperAccuracy: parseFloat(mockAgg.previous_paper_accuracy || '0'),
+        totalMcqAttempts: effectiveTotalAttempts,
+        attemptsToday: effectiveAttemptsToday,
+        attempts3d: effectiveAttempts3d,
+        attemptsWeekly: effectiveAttemptsWeekly,
+        attempts14d: effectiveAttempts14d,
+        attemptsMonthly: effectiveAttemptsMonthly,
+        correctAnswers: effectiveCorrect,
+        incorrectAnswers: effectiveIncorrect,
+        participatingStudents: effectiveParticipating,
         averageTestScore: avgMockScore,
-        avgAttemptsPerStudent: curTotalStudents > 0 ? parseFloat((totalMcq / curTotalStudents).toFixed(1)) : 0,
+        avgAttemptsPerStudent: curTotalStudents > 0 ? parseFloat((effectiveTotalAttempts / curTotalStudents).toFixed(1)) : 0,
         totalMockTests: totalMocks,
         mockTestPassRate: mockPassRate,
         highPerformersCount: highPerfCount,
@@ -841,25 +1323,25 @@ export class AnalyticsService {
           title: 'Total Registered Students',
           value: totalStudents,
           formatted: totalStudents.toLocaleString('en-IN'),
-          ...calculateChange(totalStudents, Math.max(1, totalStudents - newRegistrations)),
+          ...formatTrendMeta(totalStudents, prevTotalStudents),
           category: 'students',
-          badge: 'Verified Learners',
+          badge: `${verifiedStudents} Verified`,
         },
         {
           id: 'active_today',
           title: 'Active Students Today',
           value: activeStudentsToday,
           formatted: activeStudentsToday.toLocaleString('en-IN'),
-          ...calculateChange(activeStudentsToday, Math.max(1, Math.round(activeStudentsToday * 0.8))),
+          ...formatTrendMeta(activeStudentsToday, activeStudentsYesterday, 'vs yesterday'),
           category: 'engagement',
-          badge: 'Live Today',
+          badge: 'Live Today (IST)',
         },
         {
           id: 'new_registrations',
           title: 'New Registrations',
           value: newRegistrations,
           formatted: newRegistrations.toLocaleString('en-IN'),
-          ...calculateChange(newRegistrations, Math.max(0, newRegistrations - 1)),
+          ...formatTrendMeta(newRegistrations, prevNewInRange),
           category: 'growth',
           badge: range.toUpperCase(),
         },
@@ -868,7 +1350,7 @@ export class AnalyticsService {
           title: 'Total Visitors',
           value: totalVisitors,
           formatted: totalVisitors.toLocaleString('en-IN'),
-          ...calculateChange(totalVisitors, prevVisitors),
+          ...formatTrendMeta(totalVisitors, prevVisitors),
           category: 'traffic',
           badge: 'Total Traffic',
         },
@@ -877,7 +1359,7 @@ export class AnalyticsService {
           title: 'Unique Visitors',
           value: uniqueVisitors,
           formatted: uniqueVisitors.toLocaleString('en-IN'),
-          ...calculateChange(uniqueVisitors, prevUnique),
+          ...formatTrendMeta(uniqueVisitors, prevUnique),
           category: 'traffic',
           badge: 'Distinct Users',
         },
@@ -886,7 +1368,7 @@ export class AnalyticsService {
           title: 'Total Page Views',
           value: totalPageViews,
           formatted: totalPageViews.toLocaleString('en-IN'),
-          ...calculateChange(totalPageViews, prevPageViews),
+          ...formatTrendMeta(totalPageViews, prevPageViews),
           category: 'traffic',
           badge: 'Page Impressions',
         },
@@ -895,7 +1377,7 @@ export class AnalyticsService {
           title: 'Total Student Logins',
           value: totalLogins,
           formatted: totalLogins.toLocaleString('en-IN'),
-          ...calculateChange(totalLogins, Math.max(1, Math.round(totalLogins * 0.85))),
+          ...formatTrendMeta(totalLogins, prevLogins),
           category: 'engagement',
           badge: 'Platform Logins',
         },
@@ -904,7 +1386,7 @@ export class AnalyticsService {
           title: 'Paid Subscribers',
           value: paidSubscribers,
           formatted: paidSubscribers.toLocaleString('en-IN'),
-          ...calculateChange(paidSubscribers, Math.max(1, paidSubscribers)),
+          ...formatTrendMeta(curActiveSubs, prevActiveSubs),
           category: 'revenue',
           badge: 'Active Paid Tier',
         },
@@ -913,7 +1395,10 @@ export class AnalyticsService {
           title: 'Free Students',
           value: freeStudents,
           formatted: freeStudents.toLocaleString('en-IN'),
-          ...calculateChange(freeStudents, Math.max(1, freeStudents)),
+          change: null,
+          trend: 'neutral' as const,
+          hasHistoricalData: false,
+          comparisonText: 'Current snapshot',
           category: 'students',
           badge: 'Standard Access',
         },
@@ -922,25 +1407,25 @@ export class AnalyticsService {
           title: 'Subscription Revenue',
           value: revenue,
           formatted: `₹${revenue.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-          ...calculateChange(revenue, prevRevenue),
+          ...formatTrendMeta(revenue, prevRevenue),
           category: 'revenue',
           badge: 'Verified INR',
         },
         {
           id: 'mcq_attempts',
           title: 'Total MCQ Attempts',
-          value: totalMcq,
-          formatted: totalMcq.toLocaleString('en-IN'),
-          ...calculateChange(totalMcq, prevMcq),
+          value: effectiveTotalAttempts,
+          formatted: effectiveTotalAttempts.toLocaleString('en-IN'),
+          ...formatTrendMeta(effectiveTotalAttempts, effectivePrevAttempts),
           category: 'learning',
           badge: 'Practiced MCQs',
         },
         {
           id: 'average_accuracy',
           title: 'Average Student Accuracy',
-          value: avgAccuracy,
-          formatted: `${avgAccuracy}%`,
-          ...calculateChange(avgAccuracy, prevAccuracy),
+          value: effectiveAccuracy,
+          formatted: `${effectiveAccuracy}%`,
+          ...formatTrendMeta(effectiveAccuracy, prevAccuracy),
           category: 'learning',
           badge: 'Accuracy Metric',
         },
@@ -948,25 +1433,29 @@ export class AnalyticsService {
     };
   }
 
-  // 3. Tamil Nadu Geographic Analytics (All 38 Districts)
+  // 3. Tamil Nadu Geographic Analytics (All 38 Districts — 100% Real DB Data, IST aligned)
   static async getGeographic(range: string = '30d') {
-    const interval = getIntervalFromRange(range);
+    const isAllTime = String(range || '').toLowerCase().trim() === 'all';
 
-    // Aggregate visitor sessions by district
+    // Aggregate visitor sessions by district (exclude NULL/unknown districts)
     const distTraffic = await pool.query(
       `SELECT
         district,
-        COUNT(*) as visitors,
-        COUNT(DISTINCT visitor_id) as unique_visitors
+        COUNT(*)::int as visitors,
+        COUNT(DISTINCT visitor_id)::int as unique_visitors,
+        COUNT(DISTINCT CASE WHEN student_id IS NOT NULL AND is_active = true AND last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes' THEN student_id END)::int as online_students
        FROM visitor_sessions
-       WHERE started_at >= CURRENT_TIMESTAMP - ${interval}
+       WHERE district IS NOT NULL
+         AND ${getRangeCondition('started_at', range)}
        GROUP BY district`
     );
-    const trafficMap = new Map<string, { visitors: number; uniqueVisitors: number }>();
+    const trafficMap = new Map<string, { visitors: number; uniqueVisitors: number; onlineStudents: number }>();
     distTraffic.rows.forEach((r) => {
-      trafficMap.set(r.district.toLowerCase(), {
+      if (!r.district) return;
+      trafficMap.set(String(r.district).toLowerCase(), {
         visitors: parseInt(r.visitors, 10),
         uniqueVisitors: parseInt(r.unique_visitors, 10),
+        onlineStudents: parseInt(r.online_students || '0', 10),
       });
     });
 
@@ -974,36 +1463,38 @@ export class AnalyticsService {
     const distStudents = await pool.query(
       `SELECT
         district,
-        COUNT(*) as total_students,
-        COUNT(CASE WHEN subscription_tier != 'free' AND subscription_status = 'active' THEN 1 END) as subscribers,
-        COUNT(CASE WHEN subscription_tier = 'free' OR subscription_tier IS NULL THEN 1 END) as free_students
+        COUNT(*)::int as total_students,
+        COUNT(CASE WHEN subscription_tier != 'free' AND subscription_status = 'active' THEN 1 END)::int as subscribers,
+        COUNT(CASE WHEN subscription_tier = 'free' OR subscription_tier IS NULL THEN 1 END)::int as free_students
        FROM students
        WHERE district IS NOT NULL
        GROUP BY district`
     );
     const studentMap = new Map<string, { students: number; subscribers: number; free: number }>();
     distStudents.rows.forEach((r) => {
-      studentMap.set(r.district.toLowerCase(), {
+      if (!r.district) return;
+      studentMap.set(String(r.district).toLowerCase(), {
         students: parseInt(r.total_students, 10),
         subscribers: parseInt(r.subscribers, 10),
         free: parseInt(r.free_students, 10),
       });
     });
 
-    // Aggregate active today by district
+    // Aggregate active today by district (IST)
     const distActiveToday = await pool.query(
       `SELECT
         district,
-        COUNT(DISTINCT id) as active_today
+        COUNT(DISTINCT id)::int as active_today
        FROM students
-       WHERE (last_login_at >= CURRENT_DATE OR EXISTS (
-         SELECT 1 FROM study_sessions ss WHERE ss.student_id = students.id AND ss.started_at >= CURRENT_DATE
+       WHERE (last_login_at >= ${IST_TODAY_START} OR EXISTS (
+         SELECT 1 FROM study_sessions ss WHERE ss.student_id = students.id AND ss.started_at >= ${IST_TODAY_START}
        )) AND district IS NOT NULL
        GROUP BY district`
     );
     const activeMap = new Map<string, number>();
     distActiveToday.rows.forEach((r) => {
-      activeMap.set(r.district.toLowerCase(), parseInt(r.active_today, 10));
+      if (!r.district) return;
+      activeMap.set(String(r.district).toLowerCase(), parseInt(r.active_today, 10));
     });
 
     // Aggregate revenue by district
@@ -1013,102 +1504,265 @@ export class AnalyticsService {
         COALESCE(SUM(amount), 0) as revenue
        FROM student_subscriptions
        WHERE status = 'active'
-         AND transaction_date >= CURRENT_TIMESTAMP - ${interval}
+         AND district IS NOT NULL
+         AND ${getRangeCondition('transaction_date', range)}
        GROUP BY district`
     );
     const revenueMap = new Map<string, number>();
     distRevenue.rows.forEach((r) => {
-      revenueMap.set(r.district.toLowerCase(), parseFloat(r.revenue));
+      if (!r.district) return;
+      revenueMap.set(String(r.district).toLowerCase(), parseFloat(r.revenue));
     });
 
-    // City level breakdowns
+    // Aggregate MCQ & Mock Test activity by student's confirmed district
+    const [distMcqRes, distMockRes] = await Promise.all([
+      pool.query(
+        `SELECT s.district, COUNT(qa.id)::int as mcq_attempts
+         FROM question_attempts qa
+         JOIN students s ON qa.student_id = s.id
+         WHERE s.district IS NOT NULL
+           AND ${getRangeCondition('qa.attempted_at', range)}
+         GROUP BY s.district`
+      ),
+      pool.query(
+        `SELECT s.district, COUNT(mta.id)::int as mock_attempts
+         FROM mock_test_attempts mta
+         JOIN students s ON mta.student_id = s.id
+         WHERE s.district IS NOT NULL
+           AND COALESCE(mta.status, 'completed') = 'completed'
+           AND ${getRangeCondition('mta.completed_at', range)}
+         GROUP BY s.district`
+      ),
+    ]);
+    const mcqMap = new Map<string, number>();
+    distMcqRes.rows.forEach((r) => {
+      if (r.district) mcqMap.set(String(r.district).toLowerCase(), Number(r.mcq_attempts || 0));
+    });
+    const mockMap = new Map<string, number>();
+    distMockRes.rows.forEach((r) => {
+      if (r.district) mockMap.set(String(r.district).toLowerCase(), Number(r.mock_attempts || 0));
+    });
+
+    // City level breakdowns (only non-null districts/cities)
     const cityTraffic = await pool.query(
       `SELECT
         district,
         city,
-        COUNT(*) as visitors
+        COUNT(*)::int as visitors
        FROM visitor_sessions
-       WHERE started_at >= CURRENT_TIMESTAMP - ${interval}
+       WHERE district IS NOT NULL
+         AND city IS NOT NULL
+         AND ${getRangeCondition('started_at', range)}
        GROUP BY district, city`
     );
     const cityMap = new Map<string, { city: string; visitors: number }[]>();
     cityTraffic.rows.forEach((r) => {
-      const key = (r.district || '').toLowerCase();
+      if (!r.district || !r.city) return;
+      const key = String(r.district).toLowerCase();
       const list = cityMap.get(key) || [];
-      list.push({ city: r.city || 'Central', visitors: parseInt(r.visitors, 10) });
+      list.push({ city: String(r.city), visitors: parseInt(r.visitors, 10) });
       cityMap.set(key, list);
     });
+
+    // Real-time Login Location Analytics from student_login_locations (never fabricated)
+    const rangeWhereSql = getRangeCondition('login_timestamp', range);
+
+    const [loginByDistRes, loginSummaryRes] = await Promise.all([
+      pool.query(
+        `SELECT
+           district_id,
+           district_name,
+           COUNT(DISTINCT CASE WHEN ${rangeWhereSql} THEN student_id END)::int AS unique_login_students,
+           COUNT(CASE WHEN ${rangeWhereSql} THEN 1 END)::int AS total_login_events,
+           COUNT(DISTINCT CASE WHEN (login_timestamp AT TIME ZONE 'Asia/Kolkata')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date THEN student_id END)::int AS today_unique_logins,
+           COUNT(DISTINCT CASE WHEN login_timestamp >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN student_id END)::int AS last_7d_unique_logins,
+           COUNT(DISTINCT CASE WHEN login_timestamp >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN student_id END)::int AS last_30d_unique_logins
+         FROM student_login_locations
+         WHERE district_id IS NOT NULL
+           AND location_status IN ('detected', 'manual')
+         GROUP BY district_id, district_name`
+      ),
+      pool.query(
+        `SELECT
+           COUNT(DISTINCT CASE WHEN ${rangeWhereSql} AND district_id IS NOT NULL AND location_status IN ('detected', 'manual') THEN student_id END)::int AS total_unique_login_students,
+           COUNT(CASE WHEN ${rangeWhereSql} AND district_id IS NOT NULL AND location_status IN ('detected', 'manual') THEN 1 END)::int AS total_login_events,
+           COUNT(DISTINCT CASE WHEN (login_timestamp AT TIME ZONE 'Asia/Kolkata')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date AND district_id IS NOT NULL AND location_status IN ('detected', 'manual') THEN student_id END)::int AS today_total_unique_logins,
+           COUNT(CASE WHEN ${rangeWhereSql} AND location_status = 'outside_tamil_nadu' THEN 1 END)::int AS outside_tn_count,
+           COUNT(CASE WHEN ${rangeWhereSql} AND location_status IN ('denied', 'unavailable', 'inaccurate') THEN 1 END)::int AS unavailable_count
+         FROM student_login_locations`
+      ),
+    ]);
+
+    const loginMap = new Map<
+      string,
+      {
+        uniqueLoginStudents: number;
+        totalLoginEvents: number;
+        todayUniqueLogins: number;
+        last7dUniqueLogins: number;
+        last30dUniqueLogins: number;
+      }
+    >();
+
+    for (const r of loginByDistRes.rows) {
+      const norm = normalizeTamilNaduDistrict(r.district_name || r.district_id);
+      const key = norm ? norm.id : String(r.district_id || r.district_name || '').toLowerCase();
+      const prev = loginMap.get(key) || {
+        uniqueLoginStudents: 0,
+        totalLoginEvents: 0,
+        todayUniqueLogins: 0,
+        last7dUniqueLogins: 0,
+        last30dUniqueLogins: 0,
+      };
+      loginMap.set(key, {
+        uniqueLoginStudents: prev.uniqueLoginStudents + Number(r.unique_login_students || 0),
+        totalLoginEvents: prev.totalLoginEvents + Number(r.total_login_events || 0),
+        todayUniqueLogins: prev.todayUniqueLogins + Number(r.today_unique_logins || 0),
+        last7dUniqueLogins: prev.last7dUniqueLogins + Number(r.last_7d_unique_logins || 0),
+        last30dUniqueLogins: prev.last30dUniqueLogins + Number(r.last_30d_unique_logins || 0),
+      });
+    }
+
+    const totalUniqueLoginStudentsAcrossTN = Number(
+      loginSummaryRes.rows[0]?.total_unique_login_students || 0
+    );
 
     // Construct response for all 38 districts
     const districts: DistrictMetric[] = TN_DISTRICTS.map((td) => {
       const key = td.name.toLowerCase();
-      const tr = trafficMap.get(key) || { visitors: 0, uniqueVisitors: 0 };
-      const st = studentMap.get(key) || { students: 0, subscribers: 0, free: 0 };
+      const normDef = normalizeTamilNaduDistrict(td.name);
+      const canonicalId = normDef ? normDef.id : key;
+      const tr = trafficMap.get(key) || { visitors: 0, uniqueVisitors: 0, onlineStudents: 0 };
+      const st =
+        studentMap.get(key) ||
+        (normDef ? studentMap.get(normDef.name.toLowerCase()) : undefined) ||
+        { students: 0, subscribers: 0, free: 0 };
       const rev = revenueMap.get(key) || 0;
       const act = activeMap.get(key) || 0;
+      const mcqCount = mcqMap.get(key) || (normDef ? mcqMap.get(normDef.name.toLowerCase()) : 0) || 0;
+      const mockCount = mockMap.get(key) || (normDef ? mockMap.get(normDef.name.toLowerCase()) : 0) || 0;
+      const loginStats = loginMap.get(canonicalId) || {
+        uniqueLoginStudents: 0,
+        totalLoginEvents: 0,
+        todayUniqueLogins: 0,
+        last7dUniqueLogins: 0,
+        last30dUniqueLogins: 0,
+      };
 
       const rate = st.students > 0 ? Math.round((st.subscribers / st.students) * 1000) / 10 : 0;
+      const usagePercentage =
+        totalUniqueLoginStudentsAcrossTN > 0
+          ? Math.round((loginStats.uniqueLoginStudents / totalUniqueLoginStudentsAcrossTN) * 1000) / 10
+          : 0;
 
-      // Merge city details
+      // Merge city details (actual database counts only)
       const cList = cityMap.get(key) || [];
       const cities = td.cities.map((cityName) => {
         const found = cList.find((c) => c.city.toLowerCase() === cityName.toLowerCase());
-        const cityVisitors = found ? found.visitors : Math.floor(tr.visitors / td.cities.length);
-        const cityStudents = Math.floor(st.students / td.cities.length);
-        const citySubs = Math.floor(st.subscribers / td.cities.length);
-        const cityRev = Math.floor(rev / td.cities.length);
         return {
           city: cityName,
-          visitors: cityVisitors,
-          students: cityStudents,
-          subscribers: citySubs,
-          revenue: cityRev,
+          visitors: found ? found.visitors : 0,
+          students: 0,
+          subscribers: 0,
+          revenue: 0,
         };
       });
 
       return {
         district: td.name,
+        districtId: canonicalId,
         visitors: tr.visitors,
         uniqueVisitors: tr.uniqueVisitors,
+        onlineStudents: tr.onlineStudents,
+        mcqAttempts: mcqCount,
+        mockTestAttempts: mockCount,
         students: st.students,
+        registeredStudents: st.students,
+        uniqueLoginStudents: loginStats.uniqueLoginStudents,
+        totalLoginEvents: loginStats.totalLoginEvents,
+        todayUniqueLogins: loginStats.todayUniqueLogins,
+        last7dUniqueLogins: loginStats.last7dUniqueLogins,
+        last30dUniqueLogins: loginStats.last30dUniqueLogins,
+        usagePercentage,
         subscribers: st.subscribers,
         freeStudents: st.free,
         conversionRate: rate,
         revenue: rev,
-        activeToday: act,
+        activeToday: Math.max(act, loginStats.todayUniqueLogins),
         cities,
       };
     });
 
+    const sortedByActivity = [...districts].sort(
+      (a, b) =>
+        (b.uniqueLoginStudents || 0) - (a.uniqueLoginStudents || 0) ||
+        (b.registeredStudents || 0) - (a.registeredStudents || 0) ||
+        a.district.localeCompare(b.district)
+    );
+    const activeDistrictsList = sortedByActivity.filter((d) => (d.uniqueLoginStudents || 0) > 0);
+    const registeredDistrictsCount = districts.filter((d) => (d.registeredStudents || 0) > 0).length;
+
+    const toRankEntry = (d?: DistrictMetric) =>
+      d
+        ? {
+            district: d.district,
+            uniqueLoginStudents: d.uniqueLoginStudents || 0,
+            totalLoginEvents: d.totalLoginEvents || 0,
+            registeredStudents: d.registeredStudents || 0,
+            usagePercentage: d.usagePercentage || 0,
+          }
+        : null;
+
     return {
       totalDistricts: 38,
+      range: isAllTime ? 'all' : range,
       districts,
+      ranking: {
+        mostActiveDistrict: toRankEntry(activeDistrictsList[0]),
+        secondMostActiveDistrict: toRankEntry(activeDistrictsList[1]),
+        thirdMostActiveDistrict: toRankEntry(activeDistrictsList[2]),
+        leastActiveDistrict:
+          activeDistrictsList.length > 0
+            ? toRankEntry(activeDistrictsList[activeDistrictsList.length - 1])
+            : null,
+        totalDistrictsWithRegisteredStudents: registeredDistrictsCount,
+        totalDistrictsWithActivity: activeDistrictsList.length,
+        totalUniqueLoginStudents: totalUniqueLoginStudentsAcrossTN,
+        totalLoginEvents: Number(loginSummaryRes.rows[0]?.total_login_events || 0),
+        todayTotalUniqueLogins: Number(loginSummaryRes.rows[0]?.today_total_unique_logins || 0),
+        outsideTamilNaduCount: Number(loginSummaryRes.rows[0]?.outside_tn_count || 0),
+        unavailableLocationCount: Number(loginSummaryRes.rows[0]?.unavailable_count || 0),
+      },
     };
   }
 
-  // 4. Live Website Visitor Monitor
+  // 4. Live Website Visitor Monitor (100% Real-Time Sessions + Genuine Backend Activity Feed)
   static async getLiveMonitor() {
-    // Heartbeat in last 5 minutes considered live
     const liveThreshold = "CURRENT_TIMESTAMP - INTERVAL '5 minutes'";
 
     const qLiveVisitors = await pool.query(
       `SELECT
-        COUNT(*) as active_visitors,
-        COUNT(CASE WHEN student_id IS NOT NULL THEN 1 END) as active_students,
-        COUNT(CASE WHEN device_category = 'desktop' THEN 1 END) as desktop_count,
-        COUNT(CASE WHEN device_category = 'mobile' THEN 1 END) as mobile_count,
-        COUNT(CASE WHEN device_category = 'tablet' THEN 1 END) as tablet_count
+        COUNT(DISTINCT session_id)::int as active_sessions,
+        COUNT(DISTINCT visitor_id)::int as active_visitors,
+        COUNT(DISTINCT CASE WHEN student_id IS NOT NULL THEN student_id END)::int as active_students,
+        COUNT(DISTINCT CASE WHEN student_id IS NULL THEN visitor_id END)::int as anonymous_visitors,
+        COUNT(DISTINCT CASE WHEN device_category = 'desktop' THEN session_id END)::int as desktop_count,
+        COUNT(DISTINCT CASE WHEN device_category = 'mobile' THEN session_id END)::int as mobile_count,
+        COUNT(DISTINCT CASE WHEN device_category = 'tablet' THEN session_id END)::int as tablet_count
        FROM visitor_sessions
-       WHERE last_heartbeat >= ${liveThreshold}`
+       WHERE is_active = true
+         AND last_heartbeat >= ${liveThreshold}`
     );
 
     const activeVisitors = parseInt(qLiveVisitors.rows[0].active_visitors, 10);
+    const activeSessions = parseInt(qLiveVisitors.rows[0].active_sessions, 10);
     const activeStudents = parseInt(qLiveVisitors.rows[0].active_students, 10);
+    const anonymousVisitors = parseInt(qLiveVisitors.rows[0].anonymous_visitors, 10);
     const desktopCount = parseInt(qLiveVisitors.rows[0].desktop_count, 10);
     const mobileCount = parseInt(qLiveVisitors.rows[0].mobile_count, 10);
     const tabletCount = parseInt(qLiveVisitors.rows[0].tablet_count, 10);
 
-    // Live activity stream (recent 25 page views)
+    // Live page view stream (recent 25 real page views, no fake default districts)
     const streamRes = await pool.query(
       `SELECT
         pv.id,
@@ -1129,29 +1783,44 @@ export class AnalyticsService {
        LIMIT 25`
     );
 
-    // Today's traffic metrics
+    // Real-time platform activity feed (logins, registrations, assessments, subscriptions)
+    const recentEventsRes = await pool.query(
+      `SELECT
+        sa.id,
+        sa.activity_type as event_type,
+        sa.reference_title as title,
+        sa.created_at as timestamp,
+        s.full_name as student_name,
+        s.district as district
+       FROM student_activity sa
+       LEFT JOIN students s ON sa.student_id = s.id
+       ORDER BY sa.created_at DESC
+       LIMIT 20`
+    );
+
+    // Today's traffic metrics (Asia/Kolkata)
     const qToday = await pool.query(
       `SELECT
-        (SELECT COUNT(*)::int FROM page_views WHERE viewed_at >= CURRENT_DATE) as page_views_today,
-        (SELECT COUNT(*)::int FROM visitor_sessions WHERE started_at >= CURRENT_DATE) as sessions_today`
+        (SELECT COUNT(*)::int FROM page_views WHERE viewed_at >= ${IST_TODAY_START}) as page_views_today,
+        (SELECT COUNT(*)::int FROM visitor_sessions WHERE started_at >= ${IST_TODAY_START}) as sessions_today`
     );
     const pageViewsToday = qToday.rows[0]?.page_views_today || 0;
     const sessionsToday = qToday.rows[0]?.sessions_today || 0;
 
-    // Top visited pages today
+    // Top visited pages today (IST)
     const topPagesRes = await pool.query(
       `SELECT
         page_path,
         COUNT(*)::int as views,
         COUNT(DISTINCT visitor_id)::int as visitors
        FROM page_views
-       WHERE viewed_at >= CURRENT_DATE
+       WHERE viewed_at >= ${IST_TODAY_START}
        GROUP BY page_path
        ORDER BY views DESC
        LIMIT 5`
     );
 
-    // Traffic sources
+    // Traffic sources (last 7 days)
     const sourcesRes = await pool.query(
       `SELECT
         COALESCE(CASE
@@ -1167,21 +1836,23 @@ export class AnalyticsService {
        ORDER BY count DESC`
     );
 
-    // Hourly visitor trends today
+    // Hourly visitor trends today (IST)
     const trendsRes = await pool.query(
       `SELECT
-        TO_CHAR(DATE_TRUNC('hour', viewed_at), 'HH24:00') as time,
+        TO_CHAR(DATE_TRUNC('hour', viewed_at AT TIME ZONE 'Asia/Kolkata'), 'HH24:00') as time,
         COUNT(*)::int as page_views,
         COUNT(DISTINCT visitor_id)::int as visitors
        FROM page_views
-       WHERE viewed_at >= CURRENT_DATE
-       GROUP BY DATE_TRUNC('hour', viewed_at)
+       WHERE viewed_at >= ${IST_TODAY_START}
+       GROUP BY DATE_TRUNC('hour', viewed_at AT TIME ZONE 'Asia/Kolkata')
        ORDER BY time ASC`
     );
 
     return {
       activeVisitors,
+      activeSessions,
       activeStudents,
+      anonymousVisitors,
       pageViewsToday,
       sessionsToday,
       deviceBreakdown: {
@@ -1203,15 +1874,23 @@ export class AnalyticsService {
         pageViews: r.page_views,
         visitors: r.visitors,
       })),
+      recentEvents: recentEventsRes.rows.map((r) => ({
+        id: r.id,
+        eventType: r.event_type,
+        title: r.title || r.event_type,
+        studentName: r.student_name || 'Student',
+        district: r.district || null,
+        timestamp: r.timestamp,
+      })),
       activityStream: streamRes.rows.map((r) => ({
         id: r.id,
         sessionId: r.session_id,
         pagePath: r.page_path,
         pageTitle: r.page_title || r.page_path,
-        district: r.district,
-        city: r.city,
-        deviceCategory: r.device_category,
-        browser: r.browser || 'Chrome',
+        district: r.district || null,
+        city: r.city || null,
+        deviceCategory: r.device_category || 'desktop',
+        browser: r.browser || 'Other',
         isReturning: Boolean(r.is_returning),
         studentName: r.student_name || null,
         timestamp: r.viewed_at,
@@ -1219,67 +1898,113 @@ export class AnalyticsService {
     };
   }
 
-  // 5. Traffic Analytics
+  // 5. Traffic Analytics (Supports All Time, IST, OS, Sources, New vs Returning, Avg Session Duration)
   static async getTraffic(range: string = '30d', districtFilter?: string) {
-    const interval = getIntervalFromRange(range);
     const distParam = districtFilter && districtFilter !== 'all' ? districtFilter : null;
 
-    // Daily timeseries
-    const timeRes = await pool.query(
-      `SELECT
-        TO_CHAR(DATE_TRUNC('day', viewed_at), 'YYYY-MM-DD') as day,
-        COUNT(*) as page_views,
-        COUNT(DISTINCT visitor_id) as unique_visitors
-       FROM page_views
-       WHERE viewed_at >= CURRENT_TIMESTAMP - ${interval}
-         AND ($1::text IS NULL OR district = $1)
-       GROUP BY DATE_TRUNC('day', viewed_at)
-       ORDER BY day ASC`,
-      [distParam]
-    );
+    const [timeRes, pagesRes, devicesRes, browsersRes, osRes, sourcesRes, summaryRes] = await Promise.all([
+      pool.query(
+        `SELECT
+          TO_CHAR(DATE_TRUNC('day', viewed_at AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD') as day,
+          COUNT(*)::int as page_views,
+          COUNT(DISTINCT visitor_id)::int as unique_visitors
+         FROM page_views
+         WHERE ${getRangeCondition('viewed_at', range)}
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY DATE_TRUNC('day', viewed_at AT TIME ZONE 'Asia/Kolkata')
+         ORDER BY day ASC`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          page_path,
+          COUNT(*)::int as views,
+          COUNT(DISTINCT visitor_id)::int as unique_views
+         FROM page_views
+         WHERE ${getRangeCondition('viewed_at', range)}
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY page_path
+         ORDER BY views DESC
+         LIMIT 10`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          COALESCE(device_category, 'desktop') as device_category,
+          COUNT(*)::int as count
+         FROM visitor_sessions
+         WHERE ${getRangeCondition('started_at', range)}
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY device_category`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          COALESCE(browser, 'Other') as browser,
+          COUNT(*)::int as count
+         FROM visitor_sessions
+         WHERE ${getRangeCondition('started_at', range)}
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY browser
+         ORDER BY count DESC
+         LIMIT 6`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          COALESCE(os, 'Other') as os,
+          COUNT(*)::int as count
+         FROM visitor_sessions
+         WHERE ${getRangeCondition('started_at', range)}
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY os
+         ORDER BY count DESC
+         LIMIT 6`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          COALESCE(CASE
+            WHEN referrer ILIKE '%google%' THEN 'Google Search'
+            WHEN referrer ILIKE '%facebook%' OR referrer ILIKE '%instagram%' OR referrer ILIKE '%twitter%' OR referrer ILIKE '%t.co%' THEN 'Social Media'
+            WHEN referrer IS NULL OR referrer = '' THEN 'Direct Traffic'
+            ELSE 'Referral / Others'
+          END, 'Direct Traffic') as source,
+          COUNT(*)::int as count
+         FROM visitor_sessions
+         WHERE ${getRangeCondition('started_at', range)}
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY source
+         ORDER BY count DESC`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          COUNT(*)::int as total_sessions,
+          COUNT(DISTINCT visitor_id)::int as unique_visitors,
+          COUNT(DISTINCT CASE WHEN is_returning = false THEN visitor_id END)::int as new_visitors,
+          COUNT(DISTINCT CASE WHEN is_returning = true THEN visitor_id END)::int as returning_visitors,
+          COUNT(CASE WHEN student_id IS NOT NULL THEN 1 END)::int as authenticated_sessions,
+          COUNT(CASE WHEN student_id IS NULL THEN 1 END)::int as anonymous_sessions,
+          COALESCE(ROUND(AVG(GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(ended_at, last_heartbeat) - started_at))))), 0)::int as avg_session_seconds
+         FROM visitor_sessions
+         WHERE ${getRangeCondition('started_at', range)}
+           AND ($1::text IS NULL OR district = $1)`,
+        [distParam]
+      ),
+    ]);
 
-    // Top pages
-    const pagesRes = await pool.query(
-      `SELECT
-        page_path,
-        COUNT(*) as views,
-        COUNT(DISTINCT visitor_id) as unique_views
-       FROM page_views
-       WHERE viewed_at >= CURRENT_TIMESTAMP - ${interval}
-         AND ($1::text IS NULL OR district = $1)
-       GROUP BY page_path
-       ORDER BY views DESC
-       LIMIT 10`,
-      [distParam]
-    );
-
-    // Device breakdown
-    const devicesRes = await pool.query(
-      `SELECT
-        device_category,
-        COUNT(*) as count
-       FROM visitor_sessions
-       WHERE started_at >= CURRENT_TIMESTAMP - ${interval}
-         AND ($1::text IS NULL OR district = $1)
-       GROUP BY device_category`,
-      [distParam]
-    );
-
-    // Browser breakdown
-    const browsersRes = await pool.query(
-      `SELECT
-        browser,
-        COUNT(*) as count
-       FROM visitor_sessions
-       WHERE started_at >= CURRENT_TIMESTAMP - ${interval}
-         AND ($1::text IS NULL OR district = $1)
-       GROUP BY browser
-       ORDER BY count DESC
-       LIMIT 5`,
-      [distParam]
-    );
-
+    const sRow = summaryRes.rows[0] || {};
     return {
+      summary: {
+        totalSessions: Number(sRow.total_sessions || 0),
+        uniqueVisitors: Number(sRow.unique_visitors || 0),
+        newVisitors: Number(sRow.new_visitors || 0),
+        returningVisitors: Number(sRow.returning_visitors || 0),
+        authenticatedSessions: Number(sRow.authenticated_sessions || 0),
+        anonymousSessions: Number(sRow.anonymous_sessions || 0),
+        avgSessionDurationSeconds: Number(sRow.avg_session_seconds || 0),
+      },
       timeseries: timeRes.rows.map((r) => ({
         date: r.day,
         pageViews: parseInt(r.page_views, 10),
@@ -1298,86 +2023,106 @@ export class AnalyticsService {
         name: r.browser,
         count: parseInt(r.count, 10),
       })),
+      operatingSystems: osRes.rows.map((r) => ({
+        name: r.os,
+        count: parseInt(r.count, 10),
+      })),
+      trafficSources: sourcesRes.rows.map((r) => ({
+        source: r.source,
+        count: parseInt(r.count, 10),
+      })),
     };
   }
 
-  // 6. Subscription Analytics
+  // 6. Subscription & Payment Analytics (Real student_subscriptions + verified payment_events)
   static async getSubscriptions(range: string = '30d', districtFilter?: string) {
-    const interval = getIntervalFromRange(range);
     const distParam = districtFilter && districtFilter !== 'all' ? districtFilter : null;
 
-    // Revenue and counts by plan
-    const planRes = await pool.query(
-      `SELECT
-        plan_name,
-        COUNT(*) as subscriptions,
-        COALESCE(SUM(amount), 0) as total_revenue
-       FROM student_subscriptions
-       WHERE status = 'active'
-         AND transaction_date >= CURRENT_TIMESTAMP - ${interval}
-         AND ($1::text IS NULL OR district = $1)
-       GROUP BY plan_name`,
-      [distParam]
-    );
+    const [planRes, trendRes, txRes, tierRes, payRes] = await Promise.all([
+      pool.query(
+        `SELECT
+          plan_name,
+          COUNT(*)::int as subscriptions,
+          COALESCE(SUM(amount), 0) as total_revenue
+         FROM student_subscriptions
+         WHERE status = 'active'
+           AND ${getRangeCondition('transaction_date', range)}
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY plan_name`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          TO_CHAR(DATE_TRUNC('month', transaction_date AT TIME ZONE 'Asia/Kolkata'), 'Mon YYYY') as month,
+          COALESCE(SUM(amount), 0) as revenue,
+          COUNT(*)::int as new_subs
+         FROM student_subscriptions
+         WHERE status = 'active'
+           AND transaction_date >= CURRENT_TIMESTAMP - INTERVAL '12 months'
+           AND ($1::text IS NULL OR district = $1)
+         GROUP BY DATE_TRUNC('month', transaction_date AT TIME ZONE 'Asia/Kolkata')
+         ORDER BY DATE_TRUNC('month', transaction_date AT TIME ZONE 'Asia/Kolkata') ASC`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          ss.id,
+          s.full_name as student_name,
+          s.email as student_email,
+          ss.plan_name,
+          ss.amount,
+          ss.status,
+          ss.payment_method,
+          ss.district,
+          ss.city,
+          ss.transaction_date
+         FROM student_subscriptions ss
+         JOIN students s ON ss.student_id = s.id
+         WHERE ($1::text IS NULL OR ss.district = $1)
+         ORDER BY ss.transaction_date DESC
+         LIMIT 15`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          COUNT(*)::int as total_subscriptions,
+          COUNT(CASE WHEN status = 'active' THEN 1 END)::int as total_active,
+          COUNT(CASE WHEN (plan_name ILIKE '%month%' OR plan_id ILIKE '%month%') AND plan_name NOT ILIKE '%half%' AND status = 'active' THEN 1 END)::int as monthly,
+          COUNT(CASE WHEN (plan_name ILIKE '%quarter%' OR plan_id ILIKE '%quarter%') AND status = 'active' THEN 1 END)::int as quarterly,
+          COUNT(CASE WHEN (plan_name ILIKE '%half%' OR plan_id ILIKE '%half%') AND status = 'active' THEN 1 END)::int as half_yearly,
+          COUNT(CASE WHEN (plan_name ILIKE '%year%' OR plan_name ILIKE '%annual%' OR plan_id ILIKE '%year%') AND status = 'active' THEN 1 END)::int as yearly,
+          COUNT(CASE WHEN status = 'expired' THEN 1 END)::int as expired,
+          COUNT(CASE WHEN status = 'cancelled' THEN 1 END)::int as cancelled,
+          COUNT(CASE WHEN ${getRangeCondition('transaction_date', range)} THEN 1 END)::int as new_subscriptions
+         FROM student_subscriptions
+         WHERE ($1::text IS NULL OR district = $1)`,
+        [distParam]
+      ),
+      pool.query(
+        `SELECT
+          COUNT(CASE WHEN status = 'pending' THEN 1 END)::int as pending_payments,
+          COUNT(CASE WHEN status = 'success' THEN 1 END)::int as successful_payments,
+          COUNT(CASE WHEN status = 'failed' THEN 1 END)::int as failed_payments,
+          COUNT(CASE WHEN status = 'refunded' THEN 1 END)::int as refunded_payments,
+          COALESCE(SUM(CASE WHEN status = 'success' THEN amount ELSE 0 END), 0) as verified_webhook_revenue
+         FROM payment_events
+         WHERE ${getRangeCondition('created_at', range)}
+           AND ($1::text IS NULL OR district = $1)`,
+        [distParam]
+      ),
+    ]);
 
-    // Monthly recurring trend
-    const trendRes = await pool.query(
-      `SELECT
-        TO_CHAR(DATE_TRUNC('month', transaction_date), 'Mon YYYY') as month,
-        COALESCE(SUM(amount), 0) as revenue,
-        COUNT(*) as new_subs
-       FROM student_subscriptions
-       WHERE status = 'active'
-         AND transaction_date >= CURRENT_TIMESTAMP - INTERVAL '12 months'
-         AND ($1::text IS NULL OR district = $1)
-       GROUP BY DATE_TRUNC('month', transaction_date)
-       ORDER BY DATE_TRUNC('month', transaction_date) ASC`,
-      [distParam]
-    );
-
-    // Recent transactions
-    const txRes = await pool.query(
-      `SELECT
-        ss.id,
-        s.full_name as student_name,
-        s.email as student_email,
-        ss.plan_name,
-        ss.amount,
-        ss.status,
-        ss.payment_method,
-        ss.district,
-        ss.city,
-        ss.transaction_date
-       FROM student_subscriptions ss
-       JOIN students s ON ss.student_id = s.id
-       WHERE ($1::text IS NULL OR ss.district = $1)
-       ORDER BY ss.transaction_date DESC
-       LIMIT 15`,
-      [distParam]
-    );
-
-    // Tier counts for Donut Chart & Subscription Overview
-    const tierRes = await pool.query(
-      `SELECT
-        COUNT(CASE WHEN status = 'active' THEN 1 END)::int as total_active,
-        COUNT(CASE WHEN (plan_name ILIKE '%month%' OR plan_id ILIKE '%month%') AND plan_name NOT ILIKE '%half%' AND status = 'active' THEN 1 END)::int as monthly,
-        COUNT(CASE WHEN (plan_name ILIKE '%quarter%' OR plan_id ILIKE '%quarter%') AND status = 'active' THEN 1 END)::int as quarterly,
-        COUNT(CASE WHEN (plan_name ILIKE '%half%' OR plan_id ILIKE '%half%') AND status = 'active' THEN 1 END)::int as half_yearly,
-        COUNT(CASE WHEN (plan_name ILIKE '%year%' OR plan_name ILIKE '%annual%' OR plan_id ILIKE '%year%') AND status = 'active' THEN 1 END)::int as yearly,
-        COUNT(CASE WHEN status = 'expired' THEN 1 END)::int as expired,
-        COUNT(CASE WHEN transaction_date >= CURRENT_TIMESTAMP - ${interval} THEN 1 END)::int as new_subscriptions
-       FROM student_subscriptions
-       WHERE ($1::text IS NULL OR district = $1)`,
-      [distParam]
-    );
-
-    const totalActive = tierRes.rows[0].total_active || 0;
-    const monthlyCount = tierRes.rows[0].monthly || 0;
-    const quarterlyCount = tierRes.rows[0].quarterly || 0;
-    const halfYearlyCount = tierRes.rows[0].half_yearly || 0;
-    const yearlyCount = tierRes.rows[0].yearly || 0;
-    const expiredCount = tierRes.rows[0].expired || 0;
-    const newSubsCount = tierRes.rows[0].new_subscriptions || 0;
+    const tRow = tierRes.rows[0] || {};
+    const pRow = payRes.rows[0] || {};
+    const totalSubscriptions = tRow.total_subscriptions || 0;
+    const totalActive = tRow.total_active || 0;
+    const monthlyCount = tRow.monthly || 0;
+    const quarterlyCount = tRow.quarterly || 0;
+    const halfYearlyCount = tRow.half_yearly || 0;
+    const yearlyCount = tRow.yearly || 0;
+    const expiredCount = tRow.expired || 0;
+    const cancelledCount = tRow.cancelled || 0;
+    const newSubsCount = tRow.new_subscriptions || 0;
 
     const donutDistribution = [
       {
@@ -1414,13 +2159,20 @@ export class AnalyticsService {
 
     return {
       summary: {
+        totalSubscriptions,
         totalActive,
         monthlyCount,
         quarterlyCount,
         halfYearlyCount,
         yearlyCount,
         expiredCount,
+        cancelledCount,
         newSubscriptionsCount: newSubsCount,
+        pendingPayments: Number(pRow.pending_payments || 0),
+        successfulPayments: Number(pRow.successful_payments || 0),
+        failedPayments: Number(pRow.failed_payments || 0),
+        refundedPayments: Number(pRow.refunded_payments || 0),
+        verifiedWebhookRevenue: parseFloat(pRow.verified_webhook_revenue || '0'),
       },
       distribution: donutDistribution,
       plans: planRes.rows.map((r) => ({
@@ -1441,29 +2193,27 @@ export class AnalyticsService {
         amount: parseFloat(r.amount),
         status: r.status,
         paymentMethod: r.payment_method,
-        district: r.district,
-        city: r.city,
+        district: r.district || 'Location unavailable',
+        city: r.city || null,
         date: r.transaction_date,
       })),
     };
   }
 
-  // 7. Student Analytics
+  // 7. Student Analytics (Zero fabricated districts/cities)
   static async getStudents(range: string = '30d', districtFilter?: string) {
     const distParam = districtFilter && districtFilter !== 'all' ? districtFilter : null;
 
-    // Group breakdown (Group 1, 2, 2A, 4)
     const groupRes = await pool.query(
       `SELECT
         target_group,
-        COUNT(*) as count
+        COUNT(*)::int as count
        FROM students
        WHERE ($1::text IS NULL OR district = $1)
        GROUP BY target_group`,
       [distParam]
     );
 
-    // Student performance list
     const listRes = await pool.query(
       `SELECT
         s.id,
@@ -1475,16 +2225,21 @@ export class AnalyticsService {
         s.subscription_tier,
         s.created_at,
         s.last_login_at,
-        COUNT(qa.id) as total_mcqs,
+        EXISTS (
+          SELECT 1 FROM visitor_sessions vs
+          WHERE vs.student_id = s.id AND vs.is_active = true
+            AND vs.last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+        ) as is_online,
+        COUNT(DISTINCT qa.id)::int as total_mcqs,
         COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as accuracy,
         COALESCE(SUM(ss.duration_seconds), 0) / 3600.0 as study_hours
        FROM students s
-       LEFT JOIN question_attempts qa ON s.id = qa.student_id
-       LEFT JOIN study_sessions ss ON s.id = ss.student_id
+       LEFT JOIN question_attempts qa ON s.id = qa.student_id AND ${getRangeCondition('qa.attempted_at', range)}
+       LEFT JOIN study_sessions ss ON s.id = ss.student_id AND ${getRangeCondition('ss.started_at', range)}
        WHERE ($1::text IS NULL OR s.district = $1)
        GROUP BY s.id
        ORDER BY total_mcqs DESC, s.created_at DESC
-       LIMIT 30`,
+       LIMIT 50`,
       [distParam]
     );
 
@@ -1497,10 +2252,11 @@ export class AnalyticsService {
         id: r.id,
         fullName: r.full_name,
         email: r.email,
-        targetGroup: r.target_group,
-        district: r.district || 'Chennai',
-        city: r.city || 'Central',
+        targetGroup: r.target_group || 'group4',
+        district: r.district || 'Location unavailable',
+        city: r.city || null,
         tier: r.subscription_tier || 'free',
+        isOnline: Boolean(r.is_online),
         mcqCount: parseInt(r.total_mcqs, 10),
         accuracy: parseFloat(r.accuracy),
         studyHours: Math.round(parseFloat(r.study_hours) * 10) / 10,
@@ -1510,21 +2266,19 @@ export class AnalyticsService {
     };
   }
 
-  // 8. Performance Analytics (Subject & Group Accuracy)
+  // 8. Performance Analytics (Subject & Group Accuracy, supports All Time)
   static async getPerformance(range: string = '30d', districtFilter?: string) {
-    const interval = getIntervalFromRange(range);
     const distParam = districtFilter && districtFilter !== 'all' ? districtFilter : null;
 
-    // Subject accuracy
     const subjRes = await pool.query(
       `SELECT
         qa.subject,
-        COUNT(*) as total_attempts,
-        COUNT(CASE WHEN qa.is_correct THEN 1 END) as correct_count,
+        COUNT(*)::int as total_attempts,
+        COUNT(CASE WHEN qa.is_correct THEN 1 END)::int as correct_count,
         COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as accuracy
        FROM question_attempts qa
        JOIN students s ON qa.student_id = s.id
-       WHERE qa.attempted_at >= CURRENT_TIMESTAMP - ${interval}
+       WHERE ${getRangeCondition('qa.attempted_at', range)}
          AND qa.subject IS NOT NULL
          AND ($1::text IS NULL OR s.district = $1)
        GROUP BY qa.subject
@@ -1532,20 +2286,20 @@ export class AnalyticsService {
       [distParam]
     );
 
-    // Mock test stats
     const mockRes = await pool.query(
       `SELECT
-        COUNT(*) as total_mock_tests,
+        COUNT(*)::int as total_mock_tests,
         COALESCE(ROUND(AVG(percentage), 1), 0) as avg_percentage,
-        COUNT(CASE WHEN percentage >= 50 THEN 1 END) as passed_count
+        COUNT(CASE WHEN percentage >= 50 THEN 1 END)::int as passed_count
        FROM mock_test_attempts mta
        JOIN students s ON mta.student_id = s.id
-       WHERE mta.completed_at >= CURRENT_TIMESTAMP - ${interval}
-          AND ($1::text IS NULL OR s.district = $1)`,
+       WHERE COALESCE(mta.status, 'completed') = 'completed'
+         AND mta.attempted_questions > 0
+         AND ${getRangeCondition('mta.completed_at', range)}
+         AND ($1::text IS NULL OR s.district = $1)`,
       [distParam]
     );
 
-    // Student performance breakdown (high performers >=75%, average 50-74%, need support <50%)
     const perfRes = await pool.query(
       `WITH student_acc AS (
         SELECT
@@ -1554,7 +2308,7 @@ export class AnalyticsService {
           COALESCE(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 0) as accuracy
         FROM students s
         JOIN question_attempts qa ON s.id = qa.student_id
-        WHERE qa.attempted_at >= CURRENT_TIMESTAMP - ${interval}
+        WHERE ${getRangeCondition('qa.attempted_at', range)}
           AND ($1::text IS NULL OR s.district = $1)
         GROUP BY s.id
       )
@@ -1606,6 +2360,423 @@ export class AnalyticsService {
         },
       },
     };
+  }
+
+  // 9. Real-Time Student Login History (Day-by-Day Register, IST aligned, Admin-Only)
+  private static buildLoginHistoryFilters(opts: {
+    range?: string;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+    method?: string;
+    sessionStatus?: string;
+  }) {
+    const range = String(opts.range || '30d').toLowerCase().trim();
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    if (range === 'today') {
+      conditions.push(`(e.login_timestamp AT TIME ZONE 'Asia/Kolkata')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date`);
+    } else if (range === 'yesterday') {
+      conditions.push(`(e.login_timestamp AT TIME ZONE 'Asia/Kolkata')::date = ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '1 day')::date`);
+    } else if (range === '7d') {
+      conditions.push(`e.login_timestamp >= CURRENT_TIMESTAMP - INTERVAL '7 days'`);
+    } else if (range === '30d') {
+      conditions.push(`e.login_timestamp >= CURRENT_TIMESTAMP - INTERVAL '30 days'`);
+    } else if (range === '90d') {
+      conditions.push(`e.login_timestamp >= CURRENT_TIMESTAMP - INTERVAL '90 days'`);
+    } else if (range === 'custom') {
+      const start = String(opts.startDate || '').trim();
+      const end = String(opts.endDate || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+        params.push(start);
+        conditions.push(`(e.login_timestamp AT TIME ZONE 'Asia/Kolkata')::date >= $${params.length}::date`);
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+        params.push(end);
+        conditions.push(`(e.login_timestamp AT TIME ZONE 'Asia/Kolkata')::date <= $${params.length}::date`);
+      }
+    }
+
+    const search = String(opts.search || '').trim();
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      const idx = params.length;
+      conditions.push(`(
+        LOWER(e.student_email_snapshot) LIKE $${idx}
+        OR TO_CHAR(e.login_timestamp AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') LIKE $${idx}
+        OR TO_CHAR(e.login_timestamp AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY') LIKE $${idx}
+      )`);
+    }
+
+    const method = String(opts.method || 'all').toLowerCase().trim();
+    if (method === 'google') {
+      conditions.push(`e.authentication_method = 'Google OAuth'`);
+    } else if (method === 'email') {
+      conditions.push(`e.authentication_method = 'Email & Password'`);
+    }
+
+    const sessionStatus = String(opts.sessionStatus || 'all').toLowerCase().trim();
+    if (sessionStatus === 'online' || sessionStatus === 'offline' || sessionStatus === 'expired') {
+      params.push(sessionStatus);
+      conditions.push(`LOWER(e.session_status) = $${params.length}`);
+    }
+
+    const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    return { whereSql, params };
+  }
+
+  private static getUnifiedLoginHistoryCte(): string {
+    return `
+      WITH raw_events AS (
+        SELECT
+          sle.id::text AS record_key,
+          sle.event_id,
+          sle.student_id,
+          LOWER(TRIM(COALESCE(NULLIF(sle.student_email_snapshot, ''), s.email))) AS student_email_snapshot,
+          s.full_name AS student_name,
+          sle.authentication_method,
+          sle.login_status,
+          sle.login_timestamp
+        FROM student_login_events sle
+        JOIN students s ON s.id = sle.student_id
+        WHERE COALESCE(s.role, 'student') = 'student'
+
+        UNION ALL
+
+        SELECT
+          ('sa_' || sa.id::text) AS record_key,
+          ('legacy_sa_' || sa.id::text) AS event_id,
+          sa.student_id,
+          LOWER(TRIM(s.email)) AS student_email_snapshot,
+          s.full_name AS student_name,
+          CASE WHEN sa.activity_type = 'google_login' THEN 'Google OAuth' ELSE 'Email & Password' END AS authentication_method,
+          'Successful' AS login_status,
+          sa.created_at AS login_timestamp
+        FROM student_activity sa
+        JOIN students s ON s.id = sa.student_id
+        WHERE sa.activity_type IN ('login', 'google_login')
+          AND COALESCE(s.role, 'student') = 'student'
+          AND NOT EXISTS (
+            SELECT 1 FROM student_login_events sle2
+            WHERE sle2.student_id = sa.student_id
+              AND ABS(EXTRACT(EPOCH FROM (sle2.login_timestamp - sa.created_at))) <= 10
+          )
+      ),
+      session_state AS (
+        SELECT
+          student_id,
+          BOOL_OR(is_active = true AND last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes') AS is_online,
+          BOOL_OR(ended_at IS NOT NULL) AS has_explicit_end,
+          MAX(last_heartbeat) AS last_heartbeat
+        FROM visitor_sessions
+        WHERE student_id IS NOT NULL
+        GROUP BY student_id
+      ),
+      last_activity_cte AS (
+        SELECT
+          student_id,
+          MAX(created_at) AS last_activity_at
+        FROM student_activity
+        GROUP BY student_id
+      ),
+      enriched AS (
+        SELECT
+          re.record_key,
+          re.event_id,
+          re.student_id,
+          re.student_email_snapshot,
+          re.student_name,
+          re.authentication_method,
+          re.login_status,
+          re.login_timestamp,
+          TO_CHAR(re.login_timestamp AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS ist_date_key,
+          TO_CHAR(re.login_timestamp AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY') AS date_formatted,
+          TO_CHAR(re.login_timestamp AT TIME ZONE 'Asia/Kolkata', 'DD FMMonth YYYY') AS display_date,
+          TO_CHAR(re.login_timestamp AT TIME ZONE 'Asia/Kolkata', 'HH12:MI AM') AS time_formatted,
+          CASE
+            WHEN COALESCE(ss.is_online, false) = true THEN 'Online'
+            WHEN ss.last_heartbeat IS NOT NULL AND ss.has_explicit_end = false AND ss.last_heartbeat < CURRENT_TIMESTAMP - INTERVAL '5 minutes' THEN 'Expired'
+            ELSE 'Offline'
+          END AS session_status,
+          GREATEST(ss.last_heartbeat, la.last_activity_at, re.login_timestamp) AS last_activity_at,
+          (ROW_NUMBER() OVER (PARTITION BY re.student_id ORDER BY re.login_timestamp ASC) > 1) AS is_returning_login
+        FROM raw_events re
+        LEFT JOIN session_state ss ON ss.student_id = re.student_id
+        LEFT JOIN last_activity_cte la ON la.student_id = re.student_id
+      )
+    `;
+  }
+
+  static async getStudentLoginHistory(opts: {
+    range?: string;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+    method?: string;
+    sessionStatus?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, Number(opts.page) || 1);
+    const limit = Math.min(200, Math.max(10, Number(opts.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    const cte = this.getUnifiedLoginHistoryCte();
+    const { whereSql, params } = this.buildLoginHistoryFilters(opts);
+
+    const [summaryRes, todayOnlineRes, dailySummaryRes, pageRowsRes, activationRes] = await Promise.all([
+      pool.query(
+        `${cte}
+         SELECT
+           COUNT(*)::int AS total_login_events,
+           COUNT(DISTINCT e.student_id)::int AS unique_students_logged_in,
+           COUNT(CASE WHEN e.is_returning_login THEN 1 END)::int AS returning_student_logins
+         FROM enriched e
+         ${whereSql}`,
+        params
+      ),
+      pool.query(
+        `${cte}
+         SELECT
+           COUNT(CASE WHEN (e.login_timestamp AT TIME ZONE 'Asia/Kolkata')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date THEN 1 END)::int AS today_login_events,
+           COUNT(DISTINCT CASE WHEN (e.login_timestamp AT TIME ZONE 'Asia/Kolkata')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date THEN e.student_id END)::int AS today_unique_students,
+           (SELECT COUNT(DISTINCT student_id)::int FROM visitor_sessions WHERE student_id IS NOT NULL AND is_active = true AND last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes') AS currently_online_students
+         FROM enriched e`
+      ),
+      pool.query(
+        `${cte}
+         SELECT
+           e.ist_date_key,
+           MIN(e.display_date) AS display_date,
+           COUNT(*)::int AS total_login_events,
+           COUNT(DISTINCT e.student_id)::int AS unique_students_logged_in
+         FROM enriched e
+         ${whereSql}
+         GROUP BY e.ist_date_key
+         ORDER BY e.ist_date_key DESC`,
+        params
+      ),
+      pool.query(
+        `${cte}
+         SELECT
+           e.record_key,
+           e.event_id,
+           e.student_id,
+           e.student_email_snapshot,
+           e.student_name,
+           e.authentication_method,
+           e.login_status,
+           e.login_timestamp,
+           e.ist_date_key,
+           e.date_formatted,
+           e.display_date,
+           e.time_formatted,
+           e.session_status,
+           e.last_activity_at,
+           e.is_returning_login
+         FROM enriched e
+         ${whereSql}
+         ORDER BY e.login_timestamp DESC
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset]
+      ),
+      pool.query(`SELECT MIN(created_at) AS activated_at FROM student_login_events`),
+    ]);
+
+    const totalCount = Number(summaryRes.rows[0]?.total_login_events || 0);
+    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+
+    const dailyStatsMap = new Map<string, { displayDate: string; totalLoginEvents: number; uniqueStudentsLoggedIn: number }>();
+    for (const d of dailySummaryRes.rows) {
+      dailyStatsMap.set(d.ist_date_key, {
+        displayDate: d.display_date,
+        totalLoginEvents: Number(d.total_login_events || 0),
+        uniqueStudentsLoggedIn: Number(d.unique_students_logged_in || 0),
+      });
+    }
+
+    const rows = pageRowsRes.rows.map((r, idx) => ({
+      serialNo: offset + idx + 1,
+      eventId: r.event_id,
+      studentId: Number(r.student_id),
+      studentEmail: r.student_email_snapshot,
+      studentName: r.student_name || null,
+      dateKey: r.ist_date_key,
+      dateFormatted: r.date_formatted,
+      displayDate: r.display_date,
+      loginTime: r.time_formatted,
+      loginTimestamp: r.login_timestamp,
+      authenticationMethod: r.authentication_method,
+      loginStatus: r.login_status,
+      sessionStatus: r.session_status,
+      lastActivityAt: r.last_activity_at,
+      isReturningLogin: Boolean(r.is_returning_login),
+    }));
+
+    // Group paginated rows by IST date (latest date first, latest login first within date)
+    const groupMap = new Map<
+      string,
+      {
+        dateKey: string;
+        displayDate: string;
+        totalLoginEvents: number;
+        uniqueStudentsLoggedIn: number;
+        events: typeof rows;
+      }
+    >();
+
+    for (const row of rows) {
+      let grp = groupMap.get(row.dateKey);
+      if (!grp) {
+        const stats = dailyStatsMap.get(row.dateKey);
+        grp = {
+          dateKey: row.dateKey,
+          displayDate: stats?.displayDate || row.displayDate,
+          totalLoginEvents: stats?.totalLoginEvents || 0,
+          uniqueStudentsLoggedIn: stats?.uniqueStudentsLoggedIn || 0,
+          events: [],
+        };
+        groupMap.set(row.dateKey, grp);
+      }
+      grp.events.push(row);
+    }
+
+    return {
+      summary: {
+        totalLoginEvents: totalCount,
+        uniqueStudentsLoggedIn: Number(summaryRes.rows[0]?.unique_students_logged_in || 0),
+        todayLoginEvents: Number(todayOnlineRes.rows[0]?.today_login_events || 0),
+        todayUniqueStudents: Number(todayOnlineRes.rows[0]?.today_unique_students || 0),
+        currentlyOnlineStudents: Number(todayOnlineRes.rows[0]?.currently_online_students || 0),
+        returningStudentLogins: Number(summaryRes.rows[0]?.returning_student_logins || 0),
+      },
+      dailyGroups: Array.from(groupMap.values()),
+      rows,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages,
+      },
+      trackingActivatedAt: activationRes.rows[0]?.activated_at || null,
+      timezone: 'Asia/Kolkata',
+      serverTimestamp: new Date().toISOString(),
+    };
+  }
+
+  static async getStudentLoginHistoryDetail(studentId: number) {
+    const cte = this.getUnifiedLoginHistoryCte();
+    const [studentRes, historyRes] = await Promise.all([
+      pool.query(
+        `SELECT id, full_name, email, target_group, district, created_at, last_login_at
+         FROM students
+         WHERE id = $1 AND COALESCE(role, 'student') = 'student'`,
+        [studentId]
+      ),
+      pool.query(
+        `${cte}
+         SELECT
+           e.event_id,
+           e.student_email_snapshot,
+           e.authentication_method,
+           e.login_status,
+           e.login_timestamp,
+           e.ist_date_key,
+           e.date_formatted,
+           e.display_date,
+           e.time_formatted,
+           e.session_status,
+           e.last_activity_at
+         FROM enriched e
+         WHERE e.student_id = $1
+         ORDER BY e.login_timestamp DESC
+         LIMIT 200`,
+        [studentId]
+      ),
+    ]);
+
+    if (studentRes.rows.length === 0) {
+      return null;
+    }
+
+    const s = studentRes.rows[0];
+    const events = historyRes.rows;
+    const uniqueDates = new Set(events.map((e) => e.ist_date_key)).size;
+    const mostRecent = events[0] || null;
+    const firstRecorded = events.length > 0 ? events[events.length - 1] : null;
+
+    return {
+      studentId: Number(s.id),
+      studentEmail: String(s.email || '').trim().toLowerCase(),
+      studentName: s.full_name || null,
+      targetGroup: s.target_group || null,
+      district: s.district || 'Location unavailable',
+      firstRecordedLogin: firstRecorded?.login_timestamp || null,
+      mostRecentLogin: mostRecent?.login_timestamp || s.last_login_at || null,
+      totalLoginEvents: events.length,
+      uniqueLoginDates: uniqueDates,
+      currentSessionStatus: mostRecent?.session_status || 'Offline',
+      lastActivityAt: mostRecent?.last_activity_at || s.last_login_at || null,
+      history: events.map((r, idx) => ({
+        serialNo: idx + 1,
+        eventId: r.event_id,
+        dateFormatted: r.date_formatted,
+        displayDate: r.display_date,
+        loginTime: r.time_formatted,
+        loginTimestamp: r.login_timestamp,
+        authenticationMethod: r.authentication_method,
+        loginStatus: r.login_status,
+        sessionStatus: r.session_status,
+      })),
+    };
+  }
+
+  static async exportStudentLoginHistoryCsv(opts: {
+    range?: string;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+    method?: string;
+    sessionStatus?: string;
+  }): Promise<string> {
+    const cte = this.getUnifiedLoginHistoryCte();
+    const { whereSql, params } = this.buildLoginHistoryFilters(opts);
+
+    const res = await pool.query(
+      `${cte}
+       SELECT
+         e.date_formatted,
+         e.student_email_snapshot,
+         e.time_formatted,
+         e.authentication_method,
+         e.session_status
+       FROM enriched e
+       ${whereSql}
+       ORDER BY e.login_timestamp DESC
+       LIMIT 10000`,
+      params
+    );
+
+    const csvEscape = (v: unknown) => {
+      const s = String(v ?? '');
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const lines = ['S.No,Date,Email,Login Time,Authentication Method,Session Status'];
+    res.rows.forEach((r, idx) => {
+      lines.push(
+        [
+          idx + 1,
+          csvEscape(r.date_formatted),
+          csvEscape(r.student_email_snapshot),
+          csvEscape(r.time_formatted),
+          csvEscape(r.authentication_method),
+          csvEscape(r.session_status),
+        ].join(',')
+      );
+    });
+    return lines.join('\r\n');
   }
 }
 

@@ -1,697 +1,1089 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
-  FileText,
+  Award,
   BookOpen,
+  Calendar,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Eye,
+  FileText,
+  Filter,
   GraduationCap,
-  ChevronRight,
-  ArrowLeft,
+  History,
+  Layers,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Target,
+  Trophy,
+  X,
+  XCircle,
+  MinusCircle,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { subscribeStudentSync } from '../utils/studentSync'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
-import {
-  getSubjectsForGroup,
-  getStandardsForSubject,
-} from '../data/unifiedSyllabusRegistry'
-import {
-  dynamicSyllabusService,
-  type DynamicUnit,
-  type DynamicLesson,
-} from '../services/dynamicSyllabusService'
-import { LessonAwardSummaryBar } from '../components/exam/AchievementAwards'
-import './MCQPractice.css'
+import { AwardShieldLogo, type AchievementAwardResult, type AchievementAwardTier } from '../components/exam/AchievementAwards'
 import './MarkList.css'
+
+interface AttemptItem {
+  id: number
+  attemptUuid: string | null
+  testId: string | null
+  testKey: string
+  testTitle: string
+  resultCategory: 'mcq_practice' | 'previous_paper' | 'mock_test'
+  testCategory?: 'lesson_wise' | 'unit_wise' | 'full_length' | null
+  testCategoryLabel?: string | null
+  assessmentType: string
+  groupId: string
+  groupLabel: string
+  subjectId: string | null
+  subjectLabel: string
+  standardId: number | null
+  unitId: number | null
+  lessonId: string | null
+  lessonTitle: string | null
+  examName: string | null
+  examYear: number | null
+  attemptNumber: number
+  totalQuestions: number
+  attemptedQuestions: number
+  correctAnswers: number
+  incorrectAnswers: number
+  unansweredQuestions: number
+  marksObtained: number
+  maxMarks: number
+  negativeMarks: number
+  percentage: number
+  accuracy: number
+  awardType: AchievementAwardResult
+  grade: string | null
+  rank: number | null
+  totalParticipants: number | null
+  percentile: number | null
+  timeSpentSeconds: number
+  date: string
+  completedAt: string
+}
+
+interface GroupedTestResult {
+  testKey: string
+  testId: string | null
+  testTitle: string
+  resultCategory: 'mcq_practice' | 'previous_paper' | 'mock_test'
+  testCategory?: 'lesson_wise' | 'unit_wise' | 'full_length' | null
+  testCategoryLabel?: string | null
+  groupId: string
+  groupLabel: string
+  subjectId: string | null
+  subjectLabel: string
+  standardId: number | null
+  unitId: number | null
+  lessonId: string | null
+  lessonTitle: string | null
+  examName: string | null
+  examYear: number | null
+  totalAttempts: number
+  firstAttemptDate: string
+  latestAttempt: AttemptItem
+  bestAttempt: AttemptItem
+  rank: number | null
+  totalParticipants: number | null
+  percentile: number | null
+  attempts: AttemptItem[]
+}
+
+interface MarkListResponse {
+  summary: {
+    totalTestsCompleted: number
+    uniqueTestsCompleted: number
+    totalQuestionsAttempted: number
+    overallMarksObtained: number
+    overallMaxMarks: number
+    overallAccuracy: number
+    totalAwardsEarned: number
+    goldCount: number
+    platinumCount: number
+    silverCount: number
+    mcqPracticeCount: number
+    previousPapersCount: number
+    mockTestsCount?: number
+  }
+  counts: {
+    all: number
+    mcq_practice: number
+    previous_paper: number
+    mock_test: number
+  }
+  availableFilters: {
+    groups: { id: string; label: string }[]
+    subjects: string[]
+    standards: number[]
+    units: number[]
+    lessons: string[]
+    years: number[]
+    testCategories?: { id: string; label: string }[]
+  }
+  mcqPracticeResults: GroupedTestResult[]
+  previousPaperResults: GroupedTestResult[]
+  mockTestResults?: GroupedTestResult[]
+}
+
+interface DetailedQuestionResponse {
+  index: number
+  questionId: number | string | null
+  questionText: string
+  options: string[]
+  subject: string | null
+  topic: string | null
+  selectedOption: number | null
+  correctAnswer: number | null
+  status: 'correct' | 'incorrect' | 'unanswered'
+  isCorrect: boolean
+  marksAwarded: number
+}
+
+interface DetailedScorecard {
+  id: number
+  testName: string
+  attemptNumber: number
+  resultCategory: 'mcq_practice' | 'previous_paper' | 'mock_test'
+  testCategory?: 'lesson_wise' | 'unit_wise' | 'full_length' | null
+  testCategoryLabel?: string | null
+  negativeMarks?: number
+  groupLabel: string
+  subjectLabel: string
+  standardId: number | null
+  unitId: number | null
+  lessonTitle: string | null
+  examYear: number | null
+  totalQuestions: number
+  attemptedQuestions: number
+  correctAnswers: number
+  incorrectAnswers: number
+  unansweredQuestions: number
+  marksObtained: number
+  maxMarks: number
+  percentage: number
+  accuracyPercentage: number
+  timeSpentSeconds: number
+  awardType: AchievementAwardResult
+  grade: string | null
+  rank: number | null
+  totalParticipants: number | null
+  percentile: number | null
+  date: string
+  questionResponses: DetailedQuestionResponse[]
+}
+
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds || 0))
+  const hrs = Math.floor(s / 3600)
+  const mins = Math.floor((s % 3600) / 60)
+  const secs = s % 60
+  if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`
+  if (mins > 0) return `${mins}m ${secs}s`
+  return `${secs}s`
+}
+
+function toRomanUnit(unitId: number): string {
+  const map: Record<number, string> = {
+    1: 'Unit I',
+    2: 'Unit II',
+    3: 'Unit III',
+    4: 'Unit IV',
+    5: 'Unit V',
+    6: 'Unit VI',
+    7: 'Unit VII',
+    8: 'Unit VIII',
+    9: 'Unit IX',
+    10: 'Unit X',
+  }
+  return map[unitId] || `Unit ${unitId}`
+}
+
+function optionLetter(idx: number | null): string {
+  if (idx === null || idx < 0) return 'Not Answered'
+  return String.fromCharCode(65 + idx)
+}
 
 export const MarkList: React.FC = () => {
   useStudyTimeTracker()
 
-  const [selectedGroup, setSelectedGroup] = useState<'group1' | 'group2' | 'group4'>('group1')
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('general-studies')
-  const [selectedStandardId, setSelectedStandardId] = useState<number>(6)
-  const [activeUnitFilter, setActiveUnitFilter] = useState<number | null>(null)
-  const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null)
+  const [activeCategory, setActiveCategory] = useState<'all' | 'mcq_practice' | 'previous_paper' | 'mock_test'>('all')
+  const [selectedTestCategory, setSelectedTestCategory] = useState<string>('all')
+  const [selectedGroup, setSelectedGroup] = useState<string>('all')
+  const [selectedSubject, setSelectedSubject] = useState<string>('all')
+  const [selectedStandard, setSelectedStandard] = useState<string>('all')
+  const [selectedUnit, setSelectedUnit] = useState<string>('all')
+  const [selectedLesson, setSelectedLesson] = useState<string>('')
+  const [selectedYear, setSelectedYear] = useState<string>('all')
+  const [fromDate, setFromDate] = useState<string>('')
+  const [toDate, setToDate] = useState<string>('')
 
-  const [dynamicUnits, setDynamicUnits] = useState<DynamicUnit[]>([])
-  const [isUnitsLoading, setIsUnitsLoading] = useState<boolean>(true)
-  const [unitsCountByStandard, setUnitsCountByStandard] = useState<Record<number, number>>({})
-  const [dynamicLessons, setDynamicLessons] = useState<DynamicLesson[]>([])
-  const [isLessonsLoading, setIsLessonsLoading] = useState<boolean>(false)
-  const [syllabusRefreshTick, setSyllabusRefreshTick] = useState<number>(0)
-  const [progressRefreshTick, setProgressRefreshTick] = useState<number>(0)
+  const [data, setData] = useState<MarkListResponse | null>(null)
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [expandedTestKeys, setExpandedTestKeys] = useState<Record<string, boolean>>({})
 
-  const [syllabusFacets, setSyllabusFacets] = useState<{
-    totalQuestions: number
-    subjects: { id?: string; name: string; questionCount: number }[]
-    standards: { classId: number; questionCount: number }[]
-    units: { unitId: number; questionCount: number }[]
-    lessons: {
-      lessonId: string | null
-      lessonTitle: string
-      questionCount: number
-    }[]
-  }>({
-    totalQuestions: 0,
+  const [detailModalOpen, setDetailModalOpen] = useState<boolean>(false)
+  const [detailLoading, setDetailLoading] = useState<boolean>(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [selectedDetail, setSelectedDetail] = useState<DetailedScorecard | null>(null)
+
+  const fetchMarkList = useCallback(async () => {
+    setIsLoading(true)
+    setErrorMsg(null)
+    try {
+      const params = new URLSearchParams()
+      if (activeCategory !== 'all') params.set('category', activeCategory)
+      if (selectedTestCategory !== 'all') params.set('testCategory', selectedTestCategory)
+      if (selectedGroup !== 'all') params.set('group', selectedGroup)
+      if (selectedSubject !== 'all') params.set('subject', selectedSubject)
+      if (selectedStandard !== 'all') params.set('standard', selectedStandard)
+      if (selectedUnit !== 'all') params.set('unit', selectedUnit)
+      if (selectedLesson.trim()) params.set('lesson', selectedLesson.trim())
+      if (selectedYear !== 'all') params.set('year', selectedYear)
+      if (fromDate) params.set('from', fromDate)
+      if (toDate) params.set('to', toDate)
+
+      const res = await apiFetch(`/api/student/mark-list?${params.toString()}`)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.status !== 'success') {
+        setErrorMsg(json.message || 'Unable to load your mark list right now.')
+        return
+      }
+      setData(json.data as MarkListResponse)
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Network error while loading your mark list.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [
+    activeCategory,
+    selectedTestCategory,
+    selectedGroup,
+    selectedSubject,
+    selectedStandard,
+    selectedUnit,
+    selectedLesson,
+    selectedYear,
+    fromDate,
+    toDate,
+  ])
+
+  useEffect(() => {
+    void fetchMarkList()
+  }, [fetchMarkList])
+
+  useEffect(() => {
+    return subscribeStudentSync(() => {
+      void fetchMarkList()
+    })
+  }, [fetchMarkList])
+
+  const openAttemptDetail = async (attemptId: number) => {
+    setDetailModalOpen(true)
+    setDetailLoading(true)
+    setDetailError(null)
+    setSelectedDetail(null)
+    try {
+      const res = await apiFetch(`/api/student/mark-list/${attemptId}`)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.status !== 'success') {
+        setDetailError(json.message || 'Could not load detailed result.')
+        return
+      }
+      setSelectedDetail(json.data as DetailedScorecard)
+    } catch (err: any) {
+      setDetailError(err?.message || 'Failed to load detailed result.')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const toggleHistory = (key: string) => {
+    setExpandedTestKeys((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const resetFilters = () => {
+    setActiveCategory('all')
+    setSelectedTestCategory('all')
+    setSelectedGroup('all')
+    setSelectedSubject('all')
+    setSelectedStandard('all')
+    setSelectedUnit('all')
+    setSelectedLesson('')
+    setSelectedYear('all')
+    setFromDate('')
+    setToDate('')
+  }
+
+  const hasActiveFilters =
+    activeCategory !== 'all' ||
+    selectedTestCategory !== 'all' ||
+    selectedGroup !== 'all' ||
+    selectedSubject !== 'all' ||
+    selectedStandard !== 'all' ||
+    selectedUnit !== 'all' ||
+    selectedLesson.trim() !== '' ||
+    selectedYear !== 'all' ||
+    fromDate !== '' ||
+    toDate !== ''
+
+  const summary = data?.summary || {
+    totalTestsCompleted: 0,
+    uniqueTestsCompleted: 0,
+    totalQuestionsAttempted: 0,
+    overallMarksObtained: 0,
+    overallMaxMarks: 0,
+    overallAccuracy: 0,
+    totalAwardsEarned: 0,
+    goldCount: 0,
+    platinumCount: 0,
+    silverCount: 0,
+    mcqPracticeCount: 0,
+    previousPapersCount: 0,
+    mockTestsCount: 0,
+  }
+
+  const counts = data?.counts || { all: 0, mcq_practice: 0, previous_paper: 0, mock_test: 0 }
+  const availableFilters = data?.availableFilters || {
+    groups: [],
     subjects: [],
     standards: [],
     units: [],
     lessons: [],
-  })
+    years: [],
+    testCategories: [],
+  }
 
-  const [unitProgressByNum, setUnitProgressByNum] = useState<
-    Record<
-      number,
-      {
-        totalLessons: number
-        completedLessons: number
-        remainingLessons: number
-        completionPercentage: number
-        totalAttempts: number
-      }
-    >
-  >({})
+  const mcqResults = data?.mcqPracticeResults || []
+  const pypResults = data?.previousPaperResults || []
+  const mockResults = data?.mockTestResults || []
 
-  const [lessonProgressById, setLessonProgressById] = useState<
-    Record<
-      string,
-      {
-        status: 'not_started' | 'in_progress' | 'completed'
-        totalAttempts: number
-        latestAttemptScore: number | null
-        bestAttemptScore: number | null
-        goldCount: number
-        platinumCount: number
-        silverCount: number
-        totalAwards: number
-      }
-    >
-  >({})
-
-  const groups: { id: 'group1' | 'group2' | 'group4'; name: string }[] = [
-    { id: 'group1', name: 'TNPSC Group 1' },
-    { id: 'group2', name: 'TNPSC Group 2 & 2A' },
-    { id: 'group4', name: 'TNPSC Group 4' },
-  ]
-
-  const hierarchySubjects = getSubjectsForGroup(selectedGroup).map((sub) => {
-    const matched = syllabusFacets.subjects.find(
-      (f) => f.id === sub.id || f.name.toLowerCase() === sub.name.toLowerCase()
+  const renderAwardBadge = (awardType: AchievementAwardResult) => {
+    if (!awardType || awardType === 'NONE') return null
+    const tier: AchievementAwardTier = awardType
+    const label =
+      tier === 'GOLD'
+        ? 'Gold Award'
+        : tier === 'PLATINUM'
+          ? 'Platinum Award'
+          : 'Silver Award'
+    return (
+      <span className={`ml-award-pill ml-award-${tier.toLowerCase()}`}>
+        <AwardShieldLogo tier={tier} size={18} />
+        <span>{label}</span>
+      </span>
     )
-    return {
-      ...sub,
-      questionCount: matched ? matched.questionCount : 0,
+  }
+
+  const renderResultCard = (item: GroupedTestResult) => {
+    const latest = item.latestAttempt
+    const best = item.bestAttempt
+    const isExpanded = Boolean(expandedTestKeys[`${item.resultCategory}::${item.testKey}`])
+    const expandKey = `${item.resultCategory}::${item.testKey}`
+    const isPreviousPaper = item.resultCategory === 'previous_paper'
+    const isMockTest = item.resultCategory === 'mock_test'
+
+    const hierarchyParts: string[] = [item.groupLabel]
+    if (!isPreviousPaper) {
+      if (item.subjectLabel) hierarchyParts.push(item.subjectLabel)
+      if (item.standardId) hierarchyParts.push(`${item.standardId}th Standard`)
+      if (item.unitId) hierarchyParts.push(toRomanUnit(item.unitId))
+      if (item.lessonTitle) hierarchyParts.push(item.lessonTitle)
+    } else {
+      if (item.examName && item.examName !== item.groupLabel) hierarchyParts.push(item.examName)
+      if (item.examYear) hierarchyParts.push(`${item.examYear} Exam`)
+      if (item.subjectLabel) hierarchyParts.push(item.subjectLabel)
     }
-  })
 
-  const effectiveSubjectId = hierarchySubjects.some((s) => s.id === selectedSubjectId)
-    ? selectedSubjectId
-    : hierarchySubjects[0]?.id || 'general-studies'
+    return (
+      <article key={expandKey} className="ml-result-card glass">
+        <div className="ml-card-top">
+          <div className="ml-card-header-left">
+            <div className="ml-category-row">
+              <span className={`ml-cat-tag ${isPreviousPaper ? 'cat-pyp' : isMockTest ? 'cat-mock' : 'cat-mcq'}`}>
+                {isPreviousPaper ? 'Previous Year Paper' : isMockTest ? 'Mock Test' : 'MCQ Practice'}
+              </span>
+              {isMockTest && item.testCategoryLabel && (
+                <span className="ml-subcat-pill">{item.testCategoryLabel}</span>
+              )}
+              {item.examYear && <span className="ml-year-pill">{item.examYear}</span>}
+              <span className="ml-date-pill">
+                <Calendar size={13} />
+                <span>{latest.date}</span>
+              </span>
+              {latest.timeSpentSeconds > 0 && (
+                <span className="ml-date-pill">
+                  <Clock size={13} />
+                  <span>{formatDuration(latest.timeSpentSeconds)}</span>
+                </span>
+              )}
+              {item.totalAttempts > 1 && (
+                <span className="ml-attempts-pill">
+                  <History size={13} />
+                  <span>{item.totalAttempts} Attempts</span>
+                </span>
+              )}
+            </div>
 
-  const hierarchyStandards = effectiveSubjectId
-    ? getStandardsForSubject(selectedGroup, effectiveSubjectId).map((st) => {
-        const matched = syllabusFacets.standards.find((f) => Number(f.classId) === st.id)
-        return {
-          ...st,
-          questionCount: matched ? matched.questionCount : 0,
-        }
-      })
-    : []
+            <div className="ml-hierarchy-trail" aria-label="Test hierarchy">
+              {hierarchyParts.join(' → ')}
+            </div>
 
-  const effectiveClassId: number | null =
-    hierarchyStandards.length > 0
-      ? hierarchyStandards.some((s) => s.id === selectedStandardId)
-        ? selectedStandardId
-        : hierarchyStandards[0].id
-      : null
+            <h3 className="ml-card-title">{item.testTitle}</h3>
+          </div>
 
-  // Subscribe to Study Materials & Student sync events
-  useEffect(() => {
-    const unsubSyl = dynamicSyllabusService.subscribe(() => {
-      setSyllabusRefreshTick((t) => t + 1)
-    })
-    const unsubStu = subscribeStudentSync(() => {
-      setProgressRefreshTick((t) => t + 1)
-    })
-    return () => {
-      unsubSyl()
-      unsubStu()
-    }
-  }, [])
+          <div className="ml-card-header-right">
+            {renderAwardBadge(latest.awardType)}
+            {item.rank !== null && item.totalParticipants !== null && (
+              <div className="ml-rank-pill" title="Calculated among students who completed this test">
+                <Trophy size={14} />
+                <span>
+                  Rank <strong>#{item.rank}</strong> / {item.totalParticipants}
+                  {item.percentile !== null ? ` (${item.percentile}%ile)` : ''}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
 
-  // Fetch live syllabus question counts
-  useEffect(() => {
-    let isMounted = true
-    const fetchFacets = async () => {
-      try {
-        const params = new URLSearchParams()
-        params.set('category', selectedGroup)
-        if (effectiveSubjectId) params.set('subject', effectiveSubjectId)
-        if (effectiveClassId) params.set('classId', String(effectiveClassId))
-        if (activeUnitFilter) params.set('unitId', String(activeUnitFilter))
+        {/* Core Score & Question Breakdown */}
+        <div className="ml-metrics-grid">
+          <div className="ml-metric-box">
+            <span className="ml-metric-label">Total Questions</span>
+            <strong className="ml-metric-val">{latest.totalQuestions}</strong>
+          </div>
+          <div className="ml-metric-box metric-correct">
+            <span className="ml-metric-label">Correct</span>
+            <strong className="ml-metric-val">{latest.correctAnswers}</strong>
+          </div>
+          <div className="ml-metric-box metric-wrong">
+            <span className="ml-metric-label">Incorrect</span>
+            <strong className="ml-metric-val">{latest.incorrectAnswers}</strong>
+          </div>
+          <div className="ml-metric-box metric-unanswered">
+            <span className="ml-metric-label">Unanswered</span>
+            <strong className="ml-metric-val">{latest.unansweredQuestions}</strong>
+          </div>
+          <div className="ml-metric-box metric-marks">
+            <span className="ml-metric-label">Marks Obtained</span>
+            <strong className="ml-metric-val">
+              {latest.marksObtained} / {latest.maxMarks}
+            </strong>
+          </div>
+          <div className="ml-metric-box metric-pct">
+            <span className="ml-metric-label">Percentage</span>
+            <strong className="ml-metric-val">{latest.percentage}%</strong>
+          </div>
+          <div className="ml-metric-box metric-acc">
+            <span className="ml-metric-label">Accuracy</span>
+            <strong className="ml-metric-val">{latest.accuracy}%</strong>
+          </div>
+          {(isPreviousPaper || isMockTest) && latest.negativeMarks > 0 && (
+            <div className="ml-metric-box metric-wrong">
+              <span className="ml-metric-label">Negative Marks</span>
+              <strong className="ml-metric-val">-{latest.negativeMarks}</strong>
+            </div>
+          )}
+        </div>
 
-        const res = await apiFetch(`/api/questions/syllabus-facets?${params.toString()}`)
-        if (!res.ok) return
-        const data = await res.json()
-        if (isMounted && data?.status === 'success') {
-          setSyllabusFacets({
-            totalQuestions: data.totalQuestions || 0,
-            subjects: Array.isArray(data.subjects) ? data.subjects : [],
-            standards: Array.isArray(data.standards) ? data.standards : [],
-            units: Array.isArray(data.units) ? data.units : [],
-            lessons: Array.isArray(data.lessons) ? data.lessons : [],
-          })
-        }
-      } catch {
-        // Ignore facet error
-      }
-    }
-    fetchFacets()
-    return () => {
-      isMounted = false
-    }
-  }, [selectedGroup, effectiveSubjectId, effectiveClassId, activeUnitFilter, syllabusRefreshTick])
+        {/* Latest vs Best Comparison + Actions */}
+        <div className="ml-card-footer">
+          <div className="ml-attempt-badges">
+            <span className="ml-attempt-tag latest">
+              Latest (Attempt #{latest.attemptNumber}): <strong>{latest.marksObtained}/{latest.maxMarks} ({latest.percentage}%)</strong>
+            </span>
+            {item.totalAttempts > 1 && (
+              <span className="ml-attempt-tag best">
+                Best (Attempt #{best.attemptNumber}): <strong>{best.marksObtained}/{best.maxMarks} ({best.percentage}%)</strong>
+              </span>
+            )}
+          </div>
 
-  // Fetch live Study Materials Units
-  useEffect(() => {
-    let isMounted = true
-    if (!effectiveSubjectId || !effectiveClassId) {
-      setDynamicUnits([])
-      setIsUnitsLoading(false)
-      return () => {
-        isMounted = false
-      }
-    }
-    setIsUnitsLoading(true)
-    dynamicSyllabusService
-      .getUnits(selectedGroup, effectiveSubjectId, effectiveClassId, { allowEmpty: true })
-      .then((units) => {
-        if (isMounted) {
-          setDynamicUnits(units)
-          setIsUnitsLoading(false)
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setDynamicUnits([])
-          setIsUnitsLoading(false)
-        }
-      })
-    return () => {
-      isMounted = false
-    }
-  }, [selectedGroup, effectiveSubjectId, effectiveClassId, syllabusRefreshTick])
+          <div className="ml-card-actions">
+            {item.totalAttempts > 1 && (
+              <button
+                type="button"
+                className="ml-btn ml-btn-secondary"
+                onClick={() => toggleHistory(expandKey)}
+              >
+                <History size={15} />
+                <span>{isExpanded ? 'Hide History' : `Attempt History (${item.totalAttempts})`}</span>
+                {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+            )}
+            <button
+              type="button"
+              className="ml-btn ml-btn-primary"
+              onClick={() => void openAttemptDetail(latest.id)}
+            >
+              <Eye size={15} />
+              <span>View Result</span>
+            </button>
+          </div>
+        </div>
 
-  // Fetch unit counts per standard card
-  useEffect(() => {
-    let isMounted = true
-    if (!effectiveSubjectId) {
-      setUnitsCountByStandard({})
-      return () => {
-        isMounted = false
-      }
-    }
-    const stdIds = getStandardsForSubject(selectedGroup, effectiveSubjectId).map((s) => s.id)
-    Promise.all(
-      stdIds.map(async (stdId) => {
-        const units = await dynamicSyllabusService.getUnits(selectedGroup, effectiveSubjectId, stdId, {
-          allowEmpty: true,
-        })
-        return [stdId, units.length] as const
-      })
+        {/* Expandable Individual Attempt History */}
+        {isExpanded && item.attempts.length > 0 && (
+          <div className="ml-history-panel">
+            <div className="ml-history-header">
+              <span>Complete Attempt History (First Attempt: {item.firstAttemptDate})</span>
+            </div>
+            <div className="ml-history-list">
+              {item.attempts.map((att) => {
+                const isLatest = att.id === latest.id
+                const isBest = att.id === best.id
+                return (
+                  <div key={att.id} className="ml-history-row">
+                    <div className="ml-history-row-left">
+                      <span className="ml-history-attempt-num">Attempt #{att.attemptNumber}</span>
+                      {isLatest && <span className="ml-mini-tag tag-latest">Latest</span>}
+                      {isBest && <span className="ml-mini-tag tag-best">Best</span>}
+                      <span className="ml-history-date">{att.date}</span>
+                    </div>
+                    <div className="ml-history-row-mid">
+                      <span>Marks: <strong>{att.marksObtained}/{att.maxMarks}</strong></span>
+                      <span>Score: <strong>{att.percentage}%</strong></span>
+                      <span>Accuracy: <strong className="text-green">{att.accuracy}%</strong></span>
+                      {renderAwardBadge(att.awardType)}
+                    </div>
+                    <button
+                      type="button"
+                      className="ml-btn ml-btn-sm ml-btn-primary"
+                      onClick={() => void openAttemptDetail(att.id)}
+                    >
+                      <Eye size={13} />
+                      <span>View</span>
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </article>
     )
-      .then((entries) => {
-        if (isMounted) {
-          setUnitsCountByStandard(Object.fromEntries(entries))
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setUnitsCountByStandard({})
-        }
-      })
-    return () => {
-      isMounted = false
-    }
-  }, [selectedGroup, effectiveSubjectId, syllabusRefreshTick])
-
-  // Fetch live Study Materials Lessons when a unit is opened
-  useEffect(() => {
-    let isMounted = true
-    if (!effectiveSubjectId || !effectiveClassId || !activeUnitFilter) {
-      setDynamicLessons([])
-      setIsLessonsLoading(false)
-      return () => {
-        isMounted = false
-      }
-    }
-    setIsLessonsLoading(true)
-    dynamicSyllabusService
-      .getLessons({
-        examId: selectedGroup,
-        subjectId: effectiveSubjectId,
-        standardNumber: effectiveClassId,
-        unitNumber: activeUnitFilter,
-      })
-      .then((lessons) => {
-        if (isMounted) {
-          setDynamicLessons(lessons)
-          setIsLessonsLoading(false)
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setDynamicLessons([])
-          setIsLessonsLoading(false)
-        }
-      })
-    return () => {
-      isMounted = false
-    }
-  }, [selectedGroup, effectiveSubjectId, effectiveClassId, activeUnitFilter, syllabusRefreshTick])
-
-  // Fetch authenticated student's combined MCQ Practice & Mock Test performance records
-  useEffect(() => {
-    let isMounted = true
-    const studentToken = localStorage.getItem('tnpsc_student_token')
-    if (!studentToken || !effectiveSubjectId || !effectiveClassId) {
-      setUnitProgressByNum({})
-      setLessonProgressById({})
-      return () => {
-        isMounted = false
-      }
-    }
-
-    const q = new URLSearchParams({
-      groupId: selectedGroup,
-      subjectId: effectiveSubjectId,
-      standardId: String(effectiveClassId),
-      mode: 'all',
-    })
-    apiFetch(`/api/student/syllabus-progress?${q.toString()}`, {
-      headers: { Authorization: `Bearer ${studentToken}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) return
-        const json = await res.json()
-        if (!isMounted || json?.status !== 'success' || !json?.data) return
-        const uMap: Record<number, any> = {}
-        for (const u of json.data.units || []) {
-          uMap[Number(u.unitNumber)] = u
-        }
-        const lMap: Record<string, any> = {}
-        for (const l of json.data.lessons || []) {
-          if (l.lessonId) lMap[String(l.lessonId)] = l
-          if (l.lessonTitle) lMap[`title:${String(l.lessonTitle).trim().toLowerCase()}`] = l
-        }
-        setUnitProgressByNum(uMap)
-        setLessonProgressById(lMap)
-      })
-      .catch(() => {})
-
-    return () => {
-      isMounted = false
-    }
-  }, [selectedGroup, effectiveSubjectId, effectiveClassId, progressRefreshTick, syllabusRefreshTick])
-
-  const hierarchyUnits =
-    effectiveSubjectId && effectiveClassId
-      ? dynamicUnits.map((u) => {
-          const unitNum = Number(u.unit_number)
-          const matched = syllabusFacets.units.find((f) => Number(f.unitId) === unitNum)
-          return {
-            id: unitNum,
-            unitNumber: u.unitNumber || u.unit_code || `Unit ${unitNum}`,
-            title: u.title,
-            questionCount: matched ? matched.questionCount : 0,
-          }
-        })
-      : []
-
-  const hierarchyLessons =
-    effectiveSubjectId && effectiveClassId && activeUnitFilter
-      ? dynamicLessons.map((l) => {
-          const normTitle = (l.title || '').trim().toLowerCase()
-          const matched = syllabusFacets.lessons.find(
-            (f) => (f.lessonId && f.lessonId === l.id) || f.lessonTitle.trim().toLowerCase() === normTitle
-          )
-          return {
-            id: l.id,
-            lessonNumber: l.lesson_number || '',
-            title: l.title,
-            questionCount: matched ? matched.questionCount : 0,
-          }
-        })
-      : []
-
-  const activeSubjectObj = hierarchySubjects.find((s) => s.id === effectiveSubjectId) || null
-  const activeUnitObj = hierarchyUnits.find((u) => u.id === activeUnitFilter) || null
-  const currentView: 'browse' | 'lessons' = activeUnitFilter ? 'lessons' : 'browse'
-
-  const handleGroupSelect = (grp: 'group1' | 'group2' | 'group4') => {
-    const nextSubs = getSubjectsForGroup(grp)
-    const defaultSubject = nextSubs[0]?.id || 'general-studies'
-    const nextStds = getStandardsForSubject(grp, defaultSubject)
-    const defaultStandard = nextStds[0]?.id || 6
-    setSelectedGroup(grp)
-    setSelectedSubjectId(defaultSubject)
-    setSelectedStandardId(defaultStandard)
-    setSelectedUnitId(null)
-    setActiveUnitFilter(null)
   }
 
   return (
-    <div className="practice">
-      <div className="practice-container">
-        <div className="practice-header">
-          <h1 className="practice-title">
-            <FileText size={32} />
-            <span>
-              Student <span className="gradient-text">Mark List</span>
-            </span>
-          </h1>
+    <div className="marklist-page">
+      <div className="marklist-container">
+        {/* Page Header */}
+        <header className="marklist-header">
+          <div>
+            <h1 className="marklist-title">
+              <FileText size={30} />
+              <span>
+                Student <span className="gradient-text">Mark List</span>
+              </span>
+            </h1>
+            <p className="marklist-subtitle">
+              Real-time examination results, marks, accuracy, awards, and attempt history across MCQ Practice, Previous Year Papers, and Mock Tests
+            </p>
+          </div>
+          <button
+            type="button"
+            className="ml-btn ml-btn-secondary"
+            onClick={() => void fetchMarkList()}
+            disabled={isLoading}
+          >
+            <RefreshCw size={15} className={isLoading ? 'ml-spin' : ''} />
+            <span>Refresh Results</span>
+          </button>
+        </header>
+
+        {/* Top Summary Statistics */}
+        <section className="ml-summary-grid" aria-label="Overall examination summary">
+          <div className="ml-summary-card glass">
+            <div className="ml-summary-icon icon-purple">
+              <Layers size={20} />
+            </div>
+            <div>
+              <span className="ml-summary-label">Total Tests Completed</span>
+              <strong className="ml-summary-value">{summary.totalTestsCompleted}</strong>
+            </div>
+          </div>
+
+          <div className="ml-summary-card glass">
+            <div className="ml-summary-icon icon-blue">
+              <BookOpen size={20} />
+            </div>
+            <div>
+              <span className="ml-summary-label">Questions Attempted</span>
+              <strong className="ml-summary-value">{summary.totalQuestionsAttempted}</strong>
+            </div>
+          </div>
+
+          <div className="ml-summary-card glass">
+            <div className="ml-summary-icon icon-gold">
+              <Trophy size={20} />
+            </div>
+            <div>
+              <span className="ml-summary-label">Overall Marks</span>
+              <strong className="ml-summary-value">
+                {summary.overallMarksObtained} / {summary.overallMaxMarks}
+              </strong>
+            </div>
+          </div>
+
+          <div className="ml-summary-card glass">
+            <div className="ml-summary-icon icon-green">
+              <Target size={20} />
+            </div>
+            <div>
+              <span className="ml-summary-label">Overall Accuracy</span>
+              <strong className="ml-summary-value text-green">{summary.overallAccuracy}%</strong>
+            </div>
+          </div>
+
+          <div className="ml-summary-card glass">
+            <div className="ml-summary-icon icon-gold">
+              <Award size={20} />
+            </div>
+            <div>
+              <span className="ml-summary-label">Total Awards Earned</span>
+              <strong className="ml-summary-value">{summary.totalAwardsEarned}</strong>
+              <div className="ml-summary-awards-row" aria-label="Award breakdown">
+                <span
+                  className="ml-summary-award-item tier-gold"
+                  title="Gold Award"
+                  aria-label={`Gold Award: ${summary.goldCount}`}
+                >
+                  <AwardShieldLogo tier="GOLD" size={15} showLabel={false} />
+                  <span>× {summary.goldCount}</span>
+                </span>
+                <span
+                  className="ml-summary-award-item tier-platinum"
+                  title="Platinum Award"
+                  aria-label={`Platinum Award: ${summary.platinumCount}`}
+                >
+                  <AwardShieldLogo tier="PLATINUM" size={15} showLabel={false} />
+                  <span>× {summary.platinumCount}</span>
+                </span>
+                <span
+                  className="ml-summary-award-item tier-silver"
+                  title="Silver Award"
+                  aria-label={`Silver Award: ${summary.silverCount}`}
+                >
+                  <AwardShieldLogo tier="SILVER" size={15} showLabel={false} />
+                  <span>× {summary.silverCount}</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Result Category Tabs */}
+        <div className="ml-category-tabs glass" role="tablist" aria-label="Result categories">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeCategory === 'all'}
+            className={`ml-cat-tab ${activeCategory === 'all' ? 'active' : ''}`}
+            onClick={() => setActiveCategory('all')}
+          >
+            All Results <span className="ml-tab-count">{counts.all}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeCategory === 'mcq_practice'}
+            className={`ml-cat-tab ${activeCategory === 'mcq_practice' ? 'active' : ''}`}
+            onClick={() => setActiveCategory('mcq_practice')}
+          >
+            MCQ Practice Results <span className="ml-tab-count">{counts.mcq_practice}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeCategory === 'previous_paper'}
+            className={`ml-cat-tab ${activeCategory === 'previous_paper' ? 'active' : ''}`}
+            onClick={() => setActiveCategory('previous_paper')}
+          >
+            Previous Papers Results <span className="ml-tab-count">{counts.previous_paper}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeCategory === 'mock_test'}
+            className={`ml-cat-tab ${activeCategory === 'mock_test' ? 'active' : ''}`}
+            onClick={() => setActiveCategory('mock_test')}
+          >
+            Mock Test Results <span className="ml-tab-count">{counts.mock_test}</span>
+          </button>
         </div>
 
-        {/* 1. TNPSC Group Selection Tabs (Visible on browse selection view) */}
-        {currentView === 'browse' && (
-          <div className="practice-categories glass">
-            {groups.map((group) => {
-              const isActive = selectedGroup === group.id
-              return (
-                <button
-                  key={group.id}
-                  type="button"
-                  className={`practice-category-tab ${isActive ? 'active' : ''}`}
-                  onClick={() => handleGroupSelect(group.id)}
-                >
-                  {group.name}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Compact Syllabus Breadcrumb (Lessons view only) */}
-        {currentView === 'lessons' && (
-          <div className="practice-breadcrumb-row">
-            <nav className="practice-breadcrumb glass" aria-label="Mark list syllabus breadcrumb">
-              <button
-                type="button"
-                className="breadcrumb-crumb"
-                onClick={() => setActiveUnitFilter(null)}
-              >
-                {selectedGroup === 'group2'
-                  ? 'TNPSC Group 2 & 2A'
-                  : selectedGroup === 'group4'
-                    ? 'TNPSC Group 4'
-                    : 'TNPSC Group 1'}
+        {/* Result Filter Bar */}
+        <section className="ml-filters-bar glass" aria-label="Filter results">
+          <div className="ml-filters-title">
+            <Filter size={15} />
+            <span>Filter Results</span>
+            {hasActiveFilters && (
+              <button type="button" className="ml-reset-btn" onClick={resetFilters}>
+                <RotateCcw size={13} />
+                <span>Reset</span>
               </button>
+            )}
+          </div>
 
-              {activeSubjectObj && (
-                <>
-                  <ChevronRight size={14} className="breadcrumb-sep" />
-                  <button
-                    type="button"
-                    className="breadcrumb-crumb"
-                    onClick={() => setActiveUnitFilter(null)}
-                  >
-                    {activeSubjectObj.name}
-                  </button>
-                </>
-              )}
+          <div className="ml-filters-grid">
+            <select
+              className="ml-filter-input"
+              value={selectedGroup}
+              onChange={(e) => setSelectedGroup(e.target.value)}
+              aria-label="Filter by TNPSC Group"
+            >
+              <option value="all">All TNPSC Groups</option>
+              {availableFilters.groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.label}
+                </option>
+              ))}
+            </select>
 
-              {effectiveClassId && (
-                <>
-                  <ChevronRight size={14} className="breadcrumb-sep" />
-                  <button
-                    type="button"
-                    className="breadcrumb-crumb"
-                    onClick={() => setActiveUnitFilter(null)}
-                  >
-                    {`${effectiveClassId}th Standard`}
-                  </button>
-                </>
-              )}
+            <select
+              className="ml-filter-input"
+              value={selectedSubject}
+              onChange={(e) => setSelectedSubject(e.target.value)}
+              aria-label="Filter by Subject"
+            >
+              <option value="all">All Subjects</option>
+              {availableFilters.subjects.map((sub) => (
+                <option key={sub} value={sub}>
+                  {sub}
+                </option>
+              ))}
+            </select>
 
-              {activeUnitFilter && (
-                <>
-                  <ChevronRight size={14} className="breadcrumb-sep" />
-                  <span className="breadcrumb-crumb current">
-                    {activeUnitObj ? `${activeUnitObj.unitNumber}: ${activeUnitObj.title}` : `Unit ${activeUnitFilter}`}
-                  </span>
-                </>
-              )}
-            </nav>
+            <select
+              className="ml-filter-input"
+              value={selectedStandard}
+              onChange={(e) => setSelectedStandard(e.target.value)}
+              aria-label="Filter by Standard"
+            >
+              <option value="all">All Standards</option>
+              {availableFilters.standards.map((std) => (
+                <option key={std} value={String(std)}>
+                  {std}th Standard
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="ml-filter-input"
+              value={selectedUnit}
+              onChange={(e) => setSelectedUnit(e.target.value)}
+              aria-label="Filter by Unit"
+            >
+              <option value="all">All Units</option>
+              {availableFilters.units.map((u) => (
+                <option key={u} value={String(u)}>
+                  {toRomanUnit(u)}
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="text"
+              className="ml-filter-input"
+              placeholder="Filter by Lesson..."
+              value={selectedLesson}
+              onChange={(e) => setSelectedLesson(e.target.value)}
+              aria-label="Filter by Lesson"
+            />
+
+            <select
+              className="ml-filter-input"
+              value={selectedTestCategory}
+              onChange={(e) => setSelectedTestCategory(e.target.value)}
+              aria-label="Filter by Test Category"
+            >
+              <option value="all">All Test Categories</option>
+              <option value="lesson_wise">Lesson-wise Test</option>
+              <option value="unit_wise">Unit-wise Test</option>
+              <option value="full_length">Full-length Mock Test</option>
+            </select>
+
+            <select
+              className="ml-filter-input"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              aria-label="Filter by Examination Year"
+            >
+              <option value="all">All Exam Years</option>
+              {availableFilters.years.map((yr) => (
+                <option key={yr} value={String(yr)}>
+                  {yr}
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="date"
+              className="ml-filter-input"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              aria-label="From date"
+              title="From Date"
+            />
+
+            <input
+              type="date"
+              className="ml-filter-input"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              aria-label="To date"
+              title="To Date"
+            />
+          </div>
+        </section>
+
+        {/* Loading / Error State */}
+        {errorMsg && (
+          <div className="ml-error-banner glass">
+            <XCircle size={18} />
+            <span>{errorMsg}</span>
           </div>
         )}
 
-        {/* BROWSE VIEW: Compact Subjects + 6th-12th Standards + Unit Progress Cards */}
-        {currentView === 'browse' && (
-          <div className="hierarchy-navigator">
-            {/* 2. Subject Selection */}
-            <section className="hierarchy-section glass compact-subjects-section">
-              <div className="hierarchy-section-header compact-header">
-                <span className="hierarchy-step-badge">Subject</span>
-                <h3>Select Subject</h3>
-              </div>
-              <div className="compact-subject-grid">
-                {hierarchySubjects.map((sub) => {
-                  const isActiveSub = effectiveSubjectId === sub.id
-                  return (
-                    <button
-                      key={sub.id}
-                      type="button"
-                      className={`compact-subject-card ${isActiveSub ? 'selected' : ''}`}
-                      onClick={() => {
-                        setSelectedSubjectId(sub.id)
-                        setSelectedUnitId(null)
-                        setActiveUnitFilter(null)
-                      }}
-                    >
-                      <div className="compact-subject-left">
-                        <BookOpen size={15} className="compact-subject-icon" />
-                        <span className="compact-subject-title">{sub.name}</span>
-                      </div>
-                      <span className={`compact-count-badge ${sub.questionCount > 0 ? 'has-qs' : ''}`}>
-                        {sub.questionCount} Qs
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </section>
-
-            {/* 3. Standard Selection */}
-            <section className="classes-top-section glass">
-              <div className="classes-section-header">
-                <div className="classes-heading-group">
-                  <div className="classes-title-badge">
-                    <GraduationCap size={16} />
-                    <span>Samacheer Kalvi Standard Mapping</span>
-                  </div>
-                  <h2 className="classes-main-heading">
-                    {activeSubjectObj?.name} — Select Standard
+        {isLoading ? (
+          <div className="ml-loading-box glass">
+            <Loader2 size={28} className="ml-spin" />
+            <span>Loading your examination results...</span>
+          </div>
+        ) : (
+          <div className="ml-sections-stack">
+            {/* Section 1: MCQ Practice Results */}
+            {(activeCategory === 'all' || activeCategory === 'mcq_practice') && (
+              <section className="ml-results-section">
+                <div className="ml-section-heading">
+                  <h2>
+                    <BookOpen size={20} />
+                    <span>MCQ Practice Results</span>
                   </h2>
+                  <span className="ml-section-badge">{mcqResults.length} Tests</span>
                 </div>
-                <span className="classes-count-badge">{hierarchyStandards.length} Standards</span>
-              </div>
 
-              <div className="class-cards-grid">
-                {hierarchyStandards.map((cls) => {
-                  const unitCount = unitsCountByStandard[cls.id] ?? 0
-                  const isActiveStd = effectiveClassId === cls.id
-                  return (
-                    <div
-                      key={cls.id}
-                      role="button"
-                      tabIndex={0}
-                      className={`class-card glass ${isActiveStd ? 'active-standard' : ''}`}
-                      onClick={() => {
-                        setSelectedStandardId(cls.id)
-                        setSelectedUnitId(null)
-                        setActiveUnitFilter(null)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          setSelectedStandardId(cls.id)
-                          setSelectedUnitId(null)
-                          setActiveUnitFilter(null)
-                        }
-                      }}
-                    >
-                      <div className="class-card-top">
-                        <span className="class-num-badge">{cls.id}th</span>
-                        <span className="class-badge-samacheer">Samacheer Kalvi</span>
-                      </div>
-
-                      <div className="class-card-main">
-                        <div className="class-icon-circle">
-                          <GraduationCap size={20} />
-                        </div>
-                        <h3 className="class-card-title">{cls.label}</h3>
-                        <p className="class-card-desc">
-                          {unitCount} {unitCount === 1 ? 'Unit' : 'Units'} • {cls.questionCount} Questions
-                        </p>
-                      </div>
-
-                      <div className="class-card-cta">
-                        <span>{isActiveStd ? 'Selected' : 'Select'}</span>
-                        <ChevronRight size={14} />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-
-            {/* 4. Unit Selection — Lesson Completion & Progress Only (No Award Badges) */}
-            {effectiveClassId && (
-              <section className="hierarchy-section glass unified-units-section">
-                <div className="hierarchy-section-header">
-                  <span className="hierarchy-step-badge">{effectiveClassId}th Standard</span>
-                  <h3>Select Unit — {effectiveClassId}th Standard ({activeSubjectObj?.name})</h3>
-                </div>
-                {isUnitsLoading && hierarchyUnits.length === 0 ? (
-                  <p className="hierarchy-empty-note">Loading units from Study Materials...</p>
-                ) : hierarchyUnits.length > 0 ? (
-                  <div className="hierarchy-card-grid">
-                    {hierarchyUnits.map((u) => {
-                      const uProg = unitProgressByNum[u.id]
-                      const totalL = uProg?.totalLessons ?? 0
-                      const completedL = uProg?.completedLessons ?? 0
-                      const remainingL = uProg?.remainingLessons ?? totalL
-                      const pctL = uProg?.completionPercentage ?? 0
-                      return (
-                        <button
-                          key={u.id}
-                          type="button"
-                          className={`hierarchy-card ${selectedUnitId === u.id ? 'selected-unit' : ''}`}
-                          onClick={() => {
-                            setSelectedUnitId(u.id)
-                            setActiveUnitFilter(u.id)
-                          }}
-                        >
-                          <div className="hierarchy-card-top">
-                            <span className="hierarchy-unit-num">{u.unitNumber}</span>
-                            <span className={`hierarchy-count-pill ${u.questionCount > 0 ? 'has-qs' : ''}`}>
-                              {u.questionCount} Questions
-                            </span>
-                          </div>
-                          <span className="hierarchy-card-title">{u.title}</span>
-                          <div className="unit-card-progress-summary">
-                            <div className="unit-progress-metrics">
-                              <span>Lessons: <strong>{totalL}</strong></span>
-                              <span>Completed: <strong>{completedL}</strong></span>
-                              <span>Remaining: <strong>{remainingL}</strong></span>
-                              <span className="unit-progress-pct">Progress: <strong>{pctL}%</strong></span>
-                            </div>
-                            <div className="unit-progress-track" aria-label={`Unit progress ${pctL}%`}>
-                              <div
-                                className="unit-progress-fill"
-                                style={{ width: `${Math.min(100, Math.max(0, pctL))}%` }}
-                              />
-                            </div>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
+                {mcqResults.length > 0 ? (
+                  <div className="ml-cards-list">{mcqResults.map(renderResultCard)}</div>
                 ) : (
-                  <p className="hierarchy-empty-note">
-                    No units mapped in Study Materials for {effectiveClassId}th Standard ({activeSubjectObj?.name}).
-                  </p>
+                  <div className="ml-empty-box glass">
+                    <p>No completed MCQ Practice results match your current filter.</p>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Section 2: Previous Papers Results */}
+            {(activeCategory === 'all' || activeCategory === 'previous_paper') && (
+              <section className="ml-results-section">
+                <div className="ml-section-heading">
+                  <h2>
+                    <FileText size={20} />
+                    <span>Previous Papers Results</span>
+                  </h2>
+                  <span className="ml-section-badge">{pypResults.length} Papers</span>
+                </div>
+
+                {pypResults.length > 0 ? (
+                  <div className="ml-cards-list">{pypResults.map(renderResultCard)}</div>
+                ) : (
+                  <div className="ml-empty-box glass">
+                    <p>No completed Previous Year Paper results match your current filter.</p>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Section 3: Mock Test Results */}
+            {(activeCategory === 'all' || activeCategory === 'mock_test') && (
+              <section className="ml-results-section">
+                <div className="ml-section-heading">
+                  <h2>
+                    <GraduationCap size={20} />
+                    <span>Mock Test Results</span>
+                  </h2>
+                  <span className="ml-section-badge">{mockResults.length} Tests</span>
+                </div>
+
+                {mockResults.length > 0 ? (
+                  <div className="ml-cards-list">{mockResults.map(renderResultCard)}</div>
+                ) : (
+                  <div className="ml-empty-box glass">
+                    <p>No completed Mock Test results match your current filter.</p>
+                  </div>
                 )}
               </section>
             )}
           </div>
         )}
+      </div>
 
-        {/* 5. LESSON SELECTION VIEW — Lesson Performance & Gold / Platinum / Silver Badges */}
-        {currentView === 'lessons' && (
-          <div className="hierarchy-navigator">
-            <div className="page-step-back-row">
+      {/* Detailed Result Modal */}
+      {detailModalOpen && (
+        <div
+          className="ml-modal-backdrop"
+          onClick={() => setDetailModalOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="ml-modal-card glass"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Detailed Test Result"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="ml-modal-header">
+              <div>
+                <h2 className="ml-modal-title">
+                  {selectedDetail?.testName || 'Examination Result Details'}
+                </h2>
+                {selectedDetail && (
+                  <p className="ml-modal-sub">
+                    {selectedDetail.groupLabel} · {selectedDetail.subjectLabel}
+                    {selectedDetail.testCategoryLabel ? ` · ${selectedDetail.testCategoryLabel}` : ''}
+                    {selectedDetail.examYear ? ` · ${selectedDetail.examYear}` : ''} · Attempt #{selectedDetail.attemptNumber} · {selectedDetail.date}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
-                className="back-btn glass"
-                onClick={() => setActiveUnitFilter(null)}
+                className="ml-modal-close"
+                onClick={() => setDetailModalOpen(false)}
+                aria-label="Close result details"
               >
-                <ArrowLeft size={16} />
-                <span>Back to Units</span>
+                <X size={18} />
               </button>
             </div>
 
-            <section className="hierarchy-section glass">
-              <div className="hierarchy-section-header">
-                <span className="hierarchy-step-badge">
-                  {activeUnitObj?.unitNumber || `Unit ${activeUnitFilter}`}
-                </span>
-                <h3>
-                  {activeUnitObj?.title || 'Lessons'} — {effectiveClassId}th Standard
-                </h3>
+            {detailLoading ? (
+              <div className="ml-modal-loading">
+                <Loader2 size={26} className="ml-spin" />
+                <span>Loading detailed scorecard...</span>
               </div>
-              {isLessonsLoading ? (
-                <p className="hierarchy-empty-note">Loading lessons from Study Materials...</p>
-              ) : hierarchyLessons.length > 0 ? (
-                <div className="hierarchy-lesson-list">
-                  {hierarchyLessons.map((l) => {
-                    const lProg =
-                      lessonProgressById[String(l.id)] ||
-                      lessonProgressById[`title:${l.title.trim().toLowerCase()}`]
-                    const status = lProg?.status || 'not_started'
-                    const statusLabel =
-                      status === 'completed'
-                        ? 'Completed'
-                        : status === 'in_progress'
-                          ? 'In Progress'
-                          : 'Not Started'
-                    return (
-                      <div key={l.id} className={`hierarchy-lesson-row lesson-status-${status}`}>
-                        <div className="hierarchy-lesson-main-col">
-                          <div className="hierarchy-lesson-info">
-                            <div className="lesson-num-status-row">
-                              <span className="hierarchy-lesson-num">Lesson {l.lessonNumber}</span>
-                              <span className={`lesson-status-badge status-${status}`}>
-                                {statusLabel}
+            ) : detailError ? (
+              <div className="ml-error-banner">{detailError}</div>
+            ) : selectedDetail ? (
+              <div className="ml-modal-body">
+                <div className="ml-detail-badges-row">
+                  {renderAwardBadge(selectedDetail.awardType)}
+                  {selectedDetail.rank !== null && selectedDetail.totalParticipants !== null && (
+                    <span className="ml-rank-pill">
+                      <Trophy size={14} />
+                      <span>
+                        Rank <strong>#{selectedDetail.rank}</strong> / {selectedDetail.totalParticipants}
+                        {selectedDetail.percentile !== null ? ` (${selectedDetail.percentile}%ile)` : ''}
+                      </span>
+                    </span>
+                  )}
+                  <span className="ml-date-pill">
+                    <Clock size={14} />
+                    <span>Time Taken: {formatDuration(selectedDetail.timeSpentSeconds)}</span>
+                  </span>
+                </div>
+
+                <div className="ml-detail-stats-grid">
+                  <div className="ml-metric-box">
+                    <span className="ml-metric-label">Total Questions</span>
+                    <strong className="ml-metric-val">{selectedDetail.totalQuestions}</strong>
+                  </div>
+                  <div className="ml-metric-box metric-correct">
+                    <span className="ml-metric-label">Correct</span>
+                    <strong className="ml-metric-val">{selectedDetail.correctAnswers}</strong>
+                  </div>
+                  <div className="ml-metric-box metric-wrong">
+                    <span className="ml-metric-label">Incorrect</span>
+                    <strong className="ml-metric-val">{selectedDetail.incorrectAnswers}</strong>
+                  </div>
+                  <div className="ml-metric-box metric-unanswered">
+                    <span className="ml-metric-label">Unanswered</span>
+                    <strong className="ml-metric-val">{selectedDetail.unansweredQuestions}</strong>
+                  </div>
+                  <div className="ml-metric-box metric-marks">
+                    <span className="ml-metric-label">Marks Obtained</span>
+                    <strong className="ml-metric-val">
+                      {selectedDetail.marksObtained} / {selectedDetail.maxMarks}
+                    </strong>
+                  </div>
+                  <div className="ml-metric-box metric-pct">
+                    <span className="ml-metric-label">Percentage</span>
+                    <strong className="ml-metric-val">{selectedDetail.percentage}%</strong>
+                  </div>
+                  <div className="ml-metric-box metric-acc">
+                    <span className="ml-metric-label">Accuracy</span>
+                    <strong className="ml-metric-val">{selectedDetail.accuracyPercentage}%</strong>
+                  </div>
+                  {(selectedDetail.negativeMarks ?? 0) > 0 && (
+                    <div className="ml-metric-box metric-wrong">
+                      <span className="ml-metric-label">Negative Marks</span>
+                      <strong className="ml-metric-val">-{selectedDetail.negativeMarks}</strong>
+                    </div>
+                  )}
+                </div>
+
+                {selectedDetail.questionResponses.length > 0 && (
+                  <div className="ml-review-section">
+                    <h3>Question-Level Review ({selectedDetail.questionResponses.length})</h3>
+                    <div className="ml-review-list">
+                      {selectedDetail.questionResponses.map((qr) => (
+                        <div key={qr.index} className={`ml-review-item status-${qr.status}`}>
+                          <div className="ml-review-top">
+                            <span className="ml-review-qnum">Q{qr.index}</span>
+                            <span className={`ml-review-status status-${qr.status}`}>
+                              {qr.status === 'correct' && <CheckCircle2 size={14} />}
+                              {qr.status === 'incorrect' && <XCircle size={14} />}
+                              {qr.status === 'unanswered' && <MinusCircle size={14} />}
+                              <span>
+                                {qr.status === 'correct'
+                                  ? 'Correct'
+                                  : qr.status === 'incorrect'
+                                    ? 'Incorrect'
+                                    : 'Unanswered'}
                               </span>
-                              {lProg && lProg.totalAttempts > 0 && (
-                                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                                  Attempts: <strong style={{ color: '#e2e8f0' }}>{lProg.totalAttempts}</strong>
-                                  {lProg.latestAttemptScore != null && (
-                                    <> • Latest: <strong style={{ color: '#e2e8f0' }}>{lProg.latestAttemptScore}%</strong></>
-                                  )}
-                                  {lProg.bestAttemptScore != null && (
-                                    <> • Best: <strong style={{ color: '#fde047' }}>{lProg.bestAttemptScore}%</strong></>
-                                  )}
-                                </span>
-                              )}
-                            </div>
-                            <span className="hierarchy-lesson-title">{l.title}</span>
+                            </span>
+                            <span className="ml-review-marks">
+                              Marks: <strong>+{qr.marksAwarded}</strong>
+                            </span>
+                          </div>
+
+                          <p className="ml-review-question">{qr.questionText}</p>
+
+                          <div className="ml-review-answers">
+                            <span>
+                              Your Answer:{' '}
+                              <strong>
+                                {qr.selectedOption !== null && qr.options[qr.selectedOption]
+                                  ? `${optionLetter(qr.selectedOption)}) ${qr.options[qr.selectedOption]}`
+                                  : optionLetter(qr.selectedOption)}
+                              </strong>
+                            </span>
+                            {qr.correctAnswer !== null && (
+                              <span className="text-green">
+                                Correct Answer:{' '}
+                                <strong>
+                                  {qr.options[qr.correctAnswer]
+                                    ? `${optionLetter(qr.correctAnswer)}) ${qr.options[qr.correctAnswer]}`
+                                    : optionLetter(qr.correctAnswer)}
+                                </strong>
+                              </span>
+                            )}
                           </div>
                         </div>
-
-                        <div className="hierarchy-lesson-meta">
-                          <LessonAwardSummaryBar
-                            goldCount={lProg?.goldCount ?? 0}
-                            platinumCount={lProg?.platinumCount ?? 0}
-                            silverCount={lProg?.silverCount ?? 0}
-                            showTotal={false}
-                          />
-                          <span className={`hierarchy-count-pill ${l.questionCount > 0 ? 'has-qs' : ''}`}>
-                            {l.questionCount} Questions
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="hierarchy-empty-note">
-                  No lessons configured for this Standard and Unit in Study Materials.
-                </p>
-              )}
-            </section>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

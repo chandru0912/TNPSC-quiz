@@ -2261,3 +2261,31 @@
     gap: 0.4rem;
   }
 }
+
+/* =========================================================
+   Mobile-Only Natural Scrolling for MCQ Practice Exam (320px–767px)
+   ========================================================= */
+@media (max-width: 767px) {
+  .pyp-exam-page.mcq-pyp-exam-page {
+    min-height: auto;
+    height: auto;
+    overflow: visible;
+    padding: 0.75rem 0.25rem 2rem;
+  }
+
+  .mcq-pyp-exam-page .pyp-exam-topbar {
+    position: static;
+    top: auto;
+    z-index: auto;
+    overflow: visible;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .mcq-pyp-exam-page .pyp-exam-workspace,
+  .mcq-pyp-exam-page .pyp-question-panel {
+    overflow: visible;
+    height: auto;
+    max-height: none;
+  }
+}

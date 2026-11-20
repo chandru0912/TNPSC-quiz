@@ -1,6 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import pool from '../db';
+import {
+  validateActiveStudentSession,
+  SESSION_REVOKED_MESSAGE,
+} from '../services/studentSessionService';
 
 function getJwtSecret(): string {
   return process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_2026';
@@ -121,6 +125,7 @@ export interface StudentPayload {
   role: 'student';
   tokenType: 'student';
   tokenVersion: number;
+  sessionId?: string;
   exp: number;
   isPreview?: boolean;
 }
@@ -131,7 +136,9 @@ export function generateStudentToken(
   fullName: string,
   targetGroup: string = 'group4',
   isPreview: boolean = false,
-  tokenVersion: number = 1
+  tokenVersion: number = 1,
+  sessionId?: string,
+  expiresAtMs?: number
 ): string {
   const secret = getStudentJwtSecret();
   const payload: StudentPayload = {
@@ -142,7 +149,10 @@ export function generateStudentToken(
     role: 'student',
     tokenType: 'student',
     tokenVersion,
-    exp: isPreview ? Date.now() + 2 * 60 * 60 * 1000 : Date.now() + 30 * 24 * 60 * 60 * 1000, // 2h for preview, 30d for normal
+    ...(sessionId ? { sessionId } : {}),
+    exp:
+      expiresAtMs ||
+      (isPreview ? Date.now() + 2 * 60 * 60 * 1000 : Date.now() + 30 * 24 * 60 * 60 * 1000),
     ...(isPreview ? { isPreview: true } : {}),
   };
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -231,6 +241,16 @@ export async function requireStudentAuth(req: StudentAuthenticatedRequest, res: 
           message: 'Forbidden: Invalid account role for student access.',
         });
       }
+      // Enforce Single Active Device Session in PostgreSQL
+      const sessionCheck = await validateActiveStudentSession(verified.studentId, verified.sessionId);
+      if (!sessionCheck.valid) {
+        return res.status(401).json({
+          status: 'error',
+          code: sessionCheck.code || 'SESSION_REVOKED_OTHER_DEVICE',
+          message: sessionCheck.message || SESSION_REVOKED_MESSAGE,
+        });
+      }
+
       if (
         verified.tokenVersion !== undefined &&
         row.token_version !== undefined &&
@@ -239,7 +259,8 @@ export async function requireStudentAuth(req: StudentAuthenticatedRequest, res: 
       ) {
         return res.status(401).json({
           status: 'error',
-          message: 'Session has been logged out or revoked. Please login again.',
+          code: 'SESSION_REVOKED_OTHER_DEVICE',
+          message: SESSION_REVOKED_MESSAGE,
         });
       }
     } catch (dbErr) {
@@ -249,6 +270,117 @@ export async function requireStudentAuth(req: StudentAuthenticatedRequest, res: 
 
   req.studentUser = verified;
   next();
+}
+
+export interface StudentOrAdminAuthenticatedRequest extends Request {
+  studentUser?: StudentPayload;
+  adminUser?: AdminPayload;
+}
+
+export async function requireStudentOrAdminAuth(
+  req: StudentOrAdminAuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader = req.headers.authorization;
+  let token: string | undefined;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (req.query.token && typeof req.query.token === 'string') {
+    token = req.query.token.trim();
+  }
+
+  if (!token) {
+    return res.status(401).json({
+      status: 'error',
+      message: 'Unauthorized: Student or administrator authentication required. Please login to continue.',
+    });
+  }
+
+  const studentVerified = verifyStudentToken(token);
+  if (studentVerified) {
+    if (!studentVerified.isPreview) {
+      try {
+        const dbRes = await pool.query(
+          'SELECT is_active, token_version, role FROM students WHERE id = $1',
+          [studentVerified.studentId]
+        );
+        if (dbRes.rows.length === 0) {
+          return res.status(401).json({
+            status: 'error',
+            message: 'Student account no longer exists. Please login again.',
+          });
+        }
+        const row = dbRes.rows[0];
+        if (row.is_active === false) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Forbidden: Your student account has been deactivated.',
+          });
+        }
+        if (row.role && row.role !== 'student') {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Forbidden: Invalid account role for student access.',
+          });
+        }
+        // Enforce Single Active Device Session in PostgreSQL
+        const sessionCheck = await validateActiveStudentSession(
+          studentVerified.studentId,
+          studentVerified.sessionId
+        );
+        if (!sessionCheck.valid) {
+          return res.status(401).json({
+            status: 'error',
+            code: sessionCheck.code || 'SESSION_REVOKED_OTHER_DEVICE',
+            message: sessionCheck.message || SESSION_REVOKED_MESSAGE,
+          });
+        }
+
+        if (
+          studentVerified.tokenVersion !== undefined &&
+          row.token_version !== undefined &&
+          row.token_version !== null &&
+          row.token_version !== studentVerified.tokenVersion
+        ) {
+          return res.status(401).json({
+            status: 'error',
+            code: 'SESSION_REVOKED_OTHER_DEVICE',
+            message: SESSION_REVOKED_MESSAGE,
+          });
+        }
+      } catch (dbErr) {
+        console.error('[requireStudentOrAdminAuth DB check notice]:', dbErr);
+      }
+    }
+    req.studentUser = studentVerified;
+    return next();
+  }
+
+  const adminVerified = verifyAdminToken(token);
+  if (adminVerified) {
+    req.adminUser = adminVerified;
+    return next();
+  }
+
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    (token === 'demo_token' || token === 'admin_token' || token === 'dev')
+  ) {
+    req.adminUser = {
+      username: 'local_admin',
+      name: 'Development Administrator',
+      role: 'admin',
+      exp: Date.now() + 86400000,
+    };
+    return next();
+  }
+
+  return res.status(401).json({
+    status: 'error',
+    message: 'Unauthorized: Invalid or expired authentication token. Please login again.',
+  });
 }
 
 export function optionalStudentAuth(req: StudentAuthenticatedRequest, res: Response, next: NextFunction) {

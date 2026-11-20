@@ -8,6 +8,9 @@ import StudentDashboardLayout from './layouts/StudentDashboardLayout'
 import StudentPreviewBanner from './components/StudentPreviewBanner'
 import { StudentAuthProvider } from './context/StudentAuthContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import RequireStudentAuthRoute from './components/RequireStudentAuthRoute'
+import LoginLocationModal from './components/LoginLocationModal'
+import { startVisitorTracking, trackPageView } from './utils/visitorTracker'
 import './App.css'
 
 // Resilient lazy loader that retries once on transient chunk fetch errors (e.g. after Vercel deploy)
@@ -24,6 +27,7 @@ function lazyWithRetry<T extends ComponentType<any>>(importer: () => Promise<{ d
 
 const Home = lazyWithRetry(() => import('./pages/Home'))
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'))
+const StudentSubscription = lazyWithRetry(() => import('./pages/StudentSubscription'))
 const StudyMaterials = lazyWithRetry(() => import('./pages/StudyMaterials'))
 const SchoolMaterials = lazyWithRetry(() => import('./pages/SchoolMaterials'))
 const Group1GeneralStudies = lazyWithRetry(() => import('./pages/Group1GeneralStudies'))
@@ -85,6 +89,17 @@ function RouteLoadingFallback() {
 function AppShell() {
   const location = useLocation()
   const isAdmin = location.pathname.startsWith('/admin')
+
+  // Real-time website visitor & route page-view tracking (non-admin routes only)
+  useEffect(() => {
+    startVisitorTracking()
+  }, [])
+
+  useEffect(() => {
+    if (!isAdmin) {
+      trackPageView(location.pathname)
+    }
+  }, [location.pathname, isAdmin])
   const isDashboardRoute =
     !isAdmin &&
     [
@@ -159,6 +174,7 @@ function AppShell() {
       </div>
 
       {!isAdmin && <StudentPreviewBanner />}
+      {!isAdmin && <LoginLocationModal />}
       <Navbar />
 
       <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''} ${isDashboardRoute ? 'student-dashboard-main-mode' : ''}`}>
@@ -174,44 +190,49 @@ function AppShell() {
           {/* Persistent Global Student Dashboard Layout with Independent Dual Scroll */}
           <Route element={<StudentDashboardLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard/subscription" element={<StudentSubscription />} />
             <Route path="/materials" element={<StudyMaterials />} />
-            <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
-            <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
-            <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
-            <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
-            <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
-            <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
-            <Route path="/materials/group1/aptitude/unit/:unitId" element={<Group1UnitDetail />} />
-            <Route path="/materials/group1/aptitude/unit/:unitId/lessons" element={<Group1Lessons />} />
-            <Route path="/materials/group1/aptitude/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
-            <Route path="/materials/group1/aptitude/class/:classId" element={<Group1UnitClass />} />
-            <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
-            <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
-            <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
-            <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
-            <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
-            <Route path="/materials/group2a/:subjectId" element={<Group2SubjectDetail />} />
-            <Route path="/materials/group2a/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
-            <Route path="/materials/group2a/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
-            <Route path="/materials/group2a/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
-            <Route path="/materials/group2a/:subjectId/class/:classId" element={<Group2UnitClass />} />
-            <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
-            <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
-            <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
-            <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
-            <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
-            <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-            <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-            <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
             <Route path="/school-materials" element={<SchoolMaterials />} />
-            <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
-            <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
+
+            {/* Protected Study Materials, MCQ Practice, Mock Tests & Previous Papers Routes */}
+            <Route element={<RequireStudentAuthRoute />}>
+              <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
+              <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
+              <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
+              <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+              <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
+              <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
+              <Route path="/materials/group1/aptitude/unit/:unitId" element={<Group1UnitDetail />} />
+              <Route path="/materials/group1/aptitude/unit/:unitId/lessons" element={<Group1Lessons />} />
+              <Route path="/materials/group1/aptitude/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+              <Route path="/materials/group1/aptitude/class/:classId" element={<Group1UnitClass />} />
+              <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
+              <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+              <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+              <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+              <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
+              <Route path="/materials/group2a/:subjectId" element={<Group2SubjectDetail />} />
+              <Route path="/materials/group2a/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+              <Route path="/materials/group2a/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+              <Route path="/materials/group2a/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+              <Route path="/materials/group2a/:subjectId/class/:classId" element={<Group2UnitClass />} />
+              <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
+              <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
+              <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
+              <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
+              <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
+              <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+              <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+              <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+              <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
+              <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
+              <Route path="/previous-papers/test/:paperId" element={<PreviousPaperTest />} />
+              <Route path="/mark-list" element={<MarkList />} />
+            </Route>
             <Route path="/practice" element={<MCQPractice />} />
             <Route path="/practice/*" element={<MCQPractice />} />
             <Route path="/mock-tests" element={<MockTests />} />
             <Route path="/previous-papers" element={<PreviousPapers />} />
-            <Route path="/previous-papers/test/:paperId" element={<PreviousPaperTest />} />
-            <Route path="/mark-list" element={<MarkList />} />
             <Route path="/progress-tracker" element={<ProgressTracker />} />
             <Route path="/performance-analytics" element={<PerformanceAnalytics />} />
           </Route>

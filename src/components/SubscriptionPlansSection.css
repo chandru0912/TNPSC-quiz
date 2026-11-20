@@ -1,0 +1,491 @@
+/* =========================================================
+   TNPSC STUDY HUB - STUDENT SUBSCRIPTION PLANS SECTION
+   Dark Navy Glassmorphism • Purple/Blue Gradients • Gold Test Batch
+   ========================================================= */
+
+.sub-plans-wrapper {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.sub-plans-wrapper.dedicated-page {
+  margin-top: 0;
+}
+
+/* Per-plan Color Accents (Blue: MCQ, Purple: Mock Test, Green: Previous Papers, Gold: Test Batch) */
+.sub-plan-card.accent-blue {
+  border-color: rgba(56, 189, 248, 0.38);
+}
+.sub-plan-card.accent-blue:hover {
+  border-color: rgba(56, 189, 248, 0.78);
+  box-shadow: 0 20px 44px rgba(14, 165, 233, 0.22);
+}
+
+.sub-plan-card.accent-purple {
+  border-color: rgba(168, 85, 247, 0.4);
+}
+.sub-plan-card.accent-purple:hover {
+  border-color: rgba(192, 132, 252, 0.82);
+  box-shadow: 0 20px 44px rgba(139, 92, 246, 0.26);
+}
+
+.sub-plan-card.accent-green {
+  border-color: rgba(16, 185, 129, 0.4);
+}
+.sub-plan-card.accent-green:hover {
+  border-color: rgba(52, 211, 153, 0.82);
+  box-shadow: 0 20px 44px rgba(16, 185, 129, 0.22);
+}
+
+.sub-plan-view-btn {
+  width: 100%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.sub-plan-view-btn:hover {
+  filter: brightness(1.12);
+}
+
+/* My Subscription Status Panel */
+.my-sub-status-card {
+  padding: 1.35rem 1.5rem;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.65));
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.my-sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.my-sub-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.my-sub-title-group h3 {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.my-sub-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.85rem;
+}
+
+.my-sub-metric {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.my-sub-metric-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+
+.my-sub-metric-val {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.my-sub-entitlements-row {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.my-sub-ent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.my-sub-ent-chip.unlocked {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.my-sub-ent-chip.locked {
+  background: rgba(148, 163, 184, 0.1);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+/* Section Header */
+.sub-plans-section {
+  padding: 1.75rem;
+  border-radius: 24px;
+  background: linear-gradient(160deg, rgba(13, 19, 38, 0.88) 0%, rgba(18, 25, 52, 0.82) 100%);
+  border: 1px solid rgba(129, 140, 248, 0.22);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.sub-plans-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.sub-plans-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.16);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  color: #a5b4fc;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 0.55rem;
+}
+
+.sub-plans-title {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: -0.02em;
+}
+
+.sub-plans-subtitle {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+/* Alerts */
+.sub-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: 14px;
+  margin-bottom: 1.25rem;
+  font-size: 0.86rem;
+  font-weight: 500;
+}
+
+.sub-alert.success {
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.38);
+  color: #6ee7b7;
+}
+
+.sub-alert.error {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  color: #fecaca;
+}
+
+.sub-alert-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.2rem;
+  opacity: 0.8;
+}
+
+/* 4-Card Responsive Grid */
+.sub-plans-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.15rem;
+}
+
+@media (max-width: 1280px) {
+  .sub-plans-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .sub-plans-grid {
+    grid-template-columns: 1fr;
+  }
+  .sub-plans-section {
+    padding: 1.2rem;
+  }
+}
+
+/* Individual Plan Card */
+.sub-plan-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 1.45rem 1.3rem;
+  border-radius: 20px;
+  background: linear-gradient(
+    165deg,
+    rgba(30, 41, 75, 0.72) 0%,
+    rgba(15, 23, 42, 0.88) 100%
+  );
+  border: 1px solid rgba(129, 140, 248, 0.25);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  overflow: hidden;
+}
+
+.sub-plan-card:hover {
+  transform: translateY(-5px);
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 20px 44px rgba(30, 41, 99, 0.45);
+}
+
+/* Gold Highlighted Test Batch Card */
+.sub-plan-card.featured {
+  background: linear-gradient(
+    160deg,
+    rgba(49, 36, 18, 0.75) 0%,
+    rgba(28, 25, 58, 0.88) 52%,
+    rgba(15, 23, 42, 0.94) 100%
+  );
+  border: 1.5px solid rgba(250, 204, 21, 0.58);
+  box-shadow: 0 16px 42px rgba(245, 158, 11, 0.18);
+}
+
+.sub-plan-card.featured:hover {
+  border-color: rgba(253, 224, 71, 0.9);
+  box-shadow: 0 24px 52px rgba(245, 158, 11, 0.28);
+}
+
+.sub-plan-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.sub-plan-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.28), rgba(59, 130, 246, 0.22));
+  border: 1px solid rgba(129, 140, 248, 0.4);
+  color: #a5b4fc;
+}
+
+.sub-plan-card.featured .sub-plan-icon {
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.3), rgba(245, 158, 11, 0.22));
+  border-color: rgba(250, 204, 21, 0.55);
+  color: #fde047;
+}
+
+.sub-plan-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.25rem 0.62rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sub-plan-badge.gold {
+  background: linear-gradient(135deg, #facc15, #f59e0b);
+  color: #0f172a;
+}
+
+.sub-plan-badge.blue {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.sub-plan-name {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.sub-plan-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0.4rem;
+}
+
+.sub-plan-price {
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, #ffffff 0%, #c7d2fe 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.sub-plan-card.featured .sub-plan-price {
+  background: linear-gradient(135deg, #fef08a 0%, #facc15 50%, #f59e0b 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.sub-plan-duration {
+  font-size: 0.76rem;
+  color: #94a3b8;
+  margin-bottom: 0.85rem;
+}
+
+.sub-plan-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.52rem;
+  flex: 1;
+}
+
+.sub-plan-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.83rem;
+  line-height: 1.4;
+  color: #cbd5e1;
+}
+
+.sub-plan-features li svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #818cf8;
+}
+
+.sub-plan-card.featured .sub-plan-features li svg {
+  color: #facc15;
+}
+
+/* CTA Buttons */
+.sub-plan-cta-btn {
+  width: 100%;
+  padding: 0.78rem 1rem;
+  border-radius: 12px;
+  border: none;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  transition: transform 0.2s ease, filter 0.2s ease, opacity 0.2s ease;
+  background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.35);
+}
+
+.sub-plan-cta-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.sub-plan-cta-btn.featured {
+  background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%);
+  color: #0f172a;
+  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.35);
+}
+
+.sub-plan-cta-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.sub-plan-owned-pill {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+/* Bottom Action Bar directly below Subscription Plans: Sign In | Register | Back to Home */
+.sub-bottom-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  padding: 1.15rem 1.4rem;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sub-bottom-action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.65rem 1.25rem;
+  border-radius: 11px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.sub-bottom-action-link.signin {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(59, 130, 246, 0.22));
+  border: 1px solid rgba(129, 140, 248, 0.45);
+  color: #e0e7ff;
+}
+
+.sub-bottom-action-link.register {
+  background: linear-gradient(135deg, #facc15, #f59e0b);
+  border: 1px solid rgba(250, 204, 21, 0.6);
+  color: #0f172a;
+}
+
+.sub-bottom-action-link.home {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #cbd5e1;
+}
+
+.sub-bottom-action-link:hover {
+  transform: translateY(-2px);
+}

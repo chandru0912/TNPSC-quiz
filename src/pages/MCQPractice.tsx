@@ -26,9 +26,12 @@ import {
   History,
 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
+import { useStudentAuth } from '../context/StudentAuthContext'
+import { buildAuthRedirectUrl, savePostLoginRedirect } from '../utils/authRedirect'
 import { notifyStudentSync, subscribeStudentSync } from '../utils/studentSync'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { useMcqTranslations } from '../hooks/useMcqTranslations'
+import { useIsMobileViewport } from '../hooks/useIsMobileViewport'
 import {
   AwardShieldLogo,
   LessonAwardSummaryBar,
@@ -71,7 +74,9 @@ interface QuestionItem {
 
 const MCQPractice = () => {
   useStudyTimeTracker()
+  const isMobile = useIsMobileViewport(767)
   const navigate = useNavigate()
+  const { isAuthenticated, isLoading: authLoading } = useStudentAuth()
   const routeParams = useParams<{
     '*'?: string
     groupId?: string
@@ -301,7 +306,7 @@ const MCQPractice = () => {
   // Fetch directly from PostgreSQL Questions API ONLY when a specific Lesson (or Mock Test) is selected
   useEffect(() => {
     let isMounted = true
-    if (!isTestActive) {
+    if (!isTestActive || !isAuthenticated) {
       setDbQuestions([])
       setIsInitialLoading(false)
       return () => {
@@ -398,7 +403,7 @@ const MCQPractice = () => {
     return () => {
       isMounted = false
     }
-  }, [isTestActive, selectedGroup, activeUnitFilter, urlClassId, urlLesson, urlLessonId, urlTopic, urlSubjectId])
+  }, [isTestActive, isAuthenticated, selectedGroup, activeUnitFilter, urlClassId, urlLesson, urlLessonId, urlTopic, urlSubjectId])
 
   const groups = [
     { id: 'group1', name: 'TNPSC Group 1' },
@@ -748,7 +753,14 @@ const MCQPractice = () => {
     }
     const lessonSegment = encodeURIComponent(nextLessonId || nextLesson || 'lesson')
     const query = nextLesson ? `?lesson=${encodeURIComponent(nextLesson)}` : ''
-    navigate(`/practice/${normalizedGroup}/${encodeURIComponent(nextSubject)}/${nextClass}/${nextUnit}/${lessonSegment}/test${query}`)
+    const targetTestUrl = `/practice/${normalizedGroup}/${encodeURIComponent(nextSubject)}/${nextClass}/${nextUnit}/${lessonSegment}/test${query}`
+    const studentToken = localStorage.getItem('tnpsc_student_token')
+    if (!isAuthenticated || !studentToken) {
+      savePostLoginRedirect(targetTestUrl)
+      navigate(buildAuthRedirectUrl('login', targetTestUrl), { state: { from: targetTestUrl } })
+      return
+    }
+    navigate(targetTestUrl)
   }
 
   const clearUnitFilter = () => {
@@ -756,6 +768,16 @@ const MCQPractice = () => {
     resetQuizState()
     navigate(`/practice/${normalizedGroup}`)
   }
+
+  // Direct redirect to Login Page if an unauthenticated user lands directly on an MCQ test URL
+  useEffect(() => {
+    if (authLoading || !isTestActive) return
+    const studentToken = localStorage.getItem('tnpsc_student_token')
+    if (isAuthenticated && studentToken) return
+    const currentUrl = `${window.location.pathname}${window.location.search}`
+    savePostLoginRedirect(currentUrl)
+    navigate(buildAuthRedirectUrl('login', currentUrl), { replace: true, state: { from: currentUrl } })
+  }, [authLoading, isTestActive, isAuthenticated, navigate])
 
   // Elapsed practice timer (counts up during active practice)
   useEffect(() => {
@@ -1098,7 +1120,7 @@ const MCQPractice = () => {
         )}
 
         {/* Exam Category Tabs (Visible ONLY on the main MCQ Practice browse selection page) */}
-        {currentView === 'browse' && (
+        {currentView === 'browse' && !(isMobile && Boolean(urlClassId)) && (
           <div className="practice-categories glass">
             {groups.map((group) => {
               const isActive = normalizedGroup === group.id
@@ -1117,8 +1139,8 @@ const MCQPractice = () => {
           </div>
         )}
 
-        {/* Compact Syllabus Breadcrumb (Lessons view only) */}
-        {currentView === 'lessons' && (
+        {/* Compact Syllabus Breadcrumb (Lessons view & Mobile Unit Selection page) */}
+        {(currentView === 'lessons' || (isMobile && currentView === 'browse' && Boolean(urlClassId))) && (
           <div className="practice-breadcrumb-row">
             {/* Interactive Syllabus Breadcrumb */}
             <nav className="practice-breadcrumb glass" aria-label="Syllabus navigation breadcrumb">
@@ -1164,11 +1186,21 @@ const MCQPractice = () => {
                   <ChevronRight size={14} className="breadcrumb-sep" />
                   <button
                     type="button"
-                    className="breadcrumb-crumb"
+                    className={`breadcrumb-crumb ${isMobile && currentView === 'browse' && Boolean(urlClassId) ? 'current' : ''}`}
                     onClick={() => {
                       setSelectedStandardId(effectiveClassId)
                       setActiveUnitFilter(null)
-                      navigate(`/practice/${normalizedGroup}`)
+                      if (isMobile) {
+                        updateSyllabusFilter({
+                          subjectId: effectiveSubjectId,
+                          classId: effectiveClassId,
+                          unitId: null,
+                          lessonId: null,
+                          lesson: null,
+                        })
+                      } else {
+                        navigate(`/practice/${normalizedGroup}`)
+                      }
                     }}
                   >
                     {`${effectiveClassId}th Standard`}
@@ -1224,10 +1256,35 @@ const MCQPractice = () => {
           </div>
         )}
 
-        {/* UNIFIED SINGLE-PAGE SELECTION: Group Tabs + Compact Subjects + Standards + Units */}
+        {/* UNIFIED SINGLE-PAGE SELECTION (Desktop/Tablet) & MULTI-PAGE STEP SELECTION (Mobile <= 767px) */}
         {currentView === 'browse' && (
           <div className="hierarchy-navigator">
-            {/* Section 1: Compact Subject Cards */}
+            {/* Mobile-only Back to Standards button on dedicated Unit Selection page */}
+            {isMobile && Boolean(urlClassId) && (
+              <div className="page-step-back-row">
+                <button
+                  type="button"
+                  className="back-btn glass"
+                  onClick={() => {
+                    setSelectedSubjectId(effectiveSubjectId)
+                    if (effectiveClassId) setSelectedStandardId(effectiveClassId)
+                    updateSyllabusFilter({
+                      subjectId: effectiveSubjectId,
+                      classId: null,
+                      unitId: null,
+                      lessonId: null,
+                      lesson: null,
+                    })
+                  }}
+                >
+                  <ArrowLeft size={16} />
+                  <span>Back to Standards</span>
+                </button>
+              </div>
+            )}
+
+            {/* Section 1: Compact Subject Cards (Hidden on Mobile Unit Selection page) */}
+            {!(isMobile && Boolean(urlClassId)) && (
             <section className="hierarchy-section glass compact-subjects-section">
               <div className="hierarchy-section-header compact-header">
                 <span className="hierarchy-step-badge">Subject</span>
@@ -1262,8 +1319,10 @@ const MCQPractice = () => {
                 })}
               </div>
             </section>
+            )}
 
-            {/* Section 2: Standard Selection (Same Page) */}
+            {/* Section 2: Standard Selection (Hidden on Mobile Unit Selection page) */}
+            {!(isMobile && Boolean(urlClassId)) && (
             <section className="classes-top-section glass">
               <div className="classes-section-header">
                 <div className="classes-heading-group">
@@ -1282,27 +1341,33 @@ const MCQPractice = () => {
                 {hierarchyStandards.map((cls) => {
                   const unitCount = unitsCountByStandard[cls.id] ?? 0
                   const isActiveStd = effectiveClassId === cls.id
+                  const handlePickStandard = () => {
+                    setSelectedStandardId(cls.id)
+                    setSelectedUnitId(null)
+                    if (isMobile) {
+                      updateSyllabusFilter({
+                        subjectId: effectiveSubjectId,
+                        classId: cls.id,
+                        unitId: null,
+                        lessonId: null,
+                        lesson: null,
+                      })
+                      window.scrollTo({ top: 0, behavior: 'auto' })
+                    } else if (urlClassId) {
+                      navigate(`/practice/${normalizedGroup}`)
+                    }
+                  }
                   return (
                     <div
                       key={cls.id}
                       role="button"
                       tabIndex={0}
                       className={`class-card glass ${isActiveStd ? 'active-standard' : ''}`}
-                      onClick={() => {
-                        setSelectedStandardId(cls.id)
-                        setSelectedUnitId(null)
-                        if (urlClassId) {
-                          navigate(`/practice/${normalizedGroup}`)
-                        }
-                      }}
+                      onClick={handlePickStandard}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
-                          setSelectedStandardId(cls.id)
-                          setSelectedUnitId(null)
-                          if (urlClassId) {
-                            navigate(`/practice/${normalizedGroup}`)
-                          }
+                          handlePickStandard()
                         }
                       }}
                     >
@@ -1330,9 +1395,10 @@ const MCQPractice = () => {
                 })}
               </div>
             </section>
+            )}
 
-            {/* Section 3: Unit Selection (Same Page — Clicking Explore Lessons opens Lessons Page) */}
-            {effectiveClassId && (
+            {/* Section 3: Unit Selection (Same Page on Desktop/Tablet; Dedicated Page 2 on Mobile <= 767px) */}
+            {effectiveClassId && (!isMobile || Boolean(urlClassId)) && (
               <section className="hierarchy-section glass unified-units-section">
                 <div className="hierarchy-section-header">
                   <span className="hierarchy-step-badge">{effectiveClassId}th Standard</span>
@@ -1520,7 +1586,7 @@ const MCQPractice = () => {
         )}
 
         {/* PAGE 5: MCQ Examination Page (Two-Column Previous Year Papers Layout) */}
-        {currentView === 'test' && (
+        {currentView === 'test' && isAuthenticated && (
           <div className="pyp-exam-page mcq-pyp-exam-page">
             {/* A. Examination Header */}
             <header className="pyp-exam-topbar glass">

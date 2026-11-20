@@ -19,7 +19,7 @@ export interface KpiCardData {
   title: string;
   value: number;
   formatted: string;
-  change: number;
+  change: number | null;
   trend: 'up' | 'down' | 'neutral';
   comparisonText?: string;
   icon?: string;
@@ -163,7 +163,7 @@ export const OverviewKpiCards: React.FC<OverviewKpiCardsProps> = ({
                   {isUp && <TrendingUp size={13} className="trend-icon" />}
                   {isDown && <TrendingDown size={13} className="trend-icon" />}
                   {!isUp && !isDown && <Minus size={13} className="trend-icon" />}
-                  <span>{card.change > 0 ? `${card.change}%` : '0%'}</span>
+                  <span>{card.change === null ? '—' : card.change > 0 ? `${card.change}%` : '0%'}</span>
                 </div>
                 <span className="kpi-comparison-label">{card.comparisonText || 'vs previous 7 days'}</span>
               </div>

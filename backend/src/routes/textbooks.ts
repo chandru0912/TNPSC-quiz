@@ -5,7 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import pool from '../db';
 import { ensureDatabaseSchema } from '../migrate';
-import { requireAdminAuth } from '../middleware/auth';
+import { requireAdminAuth, requireStudentOrAdminAuth } from '../middleware/auth';
 import { processTextbookPdf } from '../services/pdfProcessor';
 import { retrieveRelevantTextbookContent } from '../services/textbookRag';
 import {
@@ -644,7 +644,7 @@ router.get('/', async (req: Request, res: Response) => {
  * GET /api/textbooks/search-content (Public / Admin)
  * RAG search for textbook content pages based on syllabus parameters.
  */
-router.get('/search-content', async (req: Request, res: Response) => {
+router.get('/search-content', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const { group, standard, subject, medium, term, unitId, lessonTitle, topic, textbookId } = req.query;
 
@@ -788,7 +788,7 @@ router.get('/mcq-lessons', async (req: Request, res: Response) => {
  * GET /api/textbooks/:id (Public / Admin)
  * Returns single textbook details and processing job status.
  */
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -1065,7 +1065,7 @@ router.post('/:id/reprocess', requireAdminAuth, async (req: Request, res: Respon
  * GET /api/textbooks/:id/view and /api/textbooks/:id/download
  * Streams the textbook PDF from Google Drive (with HTTP Range support) or local fallback.
  */
-router.get(['/:id/view', '/:id/download'], async (req: Request, res: Response) => {
+router.get(['/:id/view', '/:id/download'], requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id <= 0) {
@@ -1183,7 +1183,7 @@ router.get('/extraction-overview', async (_req: Request, res: Response) => {
  * GET /api/textbooks/:id/extracted-pages
  * Returns extracted pages with Tamil/English text and metadata for Admin review.
  */
-router.get('/:id/extracted-pages', async (req: Request, res: Response) => {
+router.get('/:id/extracted-pages', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
   try {
     const textbookId = parseInt(req.params.id, 10);
     if (!textbookId || isNaN(textbookId)) {

@@ -12,10 +12,12 @@ import {
   AlertCircle,
   BookMarked,
 } from 'lucide-react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { apiFetch, getApiUrl } from '../utils/api'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { apiFetch, getAuthenticatedApiUrl } from '../utils/api'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
+import { useStudentAuth } from '../context/StudentAuthContext'
+import { buildAuthRedirectUrl, savePostLoginRedirect } from '../utils/authRedirect'
 import './SchoolMaterials.css'
 
 interface TextbookRecord {
@@ -83,7 +85,15 @@ function isTextbookEnabled(status?: string): boolean {
 const SchoolMaterials = () => {
   useStudyTimeTracker()
   const navigate = useNavigate()
+  const location = useLocation()
+  const { isAuthenticated } = useStudentAuth()
   const [searchParams, setSearchParams] = useSearchParams()
+
+  const redirectToLogin = () => {
+    const target = `${location.pathname}${location.search}${location.hash}`
+    savePostLoginRedirect(target)
+    navigate(buildAuthRedirectUrl('login', target), { state: { from: target } })
+  }
 
   const initialStdParam = searchParams.get('standard')
   const initialStd =
@@ -425,7 +435,7 @@ const SchoolMaterials = () => {
                             <div className="term-group-heading">{termGroup.termName}</div>
                             <div className="term-pdf-list">
                               {termGroup.books.map((book) => {
-                                const dlUrl = getApiUrl(book.downloadUrl || book.viewUrl || '')
+                                const dlUrl = getAuthenticatedApiUrl(book.downloadUrl || book.viewUrl || '')
                                 return (
                                   <div key={`${book.sourceType}-${book.id}`} className="pdf-item-card">
                                     <div className="pdf-item-info">
@@ -445,15 +455,27 @@ const SchoolMaterials = () => {
                                       <button
                                         type="button"
                                         className="pdf-action-btn pdf-read-btn"
-                                        onClick={() => openPdfReader(book)}
+                                        onClick={() => {
+                                          if (!isAuthenticated) {
+                                            redirectToLogin()
+                                            return
+                                          }
+                                          openPdfReader(book)
+                                        }}
                                       >
                                         <Eye size={14} />
                                         <span>Read PDF</span>
                                       </button>
                                       <a
-                                        href={dlUrl}
-                                        download={book.bookName}
+                                        href={isAuthenticated ? dlUrl : '#'}
+                                        download={isAuthenticated ? book.bookName : undefined}
                                         className="pdf-action-btn pdf-download-btn"
+                                        onClick={(e) => {
+                                          if (!isAuthenticated) {
+                                            e.preventDefault()
+                                            redirectToLogin()
+                                          }
+                                        }}
                                       >
                                         <Download size={14} />
                                         <span>Download PDF</span>

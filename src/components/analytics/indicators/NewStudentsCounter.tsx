@@ -8,7 +8,7 @@ interface NewStudentsCounterProps {
   newWeekly: number;
   newMonthly: number;
   trend: 'up' | 'down' | 'neutral';
-  change: number;
+  change: number | null;
   comparisonText?: string;
   onClick?: () => void;
 }
@@ -82,7 +82,7 @@ export const NewStudentsCounter: React.FC<NewStudentsCounterProps> = ({
           {trend === 'up' && <TrendingUp size={12} />}
           {trend === 'down' && <TrendingDown size={12} />}
           {trend === 'neutral' && <Minus size={12} />}
-          <span>{change > 0 ? `+${change}%` : `${change}%`}</span>
+          <span>{change === null ? '—' : change > 0 ? `+${change}%` : `${change}%`}</span>
         </span>
         <span className="fic-footer-label">{comparisonText}</span>
       </div>

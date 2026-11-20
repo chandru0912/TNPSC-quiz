@@ -8,7 +8,7 @@ interface WebsiteVisitorsWaveProps {
   weeklyVisitors: number;
   monthlyVisitors: number;
   trend: 'up' | 'down' | 'neutral';
-  change: number;
+  change: number | null;
   comparisonText?: string;
   sparkline?: number[];
   onClick?: () => void;
@@ -21,22 +21,23 @@ export const WebsiteVisitorsWave: React.FC<WebsiteVisitorsWaveProps> = ({
   monthlyVisitors,
   trend,
   change,
-  comparisonText = 'vs previous 7 days',
-  sparkline = [12, 18, 14, 22, 28, 25, 32],
+  comparisonText = 'Insufficient historical data',
+  sparkline = [],
   onClick,
 }) => {
-  // Generate smooth cubic wave path for SVG
+  // Generate smooth cubic wave path from real database daily counts only (zero fabricated defaults)
   const width = 280;
   const height = 54;
-  const rawPoints = Array.isArray(sparkline) && sparkline.length > 0 ? sparkline : [10, 15, 12, 20, 24, 22, 30];
+  const rawPoints = Array.isArray(sparkline) && sparkline.length > 0 ? sparkline : [0, 0, 0, 0, 0, 0, 0];
   const points = rawPoints.map((v) => (Number.isFinite(Number(v)) ? Number(v) : 0));
   const min = Math.min(...points);
   const max = Math.max(...points);
-  const range = max - min || 1;
+  const hasVariance = max > min;
+  const range = hasVariance ? max - min : 1;
 
   const coords = points.map((val, idx) => {
     const x = points.length === 1 ? width / 2 : (idx / (points.length - 1)) * (width - 12) + 6;
-    const y = height - ((val - min) / range) * (height - 14) - 6;
+    const y = hasVariance ? height - ((val - min) / range) * (height - 14) - 6 : height - 8;
     return { x, y };
   });
 
@@ -88,7 +89,7 @@ export const WebsiteVisitorsWave: React.FC<WebsiteVisitorsWaveProps> = ({
             {trend === 'up' && <TrendingUp size={12} />}
             {trend === 'down' && <TrendingDown size={12} />}
             {trend === 'neutral' && <Minus size={12} />}
-            <span>{change > 0 ? `+${change}%` : `${change}%`}</span>
+            <span>{change === null ? '—' : change > 0 ? `+${change}%` : `${change}%`}</span>
           </span>
         </div>
 

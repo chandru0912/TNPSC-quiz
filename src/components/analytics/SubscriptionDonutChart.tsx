@@ -32,16 +32,17 @@ export const SubscriptionDonutChart: React.FC<SubscriptionDonutChartProps> = ({
 }) => {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
-  // Fallback distribution if none provided
+  const fallbackTotal = monthlyCount + quarterlyCount + halfYearlyCount + yearlyCount + expiredCount;
+  const pctOf = (v: number) => (fallbackTotal > 0 ? Math.round((v / fallbackTotal) * 100) : 0);
   const items: SubscriptionDistributionItem[] =
     distribution && distribution.length > 0
       ? distribution
       : [
-          { name: 'Monthly Pass', count: monthlyCount, percentage: 25, color: '#3b82f6' },
-          { name: 'Quarterly Pass', count: quarterlyCount, percentage: 20, color: '#8b5cf6' },
-          { name: 'Half-Yearly Pass', count: halfYearlyCount, percentage: 15, color: '#ec4899' },
-          { name: 'Yearly Pass', count: yearlyCount, percentage: 35, color: '#10b981' },
-          { name: 'Expired', count: expiredCount, percentage: 5, color: '#64748b' },
+          { name: 'Monthly Pass', count: monthlyCount, percentage: pctOf(monthlyCount), color: '#3b82f6' },
+          { name: 'Quarterly Pass', count: quarterlyCount, percentage: pctOf(quarterlyCount), color: '#8b5cf6' },
+          { name: 'Half-Yearly Pass', count: halfYearlyCount, percentage: pctOf(halfYearlyCount), color: '#ec4899' },
+          { name: 'Yearly Pass', count: yearlyCount, percentage: pctOf(yearlyCount), color: '#10b981' },
+          { name: 'Expired', count: expiredCount, percentage: pctOf(expiredCount), color: '#64748b' },
         ];
 
   const totalSum = items.reduce((acc, it) => acc + it.count, 0) || 1;

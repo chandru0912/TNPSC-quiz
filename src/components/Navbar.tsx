@@ -4,10 +4,12 @@ import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, User
 import MobileAuthSlide, { type AuthSlideType } from './MobileAuthSlide'
 import { useScrollLock } from '../hooks/useScrollLock'
 import { useStudentAuth } from '../context/StudentAuthContext'
+import { StudentAvatar } from './StudentAvatar'
+import { resolveStudentDisplayName } from '../utils/studentProfile'
 import './Navbar.css'
 
 const Navbar = () => {
-  const { student, isAuthenticated, logout, isPreviewMode, exitStudentPreview } = useStudentAuth()
+  const { student, isAuthenticated, isPreviewMode, exitStudentPreview } = useStudentAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [activeAuthSlide, setActiveAuthSlide] = useState<AuthSlideType>('none')
   const location = useLocation()
@@ -149,78 +151,24 @@ const Navbar = () => {
           ) : null}
 
           {isAuthenticated && student ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div className="nav-student-account-group">
               <Link
                 to="/dashboard"
-                className="nav-auth-btn"
-                title={`Student Profile: ${student.fullName} (${student.email})`}
+                className="nav-student-profile-pill"
+                title={`Student Profile: ${resolveStudentDisplayName(student)} (${student.email})`}
                 onClick={closeMenu}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  background: 'rgba(255, 215, 0, 0.12)',
-                  border: '1px solid rgba(255, 215, 0, 0.35)',
-                  color: '#ffd700',
-                  padding: '0.35rem 0.75rem',
-                  borderRadius: '9999px',
-                  textDecoration: 'none',
-                }}
               >
-                <div
-                  style={{
-                    width: '22px',
-                    height: '22px',
-                    borderRadius: '50%',
-                    background: 'linear-gradient(135deg, #ffd700, #f59e0b)',
-                    color: '#0f172a',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '0.72rem',
-                    fontWeight: 800,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {student.avatarUrl ? (
-                    <img
-                      src={student.avatarUrl}
-                      alt={student.fullName || 'Student'}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    student.fullName ? student.fullName.charAt(0).toUpperCase() : 'S'
-                  )}
-                </div>
-                <span className="nav-auth-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                  {student.fullName.split(' ')[0]}
+                <StudentAvatar
+                  studentId={student.id}
+                  fullName={student.fullName}
+                  email={student.email}
+                  avatarUrl={student.avatarUrl}
+                  size={26}
+                />
+                <span className="nav-auth-label nav-student-profile-name">
+                  {resolveStudentDisplayName(student)}
                 </span>
               </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  logout()
-                  closeMenu()
-                }}
-                className="nav-auth-btn"
-                title="Logout"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.3rem',
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid rgba(239, 68, 68, 0.25)',
-                  color: '#f87171',
-                  padding: '0.35rem 0.65rem',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                }}
-              >
-                <LogOut size={14} />
-                <span className="nav-auth-label">Logout</span>
-              </button>
             </div>
           ) : (
             <>

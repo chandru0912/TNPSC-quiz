@@ -45,18 +45,20 @@ export const StudentPerformancePage: React.FC<StudentPerformancePageProps> = ({ 
 
       if (perfRes.ok) {
         const pJson = await perfRes.json();
+        const pData = pJson.data || pJson;
         setPerformanceData({
-          subjects: pJson.subjects || [],
-          mockTests: pJson.mockTests || { totalAttempts: 0, averageScore: 0, passedCount: 0 },
-          performanceSummary: pJson.performanceSummary || null,
+          subjects: pData.subjects || [],
+          mockTests: pData.mockTests || { totalAttempts: 0, averageScore: 0, passedCount: 0 },
+          performanceSummary: pData.performanceSummary || null,
         });
       }
 
       if (studRes.ok) {
         const sJson = await studRes.json();
+        const sData = sJson.data || sJson;
         setStudentsData({
-          groupBreakdown: sJson.groupBreakdown || [],
-          students: sJson.students || [],
+          groupBreakdown: sData.groupBreakdown || [],
+          students: sData.students || [],
         });
       }
     } catch (err: any) {

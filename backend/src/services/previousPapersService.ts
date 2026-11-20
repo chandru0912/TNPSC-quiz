@@ -1,5 +1,6 @@
 import pool from '../db';
 import { submitAssessmentAttempt } from './markListService';
+import { ensurePreviousPapersAdminSchema } from './previousPapersAdminService';
 
 const DEFAULT_PAPERS = [
   { id: 1, year: 2024, exam: 'TNPSC Group 1', category: 'group1', subjects: 'General Studies (Prelims)', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
@@ -100,12 +101,13 @@ let seedPromise: Promise<void> | null = null;
 export async function ensurePreviousPapersSeeded(): Promise<void> {
   if (!seedPromise) {
     seedPromise = (async () => {
+      await ensurePreviousPapersAdminSchema();
       const existingPapers = await pool.query(`SELECT COUNT(*)::int AS cnt FROM previous_year_papers`);
       if (existingPapers.rows[0].cnt === 0) {
         for (const p of DEFAULT_PAPERS) {
           await pool.query(
-            `INSERT INTO previous_year_papers (id, year, exam, category, subjects, total_questions, duration_minutes, marks_per_question, status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published')
+            `INSERT INTO previous_year_papers (id, year, exam, category, subjects, total_questions, duration_minutes, marks_per_question, status, source_type)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'seed')
              ON CONFLICT (id) DO NOTHING`,
             [p.id, p.year, p.exam, p.category, p.subjects, p.total_questions, p.duration_minutes, p.marks_per_question]
           );
@@ -115,11 +117,12 @@ export async function ensurePreviousPapersSeeded(): Promise<void> {
         );
       }
 
-      // Ensure every published paper has its full 200 questions in previous_year_paper_questions
+      // Only backfill seed papers — NEVER overwrite Admin-uploaded PDF papers
       const papersRes = await pool.query(
         `SELECT p.id, p.year, p.exam, p.category, p.total_questions,
                 (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id) AS existing_q_count
          FROM previous_year_papers p
+         WHERE COALESCE(p.source_type, 'seed') = 'seed'
          ORDER BY p.id ASC`
       );
 
@@ -221,25 +224,35 @@ export async function listPreviousPapers(category?: string) {
 
   const res = await pool.query(
     `SELECT p.id, p.year, p.exam, p.category, p.subjects,
+            p.paper_title, p.paper_type, p.medium, p.difficulty,
             p.total_questions, p.duration_minutes, p.marks_per_question::float AS marks_per_question,
+            COALESCE(p.negative_marking, 0)::float AS negative_marking,
             (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id) AS loaded_questions
      FROM previous_year_papers p
      ${whereClause}
-     ORDER BY p.year DESC, p.id ASC`,
+     ORDER BY p.year DESC, p.id DESC`,
     params
   );
 
-  return res.rows.map((r: any) => ({
-    id: r.id,
-    year: r.year,
-    exam: r.exam,
-    category: r.category,
-    subjects: r.subjects,
-    questions: r.loaded_questions > 0 ? r.loaded_questions : r.total_questions,
-    durationMinutes: r.duration_minutes,
-    marksPerQuestion: Number(r.marks_per_question),
-    totalMarks: Math.round((r.loaded_questions > 0 ? r.loaded_questions : r.total_questions) * Number(r.marks_per_question)),
-  }));
+  return res.rows.map((r: any) => {
+    const qCount = r.loaded_questions > 0 ? r.loaded_questions : r.total_questions;
+    return {
+      id: r.id,
+      year: r.year,
+      exam: r.exam,
+      category: r.category,
+      subjects: r.paper_title ? `${r.paper_title}${r.subjects && !String(r.paper_title).toLowerCase().includes(String(r.subjects).toLowerCase()) ? ` — ${r.subjects}` : ''}` : r.subjects,
+      paperTitle: r.paper_title || null,
+      paperType: r.paper_type || 'Prelims',
+      medium: r.medium || 'English',
+      difficulty: r.difficulty || 'Medium',
+      questions: qCount,
+      durationMinutes: r.duration_minutes,
+      marksPerQuestion: Number(r.marks_per_question),
+      negativeMarking: Number(r.negative_marking || 0),
+      totalMarks: Math.round(qCount * Number(r.marks_per_question)),
+    };
+  });
 }
 
 export async function startOrResumePaperSession(studentId: number, paperId: number) {

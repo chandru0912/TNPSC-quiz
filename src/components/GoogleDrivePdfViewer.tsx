@@ -10,7 +10,7 @@ import {
   AlertCircle,
   RotateCcw,
 } from 'lucide-react';
-import { getApiUrl } from '../utils/api';
+import { getAuthenticatedApiUrl } from '../utils/api';
 import { useScrollLock } from '../hooks/useScrollLock';
 import './GoogleDrivePdfViewer.css';
 
@@ -71,8 +71,8 @@ export const GoogleDrivePdfViewer: React.FC<GoogleDrivePdfViewerProps> = ({
   if (!isOpen || !material) return null;
 
   const rawViewUrl = material.viewUrl || `/api/drive/view/${material.id}`;
-  const fullPdfUrl = getApiUrl(rawViewUrl);
-  const fullDownloadUrl = getApiUrl(material.downloadUrl || rawViewUrl);
+  const fullPdfUrl = getAuthenticatedApiUrl(rawViewUrl);
+  const fullDownloadUrl = getAuthenticatedApiUrl(material.downloadUrl || rawViewUrl);
 
   const formatFileSize = (bytes?: number): string => {
     if (!bytes) return '';

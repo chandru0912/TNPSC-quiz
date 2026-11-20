@@ -27,29 +27,32 @@ function detectDevice(): 'desktop' | 'mobile' | 'tablet' {
 }
 
 function detectBrowser(): string {
-  if (typeof window === 'undefined') return 'Chrome';
-  const ua = navigator.userAgent;
+  if (typeof window === 'undefined') return 'Other';
+  const ua = navigator.userAgent || '';
   if (/Edg\//.test(ua)) return 'Edge';
+  if (/OPR\//.test(ua)) return 'Opera';
   if (/Chrome\//.test(ua) && !/Chromium|Edg/.test(ua)) return 'Chrome';
   if (/Safari\//.test(ua) && !/Chrome/.test(ua)) return 'Safari';
   if (/Firefox\//.test(ua)) return 'Firefox';
-  if (/OPR\//.test(ua)) return 'Opera';
-  return 'Chrome';
+  return 'Other';
 }
 
 function detectOs(): string {
-  if (typeof window === 'undefined') return 'Windows';
-  const ua = navigator.userAgent;
+  if (typeof window === 'undefined') return 'Other';
+  const ua = navigator.userAgent || '';
   if (/Windows/i.test(ua)) return 'Windows';
-  if (/Macintosh|Mac OS X/i.test(ua)) return 'macOS';
   if (/Android/i.test(ua)) return 'Android';
   if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+  if (/Macintosh|Mac OS X/i.test(ua)) return 'macOS';
   if (/Linux/i.test(ua)) return 'Linux';
-  return 'Windows';
+  return 'Other';
 }
 
 function getStoredStudentId(): number | null {
   try {
+    if (localStorage.getItem('tnpsc_admin_preview_active') === 'true') {
+      return null;
+    }
     const raw = localStorage.getItem('tnpsc_student_user');
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -64,17 +67,26 @@ function getStoredStudentId(): number | null {
 }
 
 let lastTrackedPath = '';
-let heartbeatTimer: any = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let trackingInitialized = false;
 
-export function trackPageView(pagePath?: string, pageTitle?: string) {
+function dispatchTrackPayload(
+  eventType: 'page_view' | 'heartbeat' | 'session_end',
+  pagePath?: string,
+  pageTitle?: string
+) {
   if (typeof window === 'undefined') return;
 
   const currentPath = pagePath || window.location.pathname || '/';
-  lastTrackedPath = currentPath;
+  if (currentPath.startsWith('/admin')) return;
+
+  if (eventType === 'page_view') {
+    lastTrackedPath = currentPath;
+  }
 
   const visitorId = getOrGenerateId('tnpsc_visitor_id', localStorage);
   const sessionId = getOrGenerateId('tnpsc_session_id', sessionStorage);
-  const studentId = getStoredStudentId();
+  const studentId = eventType === 'session_end' ? null : getStoredStudentId();
   const deviceCategory = detectDevice();
   const browser = detectBrowser();
   const os = detectOs();
@@ -90,11 +102,11 @@ export function trackPageView(pagePath?: string, pageTitle?: string) {
     browser,
     os,
     referrer,
+    eventType,
   };
 
   const endpoint = getApiUrl('/api/analytics/track');
 
-  // Use sendBeacon if available, otherwise fetch
   try {
     if (navigator.sendBeacon) {
       const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
@@ -112,26 +124,73 @@ export function trackPageView(pagePath?: string, pageTitle?: string) {
   }
 }
 
-export function startVisitorTracking() {
+export function trackPageView(pagePath?: string, pageTitle?: string) {
+  dispatchTrackPayload('page_view', pagePath, pageTitle);
+}
+
+export function sendSessionHeartbeat(pagePath?: string) {
+  dispatchTrackPayload('heartbeat', pagePath || lastTrackedPath || window.location.pathname);
+}
+
+export function endVisitorSession() {
+  dispatchTrackPayload('session_end', lastTrackedPath || window.location.pathname);
+}
+
+export function trackAnalyticsEvent(
+  eventType: string,
+  metadata: Record<string, any> = {},
+  eventId?: string
+) {
   if (typeof window === 'undefined') return;
+  const currentPath = window.location.pathname || '/';
+  if (currentPath.startsWith('/admin')) return;
 
-  // Track initial page view
-  trackPageView();
+  const visitorId = getOrGenerateId('tnpsc_visitor_id', localStorage);
+  const sessionId = getOrGenerateId('tnpsc_session_id', sessionStorage);
+  const token = localStorage.getItem('tnpsc_student_token');
+  const endpoint = getApiUrl('/api/analytics/event');
 
-  // Setup periodic heartbeat every 45 seconds while active
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token && localStorage.getItem('tnpsc_admin_preview_active') !== 'true') {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      eventId: eventId || `${eventType}_${sessionId}_${Date.now()}`,
+      eventType,
+      visitorId,
+      sessionId,
+      pagePath: currentPath,
+      metadata,
+    }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+export function startVisitorTracking() {
+  if (typeof window === 'undefined' || trackingInitialized) return;
+  trackingInitialized = true;
+
+  // Setup periodic heartbeat every 45 seconds while active (updates last_heartbeat, no duplicate page_views)
   if (!heartbeatTimer) {
     heartbeatTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        trackPageView(lastTrackedPath || window.location.pathname);
+        sendSessionHeartbeat();
       }
     }, 45000);
   }
 
-  // Handle visibility changes
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      trackPageView(lastTrackedPath || window.location.pathname);
+      sendSessionHeartbeat();
     }
+  });
+
+  window.addEventListener('pagehide', () => {
+    endVisitorSession();
   });
 }
 
