@@ -12,8 +12,29 @@ export interface DriveSyncSummary {
   missingCount: number;
   duplicateDriveNames: number;
   textbooksSynced: number;
+  indexedCount: number;
+  remainingToSync: number;
+  hasMore: boolean;
+  verifiedAllSynced: boolean;
   startedAt: string;
   completedAt: string;
+}
+
+export interface DriveSyncDiagnostic {
+  folderId: string;
+  foldersScanned: number;
+  pageFetches: number;
+  totalDriveItems: number;
+  totalDrivePdfs: number;
+  uniqueDrivePdfIds: number;
+  indexedMaterialsCount: number;
+  indexedTextbooksCount: number;
+  missingFromMaterialsCount: number;
+  missingFromTextbooksCount: number;
+  duplicateMaterialIds: number;
+  duplicateTextbookIds: number;
+  missingPdfIds: Array<{ googleDriveFileId: string; fileName: string; size: number }>;
+  failedSyncLogs: any[];
 }
 
 interface LiveDrivePdf {
@@ -23,6 +44,52 @@ interface LiveDrivePdf {
   size: number;
   folderId: string;
   createdTime?: string;
+}
+
+function normalizeClassifiedDrivePdf(file: LiveDrivePdf) {
+  const classified = classifyPdf({ fileName: file.name, fileSize: file.size });
+  const rawLower = file.name.toLowerCase();
+
+  let standard = classified.standardNumber || 6;
+  let subject = classified.subject || 'General Studies';
+  let medium: 'Tamil' | 'English' = classified.medium === 'English' ? 'English' : 'Tamil';
+  let term = classified.term || 'Full Year';
+
+  if (/11thth|class[_ -]?11|\b11th\b/i.test(rawLower)) standard = 11;
+  else if (/class[_ -]?12|\b12th\b/i.test(rawLower)) standard = 12;
+
+  if (/ethics\s*and\s*indian\s*culture/i.test(rawLower)) {
+    subject = 'Ethics and Indian Culture';
+    medium = /_em_|english/i.test(rawLower) ? 'English' : 'Tamil';
+    term = 'Full Year';
+  } else if (/advance\s*tamil/i.test(rawLower)) {
+    subject = 'Advance Tamil';
+    medium = 'Tamil';
+  } else if (
+    /(?:_english_|english_medium|\benglish\b|_em_)/i.test(rawLower) &&
+    !/^class[_ -]?\d+[_ -]?english/i.test(rawLower) &&
+    !/tamil_medium|_tm_/i.test(rawLower)
+  ) {
+    medium = 'English';
+  }
+
+  let bookName = classified.bookName || file.name.replace(/\.pdf$/i, '').trim();
+  if (subject === 'Ethics and Indian Culture' || subject === 'Advance Tamil') {
+    bookName = `Samacheer Kalvi ${standard}th Standard - ${subject} - ${term} - ${medium} Medium`;
+  } else if (medium === 'English' && /tamil medium/i.test(bookName)) {
+    bookName = bookName.replace(/tamil medium/gi, 'English Medium');
+  }
+
+  return {
+    classified,
+    standard,
+    subject,
+    medium,
+    term,
+    bookName,
+    fileName: bookName.toLowerCase().endsWith('.pdf') ? bookName : `${bookName}.pdf`,
+    groupId: classified.primaryGroup || 'group4',
+  };
 }
 
 /**
@@ -203,17 +270,25 @@ async function ensureSyncSchema(): Promise<void> {
  * - Preserves existing extraction results, page counts, and syllabus mappings on UPSERT.
  * - Marks orphaned DB records as `sync_status = 'MISSING_ON_DRIVE'` without deleting any data.
  */
-export async function syncGoogleDriveToDatabase(): Promise<DriveSyncSummary> {
+export async function syncGoogleDriveToDatabase(options?: {
+  maxDurationMs?: number;
+  batchSize?: number;
+}): Promise<DriveSyncSummary> {
   await ensureSyncSchema();
-  // Prevent simultaneous duplicate sync operations (within 3 minutes)
+  const isVercel = Boolean(process.env.VERCEL);
+  const maxDurationMs = options?.maxDurationMs ?? (isVercel ? 7500 : 120000);
+  const batchSize = Math.max(1, Math.min(50, options?.batchSize ?? 25));
+  const startedMs = Date.now();
+
+  // Prevent simultaneous duplicate sync operations (45s lock window so timed-out serverless calls recover quickly)
   const runningRes = await pool.query(
     `SELECT id FROM google_drive_sync_logs
      WHERE status = 'RUNNING'
-       AND started_at > NOW() - INTERVAL '3 minutes'
+       AND started_at > NOW() - INTERVAL '45 seconds'
      ORDER BY id DESC LIMIT 1`
   );
   if (runningRes.rows.length > 0) {
-    throw new Error('A Google Drive synchronization is already in progress. Please wait a moment and refresh.');
+    throw new Error('A Google Drive synchronization is already in progress. Please wait a few seconds and retry.');
   }
 
   const auth = await getAuthenticatedClient();
@@ -228,6 +303,7 @@ export async function syncGoogleDriveToDatabase(): Promise<DriveSyncSummary> {
   const startedAt = new Date(logInsert.rows[0].started_at).toISOString();
 
   try {
+    // 1. Fetch ALL live PDFs from Drive folder + subfolders using nextPageToken pagination
     const livePdfs = await listDriveFolderPdfsRecursive(drive, folderId);
 
     const nameCounts = new Map<string, number>();
@@ -235,141 +311,245 @@ export async function syncGoogleDriveToDatabase(): Promise<DriveSyncSummary> {
       nameCounts.set(f.name, (nameCounts.get(f.name) || 0) + 1);
     }
     const duplicateDriveNames = Array.from(nameCounts.values()).filter((c) => c > 1).length;
+    const liveIds = new Set<string>(livePdfs.map((f) => f.id));
+
+    // 2. Bulk preload existing google_drive_materials & textbooks in 2 fast queries (eliminates 500+ serial round-trips!)
+    const [existingGdmRes, existingTbRes] = await Promise.all([
+      pool.query(
+        `SELECT id, google_drive_file_id, file_name, file_size, google_drive_folder_id,
+                tnpsc_group, subject, standard, medium, term, upload_status, sync_status
+         FROM google_drive_materials
+         WHERE google_drive_file_id IS NOT NULL`
+      ),
+      pool.query(
+        `SELECT id, google_drive_file_id, file_path
+         FROM textbooks`
+      ),
+    ]);
+
+    const existingGdmByDriveId = new Map<string, any>();
+    for (const r of existingGdmRes.rows) {
+      if (r.google_drive_file_id) existingGdmByDriveId.set(r.google_drive_file_id, r);
+    }
+
+    const existingTbDriveIds = new Set<string>();
+    const existingTbFilePaths = new Set<string>();
+    for (const t of existingTbRes.rows) {
+      if (t.google_drive_file_id) existingTbDriveIds.add(t.google_drive_file_id);
+      if (t.file_path) existingTbFilePaths.add(t.file_path);
+    }
+
+    const newFiles: LiveDrivePdf[] = [];
+    const existingDriveIdsToTouch: string[] = [];
+    const missingTextbookSpecs: Array<{
+      googleDriveFileId: string;
+      bookName: string;
+      groupId: string;
+      standard: number;
+      subject: string;
+      medium: string;
+      term: string;
+      fileSize: number;
+    }> = [];
+
+    for (const file of livePdfs) {
+      const existing = existingGdmByDriveId.get(file.id);
+      if (existing) {
+        existingDriveIdsToTouch.push(file.id);
+        const drivePath = `gdrive://${file.id}`;
+        if (!existingTbDriveIds.has(file.id) && !existingTbFilePaths.has(drivePath) && existing.standard && existing.subject) {
+          missingTextbookSpecs.push({
+            googleDriveFileId: file.id,
+            bookName: String(existing.file_name || file.name).replace(/\.pdf$/i, '').trim(),
+            groupId: existing.tnpsc_group || 'group4',
+            standard: Number(existing.standard),
+            subject: existing.subject,
+            medium: existing.medium || 'Tamil',
+            term: existing.term || 'Full Year',
+            fileSize: file.size || Number(existing.file_size || 0),
+          });
+        }
+      } else {
+        newFiles.push(file);
+      }
+    }
 
     let insertedCount = 0;
     let updatedCount = 0;
     let textbooksSynced = 0;
+    let budgetReached = false;
 
-    const liveIds = new Set<string>();
-
-    for (const file of livePdfs) {
-      liveIds.add(file.id);
-
-      const existingRes = await pool.query(
-        `SELECT id, file_name, tnpsc_group, subject, standard, medium, term, upload_status
-         FROM google_drive_materials
-         WHERE google_drive_file_id = $1
-         ORDER BY id DESC
-         LIMIT 1`,
-        [file.id]
+    // 3. Single bulk UPDATE to refresh sync_status='ACTIVE' & last_synced_at on already-indexed files (never overwrites metadata!)
+    if (existingDriveIdsToTouch.length > 0) {
+      const touchRes = await pool.query(
+        `UPDATE google_drive_materials
+         SET upload_status = 'completed',
+             sync_status = 'ACTIVE',
+             last_synced_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE google_drive_file_id = ANY($1::text[])`,
+        [existingDriveIdsToTouch]
       );
+      updatedCount = touchRes.rowCount || existingDriveIdsToTouch.length;
+    }
 
-      if (existingRes.rows.length > 0) {
-        const row = existingRes.rows[0];
-        await pool.query(
-          `UPDATE google_drive_materials
-           SET file_size = CASE WHEN $1 > 0 THEN $1 ELSE file_size END,
-               google_drive_folder_id = $2,
-               upload_status = 'completed',
-               sync_status = 'ACTIVE',
-               last_synced_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $3`,
-          [file.size, file.folderId, row.id]
+    // 4. Batch-insert ONLY missing Drive PDFs into google_drive_materials (incremental, never overwrites existing records)
+    for (let i = 0; i < newFiles.length; i += batchSize) {
+      if (Date.now() - startedMs >= maxDurationMs && i > 0) {
+        budgetReached = true;
+        break;
+      }
+      const slice = newFiles.slice(i, i + batchSize);
+      const placeholders: string[] = [];
+      const params: any[] = [];
+      const cols = 15;
+
+      for (let j = 0; j < slice.length; j++) {
+        const file = slice[j];
+        const norm = normalizeClassifiedDrivePdf(file);
+        const base = j * cols;
+        const ph = [];
+        for (let c = 1; c <= cols; c++) ph.push(`$${base + c}`);
+        placeholders.push(
+          `(${ph[0]}, ${ph[1]}, ${ph[2]}, ${ph[3]}, ${ph[4]}, ${ph[5]}, ${ph[6]}, ${ph[7]}, ${ph[8]}, ${ph[9]}, ${ph[10]}, ${ph[11]}::jsonb, ${ph[12]}::jsonb, ${ph[13]}::jsonb, ${ph[14]}, 'completed', 'drive-sync', 'PENDING', 'ACTIVE', CURRENT_TIMESTAMP)`
         );
-        updatedCount++;
+        params.push(
+          norm.fileName,
+          file.name,
+          file.mimeType,
+          file.size,
+          file.id,
+          file.folderId,
+          norm.groupId,
+          norm.subject,
+          norm.standard,
+          norm.term,
+          norm.medium,
+          JSON.stringify(norm.classified.applicableGroups || ['group1', 'group2', 'group4']),
+          JSON.stringify(norm.classified.units || []),
+          JSON.stringify(norm.classified),
+          norm.classified.confidenceScore || 85
+        );
 
-        if (row.standard && row.subject) {
-          const addedTb = await ensureTextbookRecord({
+        const drivePath = `gdrive://${file.id}`;
+        if (!existingTbDriveIds.has(file.id) && !existingTbFilePaths.has(drivePath)) {
+          missingTextbookSpecs.push({
             googleDriveFileId: file.id,
-            bookName: row.file_name || file.name,
-            groupId: row.tnpsc_group || 'group4',
-            standard: Number(row.standard),
-            subject: row.subject,
-            medium: row.medium || 'Tamil',
-            term: row.term || 'Full Year',
+            bookName: norm.bookName,
+            groupId: norm.groupId,
+            standard: norm.standard,
+            subject: norm.subject,
+            medium: norm.medium,
+            term: norm.term,
             fileSize: file.size,
           });
-          if (addedTb) textbooksSynced++;
         }
-      } else {
-        const classified = classifyPdf({
-          fileName: file.name,
-          fileSize: file.size,
-        });
+      }
 
-        await pool.query(
-          `INSERT INTO google_drive_materials (
-             file_name, original_file_name, mime_type, file_size,
-             google_drive_file_id, google_drive_folder_id,
-             tnpsc_group, subject, standard, term, medium,
-             applicable_groups, extracted_toc, classification_meta, confidence_score,
-             upload_status, uploaded_by, extraction_status, sync_status, last_synced_at
-           )
-           VALUES (
-             $1, $2, $3, $4,
-             $5, $6,
-             $7, $8, $9, $10, $11,
-             $12::jsonb, $13::jsonb, $14::jsonb, $15,
-             'completed', 'drive-sync', 'PENDING', 'ACTIVE', CURRENT_TIMESTAMP
-           )`,
-          [
-            classified.bookName ? `${classified.bookName}.pdf` : file.name,
-            file.name,
-            file.mimeType,
-            file.size,
-            file.id,
-            file.folderId,
-            classified.primaryGroup || 'group4',
-            classified.subject || 'General Studies',
-            classified.standardNumber || 6,
-            classified.term || 'Full Year',
-            classified.medium || 'Tamil',
-            JSON.stringify(classified.applicableGroups || ['group1', 'group2', 'group4']),
-            JSON.stringify(classified.units || []),
-            JSON.stringify(classified),
-            classified.confidenceScore || 85,
-          ]
+      const insRes = await pool.query(
+        `INSERT INTO google_drive_materials (
+           file_name, original_file_name, mime_type, file_size,
+           google_drive_file_id, google_drive_folder_id,
+           tnpsc_group, subject, standard, term, medium,
+           applicable_groups, extracted_toc, classification_meta, confidence_score,
+           upload_status, uploaded_by, extraction_status, sync_status, last_synced_at
+         )
+         VALUES ${placeholders.join(', ')}
+         ON CONFLICT DO NOTHING`,
+        params
+      );
+      insertedCount += insRes.rowCount || slice.length;
+    }
+
+    // 5. Batch-insert missing textbook catalog entries (1-to-1 by google_drive_file_id, never duplicates)
+    for (let i = 0; i < missingTextbookSpecs.length; i += batchSize) {
+      if (Date.now() - startedMs >= maxDurationMs && i > 0) {
+        budgetReached = true;
+        break;
+      }
+      const slice = missingTextbookSpecs.slice(i, i + batchSize);
+      const placeholders: string[] = [];
+      const params: any[] = [];
+      const cols = 9;
+
+      for (let j = 0; j < slice.length; j++) {
+        const spec = slice[j];
+        const base = j * cols;
+        const ph = [];
+        for (let c = 1; c <= cols; c++) ph.push(`$${base + c}`);
+        placeholders.push(`(${ph.join(', ')}, 'completed', 'PENDING')`);
+        params.push(
+          spec.groupId,
+          spec.standard,
+          spec.subject,
+          spec.medium,
+          spec.term,
+          spec.bookName,
+          `gdrive://${spec.googleDriveFileId}`,
+          spec.fileSize,
+          spec.googleDriveFileId
         );
-        insertedCount++;
+      }
 
-        const addedTb = await ensureTextbookRecord({
-          googleDriveFileId: file.id,
-          bookName: classified.bookName ? `${classified.bookName}.pdf` : file.name,
-          groupId: classified.primaryGroup || 'group4',
-          standard: classified.standardNumber || 6,
-          subject: classified.subject || 'General Studies',
-          medium: classified.medium || 'Tamil',
-          term: classified.term || 'Full Year',
-          fileSize: file.size,
-        });
-        if (addedTb) textbooksSynced++;
+      const tbInsRes = await pool.query(
+        `INSERT INTO textbooks (
+           group_id, standard, subject, medium, term, book_name, file_path, file_size, google_drive_file_id, status, extraction_status
+         )
+         VALUES ${placeholders.join(', ')}
+         ON CONFLICT DO NOTHING`,
+        params
+      );
+      textbooksSynced += tbInsRes.rowCount || 0;
+    }
+
+    // 6. Only mark MISSING_ON_DRIVE when full incremental sync completed without hitting time budget
+    let missingCount = 0;
+    if (!budgetReached) {
+      const allDbRows = await pool.query(
+        `SELECT id, google_drive_file_id FROM google_drive_materials WHERE COALESCE(sync_status, 'ACTIVE') != 'MISSING_ON_DRIVE'`
+      );
+      const missingIds = allDbRows.rows
+        .filter((r) => !r.google_drive_file_id || !liveIds.has(r.google_drive_file_id))
+        .map((r) => r.id);
+
+      if (missingIds.length > 0) {
+        const markRes = await pool.query(
+          `UPDATE google_drive_materials
+           SET sync_status = 'MISSING_ON_DRIVE',
+               last_synced_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ANY($1::int[])`,
+          [missingIds]
+        );
+        missingCount = markRes.rowCount || missingIds.length;
       }
     }
 
-    // Safely mark database records whose Google Drive file ID is no longer present in the Drive folder
-    let missingCount = 0;
-    const allDbRows = await pool.query(
-      `SELECT id, google_drive_file_id FROM google_drive_materials WHERE COALESCE(sync_status, 'ACTIVE') != 'MISSING_ON_DRIVE'`
+    // 7. Verify actual indexed count against live Drive file IDs before claiming success
+    const verifyRes = await pool.query(
+      `SELECT COUNT(DISTINCT google_drive_file_id)::int AS cnt
+       FROM google_drive_materials
+       WHERE COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'
+         AND google_drive_file_id = ANY($1::text[])`,
+      [Array.from(liveIds)]
     );
-    const missingIds = allDbRows.rows
-      .filter((r) => !r.google_drive_file_id || !liveIds.has(r.google_drive_file_id))
-      .map((r) => r.id);
-
-    if (missingIds.length > 0) {
-      const markRes = await pool.query(
-        `UPDATE google_drive_materials
-         SET sync_status = 'MISSING_ON_DRIVE',
-             last_synced_at = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ANY($1::int[])`,
-        [missingIds]
-      );
-      missingCount = markRes.rowCount || missingIds.length;
-    }
+    const indexedCount = Number(verifyRes.rows[0]?.cnt || 0);
+    const remainingToSync = Math.max(0, liveIds.size - indexedCount);
+    const hasMore = budgetReached || remainingToSync > 0;
+    const finalStatus = hasMore ? 'PARTIAL' : 'COMPLETED';
 
     const doneRes = await pool.query(
       `UPDATE google_drive_sync_logs
-       SET status = 'COMPLETED',
-           total_drive_files = $1,
-           inserted_count = $2,
-           updated_count = $3,
-           missing_count = $4,
-           duplicate_drive_names = $5,
+       SET status = $1,
+           total_drive_files = $2,
+           inserted_count = $3,
+           updated_count = $4,
+           missing_count = $5,
+           duplicate_drive_names = $6,
            completed_at = CURRENT_TIMESTAMP
-       WHERE id = $6
+       WHERE id = $7
        RETURNING completed_at`,
-      [livePdfs.length, insertedCount, updatedCount, missingCount, duplicateDriveNames, syncLogId]
+      [finalStatus, livePdfs.length, insertedCount, updatedCount, missingCount, duplicateDriveNames, syncLogId]
     );
 
     return {
@@ -381,6 +561,10 @@ export async function syncGoogleDriveToDatabase(): Promise<DriveSyncSummary> {
       missingCount,
       duplicateDriveNames,
       textbooksSynced,
+      indexedCount,
+      remainingToSync,
+      hasMore,
+      verifiedAllSynced: !hasMore && indexedCount === liveIds.size,
       startedAt,
       completedAt: new Date(doneRes.rows[0].completed_at).toISOString(),
     };
@@ -393,6 +577,96 @@ export async function syncGoogleDriveToDatabase(): Promise<DriveSyncSummary> {
     );
     throw err;
   }
+}
+
+/**
+ * Read-only diagnostic audit comparing live Google Drive folder PDFs against PostgreSQL.
+ */
+export async function getDriveSyncDiagnostic(): Promise<DriveSyncDiagnostic> {
+  await ensureSyncSchema();
+  const auth = await getAuthenticatedClient();
+  const rootFolderId = await getOrCreateTargetFolder(auth);
+  const drive = google.drive({ version: 'v3', auth });
+
+  const allItems: any[] = [];
+  const pdfs: LiveDrivePdf[] = [];
+  const folderQueue: string[] = [rootFolderId];
+  const visited = new Set<string>();
+  let pageFetches = 0;
+
+  while (folderQueue.length > 0) {
+    const currentFolderId = folderQueue.shift()!;
+    if (visited.has(currentFolderId)) continue;
+    visited.add(currentFolderId);
+
+    let pageToken: string | undefined;
+    do {
+      pageFetches++;
+      const res = await drive.files.list({
+        q: `'${currentFolderId}' in parents and trashed = false`,
+        fields: 'nextPageToken, files(id, name, mimeType, size, createdTime, trashed)',
+        pageSize: 1000,
+        pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      for (const f of res.data.files || []) {
+        if (f.trashed) continue;
+        allItems.push(f);
+        if (f.mimeType === 'application/vnd.google-apps.folder') {
+          if (f.id && !visited.has(f.id)) folderQueue.push(f.id);
+        } else if (f.id && (f.mimeType === 'application/pdf' || (f.name || '').toLowerCase().endsWith('.pdf'))) {
+          pdfs.push({
+            id: f.id,
+            name: f.name || `unnamed_${f.id}.pdf`,
+            mimeType: f.mimeType || 'application/pdf',
+            size: Number(f.size || 0),
+            folderId: currentFolderId,
+            createdTime: f.createdTime || undefined,
+          });
+        }
+      }
+      pageToken = res.data.nextPageToken || undefined;
+    } while (pageToken);
+  }
+
+  const [gdmRes, tbRes, dupGdmRes, dupTbRes, failedLogsRes] = await Promise.all([
+    pool.query(`SELECT google_drive_file_id FROM google_drive_materials WHERE COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'`),
+    pool.query(`SELECT google_drive_file_id, file_path FROM textbooks`),
+    pool.query(`SELECT google_drive_file_id FROM google_drive_materials GROUP BY google_drive_file_id HAVING COUNT(*) > 1`),
+    pool.query(`SELECT google_drive_file_id FROM textbooks WHERE google_drive_file_id IS NOT NULL GROUP BY google_drive_file_id HAVING COUNT(*) > 1`),
+    pool.query(`SELECT id, status, total_drive_files, inserted_count, error_message, started_at, completed_at FROM google_drive_sync_logs WHERE status != 'COMPLETED' ORDER BY id DESC LIMIT 10`),
+  ]);
+
+  const gdmSet = new Set(gdmRes.rows.map((r) => r.google_drive_file_id).filter(Boolean));
+  const tbSet = new Set(
+    tbRes.rows.flatMap((r) => [
+      r.google_drive_file_id,
+      String(r.file_path || '').startsWith('gdrive://') ? String(r.file_path).replace('gdrive://', '').trim() : null,
+    ]).filter(Boolean)
+  );
+
+  const missingPdfIds = pdfs
+    .filter((p) => !gdmSet.has(p.id))
+    .map((p) => ({ googleDriveFileId: p.id, fileName: p.name, size: p.size }));
+  const missingFromTextbooksCount = pdfs.filter((p) => !tbSet.has(p.id)).length;
+
+  return {
+    folderId: rootFolderId,
+    foldersScanned: visited.size,
+    pageFetches,
+    totalDriveItems: allItems.length,
+    totalDrivePdfs: pdfs.length,
+    uniqueDrivePdfIds: new Set(pdfs.map((p) => p.id)).size,
+    indexedMaterialsCount: gdmSet.size,
+    indexedTextbooksCount: tbSet.size,
+    missingFromMaterialsCount: missingPdfIds.length,
+    missingFromTextbooksCount,
+    duplicateMaterialIds: dupGdmRes.rows.length,
+    duplicateTextbookIds: dupTbRes.rows.length,
+    missingPdfIds,
+    failedSyncLogs: failedLogsRes.rows,
+  };
 }
 
 export async function getLatestDriveSyncStatus() {

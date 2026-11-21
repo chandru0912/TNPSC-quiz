@@ -1587,22 +1587,42 @@ const Admin = () => {
     }
   }
 
-  // Sync live Google Drive folder into PostgreSQL
+  // Sync live Google Drive folder into PostgreSQL (supports safe incremental chunking on Vercel)
   const handleSyncGoogleDrive = async () => {
     setIsSyncingDrive(true)
     try {
       const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
-      const res = await apiFetch('/api/drive/sync', {
-        method: 'POST',
-        headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
-      })
-      const json = await res.json()
-      if (res.ok && json.status === 'success') {
-        showToast('success', json.message || 'Google Drive synchronized successfully!')
+      let hasMore = true
+      let iterations = 0
+      let totalInserted = 0
+      let lastData: any = null
+
+      while (hasMore && iterations < 30) {
+        iterations++
+        const res = await apiFetch('/api/drive/sync', {
+          method: 'POST',
+          headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+        })
+        const json = await res.json()
+        if (!res.ok || json.status !== 'success') {
+          showToast('error', json.message || 'Google Drive sync failed.')
+          break
+        }
+        lastData = json.data
+        totalInserted += Number(lastData?.insertedCount || 0)
+        hasMore = Boolean(lastData?.hasMore)
         fetchDriveMaterials()
         fetchExtractionOverview()
-      } else {
-        showToast('error', json.message || 'Google Drive sync failed.')
+      }
+
+      if (lastData) {
+        fetchTextbooks(true)
+        showToast(
+          'success',
+          lastData.verifiedAllSynced
+            ? `Synced all ${lastData.indexedCount}/${lastData.totalDriveFiles} Google Drive PDFs (${totalInserted} newly added, ${lastData.textbooksSynced || 0} textbooks linked)!`
+            : `Synced ${lastData.indexedCount}/${lastData.totalDriveFiles} PDFs (${lastData.remainingToSync || 0} remaining). Click Sync Drive again to continue.`
+        )
       }
     } catch (err: any) {
       showToast('error', err.message || 'Failed to synchronize Google Drive.')

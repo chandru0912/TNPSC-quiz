@@ -44,6 +44,7 @@ import {
 import {
   syncGoogleDriveToDatabase,
   getLatestDriveSyncStatus,
+  getDriveSyncDiagnostic,
 } from '../services/googleDriveSyncService';
 import {
   reconcileTextbooksWithDrive,
@@ -770,6 +771,19 @@ router.get('/sync/status', requireAdminAuth, async (_req: Request, res: Response
     return res.status(200).json({ status: 'success', data: latest });
   } catch (err: any) {
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to get sync status.' });
+  }
+});
+
+/**
+ * GET /api/drive/sync/diagnostic
+ * Admin only: Read-only audit comparing live Google Drive PDFs against PostgreSQL records.
+ */
+router.get('/sync/diagnostic', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const diagnostic = await getDriveSyncDiagnostic();
+    return res.status(200).json({ status: 'success', data: diagnostic });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to run Drive sync diagnostic.' });
   }
 });
 
