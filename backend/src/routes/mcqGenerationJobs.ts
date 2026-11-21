@@ -12,6 +12,7 @@
 
 import { Router, Response } from 'express';
 import { requireAdminAuth, AuthenticatedRequest } from '../middleware/auth';
+import { aiGenerationLimiter } from '../middleware/rateLimiter';
 import { McqJobService } from '../services/mcqJobService';
 import { AIProviderName } from '../services/ai/ai-provider.interface';
 
@@ -49,7 +50,7 @@ function getAdminId(req: AuthenticatedRequest): string {
  * POST /api/admin/mcq-generation/jobs
  * Creates and queues a persistent MCQ generation job in PostgreSQL.
  */
-router.post('/', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/', aiGenerationLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = req.body || {};
     const category = String(body.category || body.groupId || '').trim();

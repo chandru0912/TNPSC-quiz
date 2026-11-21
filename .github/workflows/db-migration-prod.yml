@@ -1,0 +1,56 @@
+name: Production Database Migration (Manual Approval)
+
+# NEVER runs automatically on PRs or pushes — explicit manual dispatch only
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_migration:
+        description: 'Type APPLY_PROD_MIGRATION to confirm non-destructive schema migration'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  apply-production-migration:
+    name: Apply Idempotent Schema Migration (Production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Configure "production-db" environment in GitHub Settings with Required Reviewers
+    environment: production-db
+    steps:
+      - name: Verify explicit confirmation
+        if: ${{ inputs.confirm_production_migration != 'APPLY_PROD_MIGRATION' }}
+        run: |
+          echo "Confirmation input did not match APPLY_PROD_MIGRATION. Aborting safely."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies (lockfile)
+        working-directory: backend
+        run: npm ci
+
+      - name: Static destructive-SQL safety gate
+        working-directory: backend
+        run: npm run migrate:validate
+
+      - name: Apply idempotent migrations to production PostgreSQL
+        working-directory: backend
+        env:
+          NODE_ENV: production
+          PGHOST: ${{ secrets.PGHOST }}
+          PGPORT: ${{ secrets.PGPORT }}
+          PGDATABASE: ${{ secrets.PGDATABASE }}
+          PGUSER: ${{ secrets.PGUSER }}
+          PGPASSWORD: ${{ secrets.PGPASSWORD }}
+        run: npx tsx -e "import { runMigration } from './src/migrate'; import pool from './src/db'; runMigration().then(() => pool.end()).catch((e) => { console.error(e.message); process.exit(1); });"

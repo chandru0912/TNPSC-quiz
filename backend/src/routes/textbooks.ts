@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
+import { fileUploadLimiter } from '../middleware/rateLimiter';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -505,7 +506,7 @@ async function handleUploadOrReplaceTextbook(req: Request, res: Response) {
  * POST /api/textbooks/upload (Protected Admin)
  * Uploads textbook PDF, records metadata, prevents duplicates, starts async processing.
  */
-router.post('/upload', requireAdminAuth, handlePdfUpload, handleUploadOrReplaceTextbook);
+router.post('/upload', requireAdminAuth, fileUploadLimiter, handlePdfUpload, handleUploadOrReplaceTextbook);
 
 /**
  * PUT /api/textbooks/:id (Protected Admin)

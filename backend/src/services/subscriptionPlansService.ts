@@ -5,6 +5,7 @@ import {
   recordVerifiedSubscriptionTransaction,
 } from './subscriptionHistoryService';
 import { broadcastAnalyticsEvent } from './analyticsEventBus';
+import { executeWithCircuitBreaker } from './circuitBreakerService';
 
 export const OFFICIAL_PLAN_IDS = ['mcq_practice', 'mock_test', 'previous_papers', 'test_batch'] as const;
 export type OfficialPlanId = (typeof OFFICIAL_PLAN_IDS)[number];
@@ -361,30 +362,44 @@ export async function createRazorpaySubscriptionOrder(studentId: number, planId:
   const receipt = `tnpsc_${studentId}_${plan.id}_${Date.now()}`.slice(0, 40);
 
   const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`;
-  const rzpRes = await fetch('https://api.razorpay.com/v1/orders', {
-    method: 'POST',
-    headers: {
-      Authorization: authHeader,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      amount: amountPaise,
-      currency: plan.currency,
-      receipt,
-      notes: {
-        student_id: String(studentId),
-        student_email: String(student.email || ''),
-        plan_id: plan.id,
-        plan_name: plan.planName,
+  const rzpJson: any = await executeWithCircuitBreaker(
+    {
+      service: 'razorpay_orders',
+      maxRetries: 0, // Never retry non-idempotent payment order creation
+      fallback: () => {
+        throw Object.assign(
+          new Error('Payment gateway is temporarily unavailable. Please try again in a moment.'),
+          { statusCode: 503, code: 'PAYMENT_GATEWAY_UNAVAILABLE' }
+        );
       },
-    }),
-  });
-
-  const rzpJson: any = await rzpRes.json().catch(() => ({}));
-  if (!rzpRes.ok || !rzpJson?.id) {
-    const errMsg = rzpJson?.error?.description || 'Failed to create secure Razorpay order.';
-    throw Object.assign(new Error(errMsg), { statusCode: 502 });
-  }
+    },
+    async () => {
+      const rzpRes = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: amountPaise,
+          currency: plan.currency,
+          receipt,
+          notes: {
+            student_id: String(studentId),
+            student_email: String(student.email || ''),
+            plan_id: plan.id,
+            plan_name: plan.planName,
+          },
+        }),
+      });
+      const parsed: any = await rzpRes.json().catch(() => ({}));
+      if (!rzpRes.ok || !parsed?.id) {
+        const errMsg = parsed?.error?.description || 'Failed to create secure Razorpay order.';
+        throw Object.assign(new Error(errMsg), { statusCode: rzpRes.status >= 500 ? 502 : rzpRes.status || 502 });
+      }
+      return parsed;
+    }
+  );
 
   // Record pending transaction with authoritative backend price snapshot
   await recordVerifiedSubscriptionTransaction({
@@ -464,21 +479,30 @@ export async function verifyAndActivateRazorpayPayment(input: {
   let cardType: string | null = null;
   let verifiedAmountInr = plan.price;
 
-  try {
-    const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`;
-    const payRes = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, {
-      headers: { Authorization: authHeader },
-    });
-    if (payRes.ok) {
-      const payJson: any = await payRes.json();
-      rawMethod = payJson?.method || null;
-      cardType = payJson?.card?.type || null;
-      if (typeof payJson?.amount === 'number' && payJson.amount > 0) {
-        verifiedAmountInr = Math.round((payJson.amount / 100) * 100) / 100;
+  const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`;
+  const payJson = await executeWithCircuitBreaker<any | null>(
+    {
+      service: 'razorpay_payments_read',
+      fallback: () => null, // Non-fatal: payment method remains null -> "Not Available" (never fabricated)
+    },
+    async () => {
+      const payRes = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+        headers: { Authorization: authHeader },
+      });
+      if (!payRes.ok) {
+        const err: any = new Error(`Razorpay payment lookup failed (${payRes.status})`);
+        err.statusCode = payRes.status;
+        throw err;
       }
+      return await payRes.json();
     }
-  } catch {
-    // Non-fatal: payment method remains null -> displayed as "Not Available" (never fabricated)
+  );
+  if (payJson) {
+    rawMethod = payJson?.method || null;
+    cardType = payJson?.card?.type || null;
+    if (typeof payJson?.amount === 'number' && payJson.amount > 0) {
+      verifiedAmountInr = Math.round((payJson.amount / 100) * 100) / 100;
+    }
   }
 
   const stuRes = await pool.query(`SELECT id, email, district FROM students WHERE id = $1`, [input.studentId]);

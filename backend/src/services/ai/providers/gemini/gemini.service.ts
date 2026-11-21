@@ -20,6 +20,7 @@ import {
 } from './gemini.config';
 import { parseGeminiJsonResponse, classifyGeminiError } from './gemini.validator';
 import { GeminiRetryService } from './geminiRetryService';
+import { executeWithCircuitBreaker } from '../../../circuitBreakerService';
 import pool from '../../../../db';
 
 export class GeminiProviderService implements IAIProvider {
@@ -180,8 +181,11 @@ export class GeminiProviderService implements IAIProvider {
 
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    const execResult = await GeminiRetryService.executeWithRetryAndFallback<string>(
-      async (currentModel: string) => {
+    const execResult = await executeWithCircuitBreaker(
+      { service: 'gemini_api', maxRetries: 0 },
+      () =>
+        GeminiRetryService.executeWithRetryAndFallback<string>(
+          async (currentModel: string) => {
         const modelConfig: any = {
           model: currentModel,
           generationConfig: {
@@ -232,6 +236,7 @@ export class GeminiProviderService implements IAIProvider {
       {
         primaryModel,
       }
+    )
     );
 
     return execResult.data;

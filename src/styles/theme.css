@@ -353,6 +353,8 @@ p, span, h1, h2, h3, h4, h5, h6, a, button, label {
   font-size: 0.95rem;
   font-weight: 600;
   font-family: inherit;
+  line-height: 1.25;
+  text-align: center;
   border: 1px solid transparent;
   text-decoration: none;
   cursor: pointer;

@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     target: 'es2020',
-    cssCodeSplit: true,
+    cssCodeSplit: false,
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

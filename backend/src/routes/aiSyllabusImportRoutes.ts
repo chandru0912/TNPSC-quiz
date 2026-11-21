@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 import { AISyllabusEngineService } from '../services/aiSyllabusEngineService';
 import { AISyllabusJobService } from '../services/aiSyllabusJobService';
 import { requireAdminAuth } from '../middleware/auth';
+import { aiGenerationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -130,7 +131,7 @@ router.get('/canonical-units', requireAdminAuth, async (req: Request, res: Respo
  * POST /api/study-management/ai-import/generate-notes
  * Step 10: Generate bilingual study notes for a specific lesson
  */
-router.post('/generate-notes', requireAdminAuth, async (req: Request, res: Response) => {
+router.post('/generate-notes', requireAdminAuth, aiGenerationLimiter, async (req: Request, res: Response) => {
   try {
     const { lessonTitle, standard, topics } = req.body;
 
@@ -162,7 +163,7 @@ router.post('/generate-notes', requireAdminAuth, async (req: Request, res: Respo
  * POST /api/study-management/ai-import/generate-mcqs
  * Step 11: Generate exam-standard 4-option MCQs for a lesson
  */
-router.post('/generate-mcqs', requireAdminAuth, async (req: Request, res: Response) => {
+router.post('/generate-mcqs', requireAdminAuth, aiGenerationLimiter, async (req: Request, res: Response) => {
   try {
     const { lessonTitle, standard, topics } = req.body;
 

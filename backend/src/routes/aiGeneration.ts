@@ -9,6 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireAdminAuth } from '../middleware/auth';
+import { aiGenerationLimiter } from '../middleware/rateLimiter';
 import { CloudContentOrchestrator, UnifiedGenerationRequest } from '../services/cloudContentOrchestrator';
 import { CloudAIService } from '../services/cloudAi/cloudAiService';
 import { AIProviderFactory } from '../services/ai/ai-provider.factory';
@@ -286,7 +287,7 @@ router.post('/test-connection', requireAdminAuth, async (req: Request, res: Resp
  * Unified AI Generator for Study Notes, MCQs, or Both using selected provider.
  * Supports Server-Sent Events (SSE) streaming when ?stream=true.
  */
-router.post('/generate', requireAdminAuth, async (req: Request, res: Response) => {
+router.post('/generate', requireAdminAuth, aiGenerationLimiter, async (req: Request, res: Response) => {
   const isStream = req.query.stream === 'true' || req.headers.accept?.includes('text/event-stream');
 
   if (isStream) {

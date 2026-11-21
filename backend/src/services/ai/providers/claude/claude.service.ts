@@ -20,6 +20,7 @@ import {
 } from './claude.config';
 import { parseClaudeJsonResponse, classifyClaudeError } from './claude.validator';
 import pool from '../../../../db';
+import { executeWithCircuitBreaker } from '../../../circuitBreakerService';
 
 export class ClaudeProviderService implements IAIProvider {
   readonly name: AIProviderName = 'claude';
@@ -193,12 +194,16 @@ export class ClaudeProviderService implements IAIProvider {
         : '';
 
     try {
-      const response = await client.messages.create({
-        model: getClaudeModel(),
-        max_tokens: options?.maxTokens || 4096,
-        system: options?.systemPrompt ? `${options.systemPrompt}${jsonInstruction}` : undefined,
-        messages: [{ role: 'user', content: `${prompt}${jsonInstruction}` }],
-      });
+      const response = await executeWithCircuitBreaker(
+        { service: 'claude_api', maxRetries: 0 }, // Anthropic SDK manages its own retries
+        async () =>
+          client.messages.create({
+            model: getClaudeModel(),
+            max_tokens: options?.maxTokens || 4096,
+            system: options?.systemPrompt ? `${options.systemPrompt}${jsonInstruction}` : undefined,
+            messages: [{ role: 'user', content: `${prompt}${jsonInstruction}` }],
+          })
+      );
 
       if (response.stop_reason === 'max_tokens') {
         throw new Error('Claude response reached max token limit. Please request a smaller batch or short notes.');

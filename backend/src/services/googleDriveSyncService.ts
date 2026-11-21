@@ -96,45 +96,74 @@ async function ensureTextbookRecord(params: {
   term: string;
   fileSize: number;
 }): Promise<boolean> {
+  const cleanBookName = params.bookName.replace(/\.pdf$/i, '').trim();
+  const driveFilePath = params.googleDriveFileId ? `gdrive://${params.googleDriveFileId}` : null;
+
   if (params.googleDriveFileId) {
     const byDriveId = await pool.query(
-      `SELECT id FROM textbooks WHERE google_drive_file_id = $1 LIMIT 1`,
-      [params.googleDriveFileId]
+      `SELECT id, google_drive_file_id, file_path FROM textbooks
+       WHERE google_drive_file_id = $1 OR file_path = $2
+       ORDER BY id ASC
+       LIMIT 1`,
+      [params.googleDriveFileId, driveFilePath]
     );
     if (byDriveId.rows.length > 0) {
+      const row = byDriveId.rows[0];
+      // Backfill google_drive_file_id or file_path ONLY when missing — never overwrite a different Drive ID
+      if (!row.google_drive_file_id && row.file_path === driveFilePath) {
+        await pool.query(
+          `UPDATE textbooks SET google_drive_file_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [params.googleDriveFileId, row.id]
+        );
+      } else if (row.google_drive_file_id === params.googleDriveFileId && !row.file_path) {
+        await pool.query(
+          `UPDATE textbooks SET file_path = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [driveFilePath, row.id]
+        );
+      }
       return false;
     }
   }
 
+  // Only match an UNLINKED legacy textbook row (both google_drive_file_id IS NULL and file_path not pointing to another gdrive:// file)
   const existing = await pool.query(
-    `SELECT id, google_drive_file_id FROM textbooks
-     WHERE LOWER(book_name) = LOWER($1)
-        OR (standard = $2 AND LOWER(subject) = LOWER($3) AND LOWER(COALESCE(medium, 'Tamil')) = LOWER($4) AND LOWER(COALESCE(term, 'Full Year')) = LOWER($5))
+    `SELECT id FROM textbooks
+     WHERE google_drive_file_id IS NULL
+       AND (file_path IS NULL OR file_path NOT LIKE 'gdrive://%')
+       AND (
+         LOWER(book_name) = LOWER($1)
+         OR (standard = $2 AND LOWER(subject) = LOWER($3) AND LOWER(COALESCE(medium, 'Tamil')) = LOWER($4) AND LOWER(COALESCE(term, 'Full Year')) = LOWER($5))
+       )
      ORDER BY id ASC
      LIMIT 1`,
-    [params.bookName, params.standard, params.subject, params.medium, params.term]
+    [cleanBookName, params.standard, params.subject, params.medium, params.term]
   );
 
   if (existing.rows.length > 0) {
-    if (params.googleDriveFileId && !existing.rows[0].google_drive_file_id) {
+    if (params.googleDriveFileId) {
       await pool.query(
-        `UPDATE textbooks SET google_drive_file_id = $1 WHERE id = $2 AND google_drive_file_id IS NULL`,
-        [params.googleDriveFileId, existing.rows[0].id]
+        `UPDATE textbooks
+         SET google_drive_file_id = $1,
+             file_path = COALESCE(file_path, $2),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND google_drive_file_id IS NULL`,
+        [params.googleDriveFileId, driveFilePath, existing.rows[0].id]
       );
     }
     return false;
   }
 
   await pool.query(
-    `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_size, google_drive_file_id, status, extraction_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'completed', 'PENDING')`,
+    `INSERT INTO textbooks (group_id, standard, subject, medium, term, book_name, file_path, file_size, google_drive_file_id, status, extraction_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'completed', 'PENDING')`,
     [
       params.groupId,
       params.standard,
       params.subject,
       params.medium,
       params.term,
-      params.bookName,
+      cleanBookName,
+      driveFilePath,
       params.fileSize,
       params.googleDriveFileId || null,
     ]

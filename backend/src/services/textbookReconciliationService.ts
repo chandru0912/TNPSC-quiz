@@ -62,6 +62,61 @@ function toBookNameWithoutExt(fileName: string): string {
   return fileName.replace(/\.pdf$/i, '').trim();
 }
 
+function inferAuthoritativeMetadata(mat: any): {
+  standard: number;
+  subject: string;
+  medium: 'Tamil' | 'English';
+  term: string;
+  fileName: string;
+  bookName: string;
+  changed: boolean;
+} {
+  const orig = String(mat.original_file_name || mat.file_name || '');
+  const origLower = orig.toLowerCase();
+
+  let standard = Number(mat.standard || 6);
+  let subject = String(mat.subject || 'General Studies').trim();
+  let medium: 'Tamil' | 'English' = String(mat.medium || 'Tamil').toLowerCase() === 'english' ? 'English' : 'Tamil';
+  const term = String(mat.term || 'Full Year').trim() || 'Full Year';
+
+  // Detect standard from original filename when misclassified (including "11thth_" typo)
+  if (/11thth|class[_ -]?11|\b11th\b/i.test(origLower)) standard = 11;
+  else if (/class[_ -]?12|\b12th\b/i.test(origLower)) standard = 12;
+
+  // Detect Ethics and Indian Culture (11th / 12th)
+  if (/ethics\s*and\s*indian\s*culture/i.test(origLower)) {
+    subject = 'Ethics and Indian Culture';
+    medium = /_em_|english/i.test(origLower) ? 'English' : 'Tamil';
+  } else if (/advance\s*tamil/i.test(origLower)) {
+    subject = 'Advance Tamil';
+    medium = 'Tamil';
+  } else if (
+    VERIFIED_ENGLISH_MEDIUM_DRIVE_IDS.has(mat.google_drive_file_id) ||
+    (/(?:_english_|english_medium|\benglish\b|_em_)/i.test(origLower) && !/^class[_ -]?\d+[_ -]?english/i.test(origLower) && !/tamil_medium|_tm_/i.test(origLower))
+  ) {
+    medium = 'English';
+  }
+
+  let fileName = String(mat.file_name || '').trim();
+  if (subject === 'Ethics and Indian Culture' || subject === 'Advance Tamil') {
+    const cleanTerm = subject === 'Ethics and Indian Culture' ? 'Full Year' : term;
+    fileName = `Samacheer Kalvi ${standard}th Standard - ${subject} - ${cleanTerm} - ${medium} Medium.pdf`;
+  } else if (medium === 'English') {
+    fileName = toEnglishFileName(fileName || `Samacheer Kalvi ${standard}th Standard - ${subject} - ${term}`);
+  }
+
+  const effectiveTerm = subject === 'Ethics and Indian Culture' ? 'Full Year' : term;
+  const bookName = toBookNameWithoutExt(fileName);
+  const changed =
+    standard !== Number(mat.standard || 0) ||
+    subject !== String(mat.subject || '') ||
+    medium !== String(mat.medium || '') ||
+    effectiveTerm !== String(mat.term || '') ||
+    fileName !== String(mat.file_name || '');
+
+  return { standard, subject, medium, term: effectiveTerm, fileName, bookName, changed };
+}
+
 export interface ReconciliationResult {
   dryRun: boolean;
   activeDrivePdfs: number;
@@ -70,6 +125,8 @@ export interface ReconciliationResult {
   englishTextbooksInserted: number;
   englishTextbooksUpdated: number;
   existingTextbooksBackfilled: number;
+  splitCollisionsFixed: number;
+  missingTextbooksCreated: number;
   uniqueMappedTextbooks: number;
   unmappedActiveDrivePdfs: number;
   duplicateMappings: number;
@@ -115,6 +172,159 @@ export async function reconcileTextbooksWithDrive(options: { dryRun?: boolean } 
     let englishTextbooksInserted = 0;
     let englishTextbooksUpdated = 0;
     let existingTextbooksBackfilled = 0;
+    let splitCollisionsFixed = 0;
+    let missingTextbooksCreated = 0;
+
+    const matByDriveId = new Map<string, any>();
+    for (const mat of activeMaterials) {
+      matByDriveId.set(mat.google_drive_file_id, mat);
+    }
+
+    // 0. Normalize misclassified google_drive_materials metadata from original_file_name first
+    for (const mat of activeMaterials) {
+      const meta = inferAuthoritativeMetadata(mat);
+      if (meta.changed) {
+        await client.query(
+          `UPDATE google_drive_materials
+           SET standard = $1,
+               subject = $2,
+               medium = $3,
+               term = $4,
+               file_name = $5,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $6`,
+          [meta.standard, meta.subject, meta.medium, meta.term, meta.fileName, mat.id]
+        );
+        mat.standard = meta.standard;
+        mat.subject = meta.subject;
+        mat.medium = meta.medium;
+        mat.term = meta.term;
+        mat.file_name = meta.fileName;
+        if (meta.medium === 'English') englishDriveMaterialsUpdated++;
+      }
+    }
+
+    // 0b. Fix split textbook collisions where google_drive_file_id != REPLACE(file_path, 'gdrive://', '')
+    const splitRes = await client.query(
+      `SELECT id, book_name, google_drive_file_id, file_path
+       FROM textbooks
+       WHERE google_drive_file_id IS NOT NULL
+         AND file_path LIKE 'gdrive://%'
+         AND file_path != ('gdrive://' || google_drive_file_id)
+       ORDER BY id ASC`
+    );
+
+    for (const tb of splitRes.rows) {
+      const g1DriveId = String(tb.google_drive_file_id).trim();
+      const g2DriveId = String(tb.file_path).replace(/^gdrive:\/\//, '').trim();
+      const g1 = matByDriveId.get(g1DriveId);
+      const g2 = matByDriveId.get(g2DriveId);
+      if (!g1 || !g2) continue;
+
+      // Decide which material stays on the existing textbook row (prefer the one matching the existing book's standard/subject/medium)
+      const g1MatchesTb =
+        Number(g1.standard) === Number(tb.standard || g1.standard) &&
+        String(tb.book_name || '').toLowerCase().includes(String(g1.subject || '').toLowerCase()) &&
+        String(tb.book_name || '').toLowerCase().includes(`${String(g1.medium || '').toLowerCase()} medium`);
+      const keepMat = g1MatchesTb ? g1 : g2;
+      const splitMat = keepMat.id === g1.id ? g2 : g1;
+
+      const keepMeta = inferAuthoritativeMetadata(keepMat);
+      const splitMeta = inferAuthoritativeMetadata(splitMat);
+
+      // Update existing row to cleanly point 1-to-1 to keepMat
+      await client.query(
+        `UPDATE textbooks
+         SET group_id = $1,
+             standard = $2,
+             subject = $3,
+             medium = $4,
+             term = $5,
+             book_name = $6,
+             file_path = $7,
+             file_size = $8,
+             google_drive_file_id = $9,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $10`,
+        [
+          keepMat.tnpsc_group || 'group4',
+          keepMeta.standard,
+          keepMeta.subject,
+          keepMeta.medium,
+          keepMeta.term,
+          keepMeta.bookName,
+          `gdrive://${keepMat.google_drive_file_id}`,
+          Number(keepMat.file_size || 0),
+          keepMat.google_drive_file_id,
+          tb.id,
+        ]
+      );
+
+      // Create dedicated 1-to-1 textbook row for splitMat (if not already present)
+      const existingSplitTb = await client.query(
+        `SELECT id FROM textbooks WHERE google_drive_file_id = $1 LIMIT 1`,
+        [splitMat.google_drive_file_id]
+      );
+      let newTbId: number;
+      if (existingSplitTb.rows.length > 0) {
+        newTbId = Number(existingSplitTb.rows[0].id);
+      } else {
+        const insSplit = await client.query(
+          `INSERT INTO textbooks (
+             group_id, standard, subject, medium, term, book_name, file_path,
+             file_size, page_count, status, pdf_type, total_pages,
+             native_pages, ocr_pages, failed_pages, completion_percentage,
+             extraction_status, extraction_method, extracted_at, google_drive_file_id
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'completed', $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+           RETURNING id`,
+          [
+            splitMat.tnpsc_group || 'group4',
+            splitMeta.standard,
+            splitMeta.subject,
+            splitMeta.medium,
+            splitMeta.term,
+            splitMeta.bookName,
+            `gdrive://${splitMat.google_drive_file_id}`,
+            Number(splitMat.file_size || 0),
+            splitMat.page_count || splitMat.total_pages || 0,
+            splitMat.pdf_type || 'UNKNOWN',
+            splitMat.total_pages || splitMat.page_count || 0,
+            splitMat.native_pages || 0,
+            splitMat.ocr_pages || 0,
+            splitMat.failed_pages || 0,
+            splitMat.completion_percentage || 0,
+            splitMat.extraction_status || 'PENDING',
+            splitMat.extraction_method || 'native',
+            splitMat.extracted_at || null,
+            splitMat.google_drive_file_id,
+          ]
+        );
+        newTbId = Number(insSplit.rows[0].id);
+      }
+
+      // Re-assign textbook_content & pdf_extractions belonging to splitMat so zero extracted pages are mixed
+      await client.query(
+        `UPDATE textbook_content
+         SET textbook_id = $1, file_name = $2, standard = $3, subject = $4, term = $5
+         WHERE textbook_id = $6 AND material_id = $7`,
+        [newTbId, splitMeta.fileName, splitMeta.standard, splitMeta.subject, splitMeta.term, tb.id, splitMat.id]
+      );
+      await client.query(
+        `UPDATE pdf_extractions
+         SET textbook_id = $1, file_name = $2, google_drive_file_id = $3, updated_at = CURRENT_TIMESTAMP
+         WHERE material_id = $4 OR google_drive_file_id = $3`,
+        [newTbId, splitMeta.fileName, splitMat.google_drive_file_id, splitMat.id]
+      );
+      await client.query(
+        `UPDATE pdf_extractions
+         SET textbook_id = $1, file_name = $2, google_drive_file_id = $3, updated_at = CURRENT_TIMESTAMP
+         WHERE material_id = $4 OR google_drive_file_id = $3`,
+        [tb.id, keepMeta.fileName, keepMat.google_drive_file_id, keepMat.id]
+      );
+
+      splitCollisionsFixed++;
+    }
 
     // 1. Process the 27 verified English Medium Drive File IDs first
     for (const mat of activeMaterials) {
@@ -283,9 +493,10 @@ export async function reconcileTextbooksWithDrive(options: { dryRun?: boolean } 
         await client.query(
           `UPDATE textbooks
            SET google_drive_file_id = $1,
+               file_path = COALESCE(file_path, $2),
                updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2`,
-          [mat.google_drive_file_id, tb.id]
+           WHERE id = $3`,
+          [mat.google_drive_file_id, `gdrive://${mat.google_drive_file_id}`, tb.id]
         );
         existingTextbooksBackfilled++;
         backfilled.push({
@@ -293,6 +504,59 @@ export async function reconcileTextbooksWithDrive(options: { dryRun?: boolean } 
           bookName: tb.book_name,
           googleDriveFileId: mat.google_drive_file_id,
         });
+      } else {
+        // Insert missing textbook record 1-to-1 for this active Drive PDF
+        const meta = inferAuthoritativeMetadata(mat);
+        const insMissing = await client.query(
+          `INSERT INTO textbooks (
+             group_id, standard, subject, medium, term, book_name, file_path,
+             file_size, page_count, status, pdf_type, total_pages,
+             native_pages, ocr_pages, failed_pages, completion_percentage,
+             extraction_status, extraction_method, extracted_at, google_drive_file_id
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'completed', $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+          [
+            mat.tnpsc_group || 'group4',
+            meta.standard,
+            meta.subject,
+            meta.medium,
+            meta.term,
+            meta.bookName,
+            `gdrive://${mat.google_drive_file_id}`,
+            Number(mat.file_size || 0),
+            mat.page_count || mat.total_pages || 0,
+            mat.pdf_type || 'UNKNOWN',
+            mat.total_pages || mat.page_count || 0,
+            mat.native_pages || 0,
+            mat.ocr_pages || 0,
+            mat.failed_pages || 0,
+            mat.completion_percentage || 0,
+            mat.extraction_status || 'PENDING',
+            mat.extraction_method || 'native',
+            mat.extracted_at || null,
+            mat.google_drive_file_id,
+          ]
+        );
+        if (insMissing.rows.length > 0) {
+          const newTbId = Number(insMissing.rows[0].id);
+          await client.query(
+            `UPDATE textbook_content SET textbook_id = $1 WHERE material_id = $2`,
+            [newTbId, mat.id]
+          );
+          await client.query(
+            `UPDATE pdf_extractions SET textbook_id = $1, file_name = $2, google_drive_file_id = $3, updated_at = CURRENT_TIMESTAMP
+             WHERE material_id = $4 OR google_drive_file_id = $3`,
+            [newTbId, meta.fileName, mat.google_drive_file_id, mat.id]
+          );
+          missingTextbooksCreated++;
+          backfilled.push({
+            textbookId: newTbId,
+            bookName: meta.bookName,
+            googleDriveFileId: mat.google_drive_file_id,
+          });
+        }
       }
     }
 
@@ -337,6 +601,8 @@ export async function reconcileTextbooksWithDrive(options: { dryRun?: boolean } 
       englishTextbooksInserted,
       englishTextbooksUpdated,
       existingTextbooksBackfilled,
+      splitCollisionsFixed,
+      missingTextbooksCreated,
       uniqueMappedTextbooks: Number(uniqueMappedRes.rows[0]?.cnt || 0),
       unmappedActiveDrivePdfs: unmappedDriveIds.length,
       duplicateMappings: dupRes.rows.length,

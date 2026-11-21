@@ -4,6 +4,7 @@ import os from 'os';
 import { Router, Request, Response, NextFunction } from 'express';
 import pool from '../db';
 import { requireAdminAuth, requireStudentOrAdminAuth, AuthenticatedRequest } from '../middleware/auth';
+import { fileUploadLimiter } from '../middleware/rateLimiter';
 import {
   getAuthorizationUrl,
   handleOAuthCallback,
@@ -36,6 +37,9 @@ import {
   processAutomaticPdfExtraction,
   ensureExtractionJobForMaterial,
   getOverallExtractionOverview,
+  getFailedExtractionPages,
+  retryAllFailedPages,
+  hydrateExtractedPagesFromJsonb,
 } from '../services/pdfExtractionService';
 import {
   syncGoogleDriveToDatabase,
@@ -267,7 +271,7 @@ router.post('/disconnect', requireAdminAuth, async (_req: AuthenticatedRequest, 
  * POST /api/drive/upload/initiate
  * Admin only: Validates PDF metadata and initiates a direct Google Drive Resumable Upload session.
  */
-router.post('/upload/initiate', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/upload/initiate', requireAdminAuth, fileUploadLimiter, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const {
       fileName,
@@ -807,15 +811,19 @@ router.get('/reconcile-textbooks/compare-55-8', requireAdminAuth, async (_req: R
 /**
  * POST /api/drive/extract-all-pending
  * Admin only: Scans for all active textbooks/materials without completed text extraction and processes them.
- * Supports ?chunked=true&limit=1 for Vercel serverless timeout safety.
+ * Supports ?chunked=true&limit=1&concurrency=3&retryFailed=false for Vercel serverless & fast local execution.
  */
 router.post('/extract-all-pending', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const chunked = req.query.chunked === 'true' || req.body?.chunked === true || Boolean(process.env.VERCEL);
+    const retryFailed = req.query.retryFailed === 'true' || req.body?.retryFailed === true;
     const limitParam = parseInt(String(req.query.limit || req.body?.limit || ''), 10);
+    const concurrencyParam = parseInt(String(req.query.concurrency || req.body?.concurrency || ''), 10);
     const summary = await extractAllPendingMaterials({
       chunked,
+      retryFailed,
       limit: !isNaN(limitParam) && limitParam > 0 ? limitParam : undefined,
+      concurrency: !isNaN(concurrencyParam) && concurrencyParam > 0 ? concurrencyParam : undefined,
     });
     return res.status(200).json({
       status: 'success',
@@ -827,6 +835,58 @@ router.post('/extract-all-pending', requireAdminAuth, async (req: Request, res: 
   } catch (err: any) {
     console.error('[DriveExtractAllPending] Error:', err.message);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to process pending materials.' });
+  }
+});
+
+/**
+ * GET /api/drive/extraction-failed-pages
+ * Admin only: Lists all failed pages with textbook/material IDs, retry counts, and latest error messages.
+ */
+router.get('/extraction-failed-pages', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const pages = await getFailedExtractionPages();
+    return res.status(200).json({
+      status: 'success',
+      count: pages.length,
+      data: pages,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to list failed pages.' });
+  }
+});
+
+/**
+ * POST /api/drive/retry-all-failed
+ * Admin only: Retries all failed pages across all PDFs with bounded retries and saves any recovered text.
+ */
+router.post('/retry-all-failed', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const result = await retryAllFailedPages();
+    return res.status(200).json({
+      status: 'success',
+      message: `Retried failed pages across ${result.materialsRetried} PDF(s): ${result.recoveredPages} resolved, ${result.remainingFailedPages} remaining failed.`,
+      data: result,
+    });
+  } catch (err: any) {
+    console.error('[DriveRetryAllFailed] Error:', err.message);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to retry failed pages.' });
+  }
+});
+
+/**
+ * POST /api/drive/hydrate-extracted
+ * Admin only: Fast DB-only sync of already-extracted JSONB pages into textbook_content & overview counters.
+ */
+router.post('/hydrate-extracted', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const result = await hydrateExtractedPagesFromJsonb();
+    return res.status(200).json({
+      status: 'success',
+      message: `Hydrated ${result.hydratedPages} pages across ${result.hydratedMaterials} completed PDFs.`,
+      data: result,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message || 'Hydration failed.' });
   }
 });
 

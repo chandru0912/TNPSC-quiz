@@ -1,0 +1,127 @@
+name: TNPSC Study Hub CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+# Cancel redundant in-progress runs on the same PR / branch
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege permissions (no write access, no production secrets on PRs)
+permissions:
+  contents: read
+
+jobs:
+  frontend-ci:
+    name: Frontend Typecheck & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies (lockfile)
+        run: npm ci
+
+      - name: Frontend TypeScript validation
+        run: npx tsc --noEmit
+
+      - name: Frontend production build
+        run: npm run build
+
+  backend-ci:
+    name: Backend Typecheck, Build & Security Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies (lockfile)
+        working-directory: backend
+        run: npm ci
+
+      - name: Backend TypeScript validation
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Backend production build
+        working-directory: backend
+        run: npm run build
+
+      - name: Run automated rate-limiting, security & caching tests
+        working-directory: backend
+        env:
+          NODE_ENV: test
+          ADMIN_JWT_SECRET: ci_ephemeral_admin_jwt_secret_only
+          STUDENT_JWT_SECRET: ci_ephemeral_student_jwt_secret_only
+        run: npm test
+
+  migration-validation:
+    name: Database Migration Safety & Ephemeral Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tnpsc_ci
+          POSTGRES_PASSWORD: tnpsc_ci_ephemeral_password
+          POSTGRES_DB: tnpsc_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies (lockfile)
+        working-directory: backend
+        run: npm ci
+
+      - name: Static destructive-SQL check & ephemeral PostgreSQL migration test
+        working-directory: backend
+        env:
+          NODE_ENV: test
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: tnpsc_ci_test
+          PGUSER: tnpsc_ci
+          PGPASSWORD: tnpsc_ci_ephemeral_password
+        run: npx tsx src/scripts/validateMigrations.ts --apply-ephemeral

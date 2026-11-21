@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { executeWithCircuitBreaker } from './circuitBreakerService';
 
 export interface VerifiedGoogleProfile {
   googleId: string;
@@ -104,10 +105,14 @@ export async function verifyGoogleCredentialOrCode(params: {
 
     let tokens: any;
     try {
-      const tokenResponse = await oauth2Client.getToken({
-        code: authCode,
-        redirect_uri: effectiveRedirect,
-      });
+      const tokenResponse = await executeWithCircuitBreaker(
+        { service: 'google_oauth', maxRetries: 0 }, // Authorization codes are single-use
+        () =>
+          oauth2Client.getToken({
+            code: authCode,
+            redirect_uri: effectiveRedirect,
+          })
+      );
       tokens = tokenResponse.tokens;
     } catch (err: any) {
       const googleErrMsg = err?.response?.data?.error_description || err?.response?.data?.error || err?.message || '';

@@ -148,14 +148,16 @@
   margin-top: 0.75rem;
 }
 
-.btn {
+.home .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.6rem;
   padding: 0.875rem 1.85rem;
   border-radius: 9999px;
   font-size: 0.95rem;
   font-weight: 600;
+  line-height: 1.25;
   transition: var(--transition);
   border: none;
   text-decoration: none;
@@ -164,19 +166,19 @@
   overflow: hidden;
 }
 
-.btn-primary {
+.home .btn-primary {
   background: var(--gradient-primary);
   color: #060913;
   box-shadow: 0 8px 24px rgba(255, 215, 0, 0.35);
 }
 
-.btn-primary:hover {
+.home .btn-primary:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 32px rgba(255, 215, 0, 0.55);
   color: #060913;
 }
 
-.btn-secondary {
+.home .btn-secondary {
   background: rgba(22, 32, 58, 0.6);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -185,7 +187,7 @@
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
-.btn-secondary:hover {
+.home .btn-secondary:hover {
   background: rgba(255, 215, 0, 0.12);
   border-color: var(--gold-primary);
   color: var(--gold-primary);
@@ -193,7 +195,7 @@
   box-shadow: 0 10px 28px rgba(255, 215, 0, 0.25);
 }
 
-.btn-large {
+.home .btn-large {
   padding: 1rem 2.25rem;
   font-size: 1.1rem;
 }

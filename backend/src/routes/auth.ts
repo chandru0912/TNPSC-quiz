@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db';
 import { generateAdminToken, requireAdminAuth, AuthenticatedRequest } from '../middleware/auth';
+import { adminLoginLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -114,7 +115,7 @@ function getEnvAdmins(): EnvAdmin[] {
  * Validates admin credentials against database and .env, then issues a secure token
  * Environment variables take precedence to ensure production login works reliably
  */
-router.post(['/login', '/', '/api/admin/login', '/admin/login'], async (req: Request, res: Response) => {
+router.post(['/login', '/', '/api/admin/login', '/admin/login'], adminLoginLimiter, async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   if (!username || !password) {

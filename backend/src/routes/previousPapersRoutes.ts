@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
+import { fileUploadLimiter } from '../middleware/rateLimiter';
 import {
   requireAdminAuth,
   requireStudentAuth,
@@ -90,6 +91,7 @@ adminPreviousPapersRouter.get('/:id(\\d+)', async (req: Request, res: Response) 
 // POST /api/admin/previous-papers/upload (multipart: questionPdf + optional answerKeyPdf)
 adminPreviousPapersRouter.post(
   '/upload',
+  fileUploadLimiter,
   pdfUpload.fields([
     { name: 'questionPdf', maxCount: 1 },
     { name: 'answerKeyPdf', maxCount: 1 },

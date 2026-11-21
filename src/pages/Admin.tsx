@@ -476,6 +476,9 @@ const Admin = () => {
     }
   } | null>(null)
   const [isExtractingAllPending, setIsExtractingAllPending] = useState(false)
+  const [extractBatchStatusText, setExtractBatchStatusText] = useState<string>('')
+  const [isRetryingAllFailed, setIsRetryingAllFailed] = useState(false)
+  const stopExtractionRef = useRef(false)
   const [extractingMaterialId, setExtractingMaterialId] = useState<number | null>(null)
   const [isSyncingDrive, setIsSyncingDrive] = useState(false)
   const [driveTotalCount, setDriveTotalCount] = useState<number>(0)
@@ -505,7 +508,7 @@ const Admin = () => {
   const [textbookMediumFilter, setTextbookMediumFilter] = useState('all')
   const [textbookStatusFilter, setTextbookStatusFilter] = useState('all')
   const [textbookPage, setTextbookPage] = useState(1)
-  const textbookPageSize = 25
+  const [textbookPageSize, setTextbookPageSize] = useState<number>(25)
 
   // Textbook Modals & Actions
   const [isUploadTextbookModalOpen, setIsUploadTextbookModalOpen] = useState(false)
@@ -685,7 +688,7 @@ const Admin = () => {
     const currentPage = Math.min(textbookPage, textbookTotalPages)
     const start = (currentPage - 1) * textbookPageSize
     return filteredTextbooks.slice(start, start + textbookPageSize)
-  }, [filteredTextbooks, textbookPage, textbookTotalPages])
+  }, [filteredTextbooks, textbookPage, textbookTotalPages, textbookPageSize])
 
   // Multi-selection handlers for Textbooks
   const handleToggleSelectTextbook = (id: number) => {
@@ -1610,14 +1613,16 @@ const Admin = () => {
 
   // Extract all pending PDF materials (resumable chunked loop for Vercel & Localhost)
   const handleExtractAllPendingMaterials = async () => {
+    stopExtractionRef.current = false
     setIsExtractingAllPending(true)
+    setExtractBatchStatusText('Starting...')
     try {
       const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
       showToast('success', 'Starting resumable batch extraction for pending PDF textbooks...')
       let hasMore = true
       let iterations = 0
       let totalSucceeded = 0
-      while (hasMore && iterations < 2000) {
+      while (hasMore && iterations < 2000 && !stopExtractionRef.current) {
         iterations++
         let res: Response | null = null
         let json: any = null
@@ -1648,17 +1653,55 @@ const Admin = () => {
           break
         }
         totalSucceeded += Number(json.data?.succeeded || 0)
+        const remaining = Number(json.data?.remaining ?? 0)
+        const activeMat = json.data?.materials?.[0]
+        setExtractBatchStatusText(
+          activeMat?.totalPages
+            ? `${activeMat.extractedPages || 0}/${activeMat.totalPages} pgs • ${remaining} PDF(s) left`
+            : `${remaining} PDF(s) remaining`
+        )
         hasMore = Boolean(json.data?.hasMore)
         fetchDriveMaterials()
         fetchExtractionOverview()
         if (!hasMore) {
+          fetchTextbooks(true)
           showToast('success', `Batch PDF extraction completed (${totalSucceeded} processed)!`)
         }
+      }
+      if (stopExtractionRef.current) {
+        fetchTextbooks(true)
+        showToast('success', 'Batch extraction paused. All completed pages were saved and can be resumed anytime.')
       }
     } catch (err: any) {
       showToast('error', err.message || 'Batch extraction failed.')
     } finally {
       setIsExtractingAllPending(false)
+      setExtractBatchStatusText('')
+      stopExtractionRef.current = false
+    }
+  }
+
+  const handleRetryAllFailedPages = async () => {
+    setIsRetryingAllFailed(true)
+    try {
+      const activeToken = token || localStorage.getItem('tnpsc_admin_token') || ''
+      const res = await apiFetch('/api/drive/retry-all-failed', {
+        method: 'POST',
+        headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+      })
+      const json = await res.json()
+      if (res.ok && json.status === 'success') {
+        showToast('success', json.message || 'Retried all failed pages.')
+        fetchDriveMaterials()
+        fetchExtractionOverview()
+        fetchTextbooks(true)
+      } else {
+        showToast('error', json.message || 'Failed to retry failed pages.')
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to retry failed pages.')
+    } finally {
+      setIsRetryingAllFailed(false)
     }
   }
 
@@ -4522,8 +4565,59 @@ const Admin = () => {
                     }}
                   >
                     <RefreshCw size={14} className={isExtractingAllPending ? 'spinning' : ''} />
-                    <span>{isExtractingAllPending ? 'Extracting Pending PDFs...' : 'Extract All Pending PDFs'}</span>
+                    <span>
+                      {isExtractingAllPending
+                        ? (extractBatchStatusText ? `Extracting (${extractBatchStatusText})` : 'Extracting Pending PDFs...')
+                        : 'Extract All Pending PDFs'}
+                    </span>
                   </button>
+
+                  {isExtractingAllPending && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        stopExtractionRef.current = true
+                      }}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.16)',
+                        border: '1px solid rgba(239, 68, 68, 0.4)',
+                        color: '#fca5a5',
+                        borderRadius: '8px',
+                        padding: '0.45rem 0.75rem',
+                        fontSize: '0.82rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                      title="Pause extraction safely after current slice"
+                    >
+                      Pause
+                    </button>
+                  )}
+
+                  {(extractionOverview?.failedPages ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRetryAllFailedPages}
+                      disabled={isRetryingAllFailed || isExtractingAllPending}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.18)',
+                        border: '1px solid rgba(239, 68, 68, 0.45)',
+                        color: '#fca5a5',
+                        borderRadius: '8px',
+                        padding: '0.45rem 0.75rem',
+                        fontSize: '0.82rem',
+                        fontWeight: 600,
+                        cursor: isRetryingAllFailed ? 'wait' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                      title="Retry all failed pages across all PDFs"
+                    >
+                      <RefreshCw size={13} className={isRetryingAllFailed ? 'spinning' : ''} />
+                      <span>{isRetryingAllFailed ? 'Retrying...' : `Retry Failed (${extractionOverview?.failedPages})`}</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -5505,26 +5599,47 @@ const Admin = () => {
                 </tbody>
               </table>
 
-              {textbookTotalPages > 1 && (
-                <div className="admin-pagination">
+              {filteredTextbooks.length > 0 && (
+                <div className="admin-pagination" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    Page {Math.min(textbookPage, textbookTotalPages)} of {textbookTotalPages} ({filteredTextbooks.length} textbooks)
+                    Showing {Math.min((Math.min(textbookPage, textbookTotalPages) - 1) * textbookPageSize + 1, filteredTextbooks.length)}–{Math.min(Math.min(textbookPage, textbookTotalPages) * textbookPageSize, filteredTextbooks.length)} of {filteredTextbooks.length} filtered
+                    {textbooksList.length !== filteredTextbooks.length ? ` (${textbooksList.length} total)` : ` (${textbooksList.length} total)`}
+                    {textbookTotalPages > 1 ? ` • Page ${Math.min(textbookPage, textbookTotalPages)} of ${textbookTotalPages}` : ''}
                   </span>
-                  <div className="pagination-controls">
-                    <button
-                      className="table-action-btn"
-                      disabled={textbookPage <= 1}
-                      onClick={() => setTextbookPage((p) => Math.max(1, p - 1))}
+                  <div className="pagination-controls" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <select
+                      className="filter-select"
+                      style={{ padding: '0.28rem 0.55rem', fontSize: '0.8rem', minWidth: '90px' }}
+                      value={textbookPageSize}
+                      onChange={(e) => {
+                        setTextbookPageSize(Number(e.target.value))
+                        setTextbookPage(1)
+                      }}
+                      title="Rows per page"
                     >
-                      <ChevronLeft size={16} />
-                    </button>
-                    <button
-                      className="table-action-btn"
-                      disabled={textbookPage >= textbookTotalPages}
-                      onClick={() => setTextbookPage((p) => Math.min(textbookTotalPages, p + 1))}
-                    >
-                      <ChevronRight size={16} />
-                    </button>
+                      <option value={25}>25 / page</option>
+                      <option value={50}>50 / page</option>
+                      <option value={100}>100 / page</option>
+                      <option value={500}>Show All ({filteredTextbooks.length})</option>
+                    </select>
+                    {textbookTotalPages > 1 && (
+                      <>
+                        <button
+                          className="table-action-btn"
+                          disabled={textbookPage <= 1}
+                          onClick={() => setTextbookPage((p) => Math.max(1, p - 1))}
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          className="table-action-btn"
+                          disabled={textbookPage >= textbookTotalPages}
+                          onClick={() => setTextbookPage((p) => Math.min(textbookTotalPages, p + 1))}
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -6140,8 +6255,59 @@ const Admin = () => {
                     }}
                   >
                     <RefreshCw size={14} className={isExtractingAllPending ? 'spinning' : ''} />
-                    <span>{isExtractingAllPending ? 'Extracting Pending PDFs...' : 'Extract All Pending PDFs'}</span>
+                    <span>
+                      {isExtractingAllPending
+                        ? (extractBatchStatusText ? `Extracting (${extractBatchStatusText})` : 'Extracting Pending PDFs...')
+                        : 'Extract All Pending PDFs'}
+                    </span>
                   </button>
+
+                  {isExtractingAllPending && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        stopExtractionRef.current = true
+                      }}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.16)',
+                        border: '1px solid rgba(239, 68, 68, 0.4)',
+                        color: '#fca5a5',
+                        borderRadius: '8px',
+                        padding: '0.45rem 0.75rem',
+                        fontSize: '0.82rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                      title="Pause extraction safely after current slice"
+                    >
+                      Pause
+                    </button>
+                  )}
+
+                  {(extractionOverview?.failedPages ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRetryAllFailedPages}
+                      disabled={isRetryingAllFailed || isExtractingAllPending}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.18)',
+                        border: '1px solid rgba(239, 68, 68, 0.45)',
+                        color: '#fca5a5',
+                        borderRadius: '8px',
+                        padding: '0.45rem 0.75rem',
+                        fontSize: '0.82rem',
+                        fontWeight: 600,
+                        cursor: isRetryingAllFailed ? 'wait' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                      title="Retry all failed pages across all PDFs"
+                    >
+                      <RefreshCw size={13} className={isRetryingAllFailed ? 'spinning' : ''} />
+                      <span>{isRetryingAllFailed ? 'Retrying...' : `Retry Failed (${extractionOverview?.failedPages})`}</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"

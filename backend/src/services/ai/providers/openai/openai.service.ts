@@ -17,6 +17,7 @@ import {
   resolveOpenAIModel,
 } from './openai.config';
 import pool from '../../../../db';
+import { executeWithCircuitBreaker } from '../../../circuitBreakerService';
 
 export class OpenAIProviderService implements IAIProvider {
   readonly name: AIProviderName = 'openai';
@@ -187,19 +188,27 @@ export class OpenAIProviderService implements IAIProvider {
       max_tokens: options?.maxTokens || 4096,
     };
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const json = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(json?.error?.message || 'OpenAI API request failed.');
-    }
+    const { response, json } = await executeWithCircuitBreaker(
+      { service: 'openai_api' },
+      async () => {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const parsed = await res.json().catch(() => null);
+        if (!res.ok) {
+          const err: any = new Error(parsed?.error?.message || 'OpenAI API request failed.');
+          err.statusCode = res.status;
+          throw err;
+        }
+        return { response: res, json: parsed };
+      }
+    );
+    void response;
 
     const text = json?.choices?.[0]?.message?.content;
     if (!text || typeof text !== 'string') {

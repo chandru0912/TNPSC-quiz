@@ -6,7 +6,10 @@
   "type": "commonjs",
   "scripts": {
     "dev": "nodemon --watch src --watch .env --ext ts,env --exec tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
     "build": "tsc",
+    "test": "tsx src/tests/ci-security-cache.test.ts",
+    "migrate:validate": "tsx src/scripts/validateMigrations.ts",
     "start": "node dist/server.js",
     "db:prod:check": "tsx src/scripts/checkProdDb.ts"
   },
@@ -23,8 +26,12 @@
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.3",
+    "express-rate-limit": "^8.7.5",
     "googleapis": "^189.0.0",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
     "multer": "^2.5.0",
+    "opossum": "^10.0.0",
     "pdf-parse": "^2.4.5",
     "pg": "^8.23.1",
     "tesseract.js": "^7.0.0"
@@ -33,6 +40,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.25",
     "@types/node": "^24.19.2",
+    "@types/opossum": "^8.1.9",
     "@types/pg": "^8.23.1",
     "nodemon": "^3.1.14",
     "tsx": "^4.23.15",

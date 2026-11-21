@@ -35,9 +35,30 @@ import mcqGenerationJobsRouter from './routes/mcqGenerationJobs';
 import { adminMockTestsRouter, studentMockTestsRouter } from './routes/mockTestsRoutes';
 import subscriptionsRouter, { adminSubscriptionsRouter } from './routes/subscriptionsRoutes';
 import { AISyllabusJobService } from './services/aiSyllabusJobService';
+import {
+  securityHeadersMiddleware,
+  requestInputValidationMiddleware,
+} from './middleware/security';
+import {
+  generalStudentApiLimiter,
+  mcqPracticeLimiter,
+  searchApiLimiter,
+  getRateLimiterHealth,
+} from './middleware/rateLimiter';
+import {
+  CACHE_MIDDLEWARE_PRESETS,
+  cacheInvalidationMiddleware,
+} from './middleware/cacheMiddleware';
+import { cacheService } from './services/cacheService';
+import { getAllCircuitBreakerSnapshots } from './services/circuitBreakerService';
+import { requireAdminAuth } from './middleware/auth';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Trust exactly 1 reverse proxy hop (Vercel Edge / reverse proxy) — never blindly trust chained X-Forwarded-For
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
 // Disable ETag generation globally so dynamic API endpoints never return HTTP 304 (Not Modified)
 app.set('etag', false);
@@ -114,10 +135,13 @@ const corsOptions: CorsOptions = {
   optionsSuccessStatus: 200,
 };
 
+app.use(securityHeadersMiddleware);
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(requestInputValidationMiddleware);
+app.use(searchApiLimiter);
 
 // Ensure UTF-8 JSON charset and Unicode NFC normalization for all Tamil/English API payloads
 // (HTTP compression is handled cleanly by Vercel Edge / reverse proxy)
@@ -328,37 +352,42 @@ app.use('/api/admin', authRouter);
 app.use('/admin', authRouter);
 app.use('/api/api/admin', authRouter);
 
-app.use('/api/questions', requireSchemaMiddleware, questionsRouter);
-app.use('/questions', requireSchemaMiddleware, questionsRouter);
-app.use('/api/api/questions', requireSchemaMiddleware, questionsRouter);
+const invalidateMcqCache = cacheInvalidationMiddleware(['mcq:', 'metrics:questions:', 'metrics:study_material_questions:']);
+const invalidateStudyMaterialsCache = cacheInvalidationMiddleware(['study_materials:', 'syllabus:', 'metrics:notes:']);
+const invalidateAllContentCache = cacheInvalidationMiddleware(['syllabus:', 'study_materials:', 'mcq:', 'metrics:questions:', 'metrics:study_material_questions:', 'metrics:notes:']);
 
-app.use('/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
-app.use('/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
-app.use('/api/api/study-materials/questions', requireSchemaMiddleware, studyMaterialQuestionsRouter);
+app.use('/api/questions', requireSchemaMiddleware, mcqPracticeLimiter, invalidateMcqCache, CACHE_MIDDLEWARE_PRESETS.mcq, questionsRouter);
+app.use('/questions', requireSchemaMiddleware, mcqPracticeLimiter, invalidateMcqCache, CACHE_MIDDLEWARE_PRESETS.mcq, questionsRouter);
+app.use('/api/api/questions', requireSchemaMiddleware, mcqPracticeLimiter, invalidateMcqCache, CACHE_MIDDLEWARE_PRESETS.mcq, questionsRouter);
 
-app.use('/api/study-materials', requireSchemaMiddleware, studyMaterialRouter);
-app.use('/study-materials', requireSchemaMiddleware, studyMaterialRouter);
-app.use('/api/api/study-materials', requireSchemaMiddleware, studyMaterialRouter);
+app.use('/api/study-materials/questions', requireSchemaMiddleware, mcqPracticeLimiter, invalidateMcqCache, CACHE_MIDDLEWARE_PRESETS.mcq, studyMaterialQuestionsRouter);
+app.use('/study-materials/questions', requireSchemaMiddleware, mcqPracticeLimiter, invalidateMcqCache, CACHE_MIDDLEWARE_PRESETS.mcq, studyMaterialQuestionsRouter);
+app.use('/api/api/study-materials/questions', requireSchemaMiddleware, mcqPracticeLimiter, invalidateMcqCache, CACHE_MIDDLEWARE_PRESETS.mcq, studyMaterialQuestionsRouter);
 
-app.use('/api/syllabus', requireSchemaMiddleware, syllabusRouter);
-app.use('/syllabus', requireSchemaMiddleware, syllabusRouter);
-app.use('/api/api/syllabus', requireSchemaMiddleware, syllabusRouter);
+app.use('/api/study-materials', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.studyMaterials, studyMaterialRouter);
+app.use('/study-materials', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.studyMaterials, studyMaterialRouter);
+app.use('/api/api/study-materials', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.studyMaterials, studyMaterialRouter);
 
-app.use('/api/notes', requireSchemaMiddleware, notesRouter);
-app.use('/notes', requireSchemaMiddleware, notesRouter);
-app.use('/api/api/notes', requireSchemaMiddleware, notesRouter);
+app.use('/api/syllabus', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.syllabus, syllabusRouter);
+app.use('/syllabus', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.syllabus, syllabusRouter);
+app.use('/api/api/syllabus', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.syllabus, syllabusRouter);
 
-app.use('/api/textbooks', requireSchemaMiddleware, textbooksRouter);
-app.use('/textbooks', requireSchemaMiddleware, textbooksRouter);
-app.use('/api/api/textbooks', requireSchemaMiddleware, textbooksRouter);
+app.use('/api/notes', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.studyMaterials, notesRouter);
+app.use('/notes', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.studyMaterials, notesRouter);
+app.use('/api/api/notes', requireSchemaMiddleware, invalidateStudyMaterialsCache, CACHE_MIDDLEWARE_PRESETS.studyMaterials, notesRouter);
 
-app.use('/api/ai', requireSchemaMiddleware, aiGenerationRouter);
-app.use('/ai', requireSchemaMiddleware, aiGenerationRouter);
-app.use('/api/api/ai', requireSchemaMiddleware, aiGenerationRouter);
+app.use('/api/textbooks', requireSchemaMiddleware, invalidateStudyMaterialsCache, textbooksRouter);
+app.use('/textbooks', requireSchemaMiddleware, invalidateStudyMaterialsCache, textbooksRouter);
+app.use('/api/api/textbooks', requireSchemaMiddleware, invalidateStudyMaterialsCache, textbooksRouter);
+
+app.use('/api/ai', requireSchemaMiddleware, invalidateAllContentCache, aiGenerationRouter);
+app.use('/ai', requireSchemaMiddleware, invalidateAllContentCache, aiGenerationRouter);
+app.use('/api/api/ai', requireSchemaMiddleware, invalidateAllContentCache, aiGenerationRouter);
 
 app.use(
   ['/api/admin/mcq-generation/jobs', '/admin/mcq-generation/jobs', '/api/api/admin/mcq-generation/jobs'],
   requireSchemaMiddleware,
+  invalidateMcqCache,
   mcqGenerationJobsRouter
 );
 
@@ -370,18 +399,18 @@ app.use('/api/gemini', requireSchemaMiddleware, geminiRouter);
 app.use('/gemini', requireSchemaMiddleware, geminiRouter);
 app.use('/api/api/gemini', requireSchemaMiddleware, geminiRouter);
 
-app.use('/api/drive', requireSchemaMiddleware, driveRouter);
-app.use('/drive', requireSchemaMiddleware, driveRouter);
-app.use('/api/api/drive', requireSchemaMiddleware, driveRouter);
+app.use('/api/drive', requireSchemaMiddleware, invalidateStudyMaterialsCache, driveRouter);
+app.use('/drive', requireSchemaMiddleware, invalidateStudyMaterialsCache, driveRouter);
+app.use('/api/api/drive', requireSchemaMiddleware, invalidateStudyMaterialsCache, driveRouter);
 
-app.use('/api/student', requireSchemaMiddleware, studentRouter);
-app.use('/student', requireSchemaMiddleware, studentRouter);
-app.use('/api/api/student', requireSchemaMiddleware, studentRouter);
+app.use('/api/student', requireSchemaMiddleware, generalStudentApiLimiter, studentRouter);
+app.use('/student', requireSchemaMiddleware, generalStudentApiLimiter, studentRouter);
+app.use('/api/api/student', requireSchemaMiddleware, generalStudentApiLimiter, studentRouter);
 
-app.use(['/api/admin/previous-papers', '/admin/previous-papers', '/api/api/admin/previous-papers'], requireSchemaMiddleware, adminPreviousPapersRouter);
-app.use(['/api/previous-papers', '/previous-papers', '/api/api/previous-papers'], requireSchemaMiddleware, previousPapersRouter);
+app.use(['/api/admin/previous-papers', '/admin/previous-papers', '/api/api/admin/previous-papers'], requireSchemaMiddleware, invalidateMcqCache, adminPreviousPapersRouter);
+app.use(['/api/previous-papers', '/previous-papers', '/api/api/previous-papers'], requireSchemaMiddleware, mcqPracticeLimiter, previousPapersRouter);
 
-app.get(['/api/dashboard/performance', '/dashboard/performance'], requireSchemaMiddleware, requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+app.get(['/api/dashboard/performance', '/dashboard/performance'], requireSchemaMiddleware, generalStudentApiLimiter, requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
     const data = await getStudentDashboardData(req.studentUser!.studentId);
     if (!data) {
@@ -396,16 +425,28 @@ app.get(['/api/dashboard/performance', '/dashboard/performance'], requireSchemaM
 
 app.use(['/api/analytics', '/analytics', '/api/api/analytics', '/api/overview', '/overview'], requireSchemaMiddleware, analyticsRouter);
 
-app.use(['/api/study-management/ai-import', '/study-management/ai-import', '/api/api/study-management/ai-import'], requireSchemaMiddleware, aiSyllabusImportRouter);
-app.use('/api/study-management', requireSchemaMiddleware, studyManagementRouter);
-app.use('/study-management', requireSchemaMiddleware, studyManagementRouter);
-app.use('/api/api/study-management', requireSchemaMiddleware, studyManagementRouter);
+app.use(['/api/study-management/ai-import', '/study-management/ai-import', '/api/api/study-management/ai-import'], requireSchemaMiddleware, invalidateAllContentCache, aiSyllabusImportRouter);
+app.use('/api/study-management', requireSchemaMiddleware, invalidateAllContentCache, studyManagementRouter);
+app.use('/study-management', requireSchemaMiddleware, invalidateAllContentCache, studyManagementRouter);
+app.use('/api/api/study-management', requireSchemaMiddleware, invalidateAllContentCache, studyManagementRouter);
 
-app.use(['/api/admin/mock-tests', '/admin/mock-tests', '/api/api/admin/mock-tests'], requireSchemaMiddleware, adminMockTestsRouter);
-app.use(['/api/mock-tests', '/mock-tests', '/api/api/mock-tests'], requireSchemaMiddleware, studentMockTestsRouter);
+app.use(['/api/admin/mock-tests', '/admin/mock-tests', '/api/api/admin/mock-tests'], requireSchemaMiddleware, invalidateMcqCache, adminMockTestsRouter);
+app.use(['/api/mock-tests', '/mock-tests', '/api/api/mock-tests'], requireSchemaMiddleware, mcqPracticeLimiter, studentMockTestsRouter);
 
 app.use(['/api/admin/subscriptions', '/admin/subscriptions', '/api/api/admin/subscriptions'], requireSchemaMiddleware, adminSubscriptionsRouter);
-app.use(['/api/subscriptions', '/subscriptions', '/api/api/subscriptions'], requireSchemaMiddleware, subscriptionsRouter);
+app.use(['/api/subscriptions', '/subscriptions', '/api/api/subscriptions'], requireSchemaMiddleware, generalStudentApiLimiter, subscriptionsRouter);
+
+// Admin-only Circuit Breaker Monitoring Endpoint (never exposes secrets or credentials)
+app.get(
+  ['/api/admin/circuit-breakers', '/admin/circuit-breakers', '/api/api/admin/circuit-breakers'],
+  requireAdminAuth,
+  (_req: Request, res: Response) => {
+    return res.status(200).json({
+      status: 'success',
+      data: getAllCircuitBreakerSnapshots(),
+    });
+  }
+);
 
 // Health check endpoint with separate service status for Backend Server, Database Connection, and Authentication Service
 app.get('/api/health', async (_req: Request, res: Response) => {
@@ -454,6 +495,8 @@ app.get('/api/health', async (_req: Request, res: Response) => {
         jwtVerification: jwtOk ? 'ok' : 'error',
         configuredAdminAccounts: configuredAdmins,
       },
+      rateLimiting: getRateLimiterHealth(),
+      caching: cacheService.getStats(),
     },
   });
 });

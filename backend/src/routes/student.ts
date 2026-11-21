@@ -25,6 +25,10 @@ import {
   studentSessionEventBus,
 } from '../services/studentSessionService';
 import {
+  studentLoginLimiter,
+  otpVerificationLimiter,
+} from '../middleware/rateLimiter';
+import {
   getGoogleOAuthPublicConfig,
   verifyGoogleCredentialOrCode,
   normalizeGoogleAvatarUrl,
@@ -65,27 +69,6 @@ import {
 } from '../services/syllabusProgressService';
 
 const router = Router();
-
-// Sliding-window rate limiter on authentication endpoints (max 30 attempts / minute per IP)
-const authRateMap = new Map<string, { count: number; resetAt: number }>();
-function checkAuthRateLimit(req: Request, res: Response): boolean {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const entry = authRateMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    authRateMap.set(ip, { count: 1, resetAt: now + 60_000 });
-    return true;
-  }
-  entry.count += 1;
-  if (entry.count > 30) {
-    res.status(429).json({
-      status: 'error',
-      message: 'Too many authentication attempts. Please wait a minute and try again.',
-    });
-    return false;
-  }
-  return true;
-}
 
 function setStudentSessionCookie(res: Response, sessionId: string, expiresAt: Date) {
   const isProd = process.env.NODE_ENV === 'production';
@@ -187,8 +170,7 @@ router.post('/auth/check-email', async (req: Request, res: Response) => {
 // ====================================================
 // 0B. GOOGLE OAUTH LOGIN / AUTO-REGISTER / ACCOUNT LINKING
 // ====================================================
-router.post('/auth/google', async (req: Request, res: Response) => {
-  if (!checkAuthRateLimit(req, res)) return;
+router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Response) => {
   try {
     const { code, idToken, redirectUri } = req.body || {};
 
@@ -409,8 +391,7 @@ router.post('/auth/google', async (req: Request, res: Response) => {
 // ====================================================
 // 1. STUDENT AUTHENTICATION: REGISTER
 // ====================================================
-router.post('/register', async (req: Request, res: Response) => {
-  if (!checkAuthRateLimit(req, res)) return;
+router.post('/register', studentLoginLimiter, async (req: Request, res: Response) => {
   try {
     const { fullName, email, mobile, password, confirmPassword, targetGroup } = req.body;
 
@@ -507,8 +488,7 @@ router.post('/register', async (req: Request, res: Response) => {
 // ====================================================
 // 2. STUDENT AUTHENTICATION: LOGIN
 // ====================================================
-router.post('/login', async (req: Request, res: Response) => {
-  if (!checkAuthRateLimit(req, res)) return;
+router.post('/login', studentLoginLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -815,7 +795,7 @@ router.post('/logout', optionalStudentAuth, async (req: StudentAuthenticatedRequ
 // ====================================================
 // 2C. FORGOT PASSWORD & RESET PASSWORD
 // ====================================================
-router.post('/forgot-password', async (req: Request, res: Response) => {
+router.post('/forgot-password', otpVerificationLimiter, async (req: Request, res: Response) => {
   try {
     const { email } = req.body || {};
     if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
@@ -877,7 +857,7 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/reset-password', async (req: Request, res: Response) => {
+router.post('/reset-password', otpVerificationLimiter, async (req: Request, res: Response) => {
   try {
     const { email, resetCode, token, newPassword, confirmPassword } = req.body || {};
     const rawCode = String(resetCode || token || '').trim();
