@@ -1370,19 +1370,15 @@
     -webkit-mask-image: linear-gradient(
       180deg,
       transparent 0%,
-      rgba(0, 0, 0, 0.85) 14%,
-      #000 28%,
-      #000 72%,
-      rgba(0, 0, 0, 0.85) 86%,
+      #000 10%,
+      #000 90%,
       transparent 100%
     );
     mask-image: linear-gradient(
       180deg,
       transparent 0%,
-      rgba(0, 0, 0, 0.85) 14%,
-      #000 28%,
-      #000 72%,
-      rgba(0, 0, 0, 0.85) 86%,
+      #000 10%,
+      #000 90%,
       transparent 100%
     );
   }
@@ -1403,7 +1399,7 @@
     transform-origin: center center;
     animation: heroMobileCinematicZoom 18s ease-in-out infinite;
     will-change: transform;
-    opacity: 0.9;
+    opacity: 1;
     mix-blend-mode: normal;
     filter: none;
     -webkit-mask-image: none;
@@ -1416,20 +1412,13 @@
     inset: 0;
     z-index: 1;
     pointer-events: none;
-    background:
-      linear-gradient(
-        180deg,
-        rgba(8, 13, 27, 0.84) 0%,
-        rgba(8, 13, 27, 0.2) 20%,
-        rgba(8, 13, 27, 0.26) 50%,
-        rgba(8, 13, 27, 0.56) 78%,
-        rgba(8, 13, 27, 0.94) 100%
-      ),
-      radial-gradient(
-        ellipse 88% 60% at 50% 48%,
-        rgba(8, 13, 27, 0.1) 0%,
-        rgba(8, 13, 27, 0.45) 100%
-      );
+    background: linear-gradient(
+      180deg,
+      rgba(6, 10, 22, 0.24) 0%,
+      transparent 16%,
+      transparent 82%,
+      rgba(6, 10, 22, 0.34) 100%
+    );
   }
 
   .hero-container {
