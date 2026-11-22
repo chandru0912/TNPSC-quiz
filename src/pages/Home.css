@@ -1372,7 +1372,7 @@
   .hero-background .hero-bg-video-wrap {
     display: block;
     position: absolute;
-    top: clamp(118px, 30vw, 152px);
+    top: clamp(104px, 26.5vw, 136px);
     left: 0;
     right: 0;
     width: 100%;
@@ -1411,7 +1411,7 @@
     max-width: none;
     max-height: none;
     object-fit: cover;
-    object-position: center center;
+    object-position: center 44%;
     transform: translate3d(-50%, -50%, 0) scale(1);
     transform-origin: center center;
     animation: heroMobileCinematicZoom 18s ease-in-out infinite;
@@ -1475,7 +1475,7 @@
     width: 100%;
     max-width: 100%;
     padding: 1.15rem 0.25rem 0;
-    margin-top: clamp(5.25rem, 26vw, 7.25rem);
+    margin-top: clamp(4.25rem, 21vw, 6rem);
     margin-bottom: 0;
     font-size: 0.96rem;
     line-height: 1.65;

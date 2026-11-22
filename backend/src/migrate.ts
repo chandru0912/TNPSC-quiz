@@ -513,6 +513,9 @@ export async function runMigration() {
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS subject TEXT DEFAULT NULL;
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS term TEXT DEFAULT NULL;
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS material_id INT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS lesson_id TEXT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS idx_textbook_content_lesson_id ON textbook_content (lesson_id);
 
       DO $$
       BEGIN
