@@ -15,9 +15,15 @@ import { AIProviderFactory } from './ai/ai-provider.factory';
 import { AIProviderName } from './ai/ai-provider.interface';
 import { GeminiJsonParseError } from './ai/providers/gemini/gemini.validator';
 import {
-  isSemanticallyDuplicate,
+  checkQuestionDuplicate,
+  computeConceptFingerprint,
+  computeNormalizedQuestionHash,
+  extractLessonTopicChecklist,
   isValidQuestionText,
+  normalizeText,
+  parsePdfPagePassages,
   resolveCorrectAnswerIndex,
+  verifyQuestionAgainstSourcePdf,
   ExistingDbQuestionRecord,
   Difficulty,
 } from './questionValidator';
@@ -79,6 +85,19 @@ export interface GeneratedMcqItem {
   status: 'staging' | 'published';
   targetSystem: 'study_materials';
   aiProvider?: 'claude' | 'gemini' | 'openai';
+  normalizedQuestionHash?: string;
+  conceptFingerprint?: string;
+  duplicateCheckStatus?: 'passed';
+  generationBatchId?: string | null;
+}
+
+export interface TopicCoverageAudit {
+  totalTopics: number;
+  coveredTopics: string[];
+  uncoveredTopics: string[];
+  coveragePercent: number;
+  coverageLimitedByCount: boolean;
+  limitationNote: string | null;
 }
 
 export interface McqGenerationResult {
@@ -86,31 +105,55 @@ export interface McqGenerationResult {
   requestedCount: number;
   generatedCount: number;
   duplicateCount: number;
+  reverseQuestionRejectedCount: number;
+  unsupportedRejectedCount: number;
   invalidCount: number;
+  coverageAudit: TopicCoverageAudit;
 }
 
 /**
- * Fetches existing questions from PostgreSQL for deduplication comparison.
+ * Fetches existing questions from PostgreSQL across ALL sessions, batches, and groups
+ * for this textbook/lesson so duplicate & reverse-question checks persist across sessions.
  */
-async function fetchExistingDbQuestions(
-  category: string,
-  lessonTitle: string,
-  subject: string,
-  unitId: number
-): Promise<ExistingDbQuestionRecord[]> {
+async function fetchExistingDbQuestions(params: {
+  category: string;
+  lessonTitle: string;
+  lessonId?: string;
+  standard: number;
+  subject: string;
+  unitId: number;
+  textbookId?: number;
+}): Promise<ExistingDbQuestionRecord[]> {
   try {
+    const cleanTitle = String(params.lessonTitle || '').trim();
     const res = await pool.query(
-      `SELECT question_text, options, correct_answer
+      `SELECT question_text, options, correct_answer, option_a, option_b, option_c, option_d
        FROM questions
-       WHERE LOWER(TRIM(lesson_title)) = LOWER(TRIM($1)) AND LOWER(TRIM(category)) = LOWER(TRIM($2))
-       LIMIT 500`,
-      [lessonTitle, category]
+       WHERE status IN ('staging', 'published')
+         AND (
+           ($1::int IS NOT NULL AND textbook_id = $1 AND (LOWER(TRIM(lesson_title)) = LOWER($2) OR ($3::text IS NOT NULL AND lesson_id = $3)))
+           OR ($3::text IS NOT NULL AND lesson_id = $3)
+           OR (LOWER(TRIM(lesson_title)) = LOWER($2) AND (class_id = $4 OR standard_id = $4 OR LOWER(TRIM(category)) = LOWER($5)))
+         )
+       ORDER BY created_at DESC
+       LIMIT 1000`,
+      [
+        params.textbookId ?? null,
+        cleanTitle,
+        params.lessonId || null,
+        Number(params.standard) || 6,
+        String(params.category || '').trim(),
+      ]
     );
 
     return res.rows.map((row: any) => {
       let optText: string | undefined;
-      if (Array.isArray(row.options) && typeof row.correct_answer === 'number') {
-        optText = row.options[row.correct_answer];
+      const idx = typeof row.correct_answer === 'number' ? row.correct_answer : Number(row.correct_answer);
+      if (Array.isArray(row.options) && Number.isInteger(idx) && idx >= 0 && idx <= 3) {
+        optText = String(row.options[idx] || '');
+      } else if (Number.isInteger(idx) && idx >= 0 && idx <= 3) {
+        const fallbackOpts = [row.option_a, row.option_b, row.option_c, row.option_d];
+        optText = fallbackOpts[idx] ? String(fallbackOpts[idx]) : undefined;
       }
       return {
         question: row.question_text,
@@ -238,10 +281,14 @@ export const MCQ_RESPONSE_SCHEMA = {
           },
           topic: {
             type: SchemaType.STRING,
-            description: 'Specific lesson topic or subtopic',
+            description: 'Specific lesson topic or subtopic from the Topic Coverage Checklist',
+          },
+          sourcePage: {
+            type: SchemaType.INTEGER,
+            description: 'Exact PDF page number from the [PDF Page N] markers where this fact appears',
           },
         },
-        required: ['question', 'options', 'correctAnswer', 'explanation'],
+        required: ['question', 'options', 'correctAnswer', 'explanation', 'topic'],
       },
     },
   },
@@ -265,45 +312,74 @@ export async function generateMcqs(
     );
   }
 
-  // 1. Fetch DB existing questions for strict semantic duplicate detection
-  onProgress?.(10, 'Fetching existing questions from database for duplicate prevention...');
-  const existingDbQuestions = await fetchExistingDbQuestions(
-    req.category,
-    req.lessonTitle,
-    req.subject,
-    req.unitId
-  );
+  // STEP 1–4: Parse original PDF passages & build internal Topic Coverage Checklist
+  const pdfPassages = parsePdfPagePassages(req.textbookContent, req.sourcePages);
+  const topicChecklist = extractLessonTopicChecklist(req.textbookContent, req.selectedTopics);
+  const effectiveChecklist =
+    topicChecklist.length > 0
+      ? topicChecklist
+      : req.selectedTopics && req.selectedTopics.length > 0
+      ? req.selectedTopics
+      : [req.topic || req.lessonTitle];
+
+  // STEP 5: Fetch ALL existing DB questions across sessions/batches for persistent duplicate & reverse checks
+  onProgress?.(10, 'Fetching existing questions from database for duplicate & reverse-question prevention...');
+  const existingDbQuestions = await fetchExistingDbQuestions({
+    category: req.category,
+    lessonTitle: req.lessonTitle,
+    lessonId: req.lessonId,
+    standard: req.standard,
+    subject: req.subject,
+    unitId: req.unitId,
+    textbookId: req.textbookId,
+  });
 
   const acceptedQuestions: GeneratedMcqItem[] = [];
+  const coveredTopicsSet = new Set<string>();
   let totalDuplicatesDetected = 0;
+  let totalReverseQuestionsRejected = 0;
+  let totalUnsupportedRejected = 0;
   let totalInvalidDetected = 0;
   let lastError: Error | null = null;
 
+  const markTopicCovered = (topicStr: string | undefined, questionText: string) => {
+    const qNorm = normalizeText(`${topicStr || ''} ${questionText}`);
+    for (const checklistTopic of effectiveChecklist) {
+      const tNorm = normalizeText(checklistTopic);
+      if (!tNorm) continue;
+      if (qNorm.includes(tNorm) || (topicStr && normalizeText(topicStr) === tNorm)) {
+        coveredTopicsSet.add(checklistTopic);
+      } else {
+        const tWords = tNorm.split(' ').filter((w) => w.length >= 4);
+        if (tWords.length > 0 && tWords.some((w) => qNorm.includes(w))) {
+          coveredTopicsSet.add(checklistTopic);
+        }
+      }
+    }
+  };
+
   const systemPrompt = isTamil
     ? `நீங்கள் ஒரு TNPSC தேர்வு வினாத்தாள் வடிவமைப்பாளர் (TNPSC Exam Question Author).
-கொடுக்கப்பட்டுள்ள தமிழ்நாடு சமச்சீர் கல்வி பாடநூல் உள்ளடக்கத்தை அடிப்படையாகக் கொண்டு, உயர்தர கொள்குறி வினாக்களை (Multiple Choice Questions) JSON வடிவில் மட்டுமே வழங்க வேண்டும்.
+கொடுக்கப்பட்டுள்ள தமிழ்நாடு சமச்சீர் கல்வி பாடநூல் PDF உள்ளடக்கத்தை மட்டுமே அடிப்படையாகக் கொண்டு, உயர்தர கொள்குறி வினாக்களை (Multiple Choice Questions) JSON வடிவில் வழங்க வேண்டும்.
 
 கண்டிப்பான விதிகள்:
-1. வினாக்கள் தேர்வு நோக்கில், சிந்திக்கத் தூண்டும் வகையில் அமைய வேண்டும்.
-2. ஒவ்வொரு வினாவிற்கும் 4 தனித்துவமான விடைகள் (Options A, B, C, D) இருக்க வேண்டும்.
-3. சரியான விடைக்குரிய குறியீடு 0, 1, 2, அல்லது 3 என இருக்க வேண்டும்.
-4. ஒவ்வொரு வினாவிற்கும் தெளிவான விளக்கவுரை (Explanation) அவசியம்.
-5. ஒரே வினாவையோ அல்லது ஒரே உண்மையைச் சோதிக்கும் வினாவையோ மாற்றி மாற்றி மீண்டும் உருவாக்கக் கூடாது.
-6. கொடுக்கப்பட்ட பாடநூல் உள்ளடக்கத்தில் உள்ள தகவல்களை மட்டுமே ஆதாரமாகப் பயன்படுத்த வேண்டும். அதில் இல்லாத உண்மைகளைக் கற்பனை செய்யக் கூடாது.
-7. ஒவ்வொரு வினாவையும் கொடுக்கப்பட்ட பாடம், பகுதி, பாடத்தலைப்பு மற்றும் தலைப்புடன் இணைக்க வேண்டும்.
-8. JSON அமைப்பில் மட்டுமே விடையளிக்க வேண்டும்: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Medium", "subject": "...", "topic": "..." } ] }`
+1. கொடுக்கப்பட்ட PDF பாடநூல் உள்ளடக்கத்தில் உள்ள உண்மைகளை மட்டுமே பயன்படுத்த வேண்டும். வெளிப்புற இணையதளங்கள், பொது அறிவு அல்லது கற்பனைத் தகவல்களை ஒருபோதும் சேர்க்கக் கூடாது.
+2. ஒவ்வொரு வினாவிற்கும் 4 தனித்துவமான விடைகள் (Options A, B, C, D) மற்றும் ஒரே ஒரு சரியான விடை (0, 1, 2, அல்லது 3) இருக்க வேண்டும்.
+3. ஒவ்வொரு வினாவிற்கும் பாடநூல் ஆதாரத்துடன் கூடிய விளக்கவுரை (Explanation) மற்றும் [PDF Page N] பக்க எண் (sourcePage) அவசியம்.
+4. ஒரே வினாவையோ அல்லது ஒரே கருத்தைச் சோதிக்கும் வினாவையோ மீண்டும் உருவாக்கக் கூடாது.
+5. மிக முக்கியம் — எதிர்மாறு வினாக்கள் (Reverse Questions) தடை: ஏற்கனவே உருவாக்கப்பட்ட வினாவின் விடையை எடுத்து, அதை புதிய வினாவாக மாற்றி (எ.கா: "நீளத்தின் SI அலகு என்ன? -> மீட்டர்" என்பதற்கு பதிலாக "மீட்டரில் அளக்கப்படும் இயற்பியல் அளவு எது? -> நீளம்") ஒருபோதும் உருவாக்கக் கூடாது.
+6. கொடுக்கப்பட்ட தலைப்புப் பட்டியலில் (Topic Coverage Checklist) உள்ள அனைத்து முக்கிய தலைப்புகளையும் சமமாக உள்ளடக்க வேண்டும்.
+7. JSON அமைப்பில் மட்டுமே விடையளிக்க வேண்டும்: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Medium", "topic": "...", "sourcePage": 12 } ] }`
     : `You are a Senior TNPSC Examination MCQ Item Writer and Psychometrician.
-Generate high-quality, syllabus-grounded TNPSC Multiple Choice Questions strictly based on the provided Samacheer Kalvi textbook text.
+Generate high-quality, syllabus-grounded TNPSC Multiple Choice Questions STRICTLY and EXCLUSIVELY from the provided Samacheer Kalvi textbook PDF text.
 
-STRICT INSTRUCTIONS:
-1. Questions must test factual understanding, application, definitions, chronological events, and core concepts.
-2. Each question MUST have exactly four distinct options (A, B, C, D).
-3. Exactly one unambiguous correct answer index (0, 1, 2, or 3).
-4. Provide a clear, factual explanation explaining why the correct answer is right.
-5. NEVER repeat questions or test the exact same fact with slightly varied phrasing.
-6. Use ONLY the provided source textbook content as factual evidence. Do not invent facts not supported by it.
-7. Map every question to the given subject, unit, lesson, and topic.
-8. Output ONLY valid JSON: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Medium", "subject": "...", "topic": "..." } ] }`;
+STRICT RULES:
+1. PDF-ONLY SOURCE OF TRUTH: Use ONLY facts, definitions, dates, names, and numbers explicitly present in the provided PDF text. NEVER use external knowledge or invent facts.
+2. FORMAT: Every question MUST have a clear interrogative stem ending with '?', exactly 4 distinct non-empty options (A, B, C, D), exactly 1 unambiguous correct answer index (0..3), 3 meaningful distractors, a PDF-supported explanation, topic label, and exact sourcePage integer from the [PDF Page N] markers.
+3. COMPLETE TOPIC COVERAGE: Systematically cover ALL topics in the Topic Coverage Checklist. Do not cluster multiple questions on one topic while skipping others.
+4. STRICT DUPLICATE PREVENTION: NEVER generate exact duplicates, paraphrased duplicates, or repeated-concept questions against existing questions or within the batch.
+5. STRICT REVERSE QUESTION PROHIBITION: NEVER create a new question by turning a previous question's answer into a new question stem (e.g., if Q1 asks "What is the SI unit of length?" -> "Metre", NEVER ask "Which physical quantity is measured in metres?" -> "Length"). Generate every question directly from fresh, unused facts in the original PDF.
+6. Output ONLY valid JSON: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Medium", "topic": "...", "sourcePage": 12 } ] }`;
 
   // Generate in bounded batches to prevent token truncation and stay within serverless timeouts
   let batchSize = req.provider === 'gemini' ? Math.min(12, targetCount) : Math.min(20, targetCount);
@@ -313,36 +389,56 @@ STRICT INSTRUCTIONS:
   while (acceptedQuestions.length < targetCount && attempts < maxAttempts) {
     attempts++;
     const needed = targetCount - acceptedQuestions.length;
-    const extraBuffer = attempts > 1 && (totalDuplicatesDetected > 0 || totalInvalidDetected > 0) ? 2 : 0;
+    const extraBuffer =
+      attempts > 1 && (totalDuplicatesDetected > 0 || totalInvalidDetected > 0 || totalUnsupportedRejected > 0)
+        ? 2
+        : 0;
     const currentBatchCount = Math.min(batchSize, needed + extraBuffer);
 
     const progressPct = Math.min(90, Math.round(20 + (acceptedQuestions.length / targetCount) * 70));
     onProgress?.(
       progressPct,
-      `Generating questions batch (${acceptedQuestions.length}/${targetCount} approved)...`
+      `Generating & validating PDF-grounded batch (${acceptedQuestions.length}/${targetCount} approved)...`
     );
+
+    const uncoveredTopics = effectiveChecklist.filter((t) => !coveredTopicsSet.has(t));
+    const priorityTopics = uncoveredTopics.length > 0 ? uncoveredTopics : effectiveChecklist;
+
+    // Provide compact list of already-used concepts (DB + current batch) to prevent duplicates & reverse questions
+    const alreadyUsedSamples = [
+      ...existingDbQuestions.slice(0, 25).map((q) => `- ${q.question}${q.correctAnswerText ? ` [Ans: ${q.correctAnswerText}]` : ''}`),
+      ...acceptedQuestions.slice(-25).map((q) => `- ${q.question} [Ans: ${q.correctAnswerText}]`),
+    ].slice(0, 40);
 
     const prompt = `
 TNPSC Examination: ${req.category.toUpperCase()}
 Standard: ${req.standard}th Standard
 Subject: ${req.subject}${req.textbookSubject && req.textbookSubject !== req.subject ? ` (textbook subject: ${req.textbookSubject})` : ''}
-Unit: ${req.unitId} (${req.unitTitle || 'General'})
-Lesson: ${req.lessonTitle}${req.lessonNumber ? ` (Lesson ${req.lessonNumber})` : ''}
-${req.selectedTopics && req.selectedTopics.length > 0 ? `Selected Lesson Topics/Subtopics to focus on:\n${req.selectedTopics.map((t) => `- ${t}`).join('\n')}\n` : ''}Textbook: ${req.textbookName || req.sourcePdf || 'Processed PDF'}
 Term: ${req.term || 'Not applicable'}
 Volume: ${req.volume || 'Not applicable'}
+Unit: ${req.unitId} (${req.unitTitle || 'General'})
+Lesson: ${req.lessonTitle}${req.lessonNumber ? ` (Lesson ${req.lessonNumber})` : ''}
+Textbook: ${req.textbookName || req.sourcePdf || 'Processed PDF'}
 Source pages: ${req.sourcePages && req.sourcePages.length > 0 ? req.sourcePages.join(', ') : 'Indexed lesson pages'}
 Language: ${req.language.toUpperCase()}
 Difficulty Preference: ${req.difficulty}
-Requested Question Count: ${currentBatchCount}
+Requested Question Count for this batch: ${currentBatchCount}
 
-SOURCE TEXTBOOK CONTENT (the ONLY permitted factual source):
+TOPIC COVERAGE CHECKLIST (prioritize these UNCOVERED topics from the PDF):
+${priorityTopics.map((t, i) => `${i + 1}. ${t}`).join('\n')}
+${
+  alreadyUsedSamples.length > 0
+    ? `\nALREADY COVERED QUESTIONS & ANSWERS (STRICTLY DO NOT REPEAT, PARAPHRASE, OR REVERSE-GENERATE FROM THESE ANSWERS):\n${alreadyUsedSamples.join('\n')}\n`
+    : ''
+}
+SOURCE TEXTBOOK PDF CONTENT (the ONLY permitted factual source):
 """
 ${req.textbookContent.slice(0, 24000)}
 """
 
-Generate ${currentBatchCount} distinct, high-quality MCQs covering different sections, facts, personalities, definitions, and concepts in this lesson${req.selectedTopics && req.selectedTopics.length > 0 ? ', strictly emphasizing the selected topics/subtopics above' : ''}.
-Every question and explanation must be supportable from the source text above. If the text is insufficient, return fewer questions instead of inventing facts.
+Generate ${currentBatchCount} distinct, PDF-verified MCQs directly from UNUSED facts in the source textbook content above, systematically covering the priority topics in the checklist.
+NEVER reverse a previous answer into a new question. Include the exact integer "sourcePage" from the [PDF Page N] marker for each question.
+If the source PDF does not contain enough distinct unused facts, return fewer questions rather than inventing or repeating facts.
 Respond strictly in JSON:
 {
   "questions": [
@@ -350,9 +446,10 @@ Respond strictly in JSON:
       "question": "Clear question text?",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correctAnswer": 0,
-      "explanation": "Concise explanation.",
+      "explanation": "Concise explanation directly supported by the PDF.",
       "difficulty": "Medium",
-      "topic": "${req.selectedTopics?.[0] || req.topic || req.lessonTitle}"
+      "topic": "${priorityTopics[0] || req.topic || req.lessonTitle}",
+      "sourcePage": ${req.sourcePages?.[0] ?? pdfPassages[0]?.pageNumber ?? 1}
     }
   ]
 }`;
@@ -363,7 +460,7 @@ Respond strictly in JSON:
         prompt,
         {
           systemPrompt,
-          temperature: 0.25,
+          temperature: 0.2,
           maxTokens: 8192,
           responseFormat: 'json',
           ...(req.provider === 'gemini' ? { responseSchema: MCQ_RESPONSE_SCHEMA } : {}),
@@ -401,36 +498,57 @@ Respond strictly in JSON:
         candidate.term = req.term ?? null;
         candidate.volume = req.volume ?? null;
         candidate.sourcePdf = req.sourcePdf ?? req.textbookName ?? null;
-        candidate.sourcePage = req.sourcePages?.[0] ?? null;
         candidate.lessonNumber = req.lessonNumber ?? null;
         if (!candidate.topic || candidate.topic === 'General' || candidate.topic === req.lessonTitle) {
-          candidate.topic = (req.selectedTopics && req.selectedTopics.length > 0)
-            ? req.selectedTopics[acceptedQuestions.length % req.selectedTopics.length]
-            : (req.topic || req.lessonTitle);
+          candidate.topic = priorityTopics[acceptedQuestions.length % priorityTopics.length] || req.topic || req.lessonTitle;
         }
 
-        // Multi-level deduplication:
-        // Level 1: Against questions already accepted in current run
-        // Level 2: Against existing PostgreSQL questions for this lesson/category
-        const isDuplicate = isSemanticallyDuplicate(
+        // STEP 7: Exact, semantic, AND reverse-question duplicate check against current batch + DB history
+        const dupCheck = checkQuestionDuplicate(
           candidate.question,
           acceptedQuestions.map((q) => ({ question: q.question, correctAnswerText: q.correctAnswerText })),
           existingDbQuestions,
           candidate.correctAnswerText
         );
 
-        if (isDuplicate) {
+        if (dupCheck.isDuplicate) {
           totalDuplicatesDetected++;
+          if (dupCheck.reason === 'REVERSE_QUESTION') {
+            totalReverseQuestionsRejected++;
+          }
           continue;
         }
 
+        // STEP 8: Validate correct answer & explanation strictly against original PDF passages & attribute exact page
+        const aiSuggestedPage =
+          item.sourcePage != null && Number.isFinite(Number(item.sourcePage)) ? Number(item.sourcePage) : null;
+        const pdfVerification = verifyQuestionAgainstSourcePdf({
+          question: candidate.question,
+          options: candidate.options,
+          correctAnswerIdx: candidate.correctAnswer,
+          explanation: candidate.explanation,
+          passages: pdfPassages,
+          aiSuggestedPage,
+        });
+
+        if (!pdfVerification.supported) {
+          totalUnsupportedRejected++;
+          totalInvalidDetected++;
+          continue;
+        }
+
+        candidate.sourcePage = pdfVerification.verifiedPage ?? req.sourcePages?.[0] ?? null;
+        candidate.normalizedQuestionHash = computeNormalizedQuestionHash(candidate.question);
+        candidate.conceptFingerprint = computeConceptFingerprint(candidate.question, candidate.correctAnswerText);
+        candidate.duplicateCheckStatus = 'passed';
+
+        markTopicCovered(candidate.topic, candidate.question);
         acceptedQuestions.push(candidate);
       }
     } catch (err: any) {
       lastError = err instanceof Error ? err : new Error(String(err?.message || err));
       console.error(`[MCQ Generation] Batch attempt ${attempts} failed:`, lastError.message);
       if (err instanceof GeminiJsonParseError || /invalid JSON/i.test(lastError.message)) {
-        // Reduce batch size on JSON syntax errors so the next retry outputs a smaller, cleaner payload
         batchSize = Math.max(5, Math.floor(batchSize / 2));
       }
     }
@@ -494,12 +612,36 @@ Respond strictly in JSON:
     });
   }
 
+  // STEP 9: Compute honest Topic Coverage Audit (never claim 100% unless uncoveredTopics is empty)
+  const coveredTopics = effectiveChecklist.filter((t) => coveredTopicsSet.has(t));
+  const uncoveredTopics = effectiveChecklist.filter((t) => !coveredTopicsSet.has(t));
+  const coveragePercent =
+    effectiveChecklist.length > 0
+      ? Math.round((coveredTopics.length / effectiveChecklist.length) * 100)
+      : 0;
+  const coverageLimitedByCount = targetCount < effectiveChecklist.length && uncoveredTopics.length > 0;
+  const limitationNote = coverageLimitedByCount
+    ? `Requested ${targetCount} questions for ${effectiveChecklist.length} identified lesson topics; ${uncoveredTopics.length} topic(s) could not be covered within the requested count.`
+    : uncoveredTopics.length > 0
+    ? `${uncoveredTopics.length} of ${effectiveChecklist.length} lesson topics were not covered in this batch.`
+    : null;
+
   return {
     questions: randomizedQuestions,
     requestedCount: targetCount,
     generatedCount: randomizedQuestions.length,
     duplicateCount: totalDuplicatesDetected,
+    reverseQuestionRejectedCount: totalReverseQuestionsRejected,
+    unsupportedRejectedCount: totalUnsupportedRejected,
     invalidCount: totalInvalidDetected,
+    coverageAudit: {
+      totalTopics: effectiveChecklist.length,
+      coveredTopics,
+      uncoveredTopics,
+      coveragePercent,
+      coverageLimitedByCount,
+      limitationNote,
+    },
   };
 }
 

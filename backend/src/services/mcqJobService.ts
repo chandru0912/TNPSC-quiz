@@ -140,6 +140,13 @@ export class McqJobService {
       this.schemaReadyPromise = (async () => {
         await pool.query(`
           ALTER TABLE questions ADD COLUMN IF NOT EXISTS generation_job_id VARCHAR(64);
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS normalized_question_hash VARCHAR(64);
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS concept_fingerprint VARCHAR(128);
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS duplicate_check_status VARCHAR(30) DEFAULT 'passed';
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS generation_batch_id VARCHAR(80);
+          CREATE INDEX IF NOT EXISTS idx_questions_norm_hash ON questions (normalized_question_hash);
+          CREATE INDEX IF NOT EXISTS idx_questions_concept_fp ON questions (concept_fingerprint);
+          CREATE INDEX IF NOT EXISTS idx_questions_gen_batch ON questions (generation_batch_id);
           CREATE TABLE IF NOT EXISTS mcq_generation_jobs (
             job_id VARCHAR(64) PRIMARY KEY,
             admin_id VARCHAR(120) NOT NULL,
@@ -578,7 +585,7 @@ export class McqJobService {
         const questionsToSave = batchQuestions.slice(0, stillNeeded);
 
         if (questionsToSave.length > 0) {
-          const colsPerRow = 29;
+          const colsPerRow = 33;
           const valuesClauses: string[] = [];
           const flatParams: any[] = [];
 
@@ -590,7 +597,8 @@ export class McqJobService {
                 `$${o + 11}, $${o + 12}, $${o + 13}, $${o + 14}, $${o + 15}, ` +
                 `$${o + 16}, 'staging', $${o + 17}, 'study_materials', ` +
                 `$${o + 18}, $${o + 19}, $${o + 20}, $${o + 21}, $${o + 22}, ` +
-                `$${o + 23}, $${o + 24}, $${o + 25}, $${o + 26}, $${o + 27}, $${o + 28}, $${o + 29})`
+                `$${o + 23}, $${o + 24}, $${o + 25}, $${o + 26}, $${o + 27}, $${o + 28}, $${o + 29}, ` +
+                `$${o + 30}, $${o + 31}, $${o + 32}, $${o + 33})`
             );
             flatParams.push(
               q.category,
@@ -618,10 +626,14 @@ export class McqJobService {
               job.term_id || null,
               job.volume || null,
               job.source_pdf || job.textbook_name || null,
-              sourcePages[0] ?? null,
+              q.sourcePage ?? sourcePages[0] ?? null,
               job.textbook_id != null ? Number(job.textbook_id) : null,
               provider,
-              jobId
+              jobId,
+              q.normalizedQuestionHash || null,
+              q.conceptFingerprint || null,
+              q.duplicateCheckStatus || 'passed',
+              batchId
             );
           });
 
@@ -632,7 +644,8 @@ export class McqJobService {
               topic, difficulty, question_text, options, correct_answer,
               explanation, status, source_reference, target_system,
               language, option_a, option_b, option_c, option_d,
-              term, volume, source_pdf, source_page, textbook_id, ai_provider, generation_job_id
+              term, volume, source_pdf, source_page, textbook_id, ai_provider, generation_job_id,
+              normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id
             ) VALUES ${valuesClauses.join(', ')}
             ON CONFLICT (lesson_title, question_text) DO NOTHING
             RETURNING id`,

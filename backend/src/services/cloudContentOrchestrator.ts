@@ -7,7 +7,7 @@
 import pool from '../db';
 import { retrieveRelevantTextbookContent, TextbookSearchQuery } from './textbookRag';
 import { generateStudyNotes, GeneratedStudyNotesResult } from './studyNotesGenerator';
-import { generateMcqs, GeneratedMcqItem, McqGenerationResult } from './mcqGenerator';
+import { generateMcqs, GeneratedMcqItem, McqGenerationResult, TopicCoverageAudit } from './mcqGenerator';
 import { CloudAIService } from './cloudAi/cloudAiService';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { splitAndAlignNotesByTopic, persistTopicAlignedNotes, AlignedTopicItem, TopicSeparationResult } from './topicAlignmentService';
@@ -87,7 +87,10 @@ export interface UnifiedGenerationResult {
     questions: GeneratedMcqItem[];
     totalGenerated: number;
     duplicateCount: number;
+    reverseQuestionRejectedCount: number;
+    unsupportedRejectedCount: number;
     invalidCount: number;
+    coverageAudit: TopicCoverageAudit;
     status: 'staging' | 'preview';
   };
 }
@@ -429,6 +432,7 @@ export class CloudContentOrchestrator {
 
       // Auto-save to database staging if flag is active
       if (req.autoSaveToStaging && mcqsResult.questions.length > 0) {
+        const batchId = `sync_${Date.now().toString(36)}`;
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
@@ -440,8 +444,9 @@ export class CloudContentOrchestrator {
                 topic, difficulty, question_text, options, correct_answer,
                 explanation, status, source_reference, target_system,
                 language, option_a, option_b, option_c, option_d,
-                term, volume, source_pdf, source_page, textbook_id, ai_provider
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'staging', $17, 'study_materials', $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+                term, volume, source_pdf, source_page, textbook_id, ai_provider,
+                normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'staging', $17, 'study_materials', $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
               ON CONFLICT (lesson_title, question_text) DO NOTHING`,
               [
                 q.category,
@@ -469,9 +474,13 @@ export class CloudContentOrchestrator {
                 mcqSelection?.term || req.term || null,
                 mcqSelection?.volume || req.volume || null,
                 mcqSelection?.sourcePdf || textbookDetails.name || null,
-                mcqSelection?.pages[0] ?? null,
+                q.sourcePage ?? mcqSelection?.pages[0] ?? null,
                 mcqSelection?.candidate.textbookId || null,
                 targetProviderName,
+                q.normalizedQuestionHash || null,
+                q.conceptFingerprint || null,
+                q.duplicateCheckStatus || 'passed',
+                batchId,
               ]
             );
           }
@@ -559,7 +568,10 @@ export class CloudContentOrchestrator {
             questions: mcqsResult.questions,
             totalGenerated: mcqsResult.generatedCount,
             duplicateCount: mcqsResult.duplicateCount,
+            reverseQuestionRejectedCount: mcqsResult.reverseQuestionRejectedCount,
+            unsupportedRejectedCount: mcqsResult.unsupportedRejectedCount,
             invalidCount: mcqsResult.invalidCount,
+            coverageAudit: mcqsResult.coverageAudit,
             status: req.autoSaveToStaging ? 'staging' : 'preview',
           }
         : undefined,

@@ -558,6 +558,14 @@ export async function runMigration() {
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS volume TEXT;
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS source_pdf TEXT;
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS lesson_number TEXT;
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS normalized_question_hash VARCHAR(64);
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS concept_fingerprint VARCHAR(128);
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS duplicate_check_status VARCHAR(30) DEFAULT 'passed';
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS generation_batch_id VARCHAR(80);
+      CREATE INDEX IF NOT EXISTS idx_questions_norm_hash ON questions (normalized_question_hash);
+      CREATE INDEX IF NOT EXISTS idx_questions_concept_fp ON questions (concept_fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_questions_textbook_lesson ON questions (textbook_id, lesson_title);
+      CREATE INDEX IF NOT EXISTS idx_questions_gen_batch ON questions (generation_batch_id);
 
       UPDATE textbooks SET volume = term
       WHERE volume IS NULL AND term ~* '^volume\\s*[0-9]+';
