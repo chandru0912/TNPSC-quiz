@@ -4712,7 +4712,11 @@ const Admin = () => {
                     {extractionOverview?.totalFiles ?? driveMaterials.length}
                   </div>
                   <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
-                    {extractionOverview?.statusBreakdown?.completed ?? 0} completed • {extractionOverview?.statusBreakdown?.pending ?? driveMaterials.length} pending
+                    {extractionOverview?.statusBreakdown?.completed ?? 0} completed
+                    {(extractionOverview?.statusBreakdown?.partiallyCompleted ?? 0) > 0 ? ` • ${extractionOverview?.statusBreakdown?.partiallyCompleted} partial` : ''}
+                    {(extractionOverview?.statusBreakdown?.processing ?? 0) > 0 ? ` • ${extractionOverview?.statusBreakdown?.processing} processing` : ''}
+                    {' • '}{extractionOverview?.statusBreakdown?.pending ?? 0} pending
+                    {(extractionOverview?.statusBreakdown?.failed ?? 0) > 0 ? ` • ${extractionOverview?.statusBreakdown?.failed} failed` : ''}
                   </div>
                 </div>
 
@@ -6402,7 +6406,11 @@ const Admin = () => {
                     {extractionOverview?.totalFiles ?? driveMaterials.length}
                   </div>
                   <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
-                    {extractionOverview?.statusBreakdown?.completed ?? 0} completed • {extractionOverview?.statusBreakdown?.pending ?? driveMaterials.length} pending
+                    {extractionOverview?.statusBreakdown?.completed ?? 0} completed
+                    {(extractionOverview?.statusBreakdown?.partiallyCompleted ?? 0) > 0 ? ` • ${extractionOverview?.statusBreakdown?.partiallyCompleted} partial` : ''}
+                    {(extractionOverview?.statusBreakdown?.processing ?? 0) > 0 ? ` • ${extractionOverview?.statusBreakdown?.processing} processing` : ''}
+                    {' • '}{extractionOverview?.statusBreakdown?.pending ?? 0} pending
+                    {(extractionOverview?.statusBreakdown?.failed ?? 0) > 0 ? ` • ${extractionOverview?.statusBreakdown?.failed} failed` : ''}
                   </div>
                 </div>
 

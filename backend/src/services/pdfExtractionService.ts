@@ -1677,9 +1677,18 @@ export async function getOverallExtractionOverview(): Promise<{
   const extractedPages = Number(row.extracted_pages || 0);
   const skippedPages = Number(row.skipped_pages || 0);
   const failedPages = Number(row.failed_pages || 0);
+  const countCompleted = Number(row.count_completed || 0);
+  const countPartial = Number(row.count_partial || 0);
+  const countProcessing = Number(row.count_processing || 0);
+  const countPending = Number(row.count_pending || 0);
+  const countFailed = Number(row.count_failed || 0);
+
   const accountedPages = Math.min(totalPages || extractedPages + skippedPages, extractedPages + skippedPages);
   const pendingPages = Math.max(0, totalPages - accountedPages - failedPages);
-  const pct = totalPages > 0 ? Math.min(100, Math.round((accountedPages / totalPages) * 100)) : 0;
+  const knownPagePct = totalPages > 0 ? Math.min(100, Math.round((accountedPages / totalPages) * 100)) : 0;
+  const processedFilesPct = totalFiles > 0 ? Math.round(((countCompleted + countPartial) / totalFiles) * 100) : 0;
+  // Never display misleading high progress (e.g. 75%) when pending PDFs still have unknown total_pages = 0
+  const pct = countPending > 0 ? Math.min(knownPagePct, processedFilesPct) : knownPagePct;
 
   return {
     totalFiles,
@@ -1692,11 +1701,11 @@ export async function getOverallExtractionOverview(): Promise<{
     ocrPages: Number(row.ocr_pages || 0),
     completionPercentage: pct,
     statusBreakdown: {
-      completed: Number(row.count_completed || 0),
-      partiallyCompleted: Number(row.count_partial || 0),
-      processing: Number(row.count_processing || 0),
-      pending: Number(row.count_pending || 0),
-      failed: Number(row.count_failed || 0),
+      completed: countCompleted,
+      partiallyCompleted: countPartial,
+      processing: countProcessing,
+      pending: countPending,
+      failed: countFailed,
     },
   };
 }

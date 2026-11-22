@@ -18,11 +18,16 @@ export const isProductionOrCloud =
   Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 
 const isServerless = Boolean(process.env.VERCEL);
-const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+const connectionString = (process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
 const hasExplicitPgVars = Boolean(process.env.PGHOST && process.env.PGUSER && process.env.PGPASSWORD);
-const sslConfig = isProductionOrCloud
-  ? { rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED !== 'false' }
-  : undefined;
+const isLocalHost =
+  !connectionString &&
+  (process.env.PGHOST === 'localhost' || process.env.PGHOST === '127.0.0.1');
+
+const sslConfig =
+  isProductionOrCloud && !isLocalHost
+    ? { rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED === 'true' }
+    : undefined;
 
 export function getDirectDatabaseUrl(): string {
   return process.env.DIRECT_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
@@ -30,36 +35,39 @@ export function getDirectDatabaseUrl(): string {
 
 const poolSettings = {
   max: isServerless ? 2 : 10,
-  connectionTimeoutMillis: 8000,
+  connectionTimeoutMillis: 10000,
   idleTimeoutMillis: isServerless ? 5000 : 15000,
   allowExitOnIdle: isServerless,
 };
 
-const config: PoolConfig = hasExplicitPgVars
-  ? {
-    host: process.env.PGHOST,
-    port: parseInt(process.env.PGPORT || '5432', 10),
-    database: process.env.PGDATABASE || 'neondb',
-    user: process.env.PGUSER,
-    password: process.env.PGPASSWORD,
-    ssl: sslConfig,
-    ...poolSettings,
-  }
-  : connectionString
-    ? {
+function buildPoolConfig(): PoolConfig {
+  if (connectionString) {
+    return {
       connectionString,
       ssl: sslConfig,
       ...poolSettings,
-    }
-    : {
-      host: process.env.PGHOST || 'localhost',
+    };
+  }
+
+  if (hasExplicitPgVars) {
+    return {
+      host: process.env.PGHOST,
       port: parseInt(process.env.PGPORT || '5432', 10),
-      database: process.env.PGDATABASE || 'tnpsc_study_hub',
-      user: process.env.PGUSER || 'postgres',
-      password: process.env.PGPASSWORD || '',
+      database: process.env.PGDATABASE || 'neondb',
+      user: process.env.PGUSER,
+      password: process.env.PGPASSWORD,
       ssl: sslConfig,
       ...poolSettings,
     };
+  }
+
+  throw new Error(
+    '[DB Config Error] Missing DATABASE_URL (or POSTGRES_URL / PGHOST+PGUSER+PGPASSWORD). ' +
+      'Localhost fallback is disabled to prevent database drift. Configure your Neon PostgreSQL DATABASE_URL in backend/.env or Vercel Environment Variables.'
+  );
+}
+
+const config: PoolConfig = buildPoolConfig();
 
 export const pool = new Pool(config);
 
