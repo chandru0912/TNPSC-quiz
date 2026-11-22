@@ -20,6 +20,7 @@ import { getPdfParseClass, cleanText, isScannedText, extractPageSyllabusMeta, no
 import { extractOcrForPage, OcrResult } from './ocrService';
 import { cleanTamilUnicodeText, repairInDesignPdfArtifacts } from './tamilUnicodeCleaner';
 import { getDriveFileBuffer } from './googleDriveService';
+import { indexTextbookPages } from './textbookIndexingService';
 
 export type PdfType = 'TEXT_BASED' | 'SCANNED' | 'MIXED' | 'INVALID' | 'UNKNOWN';
 export type ExtractionStatus = 'PENDING' | 'PROCESSING' | 'DETECTING' | 'EXTRACTING' | 'OCR_PROCESSING' | 'PARTIALLY_COMPLETED' | 'COMPLETED' | 'FAILED';
@@ -539,6 +540,13 @@ async function finalizeExtraction(options: {
     `[PDF Extraction] Finalized ${fileName} (textbook #${textbookId}): ${status}, ${completed}/${totalPages} pages, ${counts.failed} failed.`
   );
 
+  // Automatically run full page indexing & syllabus lesson mapping upon extraction completion (Phase 7)
+  try {
+    await indexTextbookPages(textbookId);
+  } catch (idxErr: any) {
+    console.warn(`[PDF Extraction] Post-extraction indexing warning for textbook #${textbookId}:`, idxErr?.message || idxErr);
+  }
+
   return {
     status,
     nativePagesCount: counts.native,
@@ -1026,7 +1034,7 @@ export async function processAutomaticPdfExtraction(options: {
           }
         }
 
-        const meta = extractPageSyllabusMeta(pageText, subject, pageNum, totalPages);
+        const meta = extractPageSyllabusMeta(pageText, subject, pageNum, totalPages, standard, medium);
         if (meta.unitId) {
           if (meta.unitId !== activeUnitId) activeLessonTitle = undefined;
           activeUnitId = meta.unitId;

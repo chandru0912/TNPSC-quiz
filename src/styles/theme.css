@@ -103,6 +103,8 @@
 html {
   width: 100%;
   max-width: 100%;
+  background-color: #060913;
+  color-scheme: dark;
   scroll-behavior: auto;
   overflow-y: scroll;
   overflow-x: hidden;
@@ -665,4 +667,3 @@ p, span, h1, h2, h3, h4, h5, h6, a, button, label {
 .btn-outline:active {
   transform: translateY(1px) scale(0.98);
 }
-

@@ -6,6 +6,10 @@
   overflow: hidden;
   pointer-events: none;
   background: #080d1b;
+  isolation: isolate;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   filter: none;
@@ -15,7 +19,7 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate3d(-50%, -50%, 0);
   width: 1440px;
   height: 810px;
   max-width: none;
@@ -23,7 +27,10 @@
   object-fit: cover;
   object-position: center center;
   display: block;
+  background: #080d1b;
   pointer-events: none;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   filter: none;
   opacity: 1;
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%);

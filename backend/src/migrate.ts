@@ -515,7 +515,36 @@ export async function runMigration() {
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS material_id INT DEFAULT NULL;
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS lesson_id TEXT DEFAULT NULL;
       ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS medium VARCHAR(30) DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS chapter_title TEXT DEFAULT NULL;
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS indexing_status VARCHAR(30) DEFAULT 'pending';
+      ALTER TABLE textbook_content ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
       CREATE INDEX IF NOT EXISTS idx_textbook_content_lesson_id ON textbook_content (lesson_id);
+      CREATE INDEX IF NOT EXISTS idx_textbook_content_tb_status ON textbook_content (textbook_id, extraction_status, indexing_status);
+      CREATE INDEX IF NOT EXISTS idx_textbook_content_std_subj_med ON textbook_content (standard, subject, medium);
+
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS indexed_pages INT DEFAULT 0;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS indexing_status VARCHAR(30) DEFAULT 'PENDING';
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS indexed_lessons_count INT DEFAULT 0;
+      ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS last_indexed_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+
+      CREATE TABLE IF NOT EXISTS textbook_indexing_jobs (
+        job_id VARCHAR(64) PRIMARY KEY,
+        job_type VARCHAR(40) NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+        total_items INT DEFAULT 0,
+        processed_items INT DEFAULT 0,
+        succeeded_items INT DEFAULT 0,
+        failed_items INT DEFAULT 0,
+        cursor_textbook_id INT DEFAULT 0,
+        filters JSONB DEFAULT '{}'::jsonb,
+        summary JSONB DEFAULT '{}'::jsonb,
+        error_logs JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_textbook_indexing_jobs_status ON textbook_indexing_jobs (status, created_at DESC);
 
       DO $$
       BEGIN

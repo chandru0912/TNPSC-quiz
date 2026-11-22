@@ -1,5 +1,6 @@
 import pool from '../db';
 import { isFrontOrBackMatterPage, normalizeTamilPdfText } from './pdfProcessor';
+import { extractBilingualKeywords } from './textbookIndexingService';
 
 export interface TextbookSearchQuery {
   groupId?: string;
@@ -181,11 +182,14 @@ export async function retrieveRelevantTextbookContent(
   }
 
   // 2. Fetch all pages for the textbook
-  const keywords = extractKeywords(lessonTitle, topic);
+  const keywords = Array.from(new Set([...extractKeywords(lessonTitle, topic), ...extractBilingualKeywords(`${lessonTitle || ''} ${topic || ''}`)])).slice(0, 26);
   const contentQuery = `
     SELECT id, textbook_id, page_number, unit_id, unit_title, lesson_title, topic, content, is_ocr
     FROM textbook_content
     WHERE textbook_id = $1
+      AND COALESCE(extraction_status, 'completed') = 'completed'
+      AND LENGTH(TRIM(COALESCE(content, ''))) >= 20
+      AND COALESCE(indexing_status, 'indexed') NOT IN ('front_matter', 'back_matter', 'blank', 'failed')
     ORDER BY page_number ASC
   `;
   const contentRes = await pool.query(contentQuery, [resolvedTextbookId]);
@@ -483,6 +487,9 @@ export async function retrieveCompleteLessonContent(
     SELECT id, textbook_id, page_number, unit_id, unit_title, lesson_title, topic, content, is_ocr
     FROM textbook_content
     WHERE textbook_id = $1
+      AND COALESCE(extraction_status, 'completed') = 'completed'
+      AND LENGTH(TRIM(COALESCE(content, ''))) >= 20
+      AND COALESCE(indexing_status, 'indexed') NOT IN ('front_matter', 'back_matter', 'blank', 'failed')
     ORDER BY page_number ASC
   `;
   const contentRes = await pool.query(contentQuery, [resolvedTextbookId]);
@@ -780,6 +787,9 @@ export async function discoverLessonsInScope(params: {
     SELECT id, textbook_id, page_number, unit_id, unit_title, lesson_title, topic, content, is_ocr
     FROM textbook_content
     WHERE textbook_id = $1
+      AND COALESCE(extraction_status, 'completed') = 'completed'
+      AND LENGTH(TRIM(COALESCE(content, ''))) >= 20
+      AND COALESCE(indexing_status, 'indexed') NOT IN ('front_matter', 'back_matter', 'blank', 'failed')
     ORDER BY page_number ASC
   `;
   const contentRes = await pool.query(contentQuery, [resolvedTextbookId]);

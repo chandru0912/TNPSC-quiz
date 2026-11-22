@@ -7,6 +7,7 @@
  */
 
 import pool from '../db';
+import { extractBilingualKeywords } from './textbookIndexingService';
 
 export type CascadeSourceType = 'textbook' | 'drive';
 export type CandidateStatus = 'completed' | 'processing' | 'failed' | 'unavailable';
@@ -683,17 +684,38 @@ export async function getMcqLessons(params: {
   validateTermVolume(candidate, params.term, params.volume);
 
   if ((candidate.textbookId || candidate.materialId) && (candidate.hasIndexedContent || candidate.hasExtractedText)) {
-    const res = await pool.query(
+    // 1. Try lessons matching the requested unitId first (excluding front/back matter & blank/failed pages)
+    let res = await pool.query(
       `SELECT unit_id, unit_title, lesson_title, lesson_id,
               MIN(page_number) AS start_page, MAX(page_number) AS end_page,
               COUNT(*) FILTER (WHERE topic IS NOT NULL AND topic <> '') AS topic_count
        FROM textbook_content
        WHERE (textbook_id = $1 OR ($3::int IS NOT NULL AND material_id = $3))
+         AND COALESCE(extraction_status, 'completed') = 'completed'
+         AND COALESCE(indexing_status, 'indexed') NOT IN ('front_matter', 'back_matter', 'blank', 'failed')
          AND ($2::int IS NULL OR unit_id = $2)
        GROUP BY unit_id, unit_title, lesson_title, lesson_id
        ORDER BY unit_id NULLS LAST, MIN(page_number) ASC`,
       [candidate.textbookId || null, params.unitId, candidate.materialId || null]
     );
+
+    // 2. If TNPSC syllabus unitId (e.g. Unit 5 Polity / Unit 6 Economy) differs from the textbook's
+    // internal chapter numbering (1..N), return all indexed lessons from this textbook instead of 0!
+    if (res.rows.length === 0) {
+      res = await pool.query(
+        `SELECT unit_id, unit_title, lesson_title, lesson_id,
+                MIN(page_number) AS start_page, MAX(page_number) AS end_page,
+                COUNT(*) FILTER (WHERE topic IS NOT NULL AND topic <> '') AS topic_count
+         FROM textbook_content
+         WHERE (textbook_id = $1 OR ($2::int IS NOT NULL AND material_id = $2))
+           AND COALESCE(extraction_status, 'completed') = 'completed'
+           AND COALESCE(indexing_status, 'indexed') NOT IN ('front_matter', 'back_matter', 'blank', 'failed')
+         GROUP BY unit_id, unit_title, lesson_title, lesson_id
+         ORDER BY unit_id NULLS LAST, MIN(page_number) ASC`,
+        [candidate.textbookId || null, candidate.materialId || null]
+      );
+    }
+
     if (res.rows.length > 0) {
       return { candidate, lessons: dbLessons(candidate, res.rows) };
     }
@@ -909,76 +931,188 @@ async function loadDbLessonContent(
   lesson: McqCascadeLesson,
   materialId?: number | null
 ): Promise<{ text: string; pages: number[] }> {
-  // 1. Try exact or case-insensitive match on lesson_title
-  let res = await pool.query(
-    `SELECT page_number, content, lesson_title, topic
-     FROM textbook_content
-     WHERE (textbook_id = $1 OR ($4::int IS NOT NULL AND material_id = $4))
-       AND ($2::int IS NULL OR unit_id = $2)
-       AND (
-         LOWER(TRIM(lesson_title)) = LOWER(TRIM($3))
-         OR LOWER(lesson_title) LIKE '%' || LOWER(TRIM($3)) || '%'
-         OR LOWER(TRIM($3)) LIKE '%' || LOWER(TRIM(lesson_title)) || '%'
-       )
-     ORDER BY page_number ASC`,
-    [textbookId, lesson.unitId, lesson.title, materialId || null]
-  );
+  const validPageClause = `
+    (textbook_id = $1 OR ($2::int IS NOT NULL AND material_id = $2))
+    AND COALESCE(extraction_status, 'completed') = 'completed'
+    AND LENGTH(TRIM(COALESCE(content, ''))) >= 20
+    AND COALESCE(indexing_status, 'indexed') NOT IN ('front_matter', 'back_matter', 'blank', 'failed')
+  `;
 
-  // 2. Keyword-based matching if lesson title in DB is slightly different (e.g. Tamil or synonyms)
-  if (res.rows.length === 0 && lesson.unitId != null) {
-    const keywords = extractKeywords(lesson.title);
-    if (keywords.length > 0) {
-      const kwConditions = keywords.map((_, i) => `content ILIKE $${i + 4}`).join(' OR ');
-      const kwVals = [textbookId, lesson.unitId, materialId || null, ...keywords.map((k) => `%${k}%`)];
-      const kwRes = await pool.query(
+  let rows: any[] = [];
+
+  // 1. Exact lesson_id match in textbook_content (fastest & most precise)
+  if (lesson.lessonId) {
+    const byId = await pool.query(
+      `SELECT page_number, content, lesson_title, topic
+       FROM textbook_content
+       WHERE ${validPageClause}
+         AND lesson_id = $3
+       ORDER BY page_number ASC`,
+      [textbookId, materialId || null, lesson.lessonId]
+    );
+    if (byId.rows.length > 0) rows = byId.rows;
+  }
+
+  // 2. Check verified syllabus_lessons page range mapping for this textbook
+  if (rows.length === 0) {
+    const cleanTitle = String(lesson.title || '').trim();
+    const sylMap = await pool.query(
+      `SELECT source_page_start, source_page_end
+       FROM syllabus_lessons
+       WHERE textbook_id = $1
+         AND source_page_start IS NOT NULL
+         AND source_page_end IS NOT NULL
+         AND (
+           ($2::text IS NOT NULL AND id = $2)
+           OR LOWER(TRIM(title)) = LOWER($3)
+           OR LOWER(title) LIKE '%' || LOWER($3) || '%'
+           OR LOWER($3) LIKE '%' || LOWER(title) || '%'
+         )
+       ORDER BY CASE WHEN id = $2 THEN 0 WHEN LOWER(TRIM(title)) = LOWER($3) THEN 1 ELSE 2 END ASC
+       LIMIT 1`,
+      [textbookId, lesson.lessonId || null, cleanTitle]
+    );
+    if (sylMap.rows.length > 0) {
+      const { source_page_start, source_page_end } = sylMap.rows[0];
+      const byRange = await pool.query(
         `SELECT page_number, content, lesson_title, topic
          FROM textbook_content
-         WHERE (textbook_id = $1 OR ($3::int IS NOT NULL AND material_id = $3))
-           AND unit_id = $2
-           AND (${kwConditions})
+         WHERE ${validPageClause}
+           AND page_number BETWEEN $3 AND $4
          ORDER BY page_number ASC`,
-        kwVals
+        [textbookId, materialId || null, Number(source_page_start), Number(source_page_end)]
       );
-      if (kwRes.rows.length > 0) {
-        res = kwRes;
+      if (byRange.rows.length > 0) rows = byRange.rows;
+    }
+  }
+
+  // 3. Exact or partial match on lesson_title / chapter_title across the entire textbook
+  // (never blocked by TNPSC syllabus unitId vs textbook internal unit_id differences)
+  if (rows.length === 0 && lesson.title) {
+    const cleanTitle = String(lesson.title).trim();
+    const byTitle = await pool.query(
+      `SELECT page_number, content, lesson_title, topic
+       FROM textbook_content
+       WHERE ${validPageClause}
+         AND (
+           LOWER(TRIM(COALESCE(lesson_title, ''))) = LOWER($3)
+           OR LOWER(COALESCE(lesson_title, '')) LIKE '%' || LOWER($3) || '%'
+           OR (LENGTH(TRIM(COALESCE(lesson_title, ''))) >= 4 AND LOWER($3) LIKE '%' || LOWER(TRIM(lesson_title)) || '%')
+           OR LOWER(COALESCE(chapter_title, '')) LIKE '%' || LOWER($3) || '%'
+         )
+       ORDER BY CASE WHEN ($4::int IS NOT NULL AND unit_id = $4) THEN 0 ELSE 1 END ASC, page_number ASC`,
+      [textbookId, materialId || null, cleanTitle, lesson.unitId]
+    );
+    if (byTitle.rows.length > 0) rows = byTitle.rows;
+  }
+
+  // 4. Bilingual keyword relevance search across ALL indexed body pages of this textbook
+  if (rows.length === 0) {
+    const keywords = Array.from(
+      new Set([...extractKeywords(lesson.title), ...extractBilingualKeywords(lesson.title)])
+    ).slice(0, 24);
+
+    if (keywords.length > 0) {
+      const allBodyRes = await pool.query(
+        `SELECT page_number, content, lesson_title, topic, unit_id
+         FROM textbook_content
+         WHERE ${validPageClause}
+         ORDER BY page_number ASC`,
+        [textbookId, materialId || null]
+      );
+      const bodyRows = allBodyRes.rows;
+
+      if (bodyRows.length > 0) {
+        const scored = bodyRows.map((r) => {
+          const low = String(r.content || '').toLowerCase();
+          let score = 0;
+          for (const kw of keywords) {
+            if (low.includes(kw.toLowerCase())) score += 10;
+          }
+          if (lesson.unitId != null && Number(r.unit_id) === Number(lesson.unitId)) {
+            score += 5;
+          }
+          return { row: r, score };
+        });
+
+        const matching = scored.filter((s) => s.score >= 10).sort((a, b) => b.score - a.score || a.row.page_number - b.row.page_number);
+        if (matching.length > 0) {
+          const anchorPage = Number(matching[0].row.page_number);
+          // Contiguous lesson window around the highest-scoring anchor page
+          const windowRows = bodyRows.filter(
+            (r) => Number(r.page_number) >= anchorPage - 2 && Number(r.page_number) <= anchorPage + 14
+          );
+          rows = windowRows.length > 0 ? windowRows : matching.slice(0, 15).map((m) => m.row);
+        } else if (lesson.startPage != null && lesson.endPage != null) {
+          rows = bodyRows.filter(
+            (r) => Number(r.page_number) >= lesson.startPage! && Number(r.page_number) <= lesson.endPage!
+          );
+        } else if (lesson.unitId != null) {
+          const unitRows = bodyRows.filter((r) => Number(r.unit_id) === Number(lesson.unitId));
+          rows = unitRows.length > 0 ? unitRows.slice(0, 25) : bodyRows.slice(0, 20);
+        } else {
+          rows = bodyRows.slice(0, 20);
+        }
       }
     }
   }
 
-  // 3. If unit has pages and this unit corresponds to the lesson
-  if (res.rows.length === 0 && lesson.unitId != null) {
+  // 5. Final unit fallback (valid indexed pages)
+  if (rows.length === 0 && lesson.unitId != null) {
     const unitRes = await pool.query(
       `SELECT page_number, content, lesson_title, topic
        FROM textbook_content
-       WHERE (textbook_id = $1 OR ($3::int IS NOT NULL AND material_id = $3))
-         AND unit_id = $2
-       ORDER BY page_number ASC`,
-      [textbookId, lesson.unitId, materialId || null]
+       WHERE ${validPageClause}
+         AND unit_id = $3
+       ORDER BY page_number ASC
+       LIMIT 30`,
+      [textbookId, materialId || null, lesson.unitId]
     );
-    if (unitRes.rows.length > 0) {
-      res = unitRes;
+    if (unitRes.rows.length > 0) rows = unitRes.rows;
+  }
+
+  if (rows.length === 0) {
+    // Provide exact diagnostic error instead of a generic message
+    const diag = await pool.query(
+      `SELECT t.book_name, t.status, t.indexing_status,
+              COUNT(tc.id)::int AS stored_pages,
+              COUNT(tc.id) FILTER (WHERE tc.extraction_status = 'completed')::int AS completed_pages,
+              COUNT(tc.id) FILTER (WHERE tc.extraction_status = 'failed')::int AS failed_pages
+       FROM textbooks t
+       LEFT JOIN textbook_content tc ON tc.textbook_id = t.id
+       WHERE t.id = $1
+       GROUP BY t.id`,
+      [textbookId]
+    );
+    const d = diag.rows[0];
+    if (!d) {
+      throw new Error(`Textbook #${textbookId} does not exist in the database.`);
     }
-  }
-
-  if (res.rows.length === 0) {
+    if (Number(d.completed_pages || 0) === 0) {
+      throw new Error(
+        `Textbook #${textbookId} ("${d.book_name}") has 0 extracted pages (stored: ${d.stored_pages}, failed: ${d.failed_pages}, status: ${d.status}). Run PDF extraction in Admin → Textbook Management.`
+      );
+    }
     throw new Error(
-      `No indexed content was found for the selected lesson "${lesson.title}". The published textbook is available, but page indexing for this lesson has not been generated yet.`
+      `Lesson "${lesson.title}" could not be matched to any body page in Textbook #${textbookId} ("${d.book_name}", ${d.completed_pages} extracted pages, indexing_status: ${d.indexing_status || 'PENDING'}). Run "Index All Extracted Pages" or "Repair Missing Lesson Mappings" in Admin → Textbook Management.`
     );
   }
 
-  const text = res.rows
+  rows.sort((a, b) => Number(a.page_number) - Number(b.page_number));
+
+  const text = rows
     .map((row: any) => `[PDF Page ${row.page_number}]\n${String(row.content || '')}`)
     .join('\n\n')
     .trim();
 
   if (text.length < 50) {
     throw new Error(
-      `Extracted text for "${lesson.title}" is too short (${text.length} characters, minimum 50 required) to generate grounded MCQs. Indexing is incomplete.`
+      `Extracted text for "${lesson.title}" in Textbook #${textbookId} is too short (${text.length} characters, minimum 50 required) to generate grounded MCQs. Verify OCR extraction for these pages.`
     );
   }
 
   const pages = Array.from(
-    new Set(res.rows.map((row: any) => Number(row.page_number)).filter((n: number) => Number.isFinite(n)))
+    new Set(rows.map((row: any) => Number(row.page_number)).filter((n: number) => Number.isFinite(n)))
   ).sort((a, b) => a - b);
 
   return { text, pages };

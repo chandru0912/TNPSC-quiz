@@ -18,7 +18,16 @@ import {
   getExtractedPages,
   processAutomaticPdfExtraction,
   getOverallExtractionOverview,
+  getFailedExtractionPages,
+  retryAllFailedPages,
+  extractAllPendingMaterials,
 } from '../services/pdfExtractionService';
+import {
+  indexTextbookPages,
+  runChunkedIndexingBatch,
+  getIndexingControlCenterOverview,
+  verifyAllTextbooksIntegrity,
+} from '../services/textbookIndexingService';
 import {
   getFileStream,
   getStoredTokens,
@@ -576,7 +585,8 @@ router.get('/', async (req: Request, res: Response) => {
     const query = `
       SELECT id, group_id, standard, subject, medium, term, unit, lesson, book_name, file_size, page_count, status, error_message,
              pdf_type, total_pages, native_pages, ocr_pages, failed_pages, completion_percentage,
-             extraction_status, extraction_method, extracted_at, google_drive_file_id, file_path, created_at, updated_at
+             extraction_status, extraction_method, extracted_at, google_drive_file_id, file_path,
+             indexed_pages, indexing_status, indexed_lessons_count, last_indexed_at, created_at, updated_at
       FROM textbooks
       ${whereClause}
       ORDER BY standard ASC, subject ASC, id DESC
@@ -626,6 +636,10 @@ router.get('/', async (req: Request, res: Response) => {
         extractionStatus: r.extraction_status || (r.status === 'completed' && (r.total_pages > 0 || r.page_count > 0) ? 'COMPLETED' : 'PENDING'),
         extractionMethod: r.extraction_method,
         extractedAt: r.extracted_at,
+        indexedPages: Number(r.indexed_pages || 0),
+        indexingStatus: r.indexing_status || 'PENDING',
+        indexedLessonsCount: Number(r.indexed_lessons_count || 0),
+        lastIndexedAt: r.last_indexed_at || null,
         googleDriveFileId: r.google_drive_file_id || (String(r.file_path || '').startsWith('gdrive://') ? String(r.file_path).replace('gdrive://', '').trim() : null),
         unit: r.unit ?? null,
         lesson: r.lesson || null,
@@ -782,6 +796,253 @@ router.get('/mcq-lessons', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Textbooks Route] MCQ lessons error:', error);
     return res.status(400).json({ status: 'error', message: error.message || 'Failed to load lessons.' });
+  }
+});
+
+/**
+ * =========================================================================
+ * GLOBAL TEXTBOOK INDEXING CONTROL CENTER ENDPOINTS (Standards 6–12)
+ * =========================================================================
+ */
+
+/**
+ * GET /api/textbooks/indexing/overview (Protected Admin)
+ * Live metrics across all textbooks, PDFs, pages, syllabus lessons, and recent jobs.
+ */
+router.get('/indexing/overview', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const overview = await getIndexingControlCenterOverview();
+    return res.status(200).json({ status: 'success', data: overview });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Overview error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Failed to load indexing overview.' });
+  }
+});
+
+/**
+ * GET /api/textbooks/indexing/errors (Protected Admin)
+ * Returns detailed failed page logs and any textbooks with incomplete indexing.
+ */
+router.get('/indexing/errors', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const [failedPages, incompleteTextbooks] = await Promise.all([
+      getFailedExtractionPages(),
+      pool.query(`
+        SELECT t.id, t.standard, t.subject, t.medium, t.term, t.book_name, t.status,
+               t.page_count, t.indexed_pages, t.indexing_status, t.failed_pages, t.error_message
+        FROM textbooks t
+        WHERE COALESCE(t.indexing_status, 'PENDING') <> 'COMPLETED'
+           OR COALESCE(t.failed_pages, 0) > 0
+           OR COALESCE(t.indexed_pages, 0) = 0
+        ORDER BY t.standard ASC, t.id ASC
+      `),
+    ]);
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        failedPages,
+        incompleteTextbooks: incompleteTextbooks.rows,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Errors fetch error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Failed to load error logs.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/indexing/scan-all (Protected Admin)
+ * Scans all textbooks and returns fresh live overview & verification status.
+ */
+router.post('/indexing/scan-all', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const [overview, verification] = await Promise.all([
+      getIndexingControlCenterOverview(),
+      verifyAllTextbooksIntegrity(),
+    ]);
+    return res.status(200).json({
+      status: 'success',
+      message: `Scanned ${overview.totalTextbooks} textbooks (${overview.totalPages} pages, ${overview.indexedPages} indexed, ${overview.failedPages} failed).`,
+      data: { overview, verification },
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Scan error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Scan failed.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/indexing/index-all (Protected Admin)
+ * Chunked, resumable indexing of extracted pages across Standards 6–12.
+ */
+router.post('/indexing/index-all', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const result = await runChunkedIndexingBatch({
+      cursorTextbookId: body.cursorTextbookId ? Number(body.cursorTextbookId) : 0,
+      batchSize: body.batchSize ? Number(body.batchSize) : 10,
+      standard: body.standard && body.standard !== 'all' ? Number(body.standard) : undefined,
+      medium: body.medium && body.medium !== 'all' ? String(body.medium) : undefined,
+      onlyIncomplete: Boolean(body.onlyIncomplete),
+      jobId: body.jobId ? String(body.jobId) : undefined,
+    });
+    return res.status(200).json({
+      status: 'success',
+      message: result.hasMore
+        ? `Indexed ${result.succeeded}/${result.processed} textbooks (${result.remaining} remaining)...`
+        : `Completed indexing batch: ${result.succeeded} succeeded, ${result.failed} failed.`,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Index-all error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Indexing batch failed.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/indexing/repair-mappings (Protected Admin)
+ * Repairs missing syllabus_lessons <-> textbook page mappings in bounded chunks.
+ */
+router.post('/indexing/repair-mappings', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const result = await runChunkedIndexingBatch({
+      cursorTextbookId: body.cursorTextbookId ? Number(body.cursorTextbookId) : 0,
+      batchSize: body.batchSize ? Number(body.batchSize) : 12,
+      standard: body.standard && body.standard !== 'all' ? Number(body.standard) : undefined,
+      medium: body.medium && body.medium !== 'all' ? String(body.medium) : undefined,
+      onlyIncomplete: false,
+      jobId: body.jobId ? String(body.jobId) : undefined,
+    });
+    const totalMapped = result.results.reduce((acc, r) => acc + r.mappedSyllabusLessons, 0);
+    return res.status(200).json({
+      status: 'success',
+      message: result.hasMore
+        ? `Repaired mappings for ${result.succeeded} textbooks (${totalMapped} lessons linked, ${result.remaining} remaining)...`
+        : `Mapping repair completed: ${result.succeeded} textbooks processed (${totalMapped} lessons linked).`,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Repair mappings error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Mapping repair failed.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/indexing/extract-missing (Protected Admin)
+ * Triggers bounded extraction for any pending/unextracted PDFs.
+ */
+router.post('/indexing/extract-missing', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const summary = await extractAllPendingMaterials({
+      limit: req.body?.limit ? Number(req.body.limit) : 1,
+    });
+    return res.status(200).json({
+      status: 'success',
+      message: summary.hasMore
+        ? `Extracted slice (${summary.remaining} PDFs remaining).`
+        : `Extraction check complete: ${summary.succeeded}/${summary.processed} processed.`,
+      data: summary,
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Extract missing error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Extract missing failed.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/indexing/retry-failed (Protected Admin)
+ * Retries all failed pages across all textbooks.
+ */
+router.post('/indexing/retry-failed', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const result = await retryAllFailedPages();
+    return res.status(200).json({
+      status: 'success',
+      message: `Retried failed pages across ${result.materialsRetried} PDF(s): ${result.recoveredPages} recovered, ${result.remainingFailedPages} remaining failed.`,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Retry failed error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Retry failed pages error.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/indexing/resume-jobs (Protected Admin)
+ * Resumes the most recent interrupted indexing job from its saved cursor.
+ */
+router.post('/indexing/resume-jobs', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const lastJob = await pool.query(
+      `SELECT job_id, cursor_textbook_id, filters
+       FROM textbook_indexing_jobs
+       WHERE status IN ('PROCESSING', 'PENDING', 'PARTIALLY_COMPLETED')
+       ORDER BY updated_at DESC
+       LIMIT 1`
+    );
+    const cursor = lastJob.rows[0]?.cursor_textbook_id ? Number(lastJob.rows[0].cursor_textbook_id) : 0;
+    const jobId = lastJob.rows[0]?.job_id || undefined;
+    const result = await runChunkedIndexingBatch({
+      cursorTextbookId: cursor,
+      batchSize: 10,
+      onlyIncomplete: cursor === 0,
+      jobId,
+    });
+    return res.status(200).json({
+      status: 'success',
+      message: result.processed === 0
+        ? 'No interrupted or incomplete indexing jobs remain.'
+        : result.hasMore
+        ? `Resumed job ${result.jobId}: processed ${result.processed} textbooks (${result.remaining} remaining).`
+        : `Resumed job ${result.jobId}: completed all remaining textbooks.`,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Resume jobs error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Resume jobs failed.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/indexing/verify-all (Protected Admin)
+ * Runs the automated data integrity & verification suite across all Standards 6–12.
+ */
+router.post('/indexing/verify-all', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const report = await verifyAllTextbooksIntegrity();
+    return res.status(200).json({
+      status: 'success',
+      message: report.passed
+        ? `Verification PASSED across ${report.totals.totalTextbooks} textbooks (${report.totals.indexedBodyPages} indexed body pages, 0 duplicates, 0 NULL lesson_ids).`
+        : `Verification found ${report.issues.length} issue(s) across ${report.totals.totalTextbooks} textbooks.`,
+      data: report,
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Verify-all error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Verification failed.' });
+  }
+});
+
+/**
+ * POST /api/textbooks/:id/index (Protected Admin)
+ * Indexes a single textbook's extracted pages & updates its syllabus lesson mappings.
+ */
+router.post('/:id/index', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const textbookId = parseInt(req.params.id, 10);
+    if (!textbookId || isNaN(textbookId)) {
+      return res.status(400).json({ status: 'error', message: 'Valid textbook ID is required.' });
+    }
+    const result = await indexTextbookPages(textbookId);
+    return res.status(200).json({
+      status: 'success',
+      message: `Indexed ${result.indexedPages}/${result.totalPages} pages (${result.distinctLessons} lessons, ${result.mappedSyllabusLessons} syllabus mappings) for "${result.bookName}".`,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('[Textbooks Indexing] Single index error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Single textbook indexing failed.' });
   }
 });
 

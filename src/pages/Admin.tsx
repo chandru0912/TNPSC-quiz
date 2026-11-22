@@ -54,6 +54,7 @@ import { AdminSidebar, type AdminSectionType, type AnalyticsTabType } from '../c
 import { AdminTopHeader } from '../components/admin/AdminTopHeader'
 import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
 import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
+import { TextbookIndexingControlCenter } from '../components/admin/TextbookIndexingControlCenter'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
 import { MockTestMcqGenerator } from '../components/admin/MockTestMcqGenerator'
 import { PreviousYearPapersManager } from '../components/admin/PreviousYearPapersManager'
@@ -5240,6 +5241,15 @@ const Admin = () => {
                 </button>
               </div>
             </div>
+
+            {/* Global Textbook Extraction & Indexing Control Center (Standards 6–12) */}
+            <TextbookIndexingControlCenter
+              token={token}
+              standardFilter={textbookStandardFilter}
+              mediumFilter={textbookMediumFilter}
+              onRefreshTextbooks={() => fetchTextbooks(false)}
+              showToast={showToast}
+            />
 
             {/* Filter Bar */}
             <div className="admin-filter-bar glass">

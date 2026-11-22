@@ -190,107 +190,270 @@ const KNOWN_TAMIL_LESSONS: Array<{ pattern: RegExp; title: string; unitId: numbe
   { pattern: /இணைப்புச்சொற்கள்/i, title: 'இணைப்புச்சொற்கள்', unitId: 3 },
 ];
 
-export function isFrontOrBackMatterPage(text: string, pageNum: number, totalPages: number): 'front_matter' | 'back_matter' | null {
-  const lower = text.toLowerCase();
-  if (
-    pageNum <= 8 &&
-    !/இயல்\s*(?:ஒன்று|1)/i.test(text) &&
-    (pageNum <= 8 &&
-      (lower.includes('school education') ||
-        lower.includes('first edition') ||
-        lower.includes('revised edition') ||
-        lower.includes('tntextbooks') ||
-        lower.includes('ஜன கண') ||
-        lower.includes('நீராருங்') ||
-        lower.includes('பொருளடக்கம்') ||
-        lower.includes('table of contents') ||
-        lower.includes('untouchability') ||
-        pageNum <= 8))
-  ) {
-    return 'front_matter';
+export function isFrontOrBackMatterPage(
+  text: string,
+  pageNum: number,
+  totalPages: number
+): 'front_matter' | 'back_matter' | null {
+  const cleaned = (text || '').trim();
+  const lower = cleaned.toLowerCase();
+
+  // Never classify a page as front matter if it explicitly begins a Unit/Chapter/Iyal/Lesson
+  const hasChapterStart =
+    /(?:^|\n)\s*(?:unit|chapter|lesson|prose|poem|இயல்|அலகு|பாடம்)\s*[-–—:.]?\s*(?:1|i|ஒன்று)\b/i.test(cleaned);
+
+  if (pageNum <= 10 && !hasChapterStart) {
+    const isExplicitFrontMarker =
+      lower.includes('first edition') ||
+      lower.includes('revised edition') ||
+      lower.includes('reprint') ||
+      lower.includes('school education') ||
+      lower.includes('tamil nadu textbook') ||
+      lower.includes('tntextbooks') ||
+      lower.includes('ஜன கண') ||
+      lower.includes('jana gana mana') ||
+      lower.includes('national anthem') ||
+      lower.includes('நீராருங்') ||
+      lower.includes('தமிழ்த்தாய் வாழ்த்து') ||
+      lower.includes('பொருளடக்கம்') ||
+      lower.includes('table of contents') ||
+      /(?:^|\n)\s*contents\s*(?:$|\n)/i.test(cleaned) ||
+      lower.includes('untouchability') ||
+      lower.includes('தீண்டாமை') ||
+      lower.includes('preface') ||
+      lower.includes('foreword') ||
+      lower.includes('how to use this book') ||
+      lower.includes('career guidance') ||
+      (pageNum <= 3 && cleaned.replace(/[^a-zA-Z0-9\u0B80-\u0BFF]/g, '').length < 180);
+
+    if (isExplicitFrontMarker) {
+      return 'front_matter';
+    }
   }
+
   if (
-    pageNum >= totalPages &&
-    (lower.includes('பாடநூல்') || lower.includes('குழு') || lower.includes('textbook development') || pageNum === 72)
+    totalPages > 12 &&
+    pageNum >= totalPages - 2 &&
+    (lower.includes('textbook development') ||
+      lower.includes('textbook committee') ||
+      lower.includes('பாடநூல் உருவாக்க') ||
+      lower.includes('ஆசிரியர் குழு') ||
+      lower.includes('printed at') ||
+      lower.includes('this book has been printed on') ||
+      lower.includes('wrapper'))
   ) {
     return 'back_matter';
   }
+
   return null;
 }
 
+const TAMIL_NUMBER_WORDS: Record<string, number> = {
+  'ஒன்று': 1, 'ஒன் று': 1, 'முதல்': 1,
+  'இரண்டு': 2, 'இரண் டு': 2,
+  'மூன்று': 3, 'மூன் று': 3,
+  'நான்கு': 4, 'நான் கு': 4,
+  'ஐந்து': 5, 'ஐந் து': 5,
+  'ஆறு': 6,
+  'ஏழு': 7,
+  'எட்டு': 8,
+  'ஒன்பது': 9,
+  'பத்து': 10,
+};
+
+function parseUnitNumberToken(raw: string): number | undefined {
+  const trimmed = String(raw || '').trim();
+  const num = parseInt(trimmed, 10);
+  if (!isNaN(num) && num >= 1 && num <= 30) return num;
+  if (TAMIL_NUMBER_WORDS[trimmed]) return TAMIL_NUMBER_WORDS[trimmed];
+  const roman: Record<string, number> = {
+    i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10,
+    xi: 11, xii: 12, xiii: 13, xiv: 14, xv: 15,
+  };
+  return roman[trimmed.toLowerCase()];
+}
+
+function cleanDetectedTitle(raw: string): string | undefined {
+  const cleaned = normalizeTamilPdfText(raw || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s\-–—:|.•*]+|[\s\-–—:|.•*]+$/g, '')
+    .trim();
+  if (cleaned.length < 3 || cleaned.length > 110) return undefined;
+  if (/^(?:\d+|page\s*\d+|www\.|http|indd|standard\s*\d+|class\s*\d+|term\s*\d+)$/i.test(cleaned)) {
+    return undefined;
+  }
+  return cleaned;
+}
+
 /**
- * Heuristic metadata extraction for Unit and Lesson from page content.
+ * General-purpose Samacheer Kalvi metadata extraction for Unit, Chapter, and Lesson
+ * across Standards 6–12 (Tamil & English editions, all subjects).
  */
 export function extractPageSyllabusMeta(
   text: string,
   subject: string,
   pageNum: number,
-  totalPages: number
-): { unitId?: number; unitTitle?: string; lessonTitle?: string; topic?: string } {
-  const lower = text.toLowerCase();
+  totalPages: number,
+  standard?: number,
+  medium?: string
+): { unitId?: number; unitTitle?: string; chapterTitle?: string; lessonTitle?: string; topic?: string } {
+  const cleanedText = normalizeTamilPdfText(text || '');
   let unitId: number | undefined;
   let unitTitle: string | undefined;
+  let chapterTitle: string | undefined;
   let lessonTitle: string | undefined;
   let topic: string | undefined;
 
-  const matterType = isFrontOrBackMatterPage(text, pageNum, totalPages);
+  const matterType = isFrontOrBackMatterPage(cleanedText, pageNum, totalPages);
   if (matterType) {
     return { topic: matterType };
   }
 
-  // Match Tamil Iyal ("இயல் ஒன்று", "இயல் இரண்டு", "இயல் மூன்று", "இயல் 1", etc.)
-  if (/இயல்\s*(?:ஒன்று|ஒன்\s*று|1)\b/i.test(text) || pageNum === 9) {
-    unitId = 1;
-    unitTitle = 'இயல் 1 - தமிழ் தேன்';
-  } else if (/இயல்\s*(?:இரண்டு|இரண்\s*டு|2)\b/i.test(text) || pageNum === 27) {
-    unitId = 2;
-    unitTitle = 'இயல் 2 - இயற்கை இன்பம்';
-  } else if (/இயல்\s*(?:மூன்று|மூன்\s*று|3)\b/i.test(text) || pageNum === 49) {
-    unitId = 3;
-    unitTitle = 'இயல் 3 - எந்திர உலகம்';
-  } else {
-    // Match "Unit 1", "Unit - 2", "அலகு 1", etc.
-    const unitMatch = lower.match(/(?:unit|அலகு|இயல்)\s*[-:]?\s*(\d{1,2})/i);
-    if (unitMatch && unitMatch[1]) {
-      const parsed = parseInt(unitMatch[1], 10);
-      if (!isNaN(parsed) && parsed >= 1 && parsed <= 20) {
+  const lines = cleanedText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !/\.indd\b/i.test(l));
+
+  const topSlice = lines.slice(0, 14).join('\n');
+  const isTamilBook =
+    /tamil|தமிழ்/i.test(subject || '') ||
+    (medium ? /tamil|தமிழ்/i.test(medium) : false);
+  const isCl6TamilTerm1 =
+    isClass6TamilTextbook(standard || 0, medium || '', subject || '', totalPages) &&
+    totalPages >= 68 &&
+    totalPages <= 80;
+
+  // 1. Class 6 Tamil Term 1 specific corpus markers (strictly scoped to Class 6 Tamil Term 1 ONLY!)
+  if (isCl6TamilTerm1) {
+    if (/இயல்\s*(?:ஒன்று|ஒன்\s*று|1)\b/i.test(topSlice) || pageNum === 9) {
+      unitId = 1;
+      unitTitle = 'இயல் 1 - தமிழ் தேன்';
+    } else if (/இயல்\s*(?:இரண்டு|இரண்\s*டு|2)\b/i.test(topSlice) || pageNum === 27) {
+      unitId = 2;
+      unitTitle = 'இயல் 2 - இயற்கை இன்பம்';
+    } else if (/இயல்\s*(?:மூன்று|மூன்\s*று|3)\b/i.test(topSlice) || pageNum === 49) {
+      unitId = 3;
+      unitTitle = 'இயல் 3 - எந்திர உலகம்';
+    }
+
+    for (const item of KNOWN_TAMIL_LESSONS) {
+      if (item.pattern.test(cleanedText)) {
+        if (
+          (item.unitId === 1 && pageNum >= 9 && pageNum <= 26) ||
+          (item.unitId === 2 && pageNum >= 27 && pageNum <= 48) ||
+          (item.unitId === 3 && pageNum >= 49 && pageNum <= 71)
+        ) {
+          lessonTitle = item.title;
+          unitId = item.unitId;
+          break;
+        }
+      }
+    }
+  }
+
+  // 2. General Tamil Iyal / Alagu / Paadam heading detection (Standards 6–12)
+  if (!unitId) {
+    const tamilUnitMatch = topSlice.match(
+      /(?:^|\n)\s*(இயல்|அலகு|பாடம்)\s*[-–—:.]?\s*(\d{1,2}|ஒன்று|ஒன்\s*று|இரண்டு|இரண்\s*டு|மூன்று|மூன்\s*று|நான்கு|ஐந்து|ஆறு|ஏழு|எட்டு|ஒன்பது|பத்து)\s*[:\-–—.]?\s*([^\n]{0,80})/i
+    );
+    if (tamilUnitMatch) {
+      const parsed = parseUnitNumberToken(tamilUnitMatch[2]);
+      if (parsed) {
         unitId = parsed;
+        const headingLabel = tamilUnitMatch[1];
+        let titleCandidate = cleanDetectedTitle(tamilUnitMatch[3] || '');
+        if (!titleCandidate) {
+          const idx = lines.findIndex((l) => l.includes(tamilUnitMatch[0].trim().split('\n')[0]));
+          if (idx >= 0 && lines[idx + 1]) {
+            titleCandidate = cleanDetectedTitle(lines[idx + 1]);
+          }
+        }
+        unitTitle = titleCandidate ? `${headingLabel} ${parsed} - ${titleCandidate}` : `${headingLabel} ${parsed}`;
+        if (titleCandidate && !lessonTitle) {
+          lessonTitle = titleCandidate;
+          chapterTitle = titleCandidate;
+        }
       }
     }
   }
 
-  // Match known Tamil textbook lessons (only within appropriate page window so TOC/cross-refs don't misassign units)
-  for (const item of KNOWN_TAMIL_LESSONS) {
-    if (item.pattern.test(text)) {
-      if (
-        (item.unitId === 1 && pageNum >= 9 && pageNum <= 26) ||
-        (item.unitId === 2 && pageNum >= 27 && pageNum <= 48) ||
-        (item.unitId === 3 && pageNum >= 49 && pageNum <= 71)
-      ) {
-        lessonTitle = item.title;
-        unitId = item.unitId;
-        break;
+  // 3. General English Unit / Chapter / Lesson heading detection (Standards 6–12)
+  if (!unitId) {
+    const engUnitMatch = topSlice.match(
+      /(?:^|\n)\s*(UNIT|CHAPTER|LESSON)\s*[-–—:.]?\s*(\d{1,2}|[IVX]{1,4})\s*[:\-–—.]?\s*([^\n]{0,90})/i
+    );
+    if (engUnitMatch) {
+      const parsed = parseUnitNumberToken(engUnitMatch[2]);
+      if (parsed) {
+        unitId = parsed;
+        const kind = engUnitMatch[1].toUpperCase();
+        let titleCandidate = cleanDetectedTitle(engUnitMatch[3] || '');
+        if (!titleCandidate) {
+          const matchLineIdx = lines.findIndex((l) =>
+            new RegExp(`^${engUnitMatch[1]}\\s*[-–—:.]?\\s*${engUnitMatch[2]}\\b`, 'i').test(l)
+          );
+          if (matchLineIdx >= 0 && lines[matchLineIdx + 1]) {
+            titleCandidate = cleanDetectedTitle(lines[matchLineIdx + 1]);
+          }
+        }
+        const label = kind === 'CHAPTER' ? 'Chapter' : kind === 'LESSON' ? 'Lesson' : 'Unit';
+        unitTitle = titleCandidate ? `${label} ${parsed} - ${titleCandidate}` : `${label} ${parsed}`;
+        if (titleCandidate && !lessonTitle) {
+          lessonTitle = titleCandidate;
+          chapterTitle = titleCandidate;
+        }
       }
     }
   }
 
-  // Check for Thirukkural pages (Pages 46-48 in Unit 2, Pages 69-71 in Unit 3)
-  if (!lessonTitle && /திருக்குறள்|அகர\s*முதல\s*எழுத்தெல்லாம்|திருவள்ளுவர்/i.test(text) && pageNum > 20) {
-    lessonTitle = 'திருக்குறள்';
-    if (!unitId) {
-      unitId = pageNum < 50 ? 2 : 3;
+  // 4. Tamil sub-lesson section headings (கவிதைப்பேழை, உரைநடை உலகம், விரிவானம், கற்கண்டு, திருக்குறள்)
+  if (!lessonTitle && isTamilBook) {
+    const subMatch = topSlice.match(
+      /(?:^|\n)\s*(?:கவிதைப்பேழை|உரைநடை\s*உலகம்|விரிவானம்|கற்கண்டு|இலக்கணம்|வாழ்வியல்|செய்யுள்)\s*[:\-–—]?\s*([^\n]{0,80})/i
+    );
+    if (subMatch) {
+      let titleCandidate = cleanDetectedTitle(subMatch[1] || '');
+      if (!titleCandidate) {
+        const idx = lines.findIndex((l) => /கவிதைப்பேழை|உரைநடை\s*உலகம்|விரிவானம்|கற்கண்டு|இலக்கணம்|வாழ்வியல்/i.test(l));
+        if (idx >= 0 && lines[idx + 1]) {
+          titleCandidate = cleanDetectedTitle(lines[idx + 1]);
+        }
+      }
+      if (titleCandidate) {
+        lessonTitle = titleCandidate;
+      }
+    }
+    if (!lessonTitle && /(?:^|\n)\s*திருக்குறள்\b/i.test(topSlice)) {
+      lessonTitle = 'திருக்குறள்';
     }
   }
 
-  // Match "Lesson 1", "Chapter 2", "பாடம் 1", etc.
-  if (!lessonTitle) {
-    const lessonMatch = text.match(/(?:Lesson|Chapter|பாடம்)\s*[-:]?\s*(\d{1,2})[:.\s]+([^\n\r]{3,80})/i);
-    if (lessonMatch && lessonMatch[2]) {
-      lessonTitle = lessonMatch[2].trim();
+  // 5. English Textbook Prose / Poem / Supplementary section headings
+  if (!lessonTitle && /english/i.test(subject || '')) {
+    const engSecMatch = topSlice.match(/(?:^|\n)\s*(PROSE|POEM|SUPPLEMENTARY)\s*[:\-–—]?\s*([^\n]{0,80})/i);
+    if (engSecMatch) {
+      let titleCandidate = cleanDetectedTitle(engSecMatch[2] || '');
+      if (!titleCandidate) {
+        const idx = lines.findIndex((l) => /^(?:PROSE|POEM|SUPPLEMENTARY)\b/i.test(l));
+        if (idx >= 0 && lines[idx + 1]) {
+          titleCandidate = cleanDetectedTitle(lines[idx + 1]);
+        }
+      }
+      if (titleCandidate) {
+        lessonTitle = `${engSecMatch[1].charAt(0).toUpperCase() + engSecMatch[1].slice(1).toLowerCase()}: ${titleCandidate}`;
+      }
     }
   }
 
-  return { unitId, unitTitle, lessonTitle, topic };
+  // 6. Social Science section tags (History / Geography / Civics / Economics)
+  if (!topic && /social/i.test(subject || '')) {
+    if (/(?:^|\n)\s*(?:HISTORY|வரலாறு)\b/i.test(topSlice)) topic = 'History';
+    else if (/(?:^|\n)\s*(?:GEOGRAPHY|புவியியல்)\b/i.test(topSlice)) topic = 'Geography';
+    else if (/(?:^|\n)\s*(?:CIVICS|குடிமையியல்)\b/i.test(topSlice)) topic = 'Civics';
+    else if (/(?:^|\n)\s*(?:ECONOMICS|பொருளியல்)\b/i.test(topSlice)) topic = 'Economics';
+  }
+
+  return { unitId, unitTitle, chapterTitle, lessonTitle, topic };
 }
 
 async function batchInsertTextbookPages(

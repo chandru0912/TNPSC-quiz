@@ -209,6 +209,7 @@ export class CloudContentOrchestrator {
         groupId: req.category,
         standard: req.standard,
         subject: req.subject,
+        medium: req.language === 'tamil' ? 'Tamil' : 'English',
         term: req.term,
         unitId: req.unitId,
         lessonTitle: req.lessonTitle,
@@ -230,11 +231,11 @@ export class CloudContentOrchestrator {
       }
     }
 
-    // No textbook was provided; Claude will generate from the selected syllabus only.
+    // Strict grounding validation: never fabricate content when a textbook is selected or required
     if (!textbookText || textbookText.length < 50) {
-      if (req.mode === 'mcq') {
+      if (req.mode === 'mcq' || req.textbookId || req.textbookMode === 'specific') {
         throw new Error(
-          'No verified lesson PDF content is available. Select a processed textbook lesson before generating MCQs.'
+          `No verified indexed textbook pages were retrieved for "${req.lessonTitle}" (Standard ${req.standard}, ${req.subject}, ${req.language}). Verify textbook extraction and indexing in Admin → Textbook Management.`
         );
       }
       textbookText = '';
