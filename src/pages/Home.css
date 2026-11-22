@@ -1349,6 +1349,23 @@
     justify-content: flex-start;
     box-sizing: border-box;
     overflow: hidden;
+    background: #080d1b;
+  }
+
+  .hero-background {
+    background: #080d1b;
+  }
+
+  .hero-gradient {
+    background: radial-gradient(ellipse 75% 40% at 50% 18%, rgba(255, 215, 0, 0.08) 0%, transparent 70%);
+  }
+
+  .hero-pattern {
+    display: none;
+  }
+
+  .hero-visual::before {
+    display: none;
   }
 
   /* Layer 2: Mobile-only seamless Thirukkural background video directly below Study Hub */
@@ -1362,7 +1379,7 @@
     height: clamp(275px, 74vw, 370px);
     overflow: hidden;
     pointer-events: none;
-    background: transparent;
+    background: #080d1b;
     border: none;
     border-radius: 0;
     box-shadow: none;
@@ -1370,15 +1387,15 @@
     -webkit-mask-image: linear-gradient(
       180deg,
       transparent 0%,
-      #000 10%,
-      #000 90%,
+      #000 8%,
+      #000 92%,
       transparent 100%
     );
     mask-image: linear-gradient(
       180deg,
       transparent 0%,
-      #000 10%,
-      #000 90%,
+      #000 8%,
+      #000 92%,
       transparent 100%
     );
   }
@@ -1401,24 +1418,14 @@
     will-change: transform;
     opacity: 1;
     mix-blend-mode: normal;
-    filter: none;
+    filter: contrast(1.04) saturate(1.06);
     -webkit-mask-image: none;
     mask-image: none;
   }
 
   .hero-background .hero-video-overlay {
-    display: block;
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    pointer-events: none;
-    background: linear-gradient(
-      180deg,
-      rgba(6, 10, 22, 0.24) 0%,
-      transparent 16%,
-      transparent 82%,
-      rgba(6, 10, 22, 0.34) 100%
-    );
+    display: none;
+    background: none;
   }
 
   .hero-container {
