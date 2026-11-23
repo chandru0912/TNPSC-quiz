@@ -55,17 +55,72 @@ router.post('/test', requireAdminAuth, async (req: Request, res: Response) => {
 
 /**
  * GET /api/gemini/status (Protected)
- * Returns active provider, model and safely masked key.
+ * Returns active provider, model, safely masked key, and live-verified Gemini API health
+ * independent of PostgreSQL availability.
  */
-router.get('/status', requireAdminAuth, async (_req: Request, res: Response) => {
+let geminiLiveProbeCache: {
+  expiresAt: number;
+  status: 'CONNECTED' | 'OFFLINE' | 'INVALID_API_KEY' | 'QUOTA_EXCEEDED' | 'MODEL_UNAVAILABLE';
+  connected: boolean;
+  message: string;
+  model: string;
+} | null = null;
+
+router.get('/status', requireAdminAuth, async (req: Request, res: Response) => {
   try {
+    const forceLive = req.query.live === 'true' || req.query.refresh === 'true';
     const statusInfo = await AIProviderConfigService.getProviderStatus('gemini');
+
+    let liveStatus: 'CONNECTED' | 'OFFLINE' | 'INVALID_API_KEY' | 'QUOTA_EXCEEDED' | 'MODEL_UNAVAILABLE' =
+      statusInfo.configured ? (statusInfo.connected ? 'CONNECTED' : 'OFFLINE') : 'OFFLINE';
+    let liveConnected = statusInfo.connected;
+    let liveMessage = statusInfo.statusMessage || (statusInfo.configured ? 'Gemini API key configured.' : 'GEMINI_API_KEY is not configured.');
+
+    if (statusInfo.configured) {
+      if (!forceLive && geminiLiveProbeCache && Date.now() < geminiLiveProbeCache.expiresAt) {
+        liveStatus = geminiLiveProbeCache.status;
+        liveConnected = geminiLiveProbeCache.connected;
+        liveMessage = geminiLiveProbeCache.message;
+      } else {
+        const probe = await AIProviderConfigService.testProviderConnection('gemini');
+        if (probe.success) {
+          liveStatus = 'CONNECTED';
+          liveConnected = true;
+          liveMessage = probe.message;
+        } else if (probe.errorType === 'invalid_api_key' || probe.errorType === 'missing_api_key') {
+          liveStatus = 'INVALID_API_KEY';
+          liveConnected = false;
+          liveMessage = probe.message;
+        } else if (probe.errorType === 'quota_exceeded') {
+          liveStatus = 'QUOTA_EXCEEDED';
+          liveConnected = false;
+          liveMessage = probe.message;
+        } else if (probe.errorType === 'model_not_found' || probe.errorType === 'unsupported_model') {
+          liveStatus = 'MODEL_UNAVAILABLE';
+          liveConnected = false;
+          liveMessage = probe.message;
+        } else {
+          liveStatus = 'OFFLINE';
+          liveConnected = false;
+          liveMessage = probe.message;
+        }
+        geminiLiveProbeCache = {
+          expiresAt: Date.now() + 60_000,
+          status: liveStatus,
+          connected: liveConnected,
+          message: liveMessage,
+          model: probe.model || statusInfo.model,
+        };
+      }
+    }
+
     return res.status(200).json({
       success: true,
       provider: 'Google Gemini',
-      status: statusInfo.configured ? 'CONFIGURED' : 'NOT_CONFIGURED',
+      status: liveStatus,
       configured: statusInfo.configured,
-      connected: statusInfo.connected,
+      connected: liveConnected,
+      statusMessage: liveMessage,
       name: 'Google Gemini AI',
       model: statusInfo.model,
       maskedKey: statusInfo.maskedKey,
@@ -73,7 +128,7 @@ router.get('/status', requireAdminAuth, async (_req: Request, res: Response) => 
       isActive: statusInfo.isActive,
     });
   } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, status: 'OFFLINE', message: err.message });
   }
 });
 

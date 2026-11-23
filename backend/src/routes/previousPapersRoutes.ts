@@ -1,6 +1,4 @@
 import { Router, Request, Response } from 'express';
-import multer from 'multer';
-import { fileUploadLimiter } from '../middleware/rateLimiter';
 import {
   requireAdminAuth,
   requireStudentAuth,
@@ -18,28 +16,14 @@ import {
   getAdminPreviousPapersStats,
   listAdminPreviousPapers,
   getAdminPreviousPaperDetail,
-  uploadAndExtractPreviousPaper,
+  createPaperFromPastedQuestions,
+  approvePaperQuestions,
   updateAdminPreviousPaperMeta,
   saveAdminPreviousPaperQuestions,
-  applyAnswerKeyPdfToPaper,
   updateAdminPreviousPaperStatus,
+  bulkPublishApprovedPapers,
   deleteAdminPreviousPaper,
 } from '../services/previousPapersAdminService';
-
-const pdfUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 35 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const isPdf =
-      file.mimetype === 'application/pdf' ||
-      file.originalname.toLowerCase().endsWith('.pdf');
-    if (!isPdf) {
-      cb(new Error('Only PDF files are accepted.'));
-      return;
-    }
-    cb(null, true);
-  },
-});
 
 const router = Router();
 export const adminPreviousPapersRouter = Router();
@@ -79,73 +63,88 @@ adminPreviousPapersRouter.get('/:id(\\d+)', async (req: Request, res: Response) 
   try {
     const detail = await getAdminPreviousPaperDetail(Number(req.params.id));
     if (!detail) {
-      return res.status(404).json({ status: 'error', message: 'Paper not found.' });
+      return res.status(404).json({ status: 'error', message: 'Examination not found.' });
     }
     return res.status(200).json({ status: 'success', data: detail });
   } catch (err: any) {
     console.error('[Admin Previous Paper Detail Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load paper.' });
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load examination.' });
   }
 });
 
-// POST /api/admin/previous-papers/upload (multipart: questionPdf + optional answerKeyPdf)
-adminPreviousPapersRouter.post(
-  '/upload',
-  fileUploadLimiter,
-  pdfUpload.fields([
-    { name: 'questionPdf', maxCount: 1 },
-    { name: 'answerKeyPdf', maxCount: 1 },
-  ]),
-  async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const files = (req.files || {}) as Record<string, Express.Multer.File[]>;
-      const questionPdf = files.questionPdf?.[0];
-      const answerKeyPdf = files.answerKeyPdf?.[0] || null;
-      if (!questionPdf) {
-        return res.status(400).json({ status: 'error', message: 'Question Paper PDF file is required.' });
-      }
-
-      const b = req.body || {};
-      const result = await uploadAndExtractPreviousPaper({
-        group: String(b.group || 'group1'),
-        year: Number(b.year || new Date().getFullYear()),
-        examStream: b.examStream ? String(b.examStream) : undefined,
-        subject: b.subject ? String(b.subject) : String(b.paperTitle || 'Official Question Paper'),
-        paperTitle: String(b.paperTitle || ''),
-        paperType: b.paperType ? String(b.paperType) : 'Prelims',
-        medium: b.medium ? String(b.medium) : 'English',
-        totalQuestions: b.totalQuestions ? Number(b.totalQuestions) : undefined,
-        marksPerQuestion: b.marksPerQuestion ? Number(b.marksPerQuestion) : 1.5,
-        negativeMarking: b.negativeMarking !== undefined ? Number(b.negativeMarking) : 0,
-        durationMinutes: b.durationMinutes ? Number(b.durationMinutes) : 180,
-        difficulty: b.difficulty ? String(b.difficulty) : 'Medium',
-        questionPdf: { buffer: questionPdf.buffer, originalname: questionPdf.originalname },
-        answerKeyPdf: answerKeyPdf
-          ? { buffer: answerKeyPdf.buffer, originalname: answerKeyPdf.originalname }
-          : null,
-        adminId: null,
-      });
-
-      return res.status(201).json({ status: 'success', data: result });
-    } catch (err: any) {
-      const code = Number(err?.statusCode) || 500;
-      console.error('[Admin Previous Paper Upload Error]:', err);
-      return res.status(code).json({ status: 'error', message: err.message || 'Failed to upload and extract PDF.' });
-    }
+// POST /api/admin/previous-papers/manual-paste (Save parsed pasted questions into STAGING)
+adminPreviousPapersRouter.post('/manual-paste', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const b = req.body || {};
+    const questions = Array.isArray(b.questions) ? b.questions : [];
+    const created = await createPaperFromPastedQuestions({
+      group: String(b.group || 'group4'),
+      year: Number(b.year || new Date().getFullYear()),
+      examStream: b.examStream ? String(b.examStream) : undefined,
+      subject: b.subject ? String(b.subject) : undefined,
+      paperTitle: String(b.paperTitle || ''),
+      paperType: b.paperType ? String(b.paperType) : 'Prelims',
+      medium: b.medium ? String(b.medium) : 'English',
+      totalQuestions: b.totalQuestions ? Number(b.totalQuestions) : questions.length,
+      marksPerQuestion: b.marksPerQuestion ? Number(b.marksPerQuestion) : 1.5,
+      negativeMarking: b.negativeMarking !== undefined ? Number(b.negativeMarking) : 0,
+      durationMinutes: b.durationMinutes ? Number(b.durationMinutes) : 180,
+      questions,
+      adminId: null,
+    });
+    return res.status(201).json({ status: 'success', data: created });
+  } catch (err: any) {
+    const code = Number(err?.statusCode) || 500;
+    console.error('[Admin Manual Paste Save Error]:', err);
+    return res.status(code).json({ status: 'error', message: err.message || 'Failed to save pasted questions to Staging.' });
   }
-);
+});
+
+// PATCH /api/admin/previous-papers/:id/questions/approve (Individual or Bulk Question Approval)
+adminPreviousPapersRouter.patch('/:id(\\d+)/questions/approve', async (req: Request, res: Response) => {
+  try {
+    const paperId = Number(req.params.id);
+    const b = req.body || {};
+    const updated = await approvePaperQuestions(paperId, {
+      questionIds: Array.isArray(b.questionIds) ? b.questionIds : undefined,
+      approveAllValid: Boolean(b.approveAllValid),
+      isApproved: b.isApproved !== false,
+    });
+    if (!updated) {
+      return res.status(404).json({ status: 'error', message: 'Examination not found.' });
+    }
+    return res.status(200).json({ status: 'success', data: updated });
+  } catch (err: any) {
+    const code = Number(err?.statusCode) || 500;
+    console.error('[Admin Approve Paper Questions Error]:', err);
+    return res.status(code).json({ status: 'error', message: err.message || 'Failed to approve questions.' });
+  }
+});
+
+// POST /api/admin/previous-papers/bulk-publish
+adminPreviousPapersRouter.post('/bulk-publish', async (req: Request, res: Response) => {
+  try {
+    const paperIds = Array.isArray(req.body?.paperIds) ? req.body.paperIds : [];
+    const result = await bulkPublishApprovedPapers(paperIds);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    const code = Number(err?.statusCode) || 500;
+    console.error('[Admin Bulk Publish Papers Error]:', err);
+    return res.status(code).json({ status: 'error', message: err.message || 'Failed to bulk publish examinations.' });
+  }
+});
 
 // PUT /api/admin/previous-papers/:id
 adminPreviousPapersRouter.put('/:id(\\d+)', async (req: Request, res: Response) => {
   try {
     const updated = await updateAdminPreviousPaperMeta(Number(req.params.id), req.body || {});
     if (!updated) {
-      return res.status(404).json({ status: 'error', message: 'Paper not found.' });
+      return res.status(404).json({ status: 'error', message: 'Examination not found.' });
     }
     return res.status(200).json({ status: 'success', data: updated });
   } catch (err: any) {
     console.error('[Admin Previous Paper Update Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to update paper.' });
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to update examination.' });
   }
 });
 
@@ -158,7 +157,7 @@ adminPreviousPapersRouter.put('/:id(\\d+)/questions', async (req: Request, res: 
     }
     const updated = await saveAdminPreviousPaperQuestions(Number(req.params.id), questions);
     if (!updated) {
-      return res.status(404).json({ status: 'error', message: 'Paper not found.' });
+      return res.status(404).json({ status: 'error', message: 'Examination not found.' });
     }
     return res.status(200).json({ status: 'success', data: updated });
   } catch (err: any) {
@@ -167,37 +166,13 @@ adminPreviousPapersRouter.put('/:id(\\d+)/questions', async (req: Request, res: 
   }
 });
 
-// POST /api/admin/previous-papers/:id/answer-key
-adminPreviousPapersRouter.post(
-  '/:id(\\d+)/answer-key',
-  pdfUpload.single('answerKeyPdf'),
-  async (req: Request, res: Response) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ status: 'error', message: 'Answer Key PDF file is required.' });
-      }
-      const updated = await applyAnswerKeyPdfToPaper(Number(req.params.id), {
-        buffer: req.file.buffer,
-        originalname: req.file.originalname,
-      });
-      if (!updated) {
-        return res.status(404).json({ status: 'error', message: 'Paper not found.' });
-      }
-      return res.status(200).json({ status: 'success', data: updated });
-    } catch (err: any) {
-      console.error('[Admin Answer Key Upload Error]:', err);
-      return res.status(500).json({ status: 'error', message: err.message || 'Failed to apply answer key PDF.' });
-    }
-  }
-);
-
 // PATCH /api/admin/previous-papers/:id/status
 adminPreviousPapersRouter.patch('/:id(\\d+)/status', async (req: Request, res: Response) => {
   try {
     const nextStatus = String(req.body?.status || '').toLowerCase() as any;
     const updated = await updateAdminPreviousPaperStatus(Number(req.params.id), nextStatus);
     if (!updated) {
-      return res.status(404).json({ status: 'error', message: 'Paper not found.' });
+      return res.status(404).json({ status: 'error', message: 'Examination not found.' });
     }
     return res.status(200).json({ status: 'success', data: updated });
   } catch (err: any) {
@@ -212,20 +187,24 @@ adminPreviousPapersRouter.delete('/:id(\\d+)', async (req: Request, res: Respons
   try {
     const deleted = await deleteAdminPreviousPaper(Number(req.params.id));
     if (!deleted) {
-      return res.status(404).json({ status: 'error', message: 'Paper not found.' });
+      return res.status(404).json({ status: 'error', message: 'Examination not found.' });
     }
-    return res.status(200).json({ status: 'success', message: 'Paper deleted successfully.' });
+    return res.status(200).json({ status: 'success', message: 'Examination deleted successfully.' });
   } catch (err: any) {
     console.error('[Admin Previous Paper Delete Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to delete paper.' });
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to delete examination.' });
   }
 });
 
-// GET /api/previous-papers (Public list of published Previous Year Papers)
+// GET /api/previous-papers (Public list of published Previous Year Papers ONLY)
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const category = typeof req.query.category === 'string' ? req.query.category : undefined;
-    const papers = await listPreviousPapers(category);
+    const papers = await listPreviousPapers({
+      category: typeof req.query.category === 'string' ? req.query.category : undefined,
+      year: typeof req.query.year === 'string' ? req.query.year : undefined,
+      subject: typeof req.query.subject === 'string' ? req.query.subject : undefined,
+      medium: typeof req.query.medium === 'string' ? req.query.medium : undefined,
+    });
     return res.status(200).json({ status: 'success', data: papers });
   } catch (err: any) {
     console.error('[Previous Papers List Error]:', err);

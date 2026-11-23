@@ -55,6 +55,7 @@ import { AdminTopHeader } from '../components/admin/AdminTopHeader'
 import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
 import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
 import { TextbookIndexingControlCenter } from '../components/admin/TextbookIndexingControlCenter'
+import { GoogleDriveTextbooksTab } from '../components/admin/GoogleDriveTextbooksTab'
 import { BulkMcqPastePanel } from '../components/admin/BulkMcqPastePanel'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
 import { MockTestMcqGenerator } from '../components/admin/MockTestMcqGenerator'
@@ -423,6 +424,9 @@ const Admin = () => {
   const [driveStatus, setDriveStatus] = useState<{
     connected: boolean
     configured: boolean
+    connectionState?: 'CONNECTED' | 'DISCONNECTED' | 'AUTHORIZATION_REQUIRED' | 'INVALID_CLIENT_SECRET' | 'TOKEN_EXPIRED' | 'QUOTA_EXCEEDED' | 'API_ERROR' | 'CONNECTION_ERROR'
+    errorSource?: 'database_quota' | 'google_drive_quota' | 'oauth' | 'client_secret' | 'config' | 'network' | 'unknown'
+    remediationHint?: string
     email?: string
     folderName: string
     folderId?: string
@@ -430,7 +434,8 @@ const Admin = () => {
     error?: string
   }>({
     connected: false,
-    configured: false,
+    configured: true,
+    connectionState: 'DISCONNECTED',
     folderName: 'TNPSC Study Hub Materials',
   })
   const [isCheckingDrive, setIsCheckingDrive] = useState(false)
@@ -504,6 +509,7 @@ const Admin = () => {
   const [textbooksList, setTextbooksList] = useState<TextbookItem[]>([])
   const [textbooksLoading, setTextbooksLoading] = useState(false)
   const [textbookSearch, setTextbookSearch] = useState('')
+  const [textbookMgmtSubTab, setTextbookMgmtSubTab] = useState<'drive_library' | 'ai_indexing'>('drive_library')
   const [textbookGroupFilter, setTextbookGroupFilter] = useState('all')
   const [textbookStandardFilter, setTextbookStandardFilter] = useState('all')
   const [textbookSubjectFilter, setTextbookSubjectFilter] = useState('all')
@@ -1505,20 +1511,43 @@ const Admin = () => {
   }, [token, textbookGroupFilter, textbookStandardFilter, textbookSubjectFilter, textbookMediumFilter, textbookStatusFilter])
 
   // Check Google Drive Status
-  const checkDriveStatus = useCallback(async () => {
+  const checkDriveStatus = useCallback(async (forceRefresh = false) => {
     setIsCheckingDrive(true)
     try {
-      const res = await apiFetch('/api/drive/status')
-      const json = await res.json()
-      if (res.ok && json.status === 'success') {
+      const res = await apiFetch(`/api/drive/status${forceRefresh ? '?refresh=true' : ''}`)
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json.status === 'success' && json.data) {
         setDriveStatus(json.data)
-        if (json.data?.connected) {
+        if (json.data.connected) {
           setDriveConnectionError(null)
           setIsConnectingDrive(false)
+        } else if (json.data.error) {
+          setDriveConnectionError(json.data.error)
         }
+      } else {
+        const errMsg = json?.message || `Unable to check Google Drive status (HTTP ${res.status}).`
+        const isNeonDbQuota = /exceeded the quota|upgrade your plan to increase limits|53000|neon/i.test(errMsg)
+        setDriveConnectionError(errMsg)
+        setDriveStatus((prev) => ({
+          ...prev,
+          connected: false,
+          connectionState: isNeonDbQuota || /quota/i.test(errMsg) ? 'QUOTA_EXCEEDED' : 'CONNECTION_ERROR',
+          errorSource: isNeonDbQuota ? 'database_quota' : /quota/i.test(errMsg) ? 'google_drive_quota' : 'network',
+          remediationHint: isNeonDbQuota
+            ? 'Neon PostgreSQL database quota exceeded (NOT Google Drive API). Upgrade or reset your Neon project quota, then click Check Status.'
+            : undefined,
+          error: errMsg,
+        }))
       }
     } catch (err: any) {
-      console.warn('Could not check Google Drive status:', err.message)
+      const errMsg = err?.message || 'Network error while checking Google Drive status.'
+      setDriveConnectionError(errMsg)
+      setDriveStatus((prev) => ({
+        ...prev,
+        connected: false,
+        connectionState: 'CONNECTION_ERROR',
+        error: errMsg,
+      }))
     } finally {
       setIsCheckingDrive(false)
     }
@@ -4216,14 +4245,44 @@ const Admin = () => {
                   <Sparkles size={13} />
                   {isQuestions ? 'Question Bank' : isTextbooks ? 'Textbook Management' : isNotes ? 'Study Notes' : isStudyMaterialsManagement ? 'Study Materials Management' : isPreviousYearPapers ? 'Previous Year Papers Management' : isMockTestGenerator ? 'Mock Test MCQ Generator' : isMockTests ? 'Mock Test Management' : isGdrive ? 'Google Drive' : 'AI Provider Hub'}
                 </span>
-                <span className="admin-user-pill admin-db-pill">
+                <span
+                  className="admin-user-pill admin-db-pill"
+                  style={
+                    driveStatus.errorSource === 'database_quota'
+                      ? { color: '#fbbf24', borderColor: 'rgba(245, 158, 11, 0.45)' }
+                      : undefined
+                  }
+                >
                   <Database size={13} />
-                  PostgreSQL Connected
+                  {driveStatus.errorSource === 'database_quota'
+                    ? 'Neon DB Quota Exceeded'
+                    : 'PostgreSQL Connected'}
                 </span>
                 {isGdrive && (
-                  <span className="admin-user-pill" style={{ color: driveStatus.connected ? '#34d399' : '#f87171' }}>
+                  <span
+                    className="admin-user-pill"
+                    style={{
+                      color: driveStatus.connected
+                        ? '#34d399'
+                        : driveStatus.connectionState === 'QUOTA_EXCEEDED'
+                          ? '#fbbf24'
+                          : '#f87171',
+                    }}
+                  >
                     <Cloud size={13} />
-                    {driveStatus.connected ? 'Drive Connected' : 'Drive Offline'}
+                    {driveStatus.connected
+                      ? 'Drive Connected'
+                      : driveStatus.connectionState === 'QUOTA_EXCEEDED'
+                        ? driveStatus.errorSource === 'database_quota'
+                          ? 'DB Quota Exceeded'
+                          : 'Drive Quota Exceeded'
+                        : driveStatus.connectionState === 'INVALID_CLIENT_SECRET'
+                          ? 'Invalid Client Secret'
+                          : driveStatus.connectionState === 'TOKEN_EXPIRED'
+                            ? 'Token Expired'
+                            : driveStatus.connectionState === 'AUTHORIZATION_REQUIRED'
+                              ? 'OAuth Required'
+                              : 'Drive Offline'}
                   </span>
                 )}
                 {isClaude && (
@@ -4445,10 +4504,26 @@ const Admin = () => {
               </div>
               <div className="metric-info">
                 <span className="metric-value" style={{ fontSize: '1.1rem' }}>
-                  {driveStatus.connected ? 'Connected' : 'Not Connected'}
+                  {driveStatus.connected
+                    ? 'Connected'
+                    : driveStatus.connectionState === 'QUOTA_EXCEEDED'
+                      ? driveStatus.errorSource === 'database_quota'
+                        ? 'DB Quota Exceeded'
+                        : 'Quota Exceeded'
+                      : driveStatus.connectionState === 'INVALID_CLIENT_SECRET'
+                        ? 'Invalid Client Secret'
+                        : driveStatus.connectionState === 'TOKEN_EXPIRED'
+                          ? 'Token Expired'
+                          : driveStatus.connectionState === 'AUTHORIZATION_REQUIRED'
+                            ? 'OAuth Required'
+                            : driveStatus.connectionState === 'API_ERROR' || driveStatus.connectionState === 'CONNECTION_ERROR'
+                              ? 'API Error'
+                              : 'Disconnected'}
                 </span>
                 <span className="metric-label" style={{ wordBreak: 'break-all' }}>
-                  {driveStatus.email || 'OAuth Disconnected'}
+                  {driveStatus.connected
+                    ? driveStatus.email || 'OAuth Active'
+                    : driveStatus.error || 'OAuth Disconnected'}
                 </span>
               </div>
             </div>
@@ -5268,6 +5343,48 @@ const Admin = () => {
         {/* Section 2: Textbook Management */}
         {isTextbooks && (
           <div className="admin-textbooks-section">
+            {/* Sub-tab Switcher: Google Drive Textbooks (Student Library) vs AI Indexing & Uploads */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                marginBottom: '1.25rem',
+                padding: '0.35rem',
+                borderRadius: '12px',
+                background: 'rgba(15, 23, 42, 0.72)',
+                border: '1px solid rgba(148, 163, 184, 0.18)',
+                width: 'fit-content',
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                type="button"
+                className={`admin-btn ${textbookMgmtSubTab === 'drive_library' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}
+                onClick={() => setTextbookMgmtSubTab('drive_library')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+              >
+                <Cloud size={15} />
+                <span>Google Drive Textbooks</span>
+              </button>
+              <button
+                type="button"
+                className={`admin-btn ${textbookMgmtSubTab === 'ai_indexing' ? 'admin-btn-primary' : 'admin-btn-secondary'}`}
+                onClick={() => setTextbookMgmtSubTab('ai_indexing')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+              >
+                <BookOpen size={15} />
+                <span>AI Indexing &amp; Textbook Uploads</span>
+              </button>
+            </div>
+
+            {textbookMgmtSubTab === 'drive_library' ? (
+              <GoogleDriveTextbooksTab
+                token={token}
+                onConnectGoogleDrive={handleConnectGoogleDrive}
+              />
+            ) : (
+            <>
             <div className="admin-section-header">
               <div>
                 <h2 className="admin-section-title">Samacheer Kalvi Textbook Management</h2>
@@ -5744,6 +5861,8 @@ const Admin = () => {
                 </div>
               )}
             </div>
+            </>
+            )}
           </div>
         )}
 
@@ -6131,20 +6250,30 @@ const Admin = () => {
                           <RefreshCw size={13} className="spinning" />
                           Connecting...
                         </span>
-                      ) : driveStatus.connected ? (
+                      ) : driveStatus.connected || driveStatus.connectionState === 'CONNECTED' ? (
                         <span className="gdrive-status-badge gdrive-status-badge-connected">
                           <CheckCircle2 size={13} />
-                          Connected: {driveStatus.email || 'Authorized'}
+                          CONNECTED: {driveStatus.email || 'Authorized'}
                         </span>
-                      ) : (driveConnectionError || driveStatus.error) ? (
+                      ) : driveStatus.connectionState === 'QUOTA_EXCEEDED' ? (
+                        <span className="gdrive-status-badge gdrive-status-badge-disconnected" style={{ background: 'rgba(220, 38, 38, 0.2)', border: '1px solid rgba(248, 113, 113, 0.5)', color: '#fecaca' }}>
+                          <AlertTriangle size={13} />
+                          QUOTA EXCEEDED
+                        </span>
+                      ) : driveStatus.connectionState === 'AUTHORIZATION_REQUIRED' ? (
+                        <span className="gdrive-status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(251, 191, 36, 0.4)', color: '#fde68a' }}>
+                          <AlertCircle size={13} />
+                          AUTHORIZATION REQUIRED
+                        </span>
+                      ) : driveStatus.connectionState === 'CONNECTION_ERROR' || driveConnectionError ? (
                         <span className="gdrive-status-badge gdrive-status-badge-disconnected">
                           <AlertCircle size={13} />
-                          Connection Failed
+                          CONNECTION ERROR
                         </span>
                       ) : (
                         <span className="gdrive-status-badge gdrive-status-badge-disconnected">
                           <AlertCircle size={13} />
-                          Not Connected
+                          DISCONNECTED
                         </span>
                       )}
                     </div>
@@ -6152,28 +6281,27 @@ const Admin = () => {
                       {isConnectingDrive
                         ? 'Opening Google OAuth authorization consent screen...'
                         : driveStatus.connected
-                        ? `Connected to personal Google Drive (${driveStatus.email || 'Authorized'}). Large PDF textbooks stream directly to Google Drive via authorized resumable sessions. Target Folder: "${driveStatus.folderName}".`
+                        ? `Connected to Google Drive (${driveStatus.email || 'Authorized'}). Large PDF textbooks stream directly to Google Drive via authorized resumable sessions. Target Folder: "${driveStatus.folderName}".`
+                        : driveStatus.remediationHint
+                        ? driveStatus.remediationHint
                         : driveConnectionError
                         ? `Connection issue detected: ${driveConnectionError}`
-                        : 'Connect your personal Google Drive account to store 3–4 GB of TNPSC PDF textbooks with zero Vercel serverless size restrictions.'}
+                        : 'Connect your Google Drive account to store TNPSC Samacheer Kalvi PDF textbooks and study materials with resumable uploads up to 200 MB.'}
                     </p>
                     {(driveConnectionError || (!driveStatus.connected && driveStatus.error)) && (
-                      <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#fca5a5', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ marginTop: '0.5rem', padding: '0.45rem 0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#fca5a5', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <AlertCircle size={14} style={{ flexShrink: 0 }} />
                         <span>{driveConnectionError || driveStatus.error}</span>
                       </div>
                     )}
-                    {!driveStatus.connected && !driveStatus.configured && (
+                    {!driveStatus.connected && !driveStatus.configured && driveStatus.errorSource === 'config' && (
                       <div style={{ marginTop: '0.65rem', padding: '0.65rem 0.85rem', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fde68a', fontSize: '0.82rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: '#f59e0b', marginBottom: '0.25rem' }}>
                           <AlertTriangle size={15} />
-                          <span>Action Required: Configure GOOGLE_CLIENT_SECRET</span>
+                          <span>Action Required: Configure Google OAuth Environment Variables</span>
                         </div>
                         <div>
-                          Open <code>backend/.env</code> and paste your newly rotated Google Client Secret into:
-                          <div style={{ marginTop: '0.35rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.35)', padding: '0.35rem 0.6rem', borderRadius: '4px', color: '#6ee7b7' }}>
-                            GOOGLE_CLIENT_SECRET=GOCSPX-your_actual_rotated_secret
-                          </div>
+                          Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in server environment variables (<code>backend/.env</code> locally or Vercel Project Settings in production).
                         </div>
                       </div>
                     )}
@@ -6198,7 +6326,7 @@ const Admin = () => {
                       <button
                         type="button"
                         className="admin-btn admin-btn-secondary"
-                        onClick={() => checkDriveStatus()}
+                        onClick={() => checkDriveStatus(true)}
                         title="Refresh connection status"
                         disabled={isCheckingDrive}
                       >
@@ -6230,7 +6358,7 @@ const Admin = () => {
                       <button
                         type="button"
                         className="admin-btn admin-btn-secondary"
-                        onClick={() => checkDriveStatus()}
+                        onClick={() => checkDriveStatus(true)}
                         title="Check connection status"
                         disabled={isCheckingDrive}
                       >
@@ -6253,7 +6381,7 @@ const Admin = () => {
                       <button
                         type="button"
                         className="admin-btn admin-btn-secondary"
-                        onClick={() => checkDriveStatus()}
+                        onClick={() => checkDriveStatus(true)}
                         title="Check connection status"
                         disabled={isCheckingDrive}
                       >

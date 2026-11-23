@@ -111,7 +111,8 @@ adminMockTestsRouter.post('/auto-select', async (req: Request, res: Response) =>
 
 adminMockTestsRouter.get('/generator/availability', async (req: Request, res: Response) => {
   try {
-    const mode = (req.query.mode as 'lesson_wise' | 'unit_wise' | 'full_length') || 'lesson_wise';
+    const mode: 'unit_wise' | 'full_length' =
+      String(req.query.mode || 'unit_wise') === 'full_length' ? 'full_length' : 'unit_wise';
     const standardsRaw = String(req.query.standards || '')
       .split(',')
       .map((s) => Number(s.trim()))
@@ -127,7 +128,6 @@ adminMockTestsRouter.get('/generator/availability', async (req: Request, res: Re
       subject: req.query.subject as string | undefined,
       standards: standardsRaw,
       units: unitsRaw,
-      lesson: req.query.lesson as string | undefined,
       difficulty: req.query.difficulty as string | undefined,
       questionType: req.query.questionType as string | undefined,
       language: req.query.language as string | undefined,
@@ -146,7 +146,8 @@ adminMockTestsRouter.get('/generator/availability', async (req: Request, res: Re
 
 adminMockTestsRouter.get('/generator/questions', async (req: Request, res: Response) => {
   try {
-    const mode = (req.query.mode as 'lesson_wise' | 'unit_wise' | 'full_length') || 'lesson_wise';
+    const mode: 'unit_wise' | 'full_length' =
+      String(req.query.mode || 'unit_wise') === 'full_length' ? 'full_length' : 'unit_wise';
     const standardsRaw = String(req.query.standards || '')
       .split(',')
       .map((s) => Number(s.trim()))
@@ -162,7 +163,6 @@ adminMockTestsRouter.get('/generator/questions', async (req: Request, res: Respo
       subject: req.query.subject as string | undefined,
       standards: standardsRaw,
       units: unitsRaw,
-      lesson: req.query.lesson as string | undefined,
       difficulty: req.query.difficulty as string | undefined,
       questionType: req.query.questionType as string | undefined,
       language: req.query.language as string | undefined,
@@ -200,19 +200,19 @@ adminMockTestsRouter.post('/generator/validate-selection', async (req: Request, 
 adminMockTestsRouter.post('/generator/generate', async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
-    const mode = (body.mode as 'lesson_wise' | 'unit_wise' | 'full_length') || 'lesson_wise';
+    const mode: 'unit_wise' | 'full_length' =
+      String(body.mode || 'unit_wise') === 'full_length' ? 'full_length' : 'unit_wise';
     const data = await generateMockTestQuestionPool({
       mode,
       group: body.group,
       subject: body.subject,
       standards: Array.isArray(body.standards) ? body.standards.map(Number) : [],
       units: Array.isArray(body.units) ? body.units.map(Number) : [],
-      lesson: body.lesson,
       difficulty: body.difficulty,
       questionType: body.questionType,
       language: body.language,
       includeStaging: Boolean(body.includeStaging),
-      totalQuestions: Number(body.totalQuestions) || 25,
+      totalQuestions: Number(body.totalQuestions) || 50,
       difficultyDistribution: body.difficultyDistribution,
       standardDistribution: body.standardDistribution,
       distributeAcrossLessons: Boolean(body.distributeAcrossLessons),

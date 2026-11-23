@@ -85,6 +85,8 @@ interface SessionResultData {
     correctAnswer: number
     isCorrect: boolean
     explanation?: string | null
+    explanationSource?: string
+    answerStatus?: string
   }[]
 }
 
@@ -545,7 +547,25 @@ const PreviousPaperTest = () => {
                   </div>
                   {rq.explanation && (
                     <div className="pyp-review-explanation">
-                      <strong>Explanation:</strong> {rq.explanation}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.3rem' }}>
+                        <strong>Explanation:</strong>
+                        {rq.explanationSource === 'ai_generated' && (
+                          <span
+                            style={{
+                              fontSize: '0.72rem',
+                              padding: '0.12rem 0.55rem',
+                              borderRadius: '9999px',
+                              background: 'rgba(139, 92, 246, 0.18)',
+                              border: '1px solid rgba(167, 139, 250, 0.4)',
+                              color: '#ddd6fe',
+                              fontWeight: 600,
+                            }}
+                          >
+                            AI-Generated Study Explanation (Not Official TNPSC Key)
+                          </span>
+                        )}
+                      </div>
+                      <span>{rq.explanation}</span>
                     </div>
                   )}
                 </div>

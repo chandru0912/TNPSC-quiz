@@ -4,12 +4,12 @@ import { ensurePreviousPapersAdminSchema } from './previousPapersAdminService';
 
 const DEFAULT_PAPERS = [
   { id: 1, year: 2024, exam: 'TNPSC Group 1', category: 'group1', subjects: 'General Studies (Prelims)', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
-  { id: 2, year: 2024, exam: 'TNPSC Group 2 & 2A', category: 'group2_2a', subjects: 'General Studies + Aptitude + General Tamil', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
+  { id: 2, year: 2024, exam: 'TNPSC Group 2 and 2A', category: 'group2_2a', subjects: 'General Studies + Aptitude + General Tamil', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
   { id: 3, year: 2024, exam: 'TNPSC Group 4', category: 'group4', subjects: 'Pothu Tamil + General Studies (SSLC Standard)', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
-  { id: 4, year: 2023, exam: 'TNPSC Group 2 & 2A', category: 'group2_2a', subjects: 'General Studies & Language Eligibility', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
+  { id: 4, year: 2023, exam: 'TNPSC Group 2 and 2A', category: 'group2_2a', subjects: 'General Studies & Language Eligibility', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
   { id: 5, year: 2023, exam: 'TNPSC Group 4', category: 'group4', subjects: 'General Studies & Tamil Administration Basics', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
   { id: 6, year: 2022, exam: 'TNPSC Group 1', category: 'group1', subjects: 'General Studies Paper I, II & III', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
-  { id: 7, year: 2022, exam: 'TNPSC Group 2 & 2A', category: 'group2_2a', subjects: 'Group 2 & 2A Combined Official Solved Paper', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
+  { id: 7, year: 2022, exam: 'TNPSC Group 2 and 2A', category: 'group2_2a', subjects: 'Group 2 and 2A Combined Official Solved Paper', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
   { id: 8, year: 2022, exam: 'TNPSC Group 4', category: 'group4', subjects: 'Combined Group 4 Official Solved Paper', total_questions: 200, duration_minutes: 180, marks_per_question: 1.5 },
 ];
 
@@ -213,14 +213,40 @@ export async function ensurePreviousPapersSeeded(): Promise<void> {
   await seedPromise;
 }
 
-export async function listPreviousPapers(category?: string) {
+export async function listPreviousPapers(filters?: string | {
+  category?: string;
+  year?: string | number;
+  subject?: string;
+  medium?: string;
+}) {
   await ensurePreviousPapersSeeded();
+  const f = typeof filters === 'string' ? { category: filters } : (filters || {});
   const params: any[] = [];
-  let whereClause = `WHERE p.status = 'published'`;
-  if (category && category !== 'all') {
-    params.push(category);
-    whereClause += ` AND p.category = $1`;
+  const conditions: string[] = [`p.status = 'published'`];
+
+  if (f.category && f.category !== 'all') {
+    const c = f.category.trim().toLowerCase();
+    if (c === 'group2' || c === 'group2a' || c === 'group2_2a') {
+      conditions.push(`p.category IN ('group2', 'group2a', 'group2_2a')`);
+    } else {
+      params.push(c);
+      conditions.push(`p.category = $${params.length}`);
+    }
   }
+  if (f.year && f.year !== 'all' && !Number.isNaN(Number(f.year))) {
+    params.push(Number(f.year));
+    conditions.push(`p.year = $${params.length}`);
+  }
+  if (f.subject && f.subject !== 'all' && f.subject.trim()) {
+    params.push(`%${f.subject.trim()}%`);
+    conditions.push(`(LOWER(COALESCE(p.subjects, '')) LIKE LOWER($${params.length}) OR LOWER(COALESCE(p.paper_title, '')) LIKE LOWER($${params.length}))`);
+  }
+  if (f.medium && f.medium !== 'all' && f.medium.trim()) {
+    params.push(f.medium.trim().toLowerCase());
+    conditions.push(`(LOWER(COALESCE(p.medium, 'English')) = $${params.length} OR LOWER(COALESCE(p.medium, '')) = 'bilingual')`);
+  }
+
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
   const res = await pool.query(
     `SELECT p.id, p.year, p.exam, p.category, p.subjects,
@@ -571,7 +597,9 @@ export async function getSessionResult(studentId: number, sessionId: number) {
 
   const questionsRes = await pool.query(
     `SELECT id, question_number, subject, topic, question_text,
-            option_a, option_b, option_c, option_d, correct_answer, explanation
+            option_a, option_b, option_c, option_d, correct_answer, explanation,
+            COALESCE(explanation_source, 'none') AS explanation_source,
+            COALESCE(answer_status, 'verified_final') AS answer_status
      FROM previous_year_paper_questions
      WHERE paper_id = $1
      ORDER BY question_number ASC`,
@@ -620,6 +648,8 @@ export async function getSessionResult(studentId: number, sessionId: number) {
       correctAnswer: Number(q.correct_answer),
       isCorrect,
       explanation: q.explanation || null,
+      explanationSource: q.explanation_source || 'none',
+      answerStatus: q.answer_status || 'verified_final',
     };
   });
 

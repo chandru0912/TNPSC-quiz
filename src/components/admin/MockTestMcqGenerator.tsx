@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Sparkles,
-  BookOpen,
   Layers,
   Target,
   AlertCircle,
@@ -33,11 +32,10 @@ import {
 import {
   dynamicSyllabusService,
   type DynamicUnit,
-  type DynamicLesson,
 } from '../../services/dynamicSyllabusService'
 import './MockTestManagement.css'
 
-type GeneratorMode = 'lesson_wise' | 'unit_wise' | 'full_length'
+type GeneratorMode = 'unit_wise' | 'full_length'
 
 interface MockTestMcqGeneratorProps {
   token: string
@@ -74,7 +72,7 @@ interface MockTestQueueRow {
   title: string
   description: string
   tnpscGroup: string
-  testCategory: GeneratorMode
+  testCategory: 'lesson_wise' | GeneratorMode
   subject: string
   standard: string | null
   unit: string | null
@@ -103,9 +101,9 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
   token,
   onPublishedCountChange,
 }) => {
-  const [mode, setMode] = useState<GeneratorMode>('lesson_wise')
+  const [mode, setMode] = useState<GeneratorMode>('unit_wise')
 
-  // 9 Question Bank Filters
+  // Question Bank Filters
   const [groupId, setGroupId] = useState<'group1' | 'group2' | 'group4'>('group1')
   const [subjectId, setSubjectId] = useState<string>('general-studies')
   const [singleStandard, setSingleStandard] = useState<number>(6)
@@ -113,7 +111,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
   const [standardQuotas, setStandardQuotas] = useState<Record<number, number>>({})
   const [singleUnit, setSingleUnit] = useState<number>(1)
   const [selectedUnits, setSelectedUnits] = useState<number[]>([])
-  const [selectedLesson, setSelectedLesson] = useState<string>('')
   const [questionType, setQuestionType] = useState<'all' | 'main_practice' | 'study_materials'>('all')
   const [difficulty, setDifficulty] = useState<'all' | 'Easy' | 'Medium' | 'Hard'>('all')
   const [includeStaging, setIncludeStaging] = useState<boolean>(false)
@@ -121,9 +118,8 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
   const [bankSearch, setBankSearch] = useState<string>('')
   const [bankPage, setBankPage] = useState<number>(1)
 
-  // Dynamic Study Materials Units & Lessons
+  // Dynamic Study Materials Units
   const [units, setUnits] = useState<DynamicUnit[]>([])
-  const [lessons, setLessons] = useState<DynamicLesson[]>([])
   const [loadingSyllabus, setLoadingSyllabus] = useState(false)
 
   // Live Question Pool Availability & Embedded Question Bank Table
@@ -137,9 +133,9 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
   const [editingTestId, setEditingTestId] = useState<number | null>(null)
   const [testTitle, setTestTitle] = useState<string>('')
   const [description, setDescription] = useState<string>('')
-  const [totalQuestions, setTotalQuestions] = useState<number>(25)
+  const [totalQuestions, setTotalQuestions] = useState<number>(50)
   const [marksPerQuestion, setMarksPerQuestion] = useState<number>(1.5)
-  const [durationMinutes, setDurationMinutes] = useState<number>(30)
+  const [durationMinutes, setDurationMinutes] = useState<number>(45)
   const [negativeMarking, setNegativeMarking] = useState<number>(0)
   const [useDifficultySplit, setUseDifficultySplit] = useState<boolean>(false)
   const [easyPct, setEasyPct] = useState<number>(30)
@@ -219,14 +215,9 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
       setTotalQuestions(100)
       setDurationMinutes(90)
       setUseDifficultySplit(true)
-    } else if (nextMode === 'unit_wise') {
-      setSelectedLesson('all')
+    } else {
       setTotalQuestions(50)
       setDurationMinutes(45)
-      setUseDifficultySplit(false)
-    } else {
-      setTotalQuestions(25)
-      setDurationMinutes(30)
       setUseDifficultySplit(false)
     }
   }
@@ -256,40 +247,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
     }
   }, [groupId, subjectId, singleStandard, selectedStandards, mode])
 
-  // Load dynamic Lessons for selected Standard + Unit
-  useEffect(() => {
-    if (mode === 'full_length') {
-      setLessons([])
-      setSelectedLesson('')
-      return
-    }
-    let mounted = true
-    dynamicSyllabusService
-      .getLessons({
-        examId: groupId,
-        subjectId,
-        standardNumber: singleStandard,
-        unitNumber: singleUnit,
-      })
-      .then((lList) => {
-        if (!mounted) return
-        setLessons(lList)
-        if (mode === 'lesson_wise') {
-          setSelectedLesson((prev) =>
-            lList.some((l) => l.title === prev) ? prev : lList[0]?.title || ''
-          )
-        } else {
-          setSelectedLesson('all')
-        }
-      })
-      .catch(() => {
-        if (mounted) setLessons([])
-      })
-    return () => {
-      mounted = false
-    }
-  }, [groupId, subjectId, singleStandard, singleUnit, mode])
-
   // Build shared filter query string for Availability & Question Bank Table
   const buildFilterParams = (includePagination = false) => {
     const params = new URLSearchParams()
@@ -303,9 +260,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
     const activeUnits = mode === 'full_length' ? selectedUnits : [singleUnit]
     if (activeUnits.length > 0) params.set('units', activeUnits.join(','))
 
-    if (selectedLesson && selectedLesson !== 'all') {
-      params.set('lesson', selectedLesson)
-    }
     if (questionType !== 'all') params.set('questionType', questionType)
     if (difficulty !== 'all') params.set('difficulty', difficulty)
     if (language !== 'all') params.set('language', language)
@@ -351,7 +305,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
     selectedStandards,
     singleUnit,
     selectedUnits,
-    selectedLesson,
     questionType,
     difficulty,
     language,
@@ -396,7 +349,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
     selectedStandards,
     singleUnit,
     selectedUnits,
-    selectedLesson,
     questionType,
     difficulty,
     language,
@@ -440,9 +392,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
   const buildDefaultTestTitle = () => {
     const grpLabel = GROUPS.find((g) => g.id === groupId)?.display || 'TNPSC Group 1'
     const subLabel = activeSubject?.name || 'General Studies'
-    if (mode === 'lesson_wise') {
-      return `${grpLabel} — ${singleStandard}th Std Unit ${singleUnit}: ${selectedLesson || 'Lesson'} Test`
-    }
     if (mode === 'unit_wise') {
       const unitObj = units.find((u) => Number(u.unit_number) === singleUnit)
       return `${grpLabel} — ${singleStandard}th Std Unit ${singleUnit}${unitObj ? ` (${unitObj.title})` : ''} Test`
@@ -480,10 +429,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
   // Auto-Random Select Questions from Existing Question Bank
   const handleAutoRandomSelect = async () => {
     setFeedback(null)
-    if (mode === 'lesson_wise' && (!selectedLesson || selectedLesson === 'all')) {
-      setFeedback({ type: 'warning', text: 'Please select a Lesson before generating a Lesson-wise test.' })
-      return
-    }
     if (mode === 'full_length' && selectedStandards.length === 0) {
       setFeedback({ type: 'warning', text: 'Please select at least one Standard (6th–12th) for the Full-length Mock Test.' })
       return
@@ -515,7 +460,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
           subject: activeSubject?.name || 'General Studies',
           standards: mode === 'full_length' ? selectedStandards : [singleStandard],
           units: mode === 'full_length' ? selectedUnits : [singleUnit],
-          lesson: selectedLesson && selectedLesson !== 'all' ? selectedLesson : undefined,
           questionType,
           difficulty,
           language,
@@ -566,7 +510,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
           subject: activeSubject?.name || 'General Studies',
           standards: mode === 'full_length' ? selectedStandards : [singleStandard],
           units: mode === 'full_length' ? selectedUnits : [singleUnit],
-          lesson: selectedLesson && selectedLesson !== 'all' ? selectedLesson : undefined,
           questionType,
           difficulty,
           language,
@@ -660,7 +603,7 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
         subject: activeSubject?.name || 'General Studies',
         standard: standardStr,
         unit: mode === 'full_length' ? null : `Unit ${singleUnit}`,
-        lesson: mode === 'lesson_wise' ? selectedLesson || null : null,
+        lesson: null,
         questionsCount: selectedQuestions.length,
         durationMinutes,
         totalMarks: Number((selectedQuestions.length * marksPerQuestion).toFixed(2)),
@@ -738,7 +681,7 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
       if (!res.ok || json.status !== 'success' || !json.data) return
       const t = json.data
       setEditingTestId(t.id)
-      setMode(t.testCategory || 'lesson_wise')
+      setMode(t.testCategory === 'full_length' ? 'full_length' : 'unit_wise')
       setTestTitle(t.title || '')
       setDescription(t.description || '')
       setTotalQuestions(Number(t.questionsCount || 25))
@@ -774,27 +717,20 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
-      {/* 1. Three Category Dashboard Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '0.9rem' }}>
+      {/* 1. Two Category Dashboard Cards (Unit-wise & Full-length) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '1rem' }}>
         {[
-          {
-            id: 'lesson_wise' as const,
-            title: 'Lesson-wise Test Generator',
-            desc: 'Filter & select Question Bank MCQs strictly from one Lesson.',
-            icon: BookOpen,
-            accent: '#38bdf8',
-          },
           {
             id: 'unit_wise' as const,
             title: 'Unit-wise Test Generator',
-            desc: 'Combine MCQs across all lessons of one Unit in one Standard (never mixing standards).',
+            desc: 'Combine Question Bank MCQs across one Unit in one Standard (6th–12th, never mixing standards).',
             icon: Layers,
             accent: '#a78bfa',
           },
           {
             id: 'full_length' as const,
             title: 'Full-length Mock Test Generator',
-            desc: 'Select Standards (6th–12th), configure per-Standard quotas & build exam-style mock tests.',
+            desc: 'Select Standards (6th–12th), configure per-Standard quotas & build full TNPSC exam-style mock tests.',
             icon: Target,
             accent: '#fbbf24',
           },
@@ -954,31 +890,11 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
                   )}
                 </select>
               </div>
-
-              <div className="mtm-field">
-                <label className="mtm-label">5. Lesson {mode === 'lesson_wise' ? '*' : '(Optional Filter)'}</label>
-                <select
-                  className="mtm-select"
-                  value={selectedLesson}
-                  onChange={(e) => { setSelectedLesson(e.target.value); setBankPage(1) }}
-                >
-                  {mode === 'unit_wise' && <option value="all">All Lessons in Unit {singleUnit}</option>}
-                  {lessons.length === 0 ? (
-                    <option value="">No lessons mapped</option>
-                  ) : (
-                    lessons.map((l) => (
-                      <option key={l.id} value={l.title}>
-                        Lesson {l.lesson_number}: {l.title}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
             </>
           )}
 
           <div className="mtm-field">
-            <label className="mtm-label">6. Question Type</label>
+            <label className="mtm-label">5. Question Type</label>
             <select className="mtm-select" value={questionType} onChange={(e) => { setQuestionType(e.target.value as any); setBankPage(1) }}>
               <option value="all">All Question Banks</option>
               <option value="main_practice">MCQ Practice Bank</option>
@@ -987,7 +903,7 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
           </div>
 
           <div className="mtm-field">
-            <label className="mtm-label">7. Difficulty Level</label>
+            <label className="mtm-label">6. Difficulty Level</label>
             <select className="mtm-select" value={difficulty} onChange={(e) => { setDifficulty(e.target.value as any); setBankPage(1) }}>
               <option value="all">All Difficulties</option>
               <option value="Easy">Easy</option>
@@ -997,7 +913,7 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
           </div>
 
           <div className="mtm-field">
-            <label className="mtm-label">8. Language</label>
+            <label className="mtm-label">7. Language</label>
             <select className="mtm-select" value={language} onChange={(e) => { setLanguage(e.target.value as any); setBankPage(1) }}>
               <option value="all">All Languages</option>
               <option value="english">English</option>
@@ -1006,7 +922,7 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
           </div>
 
           <div className="mtm-field">
-            <label className="mtm-label">9. Question Status</label>
+            <label className="mtm-label">8. Question Status</label>
             <label
               style={{
                 display: 'inline-flex',
@@ -1559,7 +1475,6 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
             </div>
             <select className="mtm-select" value={queueCategoryFilter} onChange={(e) => { setQueueCategoryFilter(e.target.value as any); setQueuePage(1) }} style={{ width: '135px' }}>
               <option value="all">All Categories</option>
-              <option value="lesson_wise">Lesson-wise</option>
               <option value="unit_wise">Unit-wise</option>
               <option value="full_length">Full-length</option>
             </select>

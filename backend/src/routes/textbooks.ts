@@ -34,6 +34,16 @@ import {
   uploadFileToDrive,
 } from '../services/googleDriveService';
 import {
+  bulkUpdateDriveTextbookPublication,
+  getAdminDriveTextbooksOverview,
+  getDriveStreamForTextbook,
+  getPublishedStudentLibraryForStandard,
+  listAdminDriveTextbooks,
+  syncGoogleDriveTextbooksMetadata,
+  updateDriveTextbookMetadata,
+  verifyDriveTextbookFile,
+} from '../services/googleDriveTextbookLibraryService';
+import {
   TNPSC_GROUPS_LIST,
   STANDARDS_LIST,
   SAMACHEER_CATALOG,
@@ -1520,6 +1530,174 @@ router.post('/:id/retry-failed', requireAdminAuth, async (req: Request, res: Res
   } catch (err: any) {
     console.error('[TextbookRetryFailed] Error:', err.message);
     return res.status(500).json({ status: 'error', message: err.message || 'Retry failed.' });
+  }
+});
+
+// ============================================================================
+// GOOGLE DRIVE TEXTBOOK LIBRARY (METADATA-ONLY IN NEON, STREAMING FROM DRIVE)
+// ============================================================================
+
+router.get('/drive-library/admin/overview', requireAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const overview = await getAdminDriveTextbooksOverview();
+    return res.status(200).json({ status: 'success', data: overview });
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Failed to load Google Drive Textbook Library overview.',
+    });
+  }
+});
+
+router.get('/drive-library/admin/list', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const books = await listAdminDriveTextbooks({
+      standard: typeof req.query.standard === 'string' ? req.query.standard : undefined,
+      termOrVolume: typeof req.query.termOrVolume === 'string' ? req.query.termOrVolume : undefined,
+      medium: typeof req.query.medium === 'string' ? req.query.medium : undefined,
+      subject: typeof req.query.subject === 'string' ? req.query.subject : undefined,
+      publicationStatus: typeof req.query.publicationStatus === 'string' ? req.query.publicationStatus : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    });
+    return res.status(200).json({ status: 'success', data: books });
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Failed to list synchronized Google Drive textbooks.',
+    });
+  }
+});
+
+router.post('/drive-library/admin/sync', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const folderName =
+      typeof req.body?.folderName === 'string' && req.body.folderName.trim()
+        ? req.body.folderName.trim()
+        : undefined;
+    const summary = await syncGoogleDriveTextbooksMetadata({ folderName });
+    return res.status(200).json({ status: 'success', data: summary });
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Failed to synchronize Google Drive textbooks.',
+    });
+  }
+});
+
+router.put('/drive-library/admin/:id(\\d+)', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const updated = await updateDriveTextbookMetadata(Number(req.params.id), req.body || {});
+    if (!updated) {
+      return res.status(404).json({ status: 'error', message: 'Textbook record not found.' });
+    }
+    return res.status(200).json({ status: 'success', data: updated });
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Failed to update textbook metadata.',
+    });
+  }
+});
+
+router.post('/drive-library/admin/:id(\\d+)/verify', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const verified = await verifyDriveTextbookFile(Number(req.params.id));
+    if (!verified) {
+      return res.status(404).json({ status: 'error', message: 'Textbook record not found.' });
+    }
+    return res.status(200).json({ status: 'success', data: verified });
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Failed to verify Google Drive file.',
+    });
+  }
+});
+
+router.post('/drive-library/admin/bulk-status', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const action = req.body?.action as 'publish' | 'unpublish' | 'remove';
+    if (!['publish', 'unpublish', 'remove'].includes(action)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid action. Use publish, unpublish, or remove.' });
+    }
+    const result = await bulkUpdateDriveTextbookPublication(ids, action);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Bulk status update failed.',
+    });
+  }
+});
+
+/**
+ * GET /api/textbooks/library?standard=6..12
+ * Student Textbook Library endpoint: strictly returns ONLY published, Drive-available textbooks
+ * with dynamic Terms (6-10) or Volumes (11-12), Mediums, and Subjects.
+ */
+router.get('/library', async (req: Request, res: Response) => {
+  try {
+    const standard = Number(req.query.standard);
+    if (!Number.isInteger(standard) || standard < 6 || standard > 12) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid standard (6 to 12) is required.',
+      });
+    }
+    const data = await getPublishedStudentLibraryForStandard(standard);
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Failed to load published Textbook Library.',
+    });
+  }
+});
+
+/**
+ * GET /api/textbooks/library/:id/preview and /download
+ * Secure backend streaming directly from Google Drive (never exposes OAuth credentials or stores PDFs in Neon).
+ */
+router.get('/library/:id(\\d+)/:mode(preview|download)', requireStudentOrAdminAuth, async (req: any, res: Response) => {
+  try {
+    const textbookId = Number(req.params.id);
+    const isDownload = req.params.mode === 'download';
+    const isAdmin = Boolean(req.adminUser);
+
+    const { stream, fileName, mimeType, fileSize } = await getDriveStreamForTextbook(textbookId, isAdmin);
+    const safeAsciiName = fileName.replace(/["\\\r\n]/g, '_');
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `${isDownload ? 'attachment' : 'inline'}; filename="${safeAsciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    );
+    if (fileSize > 0) {
+      res.setHeader('Content-Length', String(fileSize));
+    }
+
+    req.on('close', () => {
+      if (typeof (stream as any).destroy === 'function') {
+        (stream as any).destroy();
+      }
+    });
+
+    stream.on('error', (streamErr: any) => {
+      console.error('[TextbookLibraryStream] Error:', streamErr?.message);
+      if (!res.headersSent) {
+        res.status(502).json({ status: 'error', message: 'Failed to stream PDF from Google Drive.' });
+      } else {
+        res.end();
+      }
+    });
+
+    stream.pipe(res);
+  } catch (err: any) {
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      message: err?.message || 'Unable to download textbook PDF from Google Drive.',
+    });
   }
 });
 

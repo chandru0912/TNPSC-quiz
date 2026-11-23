@@ -19,6 +19,186 @@ import { CLASS_6_TAMIL_TERM_1_PAGES } from './class6TamilTerm1Corpus';
 export const TARGET_FOLDER_NAME = 'TNPSC Study Hub Materials';
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
+export type DriveConnectionState =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'AUTHORIZATION_REQUIRED'
+  | 'INVALID_CLIENT_SECRET'
+  | 'TOKEN_EXPIRED'
+  | 'QUOTA_EXCEEDED'
+  | 'API_ERROR'
+  | 'CONNECTION_ERROR';
+
+export interface ClassifiedDriveError {
+  connectionState: DriveConnectionState;
+  errorSource: 'database_quota' | 'google_drive_quota' | 'oauth' | 'client_secret' | 'config' | 'network' | 'unknown';
+  httpStatus?: number | null;
+  googleReason?: string | null;
+  transient: boolean;
+  message: string;
+  remediationHint?: string;
+}
+
+const subfolderCache = new Map<string, string>();
+const statusCache: { expiresAt: number; payload: any } = { expiresAt: 0, payload: null };
+
+export function invalidateDriveStatusCache(): void {
+  statusCache.expiresAt = 0;
+  statusCache.payload = null;
+}
+
+/**
+ * Accurately classifies PostgreSQL, OAuth 2.0, and Google Drive API errors
+ * so permanent quota/auth failures are never misreported as missing secrets or retried forever.
+ */
+export function classifyDriveError(err: any): ClassifiedDriveError {
+  const msg = String(err?.response?.data?.error?.message || err?.response?.data?.error_description || err?.message || 'Unknown error');
+  const rawStatus = Number(err?.response?.status || err?.status || 0);
+  const httpStatus = Number.isInteger(rawStatus) && rawStatus >= 100 ? rawStatus : null;
+  const code = String(err?.code || httpStatus || '');
+  const reason = String(err?.response?.data?.error?.errors?.[0]?.reason || (typeof err?.response?.data?.error === 'string' ? err.response.data.error : '') || '');
+
+  // 1. PostgreSQL / Neon Database Quota Exceeded (SQLSTATE 53000)
+  if (code === '53000' || /exceeded the quota|upgrade your plan to increase limits/i.test(msg)) {
+    return {
+      connectionState: 'QUOTA_EXCEEDED',
+      errorSource: 'database_quota',
+      httpStatus: 503,
+      googleReason: 'postgresql_quota_exceeded',
+      transient: false,
+      message: 'PostgreSQL database quota exceeded (Neon): cannot read or store Google Drive tokens and metadata.',
+      remediationHint: 'Upgrade or reset compute/storage quota in your Neon PostgreSQL console (this is a Neon DB quota error, not a Google Drive API quota error), then click "Check Status".',
+    };
+  }
+
+  // 2. OAuth Invalid Client / Secret
+  if (reason === 'invalid_client' || /invalid_client|client secret is invalid/i.test(msg)) {
+    return {
+      connectionState: 'INVALID_CLIENT_SECRET',
+      errorSource: 'client_secret',
+      httpStatus: httpStatus || 401,
+      googleReason: 'invalid_client',
+      transient: false,
+      message: 'Google OAuth client authentication failed (invalid_client). Verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.',
+      remediationHint: 'Verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET match Google Cloud Console in server environment variables.',
+    };
+  }
+
+  // 3. OAuth Insufficient Permissions / Access Denied
+  if (/insufficientPermissions|access_denied|insufficient authentication scopes/i.test(`${reason} ${msg}`)) {
+    return {
+      connectionState: 'AUTHORIZATION_REQUIRED',
+      errorSource: 'oauth',
+      httpStatus: httpStatus || 403,
+      googleReason: reason || 'insufficientPermissions',
+      transient: false,
+      message: `Google Drive permission denied (${reason || 'insufficientPermissions'}): ${msg}`,
+      remediationHint: 'Reconnect Google Drive and approve the requested Drive permissions on the Google consent screen.',
+    };
+  }
+
+  // 2. Google Drive API Rate Limit (transient — safe to retry with exponential backoff)
+  if (
+    code === '429' ||
+    /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(reason) ||
+    /rate limit|too many requests/i.test(msg)
+  ) {
+    return {
+      connectionState: 'QUOTA_EXCEEDED',
+      errorSource: 'google_drive_quota',
+      transient: true,
+      message: `Google Drive API rate limit reached: ${msg}`,
+      remediationHint: 'Wait a moment and retry, or increase per-minute API quotas in Google Cloud Console → APIs & Services → Google Drive API → Quotas.',
+    };
+  }
+
+  // 3. Google Drive Hard Storage or Daily Quota Exhausted (non-transient)
+  if (/storageQuotaExceeded|dailyLimitExceeded|accessNotConfigured/i.test(reason) || /storage quota|daily limit|has not been used in project/i.test(msg)) {
+    return {
+      connectionState: 'QUOTA_EXCEEDED',
+      errorSource: 'google_drive_quota',
+      transient: false,
+      message: `Google Drive API quota/access error: ${msg}`,
+      remediationHint: /accessNotConfigured|has not been used/i.test(`${reason} ${msg}`)
+        ? 'Enable the Google Drive API in Google Cloud Console → APIs & Services → Library.'
+        : 'Free up Google Drive storage space or review daily limits in Google Cloud Console → Google Drive API → Quotas.',
+    };
+  }
+
+  // 4a. OAuth Invalid Client Secret / Client ID
+  if (/invalid_client/i.test(`${reason} ${msg}`) || /client secret is invalid/i.test(msg)) {
+    return {
+      connectionState: 'INVALID_CLIENT_SECRET',
+      errorSource: 'client_secret',
+      transient: false,
+      message: 'Google OAuth Client Secret or Client ID was rejected by Google.',
+      remediationHint: 'Verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env and Vercel Environment Variables.',
+    };
+  }
+
+  // 4b. OAuth Token Revoked / Expired / Unauthorized
+  if (
+    code === '401' ||
+    /invalid_grant|unauthorized_client|token has been expired or revoked/i.test(`${reason} ${msg}`)
+  ) {
+    return {
+      connectionState: 'TOKEN_EXPIRED',
+      errorSource: 'oauth',
+      transient: false,
+      message: 'Google Drive OAuth token has expired or been revoked. Please reconnect Google Drive.',
+      remediationHint: 'Click "Connect Google Drive" to re-authorize OAuth access.',
+    };
+  }
+
+  // 5. Transient network / 5xx errors
+  if (
+    ['500', '502', '503', '504', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(code) ||
+    /timeout|ECONNRESET|ETIMEDOUT/i.test(msg)
+  ) {
+    return {
+      connectionState: 'CONNECTION_ERROR',
+      errorSource: 'network',
+      transient: true,
+      message: `Temporary Google Drive connection error: ${msg}`,
+      remediationHint: 'Click "Retry Connection" in a few seconds.',
+    };
+  }
+
+  return {
+    connectionState: 'CONNECTION_ERROR',
+    errorSource: 'unknown',
+    transient: false,
+    message: msg,
+  };
+}
+
+/**
+ * Executes a Google Drive API call with exponential backoff + jitter for transient errors only.
+ * Never retries permanent auth or hard quota failures.
+ */
+export async function withDriveRetry<T>(
+  operation: () => Promise<T>,
+  maxAttempts = 3,
+  baseDelayMs = 400
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (err: any) {
+      lastError = err;
+      const classified = classifyDriveError(err);
+      if (!classified.transient || attempt >= maxAttempts) {
+        throw err;
+      }
+      const jitter = Math.floor(Math.random() * 250);
+      const delay = baseDelayMs * Math.pow(2, attempt - 1) + jitter;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 export const PRODUCTION_BACKEND_URL = 'https://tnpsc-quiz-lval.vercel.app';
 export const LOCAL_BACKEND_URL = 'http://localhost:5000';
 
@@ -242,6 +422,10 @@ export async function getStoredTokens(): Promise<{
     }
   } catch (err: any) {
     console.warn('[GoogleDriveService] Error querying google_drive_tokens:', err.message);
+    const hasEnvRefresh = Boolean(process.env.GOOGLE_REFRESH_TOKEN && process.env.GOOGLE_REFRESH_TOKEN.trim());
+    if (!hasEnvRefresh && (err?.code === '53000' || /exceeded the quota|upgrade your plan/i.test(String(err?.message || '')))) {
+      throw err;
+    }
   }
 
   // Fallback to environment variable if configured in Vercel
@@ -349,14 +533,34 @@ export async function getAuthenticatedClient(redirectUri?: string) {
 export async function getOrCreateTargetFolder(authClient: any): Promise<string> {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
+  // 0. Honor explicit GOOGLE_DRIVE_FOLDER_ID if configured and valid
+  const envFolderId = cleanCredential(process.env.GOOGLE_DRIVE_FOLDER_ID);
+  if (envFolderId) {
+    try {
+      const existingEnv = await withDriveRetry(() =>
+        drive.files.get({
+          fileId: envFolderId,
+          fields: 'id, name, trashed, mimeType',
+        })
+      );
+      if (existingEnv.data.id && !existingEnv.data.trashed) {
+        return existingEnv.data.id;
+      }
+    } catch {
+      // Fall through to DB-cached or name lookup
+    }
+  }
+
   // 1. Check if folderId is already saved in DB and still valid
   const stored = await getStoredTokens();
   if (stored?.folderId) {
     try {
-      const existing = await drive.files.get({
-        fileId: stored.folderId,
-        fields: 'id, name, trashed, mimeType',
-      });
+      const existing = await withDriveRetry(() =>
+        drive.files.get({
+          fileId: stored.folderId!,
+          fields: 'id, name, trashed, mimeType',
+        })
+      );
       if (existing.data.id && !existing.data.trashed) {
         return existing.data.id;
       }
@@ -367,12 +571,14 @@ export async function getOrCreateTargetFolder(authClient: any): Promise<string> 
 
   // 2. Search for existing active folder named "TNPSC Study Hub Materials"
   const q = `name = '${TARGET_FOLDER_NAME.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const listRes = await drive.files.list({
-    q,
-    spaces: 'drive',
-    fields: 'files(id, name, createdTime)',
-    pageSize: 1,
-  });
+  const listRes = await withDriveRetry(() =>
+    drive.files.list({
+      q,
+      spaces: 'drive',
+      fields: 'files(id, name, createdTime)',
+      pageSize: 1,
+    })
+  );
 
   if (listRes.data.files && listRes.data.files.length > 0) {
     const folderId = listRes.data.files[0].id!;
@@ -383,20 +589,95 @@ export async function getOrCreateTargetFolder(authClient: any): Promise<string> 
   }
 
   // 3. Create the dedicated folder
-  const createRes = await drive.files.create({
-    requestBody: {
-      name: TARGET_FOLDER_NAME,
-      mimeType: 'application/vnd.google-apps.folder',
-      description: 'Official TNPSC Study Hub PDF Study Materials & Textbook Archive',
-    },
-    fields: 'id, name',
-  });
+  const createRes = await withDriveRetry(() =>
+    drive.files.create({
+      requestBody: {
+        name: TARGET_FOLDER_NAME,
+        mimeType: 'application/vnd.google-apps.folder',
+        description: 'Official TNPSC Study Hub PDF Study Materials & Textbook Archive',
+      },
+      fields: 'id, name',
+    })
+  );
 
   const newFolderId = createRes.data.id!;
   if (stored?.refreshToken) {
     await saveTokens({ ...stored, folderId: newFolderId });
   }
   return newFolderId;
+}
+
+function resolveGroupFolderName(rawGroup?: string): string {
+  const g = String(rawGroup || '').toLowerCase().trim();
+  if (g.includes('group1') || g.includes('group 1')) return 'Group 1';
+  if (g.includes('group2') || g.includes('group 2') || g.includes('2a')) return 'Group 2 and 2A';
+  if (g.includes('group4') || g.includes('group 4') || g.includes('vao')) return 'Group 4';
+  return 'Group 1';
+}
+
+function resolveSubjectFolderName(rawSubject?: string): string {
+  const s = String(rawSubject || '').toLowerCase().trim();
+  if (s.includes('tamil') || s.includes('தமிழ்')) return 'General Tamil';
+  if (s.includes('aptitude') || s.includes('mental')) return 'Aptitude and Mental Ability';
+  return 'General Studies';
+}
+
+async function getOrCreateChildFolder(drive: any, parentId: string, name: string): Promise<string> {
+  const cacheKey = `${parentId}::${name}`;
+  const cached = subfolderCache.get(cacheKey);
+  if (cached) return cached;
+
+  const q = `name = '${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const listRes = await withDriveRetry<any>(() =>
+    drive.files.list({
+      q,
+      spaces: 'drive',
+      fields: 'files(id, name)',
+      pageSize: 1,
+    })
+  );
+
+  if (listRes.data.files && listRes.data.files.length > 0 && listRes.data.files[0].id) {
+    const id = listRes.data.files[0].id;
+    subfolderCache.set(cacheKey, id);
+    return id;
+  }
+
+  const createRes = await withDriveRetry<any>(() =>
+    drive.files.create({
+      requestBody: {
+        name,
+        parents: [parentId],
+        mimeType: 'application/vnd.google-apps.folder',
+      },
+      fields: 'id',
+    })
+  );
+
+  const newId = createRes.data.id!;
+  subfolderCache.set(cacheKey, newId);
+  return newId;
+}
+
+/**
+ * Ensures the organized folder hierarchy under "TNPSC Study Hub Materials":
+ *   Group 1 / Group 2 and 2A / Group 4 -> General Studies / General Tamil / Aptitude and Mental Ability
+ * Never creates duplicate folders.
+ */
+export async function getOrCreateStructuredFolder(
+  authClient: any,
+  params?: { group?: string; subject?: string }
+): Promise<string> {
+  const rootId = await getOrCreateTargetFolder(authClient);
+  if (!params?.group && !params?.subject) return rootId;
+
+  const drive = google.drive({ version: 'v3', auth: authClient });
+  const groupFolderName = resolveGroupFolderName(params.group);
+  const groupFolderId = await getOrCreateChildFolder(drive, rootId, groupFolderName);
+
+  if (!params.subject) return groupFolderId;
+  const subjectFolderName = resolveSubjectFolderName(params.subject);
+  return getOrCreateChildFolder(drive, groupFolderId, subjectFolderName);
 }
 
 /**
@@ -577,6 +858,7 @@ export async function handleOAuthCallback(code: string, state: string, redirectU
     accountEmail: accountEmail || null,
     folderId,
   });
+  invalidateDriveStatusCache();
 
   return {
     success: true,
@@ -589,9 +871,12 @@ export async function handleOAuthCallback(code: string, state: string, redirectU
 /**
  * Checks overall Google Drive connection status and storage info.
  */
-export async function getConnectionStatus(): Promise<{
+export async function getConnectionStatus(forceRefresh = false): Promise<{
   connected: boolean;
   configured: boolean;
+  connectionState: DriveConnectionState;
+  errorSource?: ClassifiedDriveError['errorSource'];
+  remediationHint?: string;
   email?: string;
   folderName: string;
   folderId?: string;
@@ -606,6 +891,10 @@ export async function getConnectionStatus(): Promise<{
     hasFormattingIssue: boolean;
   };
 }> {
+  if (!forceRefresh && statusCache.payload && Date.now() < statusCache.expiresAt) {
+    return statusCache.payload;
+  }
+
   const rawId = process.env.GOOGLE_CLIENT_ID || '';
   const rawSecret = process.env.GOOGLE_CLIENT_SECRET || '';
   const clientId = cleanCredential(rawId);
@@ -638,13 +927,16 @@ export async function getConnectionStatus(): Promise<{
 
   if (!configured) {
     const errorMsg = !clientId
-      ? 'Google Client ID is missing. Please configure GOOGLE_CLIENT_ID in backend/.env.'
+      ? 'Google Client ID is missing. Configure GOOGLE_CLIENT_ID in server environment variables.'
       : isPlaceholderSecret
-      ? 'Google Client Secret is not set in backend/.env. Please paste your newly rotated Google Client Secret into backend/.env.'
-      : 'Google OAuth Client ID & Secret are not yet configured in server environment variables.';
+      ? 'Google Client Secret is not configured. Set GOOGLE_CLIENT_SECRET in server environment variables.'
+      : 'Google OAuth Client ID & Secret are not configured in server environment variables.';
     return {
       connected: false,
       configured: false,
+      connectionState: 'DISCONNECTED',
+      errorSource: 'config',
+      remediationHint: 'Configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env (local) or Vercel Environment Variables (production).',
       folderName: TARGET_FOLDER_NAME,
       redirectUri,
       clientInfo,
@@ -652,11 +944,31 @@ export async function getConnectionStatus(): Promise<{
     };
   }
 
-  const stored = await getStoredTokens();
+  let stored: Awaited<ReturnType<typeof getStoredTokens>> = null;
+  try {
+    stored = await getStoredTokens();
+  } catch (dbErr: any) {
+    const classified = classifyDriveError(dbErr);
+    return {
+      connected: false,
+      configured: true,
+      connectionState: classified.connectionState,
+      errorSource: classified.errorSource,
+      remediationHint: classified.remediationHint,
+      folderName: TARGET_FOLDER_NAME,
+      redirectUri,
+      clientInfo,
+      error: classified.message,
+    };
+  }
+
   if (!stored || !stored.refreshToken) {
     return {
       connected: false,
       configured: true,
+      connectionState: 'AUTHORIZATION_REQUIRED',
+      errorSource: 'oauth',
+      remediationHint: 'Click "Connect Google Drive" to authorize access to your Google Drive.',
       folderName: TARGET_FOLDER_NAME,
       redirectUri,
       clientInfo,
@@ -667,32 +979,40 @@ export async function getConnectionStatus(): Promise<{
   try {
     const authClient = await getAuthenticatedClient();
     const folderId = await getOrCreateTargetFolder(authClient);
-    return {
+    const result = {
       connected: true,
       configured: true,
+      connectionState: 'CONNECTED' as const,
       email: stored.accountEmail || undefined,
       folderName: TARGET_FOLDER_NAME,
       folderId,
       redirectUri,
       clientInfo,
     };
+    statusCache.payload = result;
+    statusCache.expiresAt = Date.now() + 60_000;
+    return result;
   } catch (err: any) {
+    const classified = classifyDriveError(err);
     return {
       connected: false,
       configured: true,
+      connectionState: classified.connectionState,
+      errorSource: classified.errorSource,
+      remediationHint: classified.remediationHint,
       email: stored.accountEmail || undefined,
       folderName: TARGET_FOLDER_NAME,
       folderId: stored.folderId || undefined,
       redirectUri,
       clientInfo,
-      error: err.message || 'Failed to authenticate with Google Drive API',
+      error: classified.message,
     };
   }
 }
 
 /**
  * Initiates a Google Drive Resumable Upload Session.
- * 
+ *
  * Returns the resumable upload URL directly to the client browser.
  * The browser then streams the large PDF directly into Google Drive,
  * completely bypassing Vercel serverless request body limits!
@@ -702,9 +1022,14 @@ export async function initiateResumableUpload(params: {
   fileSize: number;
   mimeType?: string;
   origin?: string;
+  group?: string;
+  subject?: string;
 }): Promise<{ uploadUrl: string; folderId: string }> {
   const authClient = await getAuthenticatedClient();
-  const folderId = await getOrCreateTargetFolder(authClient);
+  const folderId =
+    params.group || params.subject
+      ? await getOrCreateStructuredFolder(authClient, { group: params.group, subject: params.subject })
+      : await getOrCreateTargetFolder(authClient);
   const mimeType = params.mimeType || 'application/pdf';
 
   // Obtain access token
@@ -937,6 +1262,8 @@ export async function uploadFileToDrive(params: {
  */
 export async function disconnectGoogleDrive(): Promise<void> {
   await pool.query(`DELETE FROM google_drive_tokens`);
+  invalidateDriveStatusCache();
+  subfolderCache.clear();
 }
 
 /**

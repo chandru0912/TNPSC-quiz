@@ -53,12 +53,19 @@ import {
 
 const router = Router();
 
-// Middleware: ensure database schema is active and prevent stale API caching
-router.use(async (_req: Request, res: Response, next: NextFunction) => {
+// Middleware: prevent stale API caching and ensure schema (never block /status or /config-check on DB quota)
+router.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+    const isStatusOrConfigRoute =
+      req.path === '/' || req.path === '/status' || req.path === '/config-check' || req.path.startsWith('/auth');
+    if (isStatusOrConfigRoute) {
+      await ensureDatabaseSchema().catch(() => {});
+      next();
+      return;
+    }
     await ensureDatabaseSchema();
     next();
   } catch (err) {
@@ -68,11 +75,12 @@ router.use(async (_req: Request, res: Response, next: NextFunction) => {
 
 /**
  * GET /api/drive and GET /api/drive/status
- * Public status endpoint reporting Google Drive integration state and route map.
+ * Status endpoint reporting accurate Google Drive integration state and error classification.
  */
-router.get(['/', '/status'], async (_req: Request, res: Response) => {
+router.get(['/', '/status'], async (req: Request, res: Response) => {
   try {
-    const status = await getConnectionStatus();
+    const forceRefresh = req.query.refresh === 'true';
+    const status = await getConnectionStatus(forceRefresh);
     return res.status(200).json({
       status: 'success',
       data: status,
@@ -333,12 +341,14 @@ router.post('/upload/initiate', requireAdminAuth, fileUploadLimiter, async (req:
       clientOrigin = process.env.FRONTEND_URL.trim().replace(/\/+$/, '');
     }
 
-    // 1. Initiate resumable upload with Google Drive API (passes origin for CORS)
+    // 1. Initiate resumable upload with Google Drive API (auto-organizes into Group/Subject subfolder)
     const { uploadUrl, folderId } = await initiateResumableUpload({
       fileName: cleanFileName,
       fileSize: parsedSize,
       mimeType: 'application/pdf',
       origin: clientOrigin || undefined,
+      group: typeof group === 'string' ? group : undefined,
+      subject: typeof subject === 'string' ? subject : undefined,
     });
 
     // 2. Pre-create pending record in PostgreSQL

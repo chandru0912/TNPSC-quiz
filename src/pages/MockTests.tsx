@@ -44,7 +44,8 @@ import './MCQPractice.css'
 import './MockTests.css'
 
 type TnpscGroupTab = 'group1' | 'group2_2a' | 'group4'
-type TestCategoryTab = 'lesson_wise' | 'unit_wise' | 'full_length'
+type BackendTestCategory = 'lesson_wise' | 'unit_wise' | 'full_length'
+type TestCategoryTab = 'quantitative_aptitude' | 'full_length'
 
 interface PublishedMockTest {
   id: number
@@ -54,7 +55,7 @@ interface PublishedMockTest {
   category: string
   categoryName: string
   tnpscGroup: string
-  testCategory: TestCategoryTab
+  testCategory: BackendTestCategory
   subject: string
   standard: string | null
   unit: string | null
@@ -187,7 +188,7 @@ const MockTests = () => {
   }
   const parseInitialCategory = (): TestCategoryTab => {
     const c = searchParams.get('category')
-    return c === 'unit_wise' || c === 'full_length' ? c : 'lesson_wise'
+    return c === 'full_length' ? 'full_length' : 'quantitative_aptitude'
   }
   const parseInitialStandard = (): number => {
     const s = Number(searchParams.get('standard'))
@@ -203,7 +204,7 @@ const MockTests = () => {
 
   // Syllabus hierarchy selections
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(
-    () => searchParams.get('subject') || 'general-studies'
+    () => (parseInitialCategory() === 'quantitative_aptitude' ? 'aptitude' : searchParams.get('subject') || 'general-studies')
   )
   const [selectedStandardId, setSelectedStandardId] = useState<number>(parseInitialStandard)
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(parseInitialUnit)
@@ -214,10 +215,11 @@ const MockTests = () => {
     setSelectedGroup(qGroup === 'group2_2a' || qGroup === 'group4' ? qGroup : 'group1')
 
     const qCat = searchParams.get('category')
-    setSelectedTestCategory(qCat === 'unit_wise' || qCat === 'full_length' ? qCat : 'lesson_wise')
+    const resolvedCat: TestCategoryTab = qCat === 'full_length' ? 'full_length' : 'quantitative_aptitude'
+    setSelectedTestCategory(resolvedCat)
 
     const qSub = searchParams.get('subject')
-    setSelectedSubjectId(qSub || 'general-studies')
+    setSelectedSubjectId(resolvedCat === 'quantitative_aptitude' ? 'aptitude' : qSub || 'general-studies')
 
     const qStd = Number(searchParams.get('standard'))
     setSelectedStandardId(Number.isInteger(qStd) && qStd >= 6 && qStd <= 12 ? qStd : 6)
@@ -328,10 +330,20 @@ const MockTests = () => {
   ]
 
   const testCategories: { id: TestCategoryTab; name: string; desc: string }[] = [
-    { id: 'lesson_wise', name: 'Lesson-wise Tests', desc: 'Group → Subject → Standard → Unit → Lesson' },
-    { id: 'unit_wise', name: 'Unit-wise Tests', desc: 'Group → Subject → Standard → Unit' },
-    { id: 'full_length', name: 'Full-length Mock Tests', desc: 'Group → Standard → Full-length Exam' },
+    {
+      id: 'quantitative_aptitude',
+      name: 'Quantitative Aptitude Test',
+      desc: 'Aptitude & Mental Ability — Standard, Unit & Topic-wise Practice',
+    },
+    {
+      id: 'full_length',
+      name: 'Full-Length Mock Tests',
+      desc: 'Complete TNPSC Group Examination Simulation',
+    },
   ]
+
+  const effectiveSubjectId =
+    selectedTestCategory === 'quantitative_aptitude' ? 'aptitude' : selectedSubjectId
 
   const registrySubjects = useMemo(() => {
     return getSubjectsForGroup(registryGroup).map((sub) => {
@@ -343,12 +355,12 @@ const MockTests = () => {
   }, [registryGroup, syllabusFacets.subjects])
 
   const registryStandards = useMemo(() => {
-    const stds = getStandardsForSubject(registryGroup, selectedSubjectId)
+    const stds = getStandardsForSubject(registryGroup, effectiveSubjectId)
     return stds.map((st) => {
       const matched = syllabusFacets.standards.find((f) => Number(f.classId) === st.id)
       return { ...st, questionCount: matched ? matched.questionCount : 0 }
     })
-  }, [registryGroup, selectedSubjectId, syllabusFacets.standards])
+  }, [registryGroup, effectiveSubjectId, syllabusFacets.standards])
 
   const [dynamicUnits, setDynamicUnits] = useState<DynamicUnit[]>([])
   const [isUnitsLoading, setIsUnitsLoading] = useState<boolean>(true)
@@ -425,7 +437,7 @@ const MockTests = () => {
     let mounted = true
     setIsUnitsLoading(true)
     dynamicSyllabusService
-      .getUnits(registryGroup, selectedSubjectId, selectedStandardId, { allowEmpty: true })
+      .getUnits(registryGroup, effectiveSubjectId, selectedStandardId, { allowEmpty: true })
       .then((units) => {
         if (mounted) {
           setDynamicUnits(units)
@@ -441,14 +453,14 @@ const MockTests = () => {
     return () => {
       mounted = false
     }
-  }, [registryGroup, selectedSubjectId, selectedStandardId, selectedTestCategory, syllabusSyncTick])
+  }, [registryGroup, effectiveSubjectId, selectedStandardId, selectedTestCategory, syllabusSyncTick])
 
   useEffect(() => {
     let mounted = true
-    const stdIds = getStandardsForSubject(registryGroup, selectedSubjectId).map((s) => s.id)
+    const stdIds = getStandardsForSubject(registryGroup, effectiveSubjectId).map((s) => s.id)
     Promise.all(
       stdIds.map(async (stdId) => {
-        const units = await dynamicSyllabusService.getUnits(registryGroup, selectedSubjectId, stdId, {
+        const units = await dynamicSyllabusService.getUnits(registryGroup, effectiveSubjectId, stdId, {
           allowEmpty: true,
         })
         return [stdId, units.length] as const
@@ -467,10 +479,10 @@ const MockTests = () => {
     return () => {
       mounted = false
     }
-  }, [registryGroup, selectedSubjectId, syllabusSyncTick])
+  }, [registryGroup, effectiveSubjectId, syllabusSyncTick])
 
   useEffect(() => {
-    if (selectedTestCategory !== 'lesson_wise' || !selectedUnitId) {
+    if (selectedTestCategory !== 'quantitative_aptitude' || !selectedUnitId) {
       setDynamicLessons([])
       setIsLessonsLoading(false)
       return
@@ -480,7 +492,7 @@ const MockTests = () => {
     dynamicSyllabusService
       .getLessons({
         examId: registryGroup,
-        subjectId: selectedSubjectId,
+        subjectId: effectiveSubjectId,
         standardNumber: selectedStandardId,
         unitNumber: selectedUnitId,
       })
@@ -516,7 +528,7 @@ const MockTests = () => {
     setProgressLoading(true)
     const q = new URLSearchParams({
       groupId: registryGroup,
-      subjectId: selectedSubjectId,
+      subjectId: effectiveSubjectId,
       standardId: String(selectedStandardId),
       mode: 'lesson_wise',
     })
@@ -562,7 +574,7 @@ const MockTests = () => {
     return () => {
       mounted = false
     }
-  }, [registryGroup, selectedSubjectId, selectedStandardId, syllabusSyncTick, isAuthenticated, authLoading])
+  }, [registryGroup, effectiveSubjectId, selectedStandardId, syllabusSyncTick, isAuthenticated, authLoading])
 
   const registryUnits = useMemo(() => {
     if (selectedTestCategory === 'full_length') return []
@@ -573,19 +585,19 @@ const MockTests = () => {
         id: unitNum,
         unitNumber: u.unitNumber || u.unit_code || `Unit ${unitNum}`,
         title: u.title,
-        subjectName: u.subjectName || u.subject_name || selectedSubjectId,
+        subjectName: u.subjectName || u.subject_name || effectiveSubjectId,
         questionCount: matched ? matched.questionCount : 0,
       }
     })
-  }, [dynamicUnits, selectedSubjectId, selectedTestCategory, syllabusFacets.units])
+  }, [dynamicUnits, effectiveSubjectId, selectedTestCategory, syllabusFacets.units])
 
   // Fetch live syllabus facets for question counts (same source of truth as Study Materials & MCQ Practice)
   useEffect(() => {
     let mounted = true
     const params = new URLSearchParams()
     params.set('category', selectedGroup === 'group4' ? 'group4_vao' : selectedGroup)
-    if (selectedTestCategory !== 'full_length' && selectedSubjectId) {
-      params.set('subject', selectedSubjectId)
+    if (selectedTestCategory !== 'full_length' && effectiveSubjectId) {
+      params.set('subject', effectiveSubjectId)
     }
     if (selectedStandardId) {
       params.set('classId', String(selectedStandardId))
@@ -609,14 +621,16 @@ const MockTests = () => {
     return () => {
       mounted = false
     }
-  }, [selectedGroup, selectedTestCategory, selectedSubjectId, selectedStandardId, selectedUnitId])
+  }, [selectedGroup, selectedTestCategory, effectiveSubjectId, selectedStandardId, selectedUnitId])
 
   const fetchPublishedTests = async () => {
     try {
       setLoading(true)
       const params = new URLSearchParams()
       params.set('group', selectedGroup)
-      params.set('testCategory', selectedTestCategory)
+      if (selectedTestCategory === 'full_length') {
+        params.set('testCategory', 'full_length')
+      }
       const res = await apiFetch(`/api/mock-tests?${params.toString()}`)
       const data = await res.json()
       if (res.ok && data.status === 'success') {
@@ -663,7 +677,7 @@ const MockTests = () => {
     [questions]
   )
   const { translations } = useMcqTranslations(translatableQuestions, questionLang)
-  const activeSubjectObj = registrySubjects.find((s) => s.id === selectedSubjectId) || null
+  const activeSubjectObj = registrySubjects.find((s) => s.id === effectiveSubjectId) || null
   const activeUnitObj = registryUnits.find((u) => u.id === selectedUnitId) || null
   const handleSelectUnit = (uId: number | null) => {
     setSelectedUnitId(uId)
@@ -687,19 +701,24 @@ const MockTests = () => {
     return tests.filter((test) => {
       if (test.status && test.status.toLowerCase() !== 'published') return false
       if (!matchesGroup(test, selectedGroup)) return false
-      if ((test.testCategory || 'full_length') !== selectedTestCategory) return false
-      if (!matchesSubjectSlug(test.subject, selectedSubjectId)) {
+      const backendCat = test.testCategory || 'full_length'
+      if (selectedTestCategory === 'full_length') {
+        if (backendCat !== 'full_length') return false
+      } else {
+        if (backendCat === 'full_length') return false
+      }
+      if (!matchesSubjectSlug(test.subject, effectiveSubjectId)) {
         return false
       }
       const testStd = parseStdNum(test.standard)
       if (testStd !== null && testStd !== selectedStandardId) return false
-      if ((selectedTestCategory === 'unit_wise' || selectedTestCategory === 'lesson_wise') && selectedUnitId) {
+      if (selectedTestCategory === 'quantitative_aptitude' && selectedUnitId) {
         const testUnit = parseStdNum(test.unit)
         if (testUnit !== selectedUnitId) return false
       }
       return true
     })
-  }, [tests, selectedGroup, selectedTestCategory, selectedSubjectId, selectedStandardId, selectedUnitId])
+  }, [tests, selectedGroup, selectedTestCategory, effectiveSubjectId, selectedStandardId, selectedUnitId])
 
   const resetExamState = () => {
     setCurrentIndex(0)
@@ -1253,11 +1272,11 @@ const MockTests = () => {
   // ====================================================
   // 3. MOCK TESTS HOME & SYLLABUS HIERARCHY
   // ====================================================
-  const isLessonsView = selectedTestCategory === 'lesson_wise' && Boolean(selectedUnitId)
-  const isUnitTestsView = selectedTestCategory === 'unit_wise' && Boolean(selectedUnitId)
+  const isAptitudeTestsView =
+    selectedTestCategory === 'quantitative_aptitude' && Boolean(selectedUnitId)
   const isFullLengthTestsView =
     selectedTestCategory === 'full_length' && searchParams.get('step') === 'full_length_tests'
-  const isSubListingView = isLessonsView || isUnitTestsView || isFullLengthTestsView
+  const isSubListingView = isAptitudeTestsView || isFullLengthTestsView
   const isMobileUnitsPage =
     isMobile &&
     selectedTestCategory !== 'full_length' &&
@@ -1267,9 +1286,12 @@ const MockTests = () => {
   const handleGroupChange = (grp: TnpscGroupTab) => {
     const nextReg = mapGroupToRegistryKey(grp)
     const nextSubs = getSubjectsForGroup(nextReg)
-    const nextSub = nextSubs.some((s) => s.id === selectedSubjectId)
-      ? selectedSubjectId
-      : nextSubs[0]?.id || 'general-studies'
+    const nextSub =
+      selectedTestCategory === 'quantitative_aptitude'
+        ? 'aptitude'
+        : nextSubs.some((s) => s.id === selectedSubjectId)
+          ? selectedSubjectId
+          : nextSubs[0]?.id || 'general-studies'
     const nextStds = getStandardsForSubject(nextReg, nextSub)
     const nextStd = nextStds.some((st) => st.id === selectedStandardId)
       ? selectedStandardId
@@ -1338,7 +1360,7 @@ const MockTests = () => {
           </div>
         )}
 
-        {/* 2. Test Format Tabs (Lesson-wise / Unit-wise / Full-length) */}
+        {/* 2. Test Format Tabs (Quantitative Aptitude Test / Full-Length Mock Tests) */}
         {!isSubListingView && !isMobileUnitsPage && (
           <div className="practice-categories glass">
             {testCategories.map((cat) => (
@@ -1347,14 +1369,24 @@ const MockTests = () => {
                 type="button"
                 className={`practice-category-tab ${selectedTestCategory === cat.id ? 'active' : ''}`}
                 onClick={() => {
+                  const nextSub =
+                    cat.id === 'quantitative_aptitude'
+                      ? 'aptitude'
+                      : selectedSubjectId || 'general-studies'
                   setSelectedTestCategory(cat.id)
+                  setSelectedSubjectId(nextSub)
                   setSelectedUnitId(null)
-                  pushMockRoute({ category: cat.id, step: null, unit: null, activeTestId: null })
+                  pushMockRoute({
+                    category: cat.id,
+                    subject: nextSub,
+                    step: null,
+                    unit: null,
+                    activeTestId: null,
+                  })
                 }}
                 title={cat.desc}
               >
-                {cat.id === 'lesson_wise' && <BookOpen size={15} style={{ marginRight: '0.4rem' }} />}
-                {cat.id === 'unit_wise' && <Layers size={15} style={{ marginRight: '0.4rem' }} />}
+                {cat.id === 'quantitative_aptitude' && <Layers size={15} style={{ marginRight: '0.4rem' }} />}
                 {cat.id === 'full_length' && <Target size={15} style={{ marginRight: '0.4rem' }} />}
                 {cat.name}
               </button>
@@ -1444,8 +1476,8 @@ const MockTests = () => {
               </div>
             )}
 
-            {/* Section 1: Compact Subject Cards (Hidden on Mobile Unit Selection page) */}
-            {!isMobileUnitsPage && (
+            {/* Section 1: Compact Subject Cards (Shown for Full-Length Mock Tests; hidden on Quantitative Aptitude Test & Mobile Unit page) */}
+            {selectedTestCategory === 'full_length' && !isMobileUnitsPage && (
               <section className="hierarchy-section glass compact-subjects-section">
                 <div className="hierarchy-section-header compact-header">
                   <span className="hierarchy-step-badge">Subject</span>
@@ -1569,8 +1601,9 @@ const MockTests = () => {
                       const pctL = uProg?.completionPercentage ?? 0
                       const unitPublishedCount = tests.filter((t) => {
                         if (!matchesGroup(t, selectedGroup)) return false
-                        if ((t.testCategory || 'full_length') !== selectedTestCategory) return false
-                        if (!matchesSubjectSlug(t.subject, selectedSubjectId)) return false
+                        const backendCat = t.testCategory || 'full_length'
+                        if (backendCat === 'full_length') return false
+                        if (!matchesSubjectSlug(t.subject, effectiveSubjectId)) return false
                         const tStd = parseStdNum(t.standard)
                         if (tStd !== null && tStd !== selectedStandardId) return false
                         return parseStdNum(t.unit) === u.id
@@ -1615,8 +1648,8 @@ const MockTests = () => {
               </section>
             )}
           </div>
-        ) : isUnitTestsView ? (
-          /* DEDICATED UNIT-WISE TEST LISTING VIEW */
+        ) : isAptitudeTestsView ? (
+          /* DEDICATED QUANTITATIVE APTITUDE TEST LISTING VIEW */
           <div className="hierarchy-navigator">
             <div className="page-step-back-row">
               <button
@@ -1633,113 +1666,12 @@ const MockTests = () => {
               <div className="hierarchy-section-header">
                 <span className="hierarchy-step-badge">{activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`}</span>
                 <h3>
-                  {activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} – {activeUnitObj?.title || 'Unit Tests'} | {selectedStandardId}th Standard
+                  {activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} – {activeUnitObj?.title || 'Quantitative Aptitude Tests'} | {selectedStandardId}th Standard
                 </h3>
               </div>
 
               {loading ? (
-                <p className="hierarchy-empty-note">Loading published Unit-wise Tests...</p>
-              ) : matchingAdminTests.length > 0 ? (
-                <div className="hierarchy-lesson-list">
-                  {matchingAdminTests.map((test, idx) => {
-                    const tProg = getTestProgress(test)
-                    const isInProg = Boolean(mockSummary?.inProgressTestIds?.includes(test.id))
-                    const attempts = tProg?.totalAttempts ?? 0
-                    const isStatusLoading = isAuthenticated && (authLoading || (progressLoading && !mockSummary))
-                    const status: 'completed' | 'in_progress' | 'not_started' =
-                      attempts > 0 ? 'completed' : isInProg ? 'in_progress' : 'not_started'
-                    const statusLabel = isStatusLoading
-                      ? 'Loading...'
-                      : status === 'completed'
-                        ? 'Completed'
-                        : status === 'in_progress'
-                          ? 'In Progress'
-                          : 'Not Started'
-                    const isStartingThis = startingTestId === test.id
-                    const ctaLabel = isStartingThis
-                      ? 'Starting...'
-                      : status === 'completed'
-                        ? 'Practice Again →'
-                        : status === 'in_progress'
-                          ? 'Continue Test →'
-                          : 'Start Test →'
-                    const cleanTitle = formatStudentTestTitle(test, activeUnitObj?.title)
-                    const showDesc = !isTechnicalGeneratorDescription(test.description)
-
-                    return (
-                      <div key={test.id} className={`hierarchy-lesson-row lesson-status-${status}`}>
-                        <div className="hierarchy-lesson-main-col">
-                          <div className="hierarchy-lesson-info">
-                            <span className="hierarchy-lesson-num">
-                              {activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} • Test {idx + 1}
-                            </span>
-                            <span className="hierarchy-lesson-title">{cleanTitle}</span>
-                            {showDesc && (
-                              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{test.description}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="hierarchy-lesson-meta">
-                          <span className={`lesson-status-badge status-${isStatusLoading ? 'loading' : status}`}>
-                            {statusLabel}
-                          </span>
-                          <span className={`hierarchy-count-pill ${test.questionsCount > 0 ? 'has-qs' : ''}`}>
-                            {test.questionsCount} Questions
-                          </span>
-                          <LessonAwardSummaryBar
-                            goldCount={tProg?.goldCount ?? 0}
-                            platinumCount={tProg?.platinumCount ?? 0}
-                            silverCount={tProg?.silverCount ?? 0}
-                            compact
-                            showTotal={false}
-                            hideZero
-                          />
-                          <button
-                            type="button"
-                            className="table-action-btn table-action-primary hierarchy-start-btn"
-                            disabled={test.questionsCount === 0 || startingTestId !== null}
-                            title={test.questionsCount === 0 ? 'No questions available in this test yet' : ctaLabel}
-                            onClick={() => handleStartAdminTest(test)}
-                          >
-                            <Play size={14} fill="currentColor" />
-                            <span>{ctaLabel}</span>
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="hierarchy-empty-note">
-                  No published Unit-wise Tests are available for {activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} ({selectedStandardId}th Standard) yet.
-                </p>
-              )}
-            </section>
-          </div>
-        ) : isLessonsView ? (
-          /* LESSON-WISE PUBLISHED TESTS VIEW (Admin-Published Tests Only) */
-          <div className="hierarchy-navigator">
-            <div className="page-step-back-row">
-              <button
-                type="button"
-                className="back-btn glass"
-                onClick={() => handleSelectUnit(null)}
-              >
-                <ArrowLeft size={16} />
-                <span>Back to Units</span>
-              </button>
-            </div>
-
-            <section className="hierarchy-section glass">
-              <div className="hierarchy-section-header">
-                <span className="hierarchy-step-badge">{activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`}</span>
-                <h3>
-                  {activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} – {activeUnitObj?.title || 'Lesson-wise Tests'} | {selectedStandardId}th Standard
-                </h3>
-              </div>
-              {loading ? (
-                <p className="hierarchy-empty-note">Loading published Lesson-wise Tests...</p>
+                <p className="hierarchy-empty-note">Loading published Quantitative Aptitude Tests...</p>
               ) : matchingAdminTests.length > 0 ? (
                 <div className="hierarchy-lesson-list">
                   {matchingAdminTests.map((test, idx) => {
@@ -1768,16 +1700,17 @@ const MockTests = () => {
                     const matchedDynLesson = dynamicLessons.find(
                       (dl) => dl.title.trim().toLowerCase() === cleanTitle.toLowerCase()
                     )
-                    const lessonLabel = matchedDynLesson?.lesson_number
-                      ? `Lesson ${matchedDynLesson.lesson_number}`
-                      : `Lesson ${idx + 1}`
+                    const itemLabel =
+                      test.testCategory === 'lesson_wise' && matchedDynLesson?.lesson_number
+                        ? `Topic ${matchedDynLesson.lesson_number}`
+                        : `${activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} • Test ${idx + 1}`
                     const showDesc = !isTechnicalGeneratorDescription(test.description)
 
                     return (
                       <div key={test.id} className={`hierarchy-lesson-row lesson-status-${status}`}>
                         <div className="hierarchy-lesson-main-col">
                           <div className="hierarchy-lesson-info">
-                            <span className="hierarchy-lesson-num">{lessonLabel}</span>
+                            <span className="hierarchy-lesson-num">{itemLabel}</span>
                             <span className="hierarchy-lesson-title">{cleanTitle}</span>
                             {showDesc && (
                               <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{test.description}</span>
@@ -1817,7 +1750,7 @@ const MockTests = () => {
                 </div>
               ) : (
                 <p className="hierarchy-empty-note">
-                  No Lesson-wise Tests Available Yet.
+                  No published Quantitative Aptitude Tests are available for {activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} ({selectedStandardId}th Standard) yet.
                 </p>
               )}
             </section>
