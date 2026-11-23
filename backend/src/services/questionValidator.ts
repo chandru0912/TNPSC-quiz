@@ -11,7 +11,7 @@
 
 import crypto from 'crypto';
 
-export type Difficulty = 'Easy' | 'Medium' | 'Hard';
+export type Difficulty = 'Easy' | 'Medium' | 'Moderate' | 'Hard' | 'Difficult' | 'Advanced';
 
 export interface TextbookPassage {
   pageNumber: number;
@@ -354,11 +354,13 @@ export function extractLessonTopicChecklist(textbookContent: string, selectedTop
       );
     const isShortTitleCase =
       line.length >= 6 &&
-      line.length <= 65 &&
+      line.length <= 60 &&
       !/[.?!,;]$/.test(line) &&
       !/^\d+$/.test(line) &&
+      !/\b(?:we|you|they|it|this|that|these|those|the|a|an|is|are|was|were|to|of|in|for|with|and|or|from|by)$/i.test(line) &&
+      !/^(?:to\s+do|in\s+this|let\s+us|for\s+example|figure|fig\.|table|note:|do\s+you\s+know\?|activity)/i.test(line) &&
       /^[A-Z\u0B80-\u0BFF]/.test(line) &&
-      line.split(/\s+/).length <= 8;
+      line.split(/\s+/).length <= 7;
 
     if (isNumberedSection || isNamedHeading || isShortTitleCase) {
       addTopic(line);

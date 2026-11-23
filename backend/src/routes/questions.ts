@@ -3,6 +3,9 @@ import { PoolClient } from 'pg';
 import pool from '../db';
 import { requireAdminAuth, verifyAdminToken, requireStudentOrAdminAuth } from '../middleware/auth';
 import {
+  checkQuestionDuplicate,
+  computeConceptFingerprint,
+  computeNormalizedQuestionHash,
   isSemanticallyDuplicate,
   isValidQuestionText,
   resolveCorrectAnswerIndex,
@@ -1312,6 +1315,181 @@ router.delete('/:id', requireAdminAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/questions/validate-bulk (Protected Admin)
+ * Validates a batch of pasted/imported MCQs against formatting rules, option uniqueness,
+ * answer key integrity, within-batch duplicates, AND existing Neon PostgreSQL questions
+ * (exact, semantic, and reverse-question detection) WITHOUT inserting into the database.
+ */
+router.post('/validate-bulk', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const rawList = Array.isArray(req.body) ? req.body : req.body?.questions;
+    if (!Array.isArray(rawList) || rawList.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Expected a non-empty array of questions to validate.',
+      });
+    }
+
+    const defaultLessonTitle = String(req.body?.lessonTitle || rawList[0]?.lessonTitle || '').trim();
+    const defaultSubject = String(req.body?.subject || rawList[0]?.subject || '').trim();
+    const defaultClassId = Number(req.body?.classId || req.body?.standard || rawList[0]?.classId || 0) || null;
+    const defaultUnitId = Number(req.body?.unitId || rawList[0]?.unitId || 0) || null;
+    const defaultLessonId = String(req.body?.lessonId || rawList[0]?.lessonId || '').trim() || null;
+
+    // Fetch existing DB questions for cross-session duplicate & reverse-question detection
+    const uniqueLessons = Array.from(
+      new Set(
+        [
+          defaultLessonTitle,
+          ...rawList.map((q: any) => String(q.lessonTitle || q.lesson_title || '').trim()),
+        ]
+          .filter(Boolean)
+          .map((s) => s.toLowerCase())
+      )
+    );
+
+    const existingDbRes = await pool.query(
+      `SELECT question_text, options, correct_answer, option_a, option_b, option_c, option_d
+       FROM questions
+       WHERE status IN ('staging', 'published')
+         AND (
+           LOWER(TRIM(lesson_title)) = ANY($1)
+           OR ($2::text IS NOT NULL AND lesson_id = $2)
+           OR ($3::int IS NOT NULL AND (class_id = $3 OR standard_id = $3) AND LOWER(subject) = LOWER($4) AND ($5::int IS NULL OR unit_id = $5))
+         )
+       LIMIT 1500`,
+      [uniqueLessons, defaultLessonId, defaultClassId, defaultSubject, defaultUnitId]
+    );
+
+    const dbRecords: ExistingDbQuestionRecord[] = existingDbRes.rows.map((r: any) => {
+      const opts = typeof r.options === 'string' ? JSON.parse(r.options) : r.options;
+      const idx = Number(r.correct_answer);
+      let ansText: string | undefined;
+      if (Array.isArray(opts) && Number.isInteger(idx) && idx >= 0 && idx <= 3) {
+        ansText = String(opts[idx] || '');
+      } else if (Number.isInteger(idx) && idx >= 0 && idx <= 3) {
+        ansText = String([r.option_a, r.option_b, r.option_c, r.option_d][idx] || '');
+      }
+      return { question: r.question_text, correctAnswerText: ansText };
+    });
+
+    const acceptedSoFar: Array<{ question: string; correctAnswerText?: string }> = [];
+    const results: Array<{
+      index: number;
+      clientId?: string;
+      status: 'valid' | 'duplicate' | 'error';
+      issues: string[];
+      duplicateReason?: string | null;
+      matchedQuestion?: string | null;
+      resolvedCorrectAnswer?: number | null;
+    }> = [];
+
+    let validCount = 0;
+    let duplicateCount = 0;
+    let invalidCount = 0;
+
+    for (let i = 0; i < rawList.length; i++) {
+      const q = rawList[i] || {};
+      const issues: string[] = [];
+      const rawQuestionText = String(q.question || q.questionText || q.question_text || '').trim();
+      const qVal = isValidQuestionText(rawQuestionText);
+      if (!qVal.valid) {
+        issues.push(qVal.reason || 'Invalid question text.');
+      }
+
+      const opts: string[] = Array.isArray(q.options)
+        ? q.options.map((o: any) => String(o || '').trim())
+        : [];
+      if (opts.length !== 4 || opts.some((o) => !o)) {
+        issues.push('Must contain exactly 4 non-empty options (A, B, C, D).');
+      } else {
+        const uniqueOpts = new Set(opts.map((o) => o.toLowerCase()));
+        if (uniqueOpts.size < 4) {
+          issues.push('Duplicate options detected within question.');
+        }
+      }
+
+      const rawAns = q.correctAnswer !== undefined ? q.correctAnswer : q.correct_answer;
+      const resolvedAns = opts.length === 4 ? resolveCorrectAnswerIndex(rawAns, opts) : -1;
+      if (resolvedAns < 0 || resolvedAns > 3) {
+        issues.push('Missing or invalid correct answer (must match A, B, C, or D).');
+      }
+
+      if (issues.length > 0) {
+        invalidCount++;
+        results.push({
+          index: i + 1,
+          clientId: q.clientId,
+          status: 'error',
+          issues,
+          resolvedCorrectAnswer: resolvedAns >= 0 ? resolvedAns : null,
+        });
+        continue;
+      }
+
+      const dup = checkQuestionDuplicate(
+        qVal.normalizedQuestion,
+        acceptedSoFar,
+        dbRecords,
+        opts[resolvedAns]
+      );
+
+      if (dup.isDuplicate) {
+        duplicateCount++;
+        const reasonLabel =
+          dup.reason === 'REVERSE_QUESTION'
+            ? 'Reverse-generated question (duplicates concept of an existing question)'
+            : `${dup.reason || 'SEMANTIC'} duplicate detected`;
+        results.push({
+          index: i + 1,
+          clientId: q.clientId,
+          status: 'duplicate',
+          issues: [reasonLabel],
+          duplicateReason: dup.reason || 'SEMANTIC',
+          matchedQuestion: dup.matchedQuestion || null,
+          resolvedCorrectAnswer: resolvedAns,
+        });
+        continue;
+      }
+
+      acceptedSoFar.push({
+        question: qVal.normalizedQuestion,
+        correctAnswerText: opts[resolvedAns],
+      });
+      validCount++;
+      results.push({
+        index: i + 1,
+        clientId: q.clientId,
+        status: 'valid',
+        issues: [],
+        duplicateReason: null,
+        matchedQuestion: null,
+        resolvedCorrectAnswer: resolvedAns,
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      summary: {
+        total: rawList.length,
+        valid: validCount,
+        duplicate: duplicateCount,
+        invalid: invalidCount,
+        readyToUpload: validCount,
+        existingDbChecked: dbRecords.length,
+      },
+      results,
+    });
+  } catch (error: any) {
+    console.error('[Questions Validate Bulk] Error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: error?.message || 'Failed to validate bulk questions.',
+    });
+  }
+});
+
+/**
  * POST /api/questions/upload (Protected)
  * Validates and uploads questions in bulk via JSON/CSV
  * Always forces status = 'staging' so uploads are NEVER automatically published!
@@ -1411,7 +1589,15 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
         lessonTitle: lessonTitle.trim(),
         lessonId: resolvedLessonId,
         topic,
-        difficulty: ['Easy', 'Medium', 'Hard'].includes(q.difficulty) ? q.difficulty : 'Medium',
+        difficulty: ['Easy', 'Medium', 'Moderate', 'Hard', 'Difficult', 'Advanced'].includes(q.difficulty)
+          ? q.difficulty
+          : 'Medium',
+        term: (q.term || req.body?.term || null) ? String(q.term || req.body?.term).trim() : null,
+        lessonNumber: (q.lessonNumber || q.lesson_number || req.body?.lessonNumber || null)
+          ? String(q.lessonNumber || q.lesson_number || req.body?.lessonNumber).trim()
+          : null,
+        normalizedQuestionHash: computeNormalizedQuestionHash(questionText.trim()),
+        conceptFingerprint: computeConceptFingerprint(questionText.trim(), cleanedOptions[correctAnswer]),
         tag: q.tag || `TNPSC ${groupName} • Unit ${unitId}: ${resolvedSubj}`,
         questionText: questionText.trim(),
         optionsArray: cleanedOptions,
@@ -1473,6 +1659,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
     });
 
     const acceptedForInsert: Array<{ question: string; correctAnswerText?: string }> = [];
+    const uploadBatchId = `bulk_${Date.now().toString(36)}`;
 
     await client.query('BEGIN');
 
@@ -1488,14 +1675,16 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
           lesson_title, lesson_id, topic, difficulty, tag, question_text,
           options, option_a, option_b, option_c, option_d, correct_answer,
           explanation, source_reference, status, textbook_id, source_page, verification_status,
-          target_system, language
+          target_system, language, term, lesson_number,
+          normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, $7,
           $8, $9, $10, $11, $12, $13,
           $14, $15, $16, $17, $18, $19,
           $20, $21, 'staging', $22, $23, $24,
-          $25, $26
+          $25, $26, $27, $28,
+          $29, $30, 'passed', $31
         )
         ON CONFLICT (lesson_title, question_text) DO NOTHING
         RETURNING id;
@@ -1527,6 +1716,11 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
         q.verificationStatus,
         q.targetSystem,
         q.language,
+        q.term || null,
+        q.lessonNumber || null,
+        q.normalizedQuestionHash || null,
+        q.conceptFingerprint || null,
+        uploadBatchId,
       ];
 
       const resInsert = await client.query(insertQuery, values);
@@ -1550,6 +1744,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
       received: rawList.length,
       validated: validQuestions.length,
       inserted: insertedCount,
+      insertedCount,
       skippedDuplicates,
       insertedIds,
       validationErrorsCount: validationErrors.length,
@@ -1761,6 +1956,63 @@ router.post('/batch', requireAdminAuth, async (req: Request, res: Response) => {
     });
   } finally {
     client.release();
+  }
+});
+
+/**
+ * PATCH /api/questions/review (Protected Admin)
+ * Approves or rejects one or more staging questions.
+ * - action = 'approve': sets verification_status = 'verified' while keeping status = 'staging'
+ *   (approved questions NEVER auto-publish; admin must explicitly click Publish).
+ * - action = 'reject': sets verification_status = 'rejected' and status = 'archived'
+ *   (rejected questions are strictly hidden from students).
+ */
+router.patch('/review', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { ids, action } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'A non-empty ids array is required.' });
+    }
+    if (action !== 'approve' && action !== 'reject') {
+      return res.status(400).json({ status: 'error', message: 'action must be "approve" or "reject".' });
+    }
+    const cleanIds = Array.from(new Set(ids.map((id: any) => Number(id)).filter((n: number) => Number.isInteger(n) && n > 0)));
+    if (cleanIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No valid question IDs provided.' });
+    }
+
+    const sql =
+      action === 'approve'
+        ? `UPDATE questions
+           SET verification_status = 'verified',
+               validation_status = 'verified',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ANY($1::int[]) AND status = 'staging'
+           RETURNING id`
+        : `UPDATE questions
+           SET verification_status = 'rejected',
+               validation_status = 'rejected',
+               status = 'archived',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ANY($1::int[]) AND status IN ('staging', 'published')
+           RETURNING id`;
+
+    const result = await pool.query(sql, [cleanIds]);
+    invalidateCachePrefix('metrics:questions:');
+
+    return res.status(200).json({
+      status: 'success',
+      action,
+      updatedCount: result.rowCount ?? 0,
+      updatedIds: result.rows.map((r: any) => Number(r.id)),
+      message:
+        action === 'approve'
+          ? `Approved ${result.rowCount ?? 0} staging question(s). Ready to publish when you click Publish.`
+          : `Rejected ${result.rowCount ?? 0} question(s) and moved to archived (hidden from students).`,
+    });
+  } catch (error: any) {
+    console.error('[Questions Review] Error:', error);
+    return res.status(500).json({ status: 'error', message: error?.message || 'Failed to update review status.' });
   }
 });
 

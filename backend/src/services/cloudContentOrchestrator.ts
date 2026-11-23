@@ -7,7 +7,14 @@
 import pool from '../db';
 import { retrieveRelevantTextbookContent, TextbookSearchQuery } from './textbookRag';
 import { generateStudyNotes, GeneratedStudyNotesResult } from './studyNotesGenerator';
-import { generateMcqs, GeneratedMcqItem, McqGenerationResult, TopicCoverageAudit } from './mcqGenerator';
+import {
+  generateMcqs,
+  GeneratedMcqItem,
+  McqGenerationResult,
+  TopicCoverageAudit,
+  QualityAuditSummary,
+  DifficultyDistribution,
+} from './mcqGenerator';
 import { CloudAIService } from './cloudAi/cloudAiService';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { splitAndAlignNotesByTopic, persistTopicAlignedNotes, AlignedTopicItem, TopicSeparationResult } from './topicAlignmentService';
@@ -39,7 +46,9 @@ export interface UnifiedGenerationRequest {
   mode: GenerationMode;
   notesFormat?: NotesFormatOption;
   questionCount?: number;
-  difficulty?: 'Easy' | 'Medium' | 'Hard' | 'Mixed';
+  difficulty?: 'Easy' | 'Medium' | 'Moderate' | 'Hard' | 'Difficult' | 'Advanced' | 'Mixed';
+  difficultyDistribution?: Partial<DifficultyDistribution>;
+  minQualityScore?: number;
   textbookMode?: 'auto' | 'specific' | 'custom_text' | 'gdrive';
   textbookId?: number;
   gdriveFileId?: string;
@@ -86,11 +95,16 @@ export interface UnifiedGenerationResult {
   mcqs?: {
     questions: GeneratedMcqItem[];
     totalGenerated: number;
+    totalAttemptedGenerated: number;
+    shortfallCount: number;
+    insufficientSourceWarning: string | null;
     duplicateCount: number;
     reverseQuestionRejectedCount: number;
     unsupportedRejectedCount: number;
+    lowQualityRejectedCount: number;
     invalidCount: number;
     coverageAudit: TopicCoverageAudit;
+    qualityReport: QualityAuditSummary;
     status: 'staging' | 'preview';
   };
 }
@@ -393,6 +407,7 @@ export class CloudContentOrchestrator {
       mcqsResult = await generateMcqs(
         {
           provider: targetProviderName,
+          modelId: providerStatus.model,
           category: req.category,
           standard: req.standard,
           subject: req.subject,
@@ -407,7 +422,9 @@ export class CloudContentOrchestrator {
           selectedTopics: req.selectedTopics,
           language: req.language,
           count: req.questionCount || 20,
-          difficulty: req.difficulty || 'Medium',
+          difficulty: req.difficulty || 'Mixed',
+          difficultyDistribution: req.difficultyDistribution,
+          minQualityScore: req.minQualityScore,
           textbookContent: textbookText,
           textbookId: mcqSelection?.candidate.textbookId || undefined,
           textbookName: mcqSelection?.textbookName,
@@ -445,8 +462,9 @@ export class CloudContentOrchestrator {
                 explanation, status, source_reference, target_system,
                 language, option_a, option_b, option_c, option_d,
                 term, volume, source_pdf, source_page, textbook_id, ai_provider,
-                normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'staging', $17, 'study_materials', $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+                normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id,
+                quality_score, quality_breakdown, question_type, model_id, validation_status
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'staging', $17, 'study_materials', $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34::jsonb, $35, $36, $37)
               ON CONFLICT (lesson_title, question_text) DO NOTHING`,
               [
                 q.category,
@@ -481,6 +499,11 @@ export class CloudContentOrchestrator {
                 q.conceptFingerprint || null,
                 q.duplicateCheckStatus || 'passed',
                 batchId,
+                q.qualityScore ?? null,
+                q.qualityBreakdown ? JSON.stringify(q.qualityBreakdown) : null,
+                q.questionType || 'Conceptual',
+                providerStatus.model || null,
+                q.validationStatus || 'verified',
               ]
             );
           }
@@ -567,11 +590,16 @@ export class CloudContentOrchestrator {
         ? {
             questions: mcqsResult.questions,
             totalGenerated: mcqsResult.generatedCount,
+            totalAttemptedGenerated: mcqsResult.totalAttemptedGenerated,
+            shortfallCount: mcqsResult.shortfallCount,
+            insufficientSourceWarning: mcqsResult.insufficientSourceWarning,
             duplicateCount: mcqsResult.duplicateCount,
             reverseQuestionRejectedCount: mcqsResult.reverseQuestionRejectedCount,
             unsupportedRejectedCount: mcqsResult.unsupportedRejectedCount,
+            lowQualityRejectedCount: mcqsResult.lowQualityRejectedCount,
             invalidCount: mcqsResult.invalidCount,
             coverageAudit: mcqsResult.coverageAudit,
+            qualityReport: mcqsResult.qualityReport,
             status: req.autoSaveToStaging ? 'staging' : 'preview',
           }
         : undefined,

@@ -13,7 +13,7 @@
 
 import crypto from 'crypto';
 import pool from '../db';
-import { generateMcqs } from './mcqGenerator';
+import { generateMcqs, DifficultyDistribution } from './mcqGenerator';
 import { resolveMcqSelection, normalizeSubjectKey } from './mcqCascadeService';
 import { extractTextFromGoogleDrivePdf } from './googleDriveService';
 import { retrieveRelevantTextbookContent, TextbookSearchQuery } from './textbookRag';
@@ -40,7 +40,9 @@ export interface CreateMcqJobInput {
   selectedTopics?: string[];
   language: 'tamil' | 'english';
   questionCount: number;
-  difficulty?: 'Easy' | 'Medium' | 'Hard' | 'Mixed';
+  difficulty?: 'Easy' | 'Medium' | 'Moderate' | 'Hard' | 'Difficult' | 'Advanced' | 'Mixed';
+  difficultyDistribution?: Partial<DifficultyDistribution>;
+  minQualityScore?: number;
   textbookMode?: 'auto' | 'specific' | 'custom_text' | 'gdrive';
   textbookId?: number;
   gdriveFileId?: string;
@@ -77,6 +79,11 @@ export interface McqJobSnapshot {
   failed_count: number;
   duplicate_count: number;
   invalid_count: number;
+  reverse_rejected_count?: number;
+  unsupported_rejected_count?: number;
+  coverage_audit?: any;
+  quality_report?: any;
+  insufficient_source_warning?: string | null;
   current_step: string | null;
   current_batch: number;
   total_batches: number;
@@ -119,6 +126,11 @@ function rowToSnapshot(row: any): McqJobSnapshot {
     failed_count: Number(row.failed_count) || 0,
     duplicate_count: Number(row.duplicate_count) || 0,
     invalid_count: Number(row.invalid_count) || 0,
+    reverse_rejected_count: Number(row.reverse_rejected_count) || 0,
+    unsupported_rejected_count: Number(row.unsupported_rejected_count) || 0,
+    coverage_audit: row.coverage_audit || null,
+    quality_report: row.quality_report || null,
+    insufficient_source_warning: row.insufficient_source_warning || null,
     current_step: row.current_step || null,
     current_batch: Number(row.current_batch) || 0,
     total_batches: Math.max(1, Number(row.total_batches) || Math.ceil((Number(row.requested_question_count) || 10) / 10)),
@@ -144,6 +156,11 @@ export class McqJobService {
           ALTER TABLE questions ADD COLUMN IF NOT EXISTS concept_fingerprint VARCHAR(128);
           ALTER TABLE questions ADD COLUMN IF NOT EXISTS duplicate_check_status VARCHAR(30) DEFAULT 'passed';
           ALTER TABLE questions ADD COLUMN IF NOT EXISTS generation_batch_id VARCHAR(80);
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS quality_score INT DEFAULT NULL;
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS quality_breakdown JSONB DEFAULT NULL;
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS question_type VARCHAR(64) DEFAULT NULL;
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS model_id VARCHAR(120) DEFAULT NULL;
+          ALTER TABLE questions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(30) DEFAULT 'verified';
           CREATE INDEX IF NOT EXISTS idx_questions_norm_hash ON questions (normalized_question_hash);
           CREATE INDEX IF NOT EXISTS idx_questions_concept_fp ON questions (concept_fingerprint);
           CREATE INDEX IF NOT EXISTS idx_questions_gen_batch ON questions (generation_batch_id);
@@ -194,6 +211,11 @@ export class McqJobService {
           CREATE INDEX IF NOT EXISTS idx_mcq_jobs_admin ON mcq_generation_jobs (admin_id, created_at DESC);
           ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS current_batch INTEGER NOT NULL DEFAULT 0;
           ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS total_batches INTEGER NOT NULL DEFAULT 1;
+          ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS coverage_audit JSONB DEFAULT NULL;
+          ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS quality_report JSONB DEFAULT NULL;
+          ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS insufficient_source_warning TEXT DEFAULT NULL;
+          ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS reverse_rejected_count INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE mcq_generation_jobs ADD COLUMN IF NOT EXISTS unsupported_rejected_count INTEGER NOT NULL DEFAULT 0;
           CREATE TABLE IF NOT EXISTS mcq_generation_batches (
             batch_id VARCHAR(80) PRIMARY KEY,
             job_id VARCHAR(64) NOT NULL REFERENCES mcq_generation_jobs(job_id) ON DELETE CASCADE,
@@ -540,6 +562,7 @@ export class McqJobService {
     try {
       const genResult = await generateMcqs({
         provider,
+        modelId: job.model || undefined,
         category: job.group_id,
         standard: Number(job.standard_id),
         subject: job.subject,
@@ -585,7 +608,7 @@ export class McqJobService {
         const questionsToSave = batchQuestions.slice(0, stillNeeded);
 
         if (questionsToSave.length > 0) {
-          const colsPerRow = 33;
+          const colsPerRow = 38;
           const valuesClauses: string[] = [];
           const flatParams: any[] = [];
 
@@ -598,7 +621,8 @@ export class McqJobService {
                 `$${o + 16}, 'staging', $${o + 17}, 'study_materials', ` +
                 `$${o + 18}, $${o + 19}, $${o + 20}, $${o + 21}, $${o + 22}, ` +
                 `$${o + 23}, $${o + 24}, $${o + 25}, $${o + 26}, $${o + 27}, $${o + 28}, $${o + 29}, ` +
-                `$${o + 30}, $${o + 31}, $${o + 32}, $${o + 33})`
+                `$${o + 30}, $${o + 31}, $${o + 32}, $${o + 33}, ` +
+                `$${o + 34}, $${o + 35}::jsonb, $${o + 36}, $${o + 37}, $${o + 38})`
             );
             flatParams.push(
               q.category,
@@ -633,7 +657,12 @@ export class McqJobService {
               q.normalizedQuestionHash || null,
               q.conceptFingerprint || null,
               q.duplicateCheckStatus || 'passed',
-              batchId
+              batchId,
+              q.qualityScore ?? null,
+              q.qualityBreakdown ? JSON.stringify(q.qualityBreakdown) : null,
+              q.questionType || 'Conceptual',
+              q.modelId || job.model || null,
+              q.validationStatus || 'verified'
             );
           });
 
@@ -645,7 +674,8 @@ export class McqJobService {
               explanation, status, source_reference, target_system,
               language, option_a, option_b, option_c, option_d,
               term, volume, source_pdf, source_page, textbook_id, ai_provider, generation_job_id,
-              normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id
+              normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id,
+              quality_score, quality_breakdown, question_type, model_id, validation_status
             ) VALUES ${valuesClauses.join(', ')}
             ON CONFLICT (lesson_title, question_text) DO NOTHING
             RETURNING id`,
@@ -684,6 +714,11 @@ export class McqJobService {
            SET generated_count = $2::integer,
                duplicate_count = duplicate_count + $3::integer,
                invalid_count = invalid_count + $4::integer,
+               reverse_rejected_count = reverse_rejected_count + $11::integer,
+               unsupported_rejected_count = unsupported_rejected_count + $12::integer,
+               coverage_audit = $13::jsonb,
+               quality_report = $14::jsonb,
+               insufficient_source_warning = COALESCE($15::text, insufficient_source_warning),
                progress = $5::integer,
                status = $6::varchar(32),
                current_batch = $9::integer,
@@ -707,6 +742,11 @@ export class McqJobService {
             isDone,
             batchNumber,
             updatedTotalBatches,
+            genResult.reverseQuestionRejectedCount || 0,
+            genResult.unsupportedRejectedCount || 0,
+            JSON.stringify(genResult.coverageAudit || null),
+            JSON.stringify(genResult.qualityReport || null),
+            genResult.insufficientSourceWarning || null,
           ]
         );
 

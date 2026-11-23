@@ -15,7 +15,6 @@ import { AIProviderFactory } from './ai/ai-provider.factory';
 import { AIProviderName } from './ai/ai-provider.interface';
 import { GeminiJsonParseError } from './ai/providers/gemini/gemini.validator';
 import {
-  checkQuestionDuplicate,
   computeConceptFingerprint,
   computeNormalizedQuestionHash,
   extractLessonTopicChecklist,
@@ -23,16 +22,34 @@ import {
   normalizeText,
   parsePdfPagePassages,
   resolveCorrectAnswerIndex,
-  verifyQuestionAgainstSourcePdf,
   ExistingDbQuestionRecord,
   Difficulty,
 } from './questionValidator';
+import {
+  auditMcqQuality,
+  QualityScoreBreakdown,
+} from './mcqQualityAuditor';
 import { cleanTamilUnicodeText } from './tamilUnicodeCleaner';
 import { randomizeQuestionOptions } from './ai/shared/option-randomizer';
 import { OptionKey } from './ai/shared/mcq-schema';
 
+export interface DifficultyDistribution {
+  easy: number;      // default 15%
+  moderate: number;  // Medium — default 35%
+  difficult: number; // Hard — default 35%
+  advanced: number;  // default 15%
+}
+
+export const DEFAULT_DIFFICULTY_DISTRIBUTION: DifficultyDistribution = {
+  easy: 15,
+  moderate: 35,
+  difficult: 35,
+  advanced: 15,
+};
+
 export interface McqGenerationRequest {
   provider?: AIProviderName;
+  modelId?: string;
   category: string;
   standard: number;
   subject: string;
@@ -51,7 +68,9 @@ export interface McqGenerationRequest {
   selectedTopics?: string[];
   language: 'tamil' | 'english';
   count: number;
-  difficulty: 'Easy' | 'Medium' | 'Hard' | 'Mixed';
+  difficulty: 'Easy' | 'Medium' | 'Moderate' | 'Hard' | 'Difficult' | 'Advanced' | 'Mixed';
+  difficultyDistribution?: Partial<DifficultyDistribution>;
+  minQualityScore?: number;
   textbookContent: string;
   textbookId?: number;
 }
@@ -85,10 +104,30 @@ export interface GeneratedMcqItem {
   status: 'staging' | 'published';
   targetSystem: 'study_materials';
   aiProvider?: 'claude' | 'gemini' | 'openai';
+  modelId?: string | null;
+  questionType?: string;
+  qualityScore?: number;
+  qualityBreakdown?: QualityScoreBreakdown;
+  validationStatus?: 'verified' | 'rejected';
   normalizedQuestionHash?: string;
   conceptFingerprint?: string;
   duplicateCheckStatus?: 'passed';
   generationBatchId?: string | null;
+}
+
+export interface QualityAuditSummary {
+  minAcceptanceScore: number;
+  averageScore: number;
+  minScore: number;
+  maxScore: number;
+  acceptedCount: number;
+  rejectedLowQualityCount: number;
+  rejectedDuplicateCount: number;
+  rejectedReverseCount: number;
+  rejectedUnsupportedCount: number;
+  difficultyCounts: Record<string, number>;
+  patternCounts: Record<string, number>;
+  rejectedSamples: Array<{ question: string; score: number; reasons: string[] }>;
 }
 
 export interface TopicCoverageAudit {
@@ -103,12 +142,18 @@ export interface TopicCoverageAudit {
 export interface McqGenerationResult {
   questions: GeneratedMcqItem[];
   requestedCount: number;
+  totalAttemptedGenerated: number;
   generatedCount: number;
+  shortfallCount: number;
+  insufficientSourceWarning: string | null;
   duplicateCount: number;
   reverseQuestionRejectedCount: number;
   unsupportedRejectedCount: number;
+  lowQualityRejectedCount: number;
   invalidCount: number;
   coverageAudit: TopicCoverageAudit;
+  qualityReport: QualityAuditSummary;
+  estimatedTokens: { inputChars: number; outputChars: number };
 }
 
 /**
@@ -210,10 +255,12 @@ export function validateMcqItem(rawQ: any): { valid: boolean; question?: Generat
   const rawExplanation = cleanTamilUnicodeText(String(rawQ.explanation || '')).trim();
   const explanation = rawExplanation || `சரியான விடை: ${optionsList[correctIdx]}`;
 
-  let diff: Difficulty = 'Medium';
-  const rawDiff = String(rawQ.difficulty || '').toLowerCase();
+  let diff: Difficulty = 'Moderate';
+  const rawDiff = String(rawQ.difficulty || '').toLowerCase().trim();
   if (rawDiff === 'easy') diff = 'Easy';
-  else if (rawDiff === 'hard') diff = 'Hard';
+  else if (rawDiff === 'advanced') diff = 'Advanced';
+  else if (rawDiff === 'hard' || rawDiff === 'difficult') diff = 'Difficult';
+  else if (rawDiff === 'medium' || rawDiff === 'moderate') diff = 'Moderate';
 
   return {
     valid: true,
@@ -273,7 +320,11 @@ export const MCQ_RESPONSE_SCHEMA = {
           },
           difficulty: {
             type: SchemaType.STRING,
-            description: 'Easy, Medium, or Hard',
+            description: 'Easy, Moderate, Difficult, or Advanced',
+          },
+          questionType: {
+            type: SchemaType.STRING,
+            description: 'TNPSC pattern: Conceptual, Analytical, Logical Application, Statement-Based, Assertion-Reason, Match the Following, Cause and Effect, Comparison, Scientific Principle, Situation-Based, Correct/Incorrect Statement, or Multi-Concept',
           },
           subject: {
             type: SchemaType.STRING,
@@ -336,10 +387,30 @@ export async function generateMcqs(
 
   const acceptedQuestions: GeneratedMcqItem[] = [];
   const coveredTopicsSet = new Set<string>();
+  const rejectedSamples: Array<{ question: string; score: number; reasons: string[] }> = [];
+  const minQualityScore = Math.max(60, Math.min(95, Number(req.minQualityScore ?? 85)));
+
+  // Normalize configurable difficulty distribution (Default: Easy 15%, Medium 35%, Hard 35%, Advanced 15%)
+  const dist: DifficultyDistribution = {
+    easy: req.difficultyDistribution?.easy ?? DEFAULT_DIFFICULTY_DISTRIBUTION.easy,
+    moderate: req.difficultyDistribution?.moderate ?? DEFAULT_DIFFICULTY_DISTRIBUTION.moderate,
+    difficult: req.difficultyDistribution?.difficult ?? DEFAULT_DIFFICULTY_DISTRIBUTION.difficult,
+    advanced: req.difficultyDistribution?.advanced ?? DEFAULT_DIFFICULTY_DISTRIBUTION.advanced,
+  };
+  const distSum = Math.max(1, dist.easy + dist.moderate + dist.difficult + dist.advanced);
+  const targetEasy = Math.round((dist.easy / distSum) * targetCount);
+  const targetModerate = Math.round((dist.moderate / distSum) * targetCount);
+  const targetDifficult = Math.round((dist.difficult / distSum) * targetCount);
+  const targetAdvanced = Math.max(0, targetCount - targetEasy - targetModerate - targetDifficult);
+
+  let totalAttemptedGenerated = 0;
   let totalDuplicatesDetected = 0;
   let totalReverseQuestionsRejected = 0;
   let totalUnsupportedRejected = 0;
+  let totalLowQualityRejected = 0;
   let totalInvalidDetected = 0;
+  let totalInputChars = 0;
+  let totalOutputChars = 0;
   let lastError: Error | null = null;
 
   const markTopicCovered = (topicStr: string | undefined, questionText: string) => {
@@ -359,27 +430,26 @@ export async function generateMcqs(
   };
 
   const systemPrompt = isTamil
-    ? `நீங்கள் ஒரு TNPSC தேர்வு வினாத்தாள் வடிவமைப்பாளர் (TNPSC Exam Question Author).
-கொடுக்கப்பட்டுள்ள தமிழ்நாடு சமச்சீர் கல்வி பாடநூல் PDF உள்ளடக்கத்தை மட்டுமே அடிப்படையாகக் கொண்டு, உயர்தர கொள்குறி வினாக்களை (Multiple Choice Questions) JSON வடிவில் வழங்க வேண்டும்.
+    ? `நீங்கள் ஒரு மூத்த TNPSC போட்டித் தேர்வு வினாத்தாள் வடிவமைப்பாளர் (TNPSC Group 1/2/2A/4 Competitive Exam Author).
+கொடுக்கப்பட்டுள்ள தமிழ்நாடு சமச்சீர் கல்வி பாடநூல் PDF உள்ளடக்கத்தை மட்டுமே அடிப்படையாகக் கொண்டு, போட்டித் தேர்வு தரத்திலான கொள்குறி வினாக்களை (MCQs) JSON வடிவில் வழங்க வேண்டும்.
 
 கண்டிப்பான விதிகள்:
-1. கொடுக்கப்பட்ட PDF பாடநூல் உள்ளடக்கத்தில் உள்ள உண்மைகளை மட்டுமே பயன்படுத்த வேண்டும். வெளிப்புற இணையதளங்கள், பொது அறிவு அல்லது கற்பனைத் தகவல்களை ஒருபோதும் சேர்க்கக் கூடாது.
-2. ஒவ்வொரு வினாவிற்கும் 4 தனித்துவமான விடைகள் (Options A, B, C, D) மற்றும் ஒரே ஒரு சரியான விடை (0, 1, 2, அல்லது 3) இருக்க வேண்டும்.
-3. ஒவ்வொரு வினாவிற்கும் பாடநூல் ஆதாரத்துடன் கூடிய விளக்கவுரை (Explanation) மற்றும் [PDF Page N] பக்க எண் (sourcePage) அவசியம்.
+1. PDF மட்டுமே ஆதாரம்: கொடுக்கப்பட்ட PDF உள்ளடக்கத்தில் உள்ள உண்மைகளை மட்டுமே பயன்படுத்த வேண்டும். வெளிப்புற தகவல்கள் அல்லது கற்பனை உண்மைகள் கூடாது.
+2. TNPSC போட்டித் தேர்வு தரம்: மிக எளிமையான ஒரு வரி வினாக்களைத் தவிர்த்து, கருத்துசார்ந்த (Conceptual), பகுப்பாய்வு (Analytical), கூற்று-காரணம் (Assertion-Reason), கூற்று அடிப்படையிலான (Statement-Based), பொருத்துக (Match the Following), காரணம்-விளைவு (Cause & Effect), ஒப்பீடு (Comparison), அறிவியல் தத்துவம் (Scientific Principle), சூழ்நிலை அடிப்படையிலான (Situation-Based), சரியான/தவறான கூற்று வினாக்களை உருவாக்கவும்.
+3. ஒவ்வொரு வினாவிற்கும் 4 தனித்துவமான மற்றும் சிந்திக்க வைக்கும் விடைகள் (A, B, C, D), ஒரே ஒரு சரியான விடை (0..3), பாடநூல் ஆதார விளக்கவுரை, topic, questionType, difficulty (Easy/Moderate/Difficult/Advanced), மற்றும் [PDF Page N] sourcePage எண் அவசியம்.
 4. ஒரே வினாவையோ அல்லது ஒரே கருத்தைச் சோதிக்கும் வினாவையோ மீண்டும் உருவாக்கக் கூடாது.
-5. மிக முக்கியம் — எதிர்மாறு வினாக்கள் (Reverse Questions) தடை: ஏற்கனவே உருவாக்கப்பட்ட வினாவின் விடையை எடுத்து, அதை புதிய வினாவாக மாற்றி (எ.கா: "நீளத்தின் SI அலகு என்ன? -> மீட்டர்" என்பதற்கு பதிலாக "மீட்டரில் அளக்கப்படும் இயற்பியல் அளவு எது? -> நீளம்") ஒருபோதும் உருவாக்கக் கூடாது.
-6. கொடுக்கப்பட்ட தலைப்புப் பட்டியலில் (Topic Coverage Checklist) உள்ள அனைத்து முக்கிய தலைப்புகளையும் சமமாக உள்ளடக்க வேண்டும்.
-7. JSON அமைப்பில் மட்டுமே விடையளிக்க வேண்டும்: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Medium", "topic": "...", "sourcePage": 12 } ] }`
-    : `You are a Senior TNPSC Examination MCQ Item Writer and Psychometrician.
-Generate high-quality, syllabus-grounded TNPSC Multiple Choice Questions STRICTLY and EXCLUSIVELY from the provided Samacheer Kalvi textbook PDF text.
+5. எதிர்மாறு வினாக்கள் (Reverse Questions) தடை: ஏற்கனவே உருவாக்கப்பட்ட வினாவின் விடையை புதிய வினாவாக மாற்றக் கூடாது.
+6. JSON மட்டுமே: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Moderate", "questionType": "Analytical", "topic": "...", "sourcePage": 12 } ] }`
+    : `You are a Senior TNPSC Competitive Examination MCQ Item Writer and Psychometrician (Group 1, Group 2, Group 2A, Group 4 standard).
+Generate high-quality, conceptually rich TNPSC Multiple Choice Questions STRICTLY and EXCLUSIVELY from the provided Samacheer Kalvi textbook PDF text.
 
 STRICT RULES:
-1. PDF-ONLY SOURCE OF TRUTH: Use ONLY facts, definitions, dates, names, and numbers explicitly present in the provided PDF text. NEVER use external knowledge or invent facts.
-2. FORMAT: Every question MUST have a clear interrogative stem ending with '?', exactly 4 distinct non-empty options (A, B, C, D), exactly 1 unambiguous correct answer index (0..3), 3 meaningful distractors, a PDF-supported explanation, topic label, and exact sourcePage integer from the [PDF Page N] markers.
-3. COMPLETE TOPIC COVERAGE: Systematically cover ALL topics in the Topic Coverage Checklist. Do not cluster multiple questions on one topic while skipping others.
-4. STRICT DUPLICATE PREVENTION: NEVER generate exact duplicates, paraphrased duplicates, or repeated-concept questions against existing questions or within the batch.
-5. STRICT REVERSE QUESTION PROHIBITION: NEVER create a new question by turning a previous question's answer into a new question stem (e.g., if Q1 asks "What is the SI unit of length?" -> "Metre", NEVER ask "Which physical quantity is measured in metres?" -> "Length"). Generate every question directly from fresh, unused facts in the original PDF.
-6. Output ONLY valid JSON: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Medium", "topic": "...", "sourcePage": 12 } ] }`;
+1. PDF-ONLY SOURCE OF TRUTH (FACT-FIRST WORKFLOW): Follow strictly: PDF Content -> Source Fact Extraction -> Topic Identification -> Question Construction -> Option Generation -> Correct Answer Validation. NEVER generate a question by starting from an answer. Use ONLY facts, definitions, dates, names, and numbers explicitly present in the provided PDF text. NEVER invent facts.
+2. TNPSC COMPETITIVE STANDARD: Generate a balanced mix of high-rigor TNPSC patterns: Conceptual, Analytical, Logical Application, Statement-Based, Assertion-Reason, Match the Following, Cause and Effect, Comparison, Chronological Ordering, Scientific Principle, Situation-Based, Correct/Incorrect Statement, and Multi-Concept questions. AVOID very basic one-line recall questions, obvious filler distractors, or lazy "All of the above" / "None of the above" unless genuinely required by statement analysis.
+3. DIFFICULTY DISTRIBUTION & LANGUAGE QUALITY: Follow the requested Easy (15%) / Medium (35%) / Hard (35%) / Advanced (15%) distribution strictly within the selected syllabus. Maintain flawless English/Tamil grammar and subject terminology with zero unintended mixed-language artifacts.
+4. FORMAT: Every question MUST have a clear interrogative stem ending with '?', 4 distinct plausible options (A, B, C, D), 1 unambiguous correctAnswer index (0..3), a detailed PDF-supported explanation, questionType, difficulty, topic label, and exact sourcePage integer from [PDF Page N].
+5. STRICT DUPLICATE & REVERSE-QUESTION PROHIBITION: NEVER repeat or paraphrase existing questions, and NEVER create a new question by inverting a previous question's answer (e.g., Q1 "SI unit of length -> Metre" must NEVER spawn Q2 "Which quantity is measured in metres? -> Length").
+6. Output ONLY valid JSON: { "questions": [ { "question": "...", "options": ["...","...","...","..."], "correctAnswer": 0, "explanation": "...", "difficulty": "Moderate", "questionType": "Statement-Based", "topic": "...", "sourcePage": 12 } ] }`;
 
   // Generate in bounded batches to prevent token truncation and stay within serverless timeouts
   let batchSize = req.provider === 'gemini' ? Math.min(12, targetCount) : Math.min(20, targetCount);
@@ -422,6 +492,7 @@ Textbook: ${req.textbookName || req.sourcePdf || 'Processed PDF'}
 Source pages: ${req.sourcePages && req.sourcePages.length > 0 ? req.sourcePages.join(', ') : 'Indexed lesson pages'}
 Language: ${req.language.toUpperCase()}
 Difficulty Preference: ${req.difficulty}
+Target Difficulty Distribution across full set (${targetCount} questions): Easy=${targetEasy} (${dist.easy}%), Moderate=${targetModerate} (${dist.moderate}%), Difficult=${targetDifficult} (${dist.difficult}%), Advanced=${targetAdvanced} (${dist.advanced}%)
 Requested Question Count for this batch: ${currentBatchCount}
 
 TOPIC COVERAGE CHECKLIST (prioritize these UNCOVERED topics from the PDF):
@@ -455,6 +526,7 @@ Respond strictly in JSON:
 }`;
 
     const aiProvider = AIProviderFactory.getProvider(req.provider || 'claude');
+    totalInputChars += prompt.length + systemPrompt.length;
     try {
       const response = await aiProvider.generateJson<any>(
         prompt,
@@ -466,12 +538,14 @@ Respond strictly in JSON:
           ...(req.provider === 'gemini' ? { responseSchema: MCQ_RESPONSE_SCHEMA } : {}),
         }
       );
+      totalOutputChars += JSON.stringify(response || '').length;
 
       const rawList = Array.isArray(response?.questions)
         ? response.questions
         : Array.isArray(response)
         ? response
         : [];
+      totalAttemptedGenerated += rawList.length;
 
       for (const item of rawList) {
         if (acceptedQuestions.length >= targetCount) break;
@@ -499,45 +573,62 @@ Respond strictly in JSON:
         candidate.volume = req.volume ?? null;
         candidate.sourcePdf = req.sourcePdf ?? req.textbookName ?? null;
         candidate.lessonNumber = req.lessonNumber ?? null;
+        candidate.questionType = String(item.questionType || 'Conceptual').trim().slice(0, 60);
+        candidate.modelId = req.modelId || null;
         if (!candidate.topic || candidate.topic === 'General' || candidate.topic === req.lessonTitle) {
           candidate.topic = priorityTopics[acceptedQuestions.length % priorityTopics.length] || req.topic || req.lessonTitle;
         }
 
-        // STEP 7: Exact, semantic, AND reverse-question duplicate check against current batch + DB history
-        const dupCheck = checkQuestionDuplicate(
-          candidate.question,
-          acceptedQuestions.map((q) => ({ question: q.question, correctAnswerText: q.correctAnswerText })),
+        // INDEPENDENT AI QUALITY AUDITOR (10-dimension evidence-based scoring out of 100, min 80)
+        // Evaluates: Syllabus Relevance, Textbook Accuracy, Conceptual Depth, Logical Reasoning,
+        // TNPSC Suitability, Originality, Distractor Quality, Answer Accuracy, Duplicates, Reverse-Questions.
+        const aiSuggestedPage =
+          item.sourcePage != null && Number.isFinite(Number(item.sourcePage)) ? Number(item.sourcePage) : null;
+        const audit = auditMcqQuality({
+          question: candidate.question,
+          options: candidate.options,
+          correctAnswer: candidate.correctAnswer,
+          explanation: candidate.explanation,
+          difficulty: candidate.difficulty,
+          questionType: candidate.questionType,
+          topic: candidate.topic,
+          category: req.category,
+          subject: req.subject,
+          lessonTitle: req.lessonTitle,
+          aiSuggestedPage,
+          passages: pdfPassages,
+          existingBatch: acceptedQuestions.map((q) => ({ question: q.question, correctAnswerText: q.correctAnswerText })),
           existingDbQuestions,
-          candidate.correctAnswerText
-        );
+          minAcceptanceScore: minQualityScore,
+        });
 
-        if (dupCheck.isDuplicate) {
-          totalDuplicatesDetected++;
-          if (dupCheck.reason === 'REVERSE_QUESTION') {
+        if (!audit.passed) {
+          if (audit.breakdown.reverseQuestionDetection === 0) {
+            totalDuplicatesDetected++;
             totalReverseQuestionsRejected++;
+          } else if (audit.breakdown.duplicateDetection === 0) {
+            totalDuplicatesDetected++;
+          } else if (audit.breakdown.answerAccuracy < 8) {
+            totalUnsupportedRejected++;
+            totalInvalidDetected++;
+          } else {
+            totalLowQualityRejected++;
+            totalInvalidDetected++;
+          }
+          if (rejectedSamples.length < 15) {
+            rejectedSamples.push({
+              question: candidate.question.slice(0, 140),
+              score: audit.totalScore,
+              reasons: audit.rejectionReasons,
+            });
           }
           continue;
         }
 
-        // STEP 8: Validate correct answer & explanation strictly against original PDF passages & attribute exact page
-        const aiSuggestedPage =
-          item.sourcePage != null && Number.isFinite(Number(item.sourcePage)) ? Number(item.sourcePage) : null;
-        const pdfVerification = verifyQuestionAgainstSourcePdf({
-          question: candidate.question,
-          options: candidate.options,
-          correctAnswerIdx: candidate.correctAnswer,
-          explanation: candidate.explanation,
-          passages: pdfPassages,
-          aiSuggestedPage,
-        });
-
-        if (!pdfVerification.supported) {
-          totalUnsupportedRejected++;
-          totalInvalidDetected++;
-          continue;
-        }
-
-        candidate.sourcePage = pdfVerification.verifiedPage ?? req.sourcePages?.[0] ?? null;
+        candidate.sourcePage = audit.verifiedPage ?? req.sourcePages?.[0] ?? null;
+        candidate.qualityScore = audit.totalScore;
+        candidate.qualityBreakdown = audit.breakdown;
+        candidate.validationStatus = 'verified';
         candidate.normalizedQuestionHash = computeNormalizedQuestionHash(candidate.question);
         candidate.conceptFingerprint = computeConceptFingerprint(candidate.question, candidate.correctAnswerText);
         candidate.duplicateCheckStatus = 'passed';
@@ -626,13 +717,35 @@ Respond strictly in JSON:
     ? `${uncoveredTopics.length} of ${effectiveChecklist.length} lesson topics were not covered in this batch.`
     : null;
 
+  const scores = randomizedQuestions.map((q) => Number(q.qualityScore || 0));
+  const avgScore = scores.length > 0 ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0;
+  const minScore = scores.length > 0 ? Math.min(...scores) : 0;
+  const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
+  const difficultyCounts: Record<string, number> = {};
+  const patternCounts: Record<string, number> = {};
+  for (const q of randomizedQuestions) {
+    difficultyCounts[q.difficulty] = (difficultyCounts[q.difficulty] || 0) + 1;
+    const pat = q.questionType || 'Conceptual';
+    patternCounts[pat] = (patternCounts[pat] || 0) + 1;
+  }
+
+  const shortfallCount = Math.max(0, targetCount - randomizedQuestions.length);
+  const insufficientSourceWarning =
+    shortfallCount > 0
+      ? `Insufficient distinct PDF source facts to generate all ${targetCount} verified questions at quality threshold ${minQualityScore}/100: ${randomizedQuestions.length} verified, ${shortfallCount} short (${totalDuplicatesDetected} duplicates, ${totalLowQualityRejected} low-quality, ${totalUnsupportedRejected} unsupported rejected).`
+      : null;
+
   return {
     questions: randomizedQuestions,
     requestedCount: targetCount,
+    totalAttemptedGenerated,
     generatedCount: randomizedQuestions.length,
+    shortfallCount,
+    insufficientSourceWarning,
     duplicateCount: totalDuplicatesDetected,
     reverseQuestionRejectedCount: totalReverseQuestionsRejected,
     unsupportedRejectedCount: totalUnsupportedRejected,
+    lowQualityRejectedCount: totalLowQualityRejected,
     invalidCount: totalInvalidDetected,
     coverageAudit: {
       totalTopics: effectiveChecklist.length,
@@ -641,6 +754,24 @@ Respond strictly in JSON:
       coveragePercent,
       coverageLimitedByCount,
       limitationNote,
+    },
+    qualityReport: {
+      minAcceptanceScore: minQualityScore,
+      averageScore: avgScore,
+      minScore,
+      maxScore,
+      acceptedCount: randomizedQuestions.length,
+      rejectedLowQualityCount: totalLowQualityRejected,
+      rejectedDuplicateCount: totalDuplicatesDetected,
+      rejectedReverseCount: totalReverseQuestionsRejected,
+      rejectedUnsupportedCount: totalUnsupportedRejected,
+      difficultyCounts,
+      patternCounts,
+      rejectedSamples,
+    },
+    estimatedTokens: {
+      inputChars: totalInputChars,
+      outputChars: totalOutputChars,
     },
   };
 }

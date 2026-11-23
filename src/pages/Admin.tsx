@@ -55,6 +55,7 @@ import { AdminTopHeader } from '../components/admin/AdminTopHeader'
 import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
 import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
 import { TextbookIndexingControlCenter } from '../components/admin/TextbookIndexingControlCenter'
+import { BulkMcqPastePanel } from '../components/admin/BulkMcqPastePanel'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
 import { MockTestMcqGenerator } from '../components/admin/MockTestMcqGenerator'
 import { PreviousYearPapersManager } from '../components/admin/PreviousYearPapersManager'
@@ -788,6 +789,11 @@ const Admin = () => {
   // Modals state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState<Partial<QuestionItem> | null>(null)
+  const [mcqModalMode, setMcqModalMode] = useState<'single' | 'bulk_paste'>('bulk_paste')
+  const [isMcqModalExpanded, setIsMcqModalExpanded] = useState<boolean>(true)
+  const [bulkPasteTerm, setBulkPasteTerm] = useState<string>('Term 1')
+  const [bulkPasteLessonNumber, setBulkPasteLessonNumber] = useState<string>('')
+  const [bulkPasteLanguage, setBulkPasteLanguage] = useState<'tamil' | 'english'>('english')
   const [isDeleting, setIsDeleting] = useState<QuestionItem | null>(null)
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false)
   const [bulkGroupId, setBulkGroupId] = useState<'group1' | 'group2' | 'group4'>('group1')
@@ -3233,6 +3239,40 @@ const Admin = () => {
     }
   }
 
+  // Bulk Approve or Reject Selected Staging Questions (approved questions remain in staging until explicitly published)
+  const [isBulkReviewing, setIsBulkReviewing] = useState(false)
+  const handleBulkReview = async (action: 'approve' | 'reject') => {
+    if (!token) return
+    const targetIds = action === 'approve' ? selectedStagingIds : Array.from(selectedQuestionIds)
+    if (targetIds.length === 0) {
+      showToast('error', action === 'approve' ? 'Select one or more staging questions to approve.' : 'Select one or more questions to reject.')
+      return
+    }
+    setIsBulkReviewing(true)
+    try {
+      const res = await apiFetch('/api/questions/review', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ ids: targetIds, action }),
+      })
+      const json = await res.json()
+      if (res.ok && json.status === 'success') {
+        showToast('success', json.message || `${action === 'approve' ? 'Approved' : 'Rejected'} ${json.updatedCount || targetIds.length} question(s).`)
+        setSelectedQuestionIds(new Set())
+        fetchQuestions()
+      } else {
+        showToast('error', json.message || `Failed to ${action} selected questions.`)
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || `Failed to ${action} selected questions.`)
+    } finally {
+      setIsBulkReviewing(false)
+    }
+  }
+
   const handleBulkPublish = async () => {
     if (!token || selectedStagingIds.length === 0 || isBulkPublishing) return
     const ids = selectedStagingIds
@@ -5021,6 +5061,32 @@ const Admin = () => {
                   title="Generate textbook-grounded English & Tamil explanations for selected or missing-explanation MCQs (preview before saving)"
                 >
                   <span>{isGeneratingExplanations ? 'Generating Explanations...' : '📚 Generate Explanations'}</span>
+                </button>
+                <button
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => handleBulkReview('approve')}
+                  disabled={selectedStagingIds.length === 0 || isBulkReviewing || isBulkPublishing || isBulkDeleting}
+                  style={{
+                    borderColor: 'rgba(16, 185, 129, 0.45)',
+                    color: selectedStagingIds.length > 0 ? '#34d399' : undefined,
+                  }}
+                  title="Approve selected staging questions (keeps them in staging until you click Publish)"
+                >
+                  <CheckCircle2 size={14} />
+                  <span>Approve Selected ({selectedStagingIds.length})</span>
+                </button>
+                <button
+                  className="admin-btn admin-btn-secondary"
+                  onClick={() => handleBulkReview('reject')}
+                  disabled={selectedQuestionIds.size === 0 || isBulkReviewing || isBulkPublishing || isBulkDeleting}
+                  style={{
+                    borderColor: 'rgba(245, 158, 11, 0.45)',
+                    color: selectedQuestionIds.size > 0 ? '#fbbf24' : undefined,
+                  }}
+                  title="Reject selected questions (hides them from students)"
+                >
+                  <AlertCircle size={14} />
+                  <span>Reject Selected ({selectedQuestionIds.size})</span>
                 </button>
                 <button
                   className="admin-btn admin-bulk-publish-btn"
@@ -7977,26 +8043,93 @@ const Admin = () => {
         </div>
       </div>
 
-      {/* Add / Edit Question Modal */}
+      {/* Add / Edit Question Modal (Expandable Workspace with Manual Single MCQ & Bulk Paste Import) */}
       <AnimatePresence>
         {isEditModalOpen && editingQuestion && (
           <div className="admin-modal-backdrop">
             <motion.div
-              className="admin-modal"
-              initial={{ opacity: 0, scale: 0.95 }}
+              className={`admin-modal${isMcqModalExpanded ? ' admin-modal-expanded' : ''}`}
+              initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.96 }}
             >
-              <div className="admin-modal-header">
-                <h2 className="admin-modal-title">
-                  {editingQuestion.id ? `Edit Question #${editingQuestion.id}` : 'Create New MCQ Question'}
-                </h2>
-                <button className="admin-modal-close" onClick={() => setIsEditModalOpen(false)}>
-                  <X size={18} />
-                </button>
+              <div className="admin-modal-header" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                  <h2 className="admin-modal-title">
+                    {editingQuestion.id ? `Edit Question #${editingQuestion.id}` : 'Create New MCQ Questions'}
+                  </h2>
+                  {!editingQuestion.id && (
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        background: 'rgba(15, 23, 42, 0.75)',
+                        borderRadius: '10px',
+                        padding: '3px',
+                        border: '1px solid rgba(148, 163, 184, 0.2)',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMcqModalMode('bulk_paste')
+                          setIsMcqModalExpanded(true)
+                        }}
+                        style={{
+                          padding: '0.35rem 0.85rem',
+                          borderRadius: '8px',
+                          border: 'none',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          background: mcqModalMode === 'bulk_paste' ? 'rgba(56, 189, 248, 0.22)' : 'transparent',
+                          color: mcqModalMode === 'bulk_paste' ? '#38bdf8' : '#94a3b8',
+                        }}
+                      >
+                        Bulk MCQ Paste Import
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMcqModalMode('single')}
+                        style={{
+                          padding: '0.35rem 0.85rem',
+                          borderRadius: '8px',
+                          border: 'none',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          background: mcqModalMode === 'single' ? 'rgba(251, 191, 36, 0.22)' : 'transparent',
+                          color: mcqModalMode === 'single' ? '#fbbf24' : '#94a3b8',
+                        }}
+                      >
+                        Manual Single MCQ
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-secondary"
+                    style={{ padding: '0.32rem 0.65rem', fontSize: '0.75rem' }}
+                    onClick={() => setIsMcqModalExpanded((v) => !v)}
+                    title={isMcqModalExpanded ? 'Collapse modal width' : 'Expand to full workspace'}
+                  >
+                    {isMcqModalExpanded ? 'Collapse' : 'Expand Workspace'}
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-modal-close"
+                    onClick={() => {
+                      setIsEditModalOpen(false)
+                      setMcqModalMode('bulk_paste')
+                    }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
               </div>
 
-              <form onSubmit={handleSaveQuestion}>
+              <form onSubmit={handleSaveQuestion} className="admin-modal-workspace">
                 <div className="admin-modal-body">
                   {/* Row 1: Group & Subject */}
                   <div className="form-grid-2" style={{ marginBottom: '0.75rem' }}>
@@ -8296,6 +8429,53 @@ const Admin = () => {
                     })()}
                   </div>
 
+                  {/* Bulk MCQ Paste Import OR Manual Single MCQ Fields */}
+                  {!editingQuestion.id && mcqModalMode === 'bulk_paste' ? (
+                    <BulkMcqPastePanel
+                      token={token}
+                      targetSystem={targetSystemFilter}
+                      syllabus={{
+                        category: String(editingQuestion.category || 'group1'),
+                        subject: String(editingQuestion.subject || 'General Studies'),
+                        classId: Number(editingQuestion.classId || 6),
+                        term: bulkPasteTerm,
+                        unitId: Number(editingQuestion.unitId || 1),
+                        lessonNumber: bulkPasteLessonNumber,
+                        lessonTitle: String(editingQuestion.lessonTitle || ''),
+                        lessonId: editingQuestion.lessonId || null,
+                        topic: String(editingQuestion.topic || ''),
+                        difficulty: (editingQuestion.difficulty as any) || 'Medium',
+                        language: bulkPasteLanguage,
+                        sourceReference: editingQuestion.sourceReference || undefined,
+                      }}
+                      onSyllabusFieldChange={(patch) => {
+                        if (patch.term !== undefined) setBulkPasteTerm(patch.term)
+                        if (patch.lessonNumber !== undefined) setBulkPasteLessonNumber(patch.lessonNumber)
+                        if (patch.language !== undefined) setBulkPasteLanguage(patch.language)
+                        if (patch.difficulty !== undefined) {
+                          setEditingQuestion({ ...editingQuestion, difficulty: patch.difficulty as any })
+                        }
+                      }}
+                      onUploadComplete={() => {
+                        fetchQuestions()
+                      }}
+                      onViewInQuestionBank={() => {
+                        setIsEditModalOpen(false)
+                        setMcqModalMode('bulk_paste')
+                        qbSyllabusCascade.resetFilters()
+                        setSearchQuery('')
+                        setDebouncedSearchQuery('')
+                        setDifficultyFilter('all')
+                        setStatusFilter('staging')
+                        setPage(1)
+                        setTimeout(() => {
+                          fetchQuestions()
+                        }, 50)
+                      }}
+                      showToast={showToast}
+                    />
+                  ) : (
+                    <>
                   {/* Row 4: Difficulty */}
                   <div className="form-grid-2">
                     <div className="form-field">
@@ -8389,16 +8569,27 @@ const Admin = () => {
                       </select>
                     </div>
                   </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="admin-modal-footer">
-                  <button type="button" className="admin-btn admin-btn-secondary" onClick={() => setIsEditModalOpen(false)}>
-                    Cancel
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-secondary"
+                    onClick={() => {
+                      setIsEditModalOpen(false)
+                      setMcqModalMode('bulk_paste')
+                    }}
+                  >
+                    Close
                   </button>
-                  <button type="submit" className="admin-btn admin-btn-primary">
-                    <FileCheck size={16} />
-                    <span>{editingQuestion.id ? 'Save Changes' : 'Create Question'}</span>
-                  </button>
+                  {(editingQuestion.id || mcqModalMode === 'single') && (
+                    <button type="submit" className="admin-btn admin-btn-primary">
+                      <FileCheck size={16} />
+                      <span>{editingQuestion.id ? 'Save Changes' : 'Create Question'}</span>
+                    </button>
+                  )}
                 </div>
               </form>
             </motion.div>

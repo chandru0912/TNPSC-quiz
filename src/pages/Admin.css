@@ -1086,6 +1086,40 @@
   overscroll-behavior: contain;
   margin: auto;
   color-scheme: dark !important;
+  transition: max-width 0.22s ease, height 0.22s ease;
+}
+
+.admin-modal.admin-modal-expanded {
+  width: min(94vw, 1380px);
+  max-width: min(94vw, 1380px);
+  height: min(92vh, calc(100dvh - 1.5rem));
+  max-height: min(92vh, calc(100dvh - 1.5rem));
+}
+
+.admin-modal.admin-modal-expanded > form,
+.admin-modal.admin-modal-expanded .admin-modal-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.admin-modal.admin-modal-expanded .admin-modal-body {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+
+@media (max-width: 768px) {
+  .admin-modal.admin-modal-expanded {
+    width: 98vw;
+    max-width: 98vw;
+    height: 96dvh;
+    max-height: 96dvh;
+    border-radius: 12px;
+  }
 }
 
 .admin-modal-header {

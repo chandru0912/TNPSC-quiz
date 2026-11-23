@@ -562,10 +562,25 @@ export async function runMigration() {
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS concept_fingerprint VARCHAR(128);
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS duplicate_check_status VARCHAR(30) DEFAULT 'passed';
       ALTER TABLE questions ADD COLUMN IF NOT EXISTS generation_batch_id VARCHAR(80);
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS quality_score INT DEFAULT NULL;
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS quality_breakdown JSONB DEFAULT NULL;
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS question_type VARCHAR(64) DEFAULT NULL;
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS model_id VARCHAR(120) DEFAULT NULL;
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(30) DEFAULT 'verified';
       CREATE INDEX IF NOT EXISTS idx_questions_norm_hash ON questions (normalized_question_hash);
       CREATE INDEX IF NOT EXISTS idx_questions_concept_fp ON questions (concept_fingerprint);
       CREATE INDEX IF NOT EXISTS idx_questions_textbook_lesson ON questions (textbook_id, lesson_title);
       CREATE INDEX IF NOT EXISTS idx_questions_gen_batch ON questions (generation_batch_id);
+      CREATE INDEX IF NOT EXISTS idx_questions_quality_score ON questions (quality_score);
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'questions_difficulty_check') THEN
+          ALTER TABLE questions DROP CONSTRAINT questions_difficulty_check;
+        END IF;
+        ALTER TABLE questions ADD CONSTRAINT questions_difficulty_check
+          CHECK (difficulty IN ('Easy', 'Medium', 'Moderate', 'Hard', 'Difficult', 'Advanced'));
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
 
       UPDATE textbooks SET volume = term
       WHERE volume IS NULL AND term ~* '^volume\\s*[0-9]+';

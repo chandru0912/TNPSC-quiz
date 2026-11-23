@@ -97,7 +97,11 @@ router.post('/', aiGenerationLimiter, async (req: AuthenticatedRequest, res: Res
       selectedTopics: Array.isArray(body.selectedTopics) ? body.selectedTopics.map(String) : undefined,
       language: body.language === 'tamil' ? 'tamil' : 'english',
       questionCount,
-      difficulty: ['Easy', 'Medium', 'Hard', 'Mixed'].includes(body.difficulty) ? body.difficulty : 'Mixed',
+      difficulty: ['Easy', 'Medium', 'Moderate', 'Hard', 'Difficult', 'Advanced', 'Mixed'].includes(body.difficulty)
+        ? body.difficulty
+        : 'Mixed',
+      difficultyDistribution: body.difficultyDistribution && typeof body.difficultyDistribution === 'object' ? body.difficultyDistribution : undefined,
+      minQualityScore: body.minQualityScore != null ? Number(body.minQualityScore) : undefined,
       textbookMode: body.textbookMode,
       textbookId: body.textbookId != null ? Number(body.textbookId) : undefined,
       gdriveFileId: body.gdriveFileId ? String(body.gdriveFileId) : undefined,
