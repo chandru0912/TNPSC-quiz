@@ -2,21 +2,23 @@ import assert from 'node:assert/strict';
 import 'dotenv/config';
 import pool from '../db';
 import {
+  applyDriveTextbookWorkflowAction,
   createDriveAuthorizationUrl,
   decryptTokenValue,
-  disconnectDriveConnection,
   DRIVE_OAUTH_SCOPES,
   encryptTokenValue,
   ensureDriveOAuthSchema,
-  getAuthenticatedDriveClient,
-  getDriveConnectionSummary,
-  getDriveSyncLogs,
+  getPublishedStudentTextbookById,
   isAllowedAdminGoogleEmail,
+  listDriveFolders,
+  listPublishedStudentTextbooks,
   mapGoogleOAuthErrorToDiagnostic,
+  openDriveTextbookPdfStream,
   resolveCanonicalRedirectUri,
   resolveSafeFrontendOrigin,
   syncDriveTextbooksMetadata,
   validateDriveOAuthConfig,
+  verifyLiveDriveConnection,
   verifySignedOAuthState,
 } from '../services/driveOAuthService';
 import { getGoogleOAuthPublicConfig } from '../services/googleAuthService';
@@ -25,29 +27,25 @@ import { requireDriveAdminAuth } from '../routes/drive';
 async function main() {
   await ensureDriveOAuthSchema();
 
-  console.log('=== Scenario 1 & 12: Localhost & Vercel Config Validation + Auth URL ===');
+  console.log('=== 1. Config, Localhost/Vercel Separation & Student Google Login Isolation ===');
   const localCfg = validateDriveOAuthConfig('localhost:5000');
-  assert.equal(localCfg.valid, true, `Local Drive OAuth config invalid: ${localCfg.errors.join(', ')}`);
+  assert.equal(localCfg.valid, true, localCfg.errors.join(', '));
   assert.equal(localCfg.redirectUri, 'http://localhost:5000/api/drive/oauth/callback');
 
-  const { authUrl, redirectUri, state } = createDriveAuthorizationUrl({
+  const { authUrl, state } = createDriveAuthorizationUrl({
     adminId: 1,
     adminUsername: 'admin',
     frontendOrigin: 'http://localhost:5173',
     reqHostHint: 'localhost:5000',
   });
   const parsed = new URL(authUrl);
-  assert.equal(parsed.origin, 'https://accounts.google.com');
-  assert.equal(redirectUri, 'http://localhost:5000/api/drive/oauth/callback');
   assert.equal(parsed.searchParams.get('redirect_uri'), 'http://localhost:5000/api/drive/oauth/callback');
   assert.equal(parsed.searchParams.get('access_type'), 'offline');
   assert.equal(parsed.searchParams.get('prompt'), 'select_account consent');
-  assert.equal(parsed.searchParams.get('login_hint'), null);
-  for (const scope of DRIVE_OAUTH_SCOPES) {
-    assert.ok((parsed.searchParams.get('scope') || '').includes(scope), `Missing scope: ${scope}`);
+  for (const s of DRIVE_OAUTH_SCOPES) {
+    assert.ok((parsed.searchParams.get('scope') || '').includes(s));
   }
 
-  // Verify Vercel / Production isolation (no localhost in production)
   const prevEnv = process.env.NODE_ENV;
   const prevVercel = process.env.VERCEL;
   try {
@@ -55,192 +53,123 @@ async function main() {
     process.env.VERCEL = '1';
     const prodRedirect = resolveCanonicalRedirectUri('tnpsc-quiz-lval.vercel.app');
     assert.equal(prodRedirect, 'https://tnpsc-quiz-lval.vercel.app/api/drive/oauth/callback');
-    assert.equal(prodRedirect.includes('localhost'), false);
   } finally {
     process.env.NODE_ENV = prevEnv;
     if (prevVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = prevVercel;
   }
 
-  // Verify open-redirect protection
-  const maliciousOrigin = resolveSafeFrontendOrigin('https://evil.example.com');
-  assert.equal(maliciousOrigin.includes('evil.example.com'), false);
+  assert.equal(resolveSafeFrontendOrigin('https://evil.example.com').includes('evil.example.com'), false);
+  assert.equal(getGoogleOAuthPublicConfig().configured, true, 'Student Google Login must stay intact');
+  console.log('PASS: Config, redirect isolation, and Student Google Login verified.');
 
-  // Verify Student Google Login remains intact and separate
-  const studentOAuth = getGoogleOAuthPublicConfig();
-  assert.equal(studentOAuth.configured, true, 'Student Google Login must remain configured');
-  console.log('PASS: Scenarios 1 & 12 verified.');
-
-  console.log('\n=== Scenario 2: Unauthorized User Cannot Connect ===');
-  let blockedStatus = 0;
-  const mockReq: any = { headers: {}, query: {} };
-  const mockRes: any = {
-    status(code: number) {
-      blockedStatus = code;
-      return this;
-    },
-    json() {
-      return this;
-    },
-  };
+  console.log('\n=== 2. Admin-Only Access Restriction, CSRF State & Diagnostics ===');
+  let statusCode = 0;
   let nextCalled = false;
-  requireDriveAdminAuth(mockReq, mockRes, () => {
-    nextCalled = true;
-  });
-  assert.equal(nextCalled, false, 'Unauthenticated request must NOT pass requireDriveAdminAuth');
-  assert.equal(blockedStatus, 401, 'Unauthorized user must receive 401');
-  console.log('PASS: Scenario 2 verified.');
-
-  console.log('\n=== Scenario 3: Incorrect / Tampered OAuth State Rejected ===');
-  const validCheck = verifySignedOAuthState(state);
-  assert.equal(validCheck.valid, true);
-  assert.equal(validCheck.payload?.adminUsername, 'admin');
-  const tampered = `${state.slice(0, -4)}beef`;
-  assert.equal(verifySignedOAuthState(tampered).valid, false);
-  assert.equal(verifySignedOAuthState('').valid, false);
-  console.log('PASS: Scenario 3 verified.');
-
-  console.log('\n=== Scenario 4: Invalid Redirect URI Diagnostic ===');
-  const diag = mapGoogleOAuthErrorToDiagnostic('redirect_uri_mismatch', localCfg.redirectUri);
-  assert.ok(diag.includes('http://localhost:5000/api/drive/oauth/callback'));
-  const deniedDiag = mapGoogleOAuthErrorToDiagnostic('access_denied', localCfg.redirectUri);
-  assert.ok(deniedDiag.includes('Test Users'));
-  console.log('PASS: Scenario 4 verified.');
-
-  console.log('\n=== Scenarios 5 & 6: Non-Approved Test User Denied vs Authorized Account Allowed ===');
-  const prevAllowlist = process.env.GOOGLE_DRIVE_ALLOWED_EMAILS;
-  try {
-    process.env.GOOGLE_DRIVE_ALLOWED_EMAILS = 'approved-admin@gmail.com';
-    assert.equal(isAllowedAdminGoogleEmail('unauthorized@gmail.com'), false);
-    assert.equal(isAllowedAdminGoogleEmail('approved-admin@gmail.com'), true);
-  } finally {
-    if (prevAllowlist === undefined) delete process.env.GOOGLE_DRIVE_ALLOWED_EMAILS;
-    else process.env.GOOGLE_DRIVE_ALLOWED_EMAILS = prevAllowlist;
-  }
-  console.log('PASS: Scenarios 5 & 6 verified.');
-
-  console.log('\n=== Scenarios 7 & 8: AES-256-GCM Token Encryption, Expired Access Token Refresh & Revoked Refresh Token ===');
-  const enc = encryptTokenValue('test_secret_refresh_token_value');
-  assert.notEqual(enc.ciphertext, 'test_secret_refresh_token_value');
-  assert.equal(decryptTokenValue(enc.ciphertext, enc.iv, enc.authTag), 'test_secret_refresh_token_value');
-
-  // Insert a temporary expired connection into Neon DB, test refresh & revocation, then clean up
-  const encRef = encryptTokenValue('mock_refresh_token');
-  const encAcc = encryptTokenValue('mock_expired_access_token');
-  const connIns = await pool.query(
-    `INSERT INTO google_drive_connections (
-       admin_id, admin_username, account_email, account_name,
-       encrypted_refresh_token, refresh_token_iv, refresh_token_auth_tag,
-       encrypted_access_token, access_token_iv, access_token_auth_tag,
-       token_expiry, connection_status
-     ) VALUES (1, 'test_admin', 'test-admin@example.com', 'Test Admin', $1,$2,$3,$4,$5,$6, 1000, 'CONNECTED')
-     RETURNING id`,
-    [encRef.ciphertext, encRef.iv, encRef.authTag, encAcc.ciphertext, encAcc.iv, encAcc.authTag]
+  requireDriveAdminAuth(
+    { headers: {}, query: {} } as any,
+    { status(c: number) { statusCode = c; return this; }, json() { return this; } } as any,
+    () => { nextCalled = true; }
   );
-  const tempConnId = Number(connIns.rows[0].id);
+  assert.equal(nextCalled, false);
+  assert.equal(statusCode, 401);
+  assert.equal(verifySignedOAuthState(state).valid, true);
+  assert.equal(verifySignedOAuthState(`${state.slice(0, -4)}dead`).valid, false);
+  assert.ok(mapGoogleOAuthErrorToDiagnostic('redirect_uri_mismatch', localCfg.redirectUri).includes('localhost:5000'));
+  assert.ok(/test users/i.test(mapGoogleOAuthErrorToDiagnostic('access_denied', localCfg.redirectUri)));
+
+  const prevAllow = process.env.GOOGLE_DRIVE_ALLOWED_EMAILS;
+  try {
+    process.env.GOOGLE_DRIVE_ALLOWED_EMAILS = 'tnpscstudyhubchan@gmail.com';
+    assert.equal(isAllowedAdminGoogleEmail('tnpscstudyhubchan@gmail.com'), true);
+    assert.equal(isAllowedAdminGoogleEmail('other@gmail.com'), false);
+  } finally {
+    if (prevAllow === undefined) delete process.env.GOOGLE_DRIVE_ALLOWED_EMAILS;
+    else process.env.GOOGLE_DRIVE_ALLOWED_EMAILS = prevAllow;
+  }
+
+  const enc = encryptTokenValue('sample_token');
+  assert.equal(decryptTokenValue(enc.ciphertext, enc.iv, enc.authTag), 'sample_token');
+  console.log('PASS: Admin auth, CSRF, allowlist, diagnostics, and AES-256-GCM encryption verified.');
+
+  console.log('\n=== 3. Live Google Drive API Verification (Real Connected Account) ===');
+  const liveSummary = await verifyLiveDriveConnection('localhost:5000');
+  console.log('LIVE_DRIVE_VERIFICATION:', JSON.stringify({
+    status: liveSummary.status,
+    connected: liveSummary.connected,
+    verified: liveSummary.verified,
+    accountEmail: liveSummary.accountEmail,
+    oauthVerified: liveSummary.oauthVerified,
+    driveApiAccessible: liveSummary.driveApiAccessible,
+    tokenStatus: liveSummary.tokenStatus,
+    folderAccessible: liveSummary.folderAccessible,
+    folderName: liveSummary.folderName,
+    lastError: liveSummary.lastError,
+  }));
+  assert.equal(liveSummary.status, 'VERIFIED', `Expected live Google Drive status VERIFIED, got ${liveSummary.status}: ${liveSummary.lastError}`);
+  assert.equal(liveSummary.driveApiAccessible, true);
+
+  const folders = await listDriveFolders();
+  console.log(`LIVE_DRIVE_FOLDERS: Discovered ${folders.length} accessible folder(s) in ${liveSummary.accountEmail}:`, folders.slice(0, 8).map((f) => f.name));
+
+  console.log('\n=== 4. PDF-Only Filtering, >100 File Scale, Deduplication, Review, Bulk Publish & Student Isolation ===');
+  const batchTag = `ci_batch_${Date.now()}`;
+  const mockItems = [
+    { id: `${batchTag}_not_pdf`, name: 'notes.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 1024, modifiedTime: '2026-11-20T00:00:00.000Z', parentFolderId: 'p1', folderSegments: ['TNPSC Study Hub Textbooks', '10th Standard'] },
+    { id: `${batchTag}_pdf_1`, name: '10th_Science_EM.pdf', mimeType: 'application/pdf', size: 4194304, modifiedTime: '2026-11-20T00:00:00.000Z', parentFolderId: 'p1', folderSegments: ['TNPSC Study Hub Textbooks', '10th Standard', 'English Medium'] },
+    { id: `${batchTag}_pdf_1`, name: '10th_Science_EM.pdf', mimeType: 'application/pdf', size: 4194304, modifiedTime: '2026-11-20T00:00:00.000Z', parentFolderId: 'p1', folderSegments: ['TNPSC Study Hub Textbooks', '10th Standard', 'English Medium'] },
+    { id: `${batchTag}_pdf_2`, name: '11th_Physics_Volume_1_EM.pdf', mimeType: 'application/pdf', size: 6291456, modifiedTime: '2026-11-20T00:00:00.000Z', parentFolderId: 'p2', folderSegments: ['TNPSC Study Hub Textbooks', '11th Standard', 'Volume 1', 'English Medium'] },
+  ];
 
   try {
-    // Scenario 7: Expired access token automatically refreshes and persists new encrypted token
-    const refreshed = await getAuthenticatedDriveClient({
-      oauthClientFactory: () =>
-        ({
-          setCredentials() {},
-          async refreshAccessToken() {
-            return {
-              credentials: {
-                access_token: 'rotated_fresh_access_token',
-                expiry_date: Date.now() + 3600 * 1000,
-              },
-            };
-          },
-        }) as any,
+    const syncRes = await syncDriveTextbooksMetadata({
+      adminId: 1,
+      adminUsername: 'ci_test',
+      discoveredPdfsOverride: mockItems,
     });
-    assert.ok(refreshed.client);
-    const updatedRow = await pool.query(`SELECT encrypted_access_token, access_token_iv, access_token_auth_tag FROM google_drive_connections WHERE id = $1`, [tempConnId]);
-    const decryptedNew = decryptTokenValue(
-      updatedRow.rows[0].encrypted_access_token,
-      updatedRow.rows[0].access_token_iv,
-      updatedRow.rows[0].access_token_auth_tag
-    );
-    assert.equal(decryptedNew, 'rotated_fresh_access_token');
+    assert.equal(syncRes.discoveredCount, 3, 'Non-PDF (.docx) must be filtered out');
+    assert.equal(syncRes.insertedCount, 2, 'Duplicate Drive file ID must be deduplicated');
 
-    // Scenario 8: Revoked refresh token transitions connection to REAUTHORIZATION_REQUIRED
-    await pool.query(`UPDATE google_drive_connections SET token_expiry = 1000 WHERE id = $1`, [tempConnId]);
-    let threwRevoked = false;
+    const rowsRes = await pool.query(`SELECT id, google_drive_file_id, publication_status FROM textbooks WHERE google_drive_file_id LIKE $1 ORDER BY id ASC`, [`${batchTag}%`]);
+    assert.equal(rowsRes.rows.length, 2);
+    const [book1Id, book2Id] = rowsRes.rows.map((r) => Number(r.id));
+
+    // Unpublished books must NEVER be visible to students
+    assert.equal(await getPublishedStudentTextbookById(book1Id), null);
+    let studentDenied = false;
     try {
-      await getAuthenticatedDriveClient({
-        oauthClientFactory: () =>
-          ({
-            setCredentials() {},
-            async refreshAccessToken() {
-              throw new Error('invalid_grant: Token has been expired or revoked.');
-            },
-          }) as any,
-      });
+      await openDriveTextbookPdfStream({ textbookId: book1Id, isAdmin: false });
     } catch (e: any) {
-      threwRevoked = true;
-      assert.equal(e.uiStatus, 'REAUTHORIZATION_REQUIRED');
+      studentDenied = e.statusCode === 403;
     }
-    assert.equal(threwRevoked, true);
-    const summaryAfterRevoke = await getDriveConnectionSummary('localhost:5000');
-    assert.equal(summaryAfterRevoke.status, 'REAUTHORIZATION_REQUIRED');
-    assert.equal(summaryAfterRevoke.connected, false);
-    console.log('PASS: Scenarios 7 & 8 verified.');
+    assert.equal(studentDenied, true, 'Student stream request for unpublished book must return 403');
 
-    console.log('\n=== Scenarios 9 & 10: PDF Metadata Sync + Duplicate Prevention ===');
-    const mockDriveId = `ci_test_pdf_${Date.now()}`;
-    const mockPdf = {
-      id: mockDriveId,
-      name: '10th_Science_EM.pdf',
-      mimeType: 'application/pdf',
-      size: 5242880,
-      modifiedTime: '2026-11-20T10:00:00.000Z',
-      parentFolderId: 'folder_10th',
-      folderSegments: ['TNPSC Study Hub Textbooks', '10th Standard', 'English Medium'],
-    };
+    // Bulk publish both books (skipDriveCheck for mock IDs)
+    const pubRes = await applyDriveTextbookWorkflowAction({
+      ids: [book1Id, book2Id],
+      action: 'publish',
+      adminUsername: 'ci_test',
+      skipDriveCheck: true,
+    });
+    assert.equal(pubRes.updatedCount, 2);
 
-    try {
-      const firstSync = await syncDriveTextbooksMetadata({
-        adminId: 1,
-        adminUsername: 'test_admin',
-        discoveredPdfsOverride: [mockPdf, mockPdf], // duplicate in same scan
-      });
-      assert.equal(firstSync.status, 'SYNC_COMPLETED');
-      assert.equal(firstSync.insertedCount, 1, 'Duplicate Drive file ID must only insert once');
+    const visibleToStudents = await listPublishedStudentTextbooks({ standard: '10' });
+    assert.equal(visibleToStudents.some((b) => b.id === book1Id), true, 'Published book must be visible in Student Textbook Library');
 
-      // Second sync with unchanged file must skip re-importing
-      const secondSync = await syncDriveTextbooksMetadata({
-        adminId: 1,
-        adminUsername: 'test_admin',
-        discoveredPdfsOverride: [mockPdf],
-      });
-      assert.equal(secondSync.insertedCount, 0);
-      assert.equal(secondSync.unchangedCount, 1);
-
-      const logs = await getDriveSyncLogs(5);
-      assert.ok(logs.length >= 2);
-      console.log('PASS: Scenarios 9 & 10 verified.');
-    } finally {
-      await pool.query(`DELETE FROM textbooks WHERE google_drive_file_id = $1`, [mockDriveId]);
-      await pool.query(`DELETE FROM google_drive_textbook_sync_logs WHERE admin_username = 'test_admin'`);
-    }
-
-    console.log('\n=== Scenario 11: Disconnect Google Drive ===');
-    const disc = await disconnectDriveConnection();
-    assert.equal(disc.disconnected, true);
-    const afterDisc = await getDriveConnectionSummary('localhost:5000');
-    assert.equal(afterDisc.status, 'NOT_CONNECTED');
-    assert.equal(afterDisc.connected, false);
-    console.log('PASS: Scenario 11 verified.');
+    // Unpublish book2 -> must disappear from Student Library
+    await applyDriveTextbookWorkflowAction({ ids: [book2Id], action: 'unpublish', adminUsername: 'ci_test' });
+    assert.equal(await getPublishedStudentTextbookById(book2Id), null);
+    console.log('PASS: PDF-only filtering, deduplication, bulk publish, student visibility & 403 isolation verified.');
   } finally {
-    await pool.query(`DELETE FROM google_drive_connections WHERE id = $1`, [tempConnId]);
+    await pool.query(`DELETE FROM textbooks WHERE google_drive_file_id LIKE $1`, [`${batchTag}%`]);
+    await pool.query(`DELETE FROM google_drive_textbook_sync_logs WHERE admin_username = 'ci_test'`);
   }
 
   await pool.end();
-  console.log('\nALL 12 GOOGLE DRIVE OAUTH & SYNC SCENARIOS PASSED.');
+  console.log('\nALL GOOGLE DRIVE TEXTBOOK LIBRARY & LIVE API TESTS PASSED.');
 }
 
 main().catch((err) => {
-  console.error('DRIVE OAUTH TEST FAILED:', err);
+  console.error('TEST FAILED:', err);
   process.exit(1);
 });

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
+import type { Readable } from 'stream';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
@@ -16,8 +17,8 @@ export const PRODUCTION_BACKEND_URL = 'https://tnpsc-quiz-lval.vercel.app';
 export const DEFAULT_LOCAL_FRONTEND_URL = 'http://localhost:5173';
 export const DEFAULT_TEXTBOOKS_FOLDER_NAME = 'TNPSC Study Hub Textbooks';
 
-// Least-privilege scopes: openid/email/profile to identify & allowlist the admin account,
-// plus drive.readonly to discover & read textbook PDF metadata without write/delete access.
+// Least-privilege scopes: openid/email/profile for admin identity & allowlist verification,
+// plus drive.readonly to discover folders, read PDF metadata, and stream published PDFs.
 export const DRIVE_OAUTH_SCOPES = [
   'openid',
   'email',
@@ -27,14 +28,27 @@ export const DRIVE_OAUTH_SCOPES = [
 
 export type DriveUiStatus =
   | 'NOT_CONNECTED'
-  | 'AUTHORIZATION_REQUIRED'
   | 'CONNECTING'
   | 'CONNECTED'
-  | 'SYNCING'
-  | 'SYNC_COMPLETED'
-  | 'SYNC_FAILED'
+  | 'VERIFIED'
   | 'TOKEN_EXPIRED'
-  | 'REAUTHORIZATION_REQUIRED';
+  | 'REAUTHORIZATION_REQUIRED'
+  | 'CONNECTION_FAILED';
+
+export type ReviewStatus =
+  | 'DISCOVERED'
+  | 'SYNCED'
+  | 'NEEDS_REVIEW'
+  | 'PENDING_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED';
+
+export type PublicationStatus =
+  | 'PENDING_REVIEW'
+  | 'PUBLISHED'
+  | 'UNPUBLISHED'
+  | 'REJECTED'
+  | 'UNAVAILABLE';
 
 export interface DriveOAuthConfigValidation {
   valid: boolean;
@@ -48,23 +62,33 @@ export interface DriveOAuthConfigValidation {
 export interface DriveConnectionSummary {
   status: DriveUiStatus;
   connected: boolean;
+  verified: boolean;
   configured: boolean;
   accountEmail: string | null;
   accountName: string | null;
   adminId: number | null;
   adminUsername: string | null;
+  oauthVerified: boolean;
+  driveApiAccessible: boolean;
+  tokenStatus: 'VALID' | 'EXPIRED' | 'REVOKED' | 'MISSING';
+  folderAccessible: boolean;
   folderId: string | null;
   folderName: string;
   redirectUri: string;
   scopes: readonly string[];
+  connectedAt: string | null;
+  lastVerifiedAt: string | null;
   lastSyncAt: string | null;
   lastError: string | null;
   counts: {
-    synchronizedTextbooks: number;
+    drivePdfsDiscovered: number;
+    synchronizedBooks: number;
     pendingReview: number;
-    published: number;
-    missingInDrive: number;
-    failedSyncRuns: number;
+    approved: number;
+    publishedTextbooks: number;
+    rejected: number;
+    failedSync: number;
+    unavailableFiles: number;
   };
 }
 
@@ -80,6 +104,42 @@ export interface DriveSyncResult {
   missingCount: number;
   failedCount: number;
   errors: string[];
+}
+
+export interface DriveTextbookRow {
+  id: number;
+  groupId: string;
+  bookName: string;
+  standard: number;
+  term: string | null;
+  volume: string | null;
+  subject: string;
+  medium: 'Tamil' | 'English';
+  unit: number | null;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  googleDriveFileId: string;
+  googleDriveParentFolderId: string | null;
+  driveFolderPath: string | null;
+  driveModifiedTime: string | null;
+  driveAvailable: boolean;
+  reviewStatus: ReviewStatus;
+  publicationStatus: PublicationStatus;
+  publishedAt: string | null;
+  publishedBy: string | null;
+  lastSyncedAt: string | null;
+  downloadCount: number;
+}
+
+export interface DiscoveredDrivePdf {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  modifiedTime: string | null;
+  parentFolderId: string | null;
+  folderSegments: string[];
 }
 
 export function cleanEnvValue(raw?: string | null): string {
@@ -115,7 +175,6 @@ export function resolveCanonicalRedirectUri(reqHostHint?: string): string {
     return `${LOCAL_BACKEND_URL}/api/drive/oauth/callback`;
   }
 
-  // Production: strictly disallow localhost redirect URIs
   if (configured && /^https:\/\/[^/]+\/api\/drive\/oauth\/callback$/i.test(configured) && !configured.includes('localhost')) {
     return configured;
   }
@@ -130,10 +189,6 @@ export function resolveCanonicalRedirectUri(reqHostHint?: string): string {
   return `${PRODUCTION_BACKEND_URL}/api/drive/oauth/callback`;
 }
 
-/**
- * Validates Drive OAuth configuration without exposing secrets.
- * Prefers dedicated GOOGLE_DRIVE_CLIENT_ID / GOOGLE_DRIVE_CLIENT_SECRET so Student Google Login stays isolated.
- */
 export function validateDriveOAuthConfig(reqHostHint?: string): DriveOAuthConfigValidation {
   const clientId = cleanEnvValue(process.env.GOOGLE_DRIVE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID);
   const clientSecret = cleanEnvValue(process.env.GOOGLE_DRIVE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET);
@@ -164,9 +219,6 @@ export function validateDriveOAuthConfig(reqHostHint?: string): DriveOAuthConfig
   };
 }
 
-/**
- * Validates and normalizes frontend origin to prevent open redirects after OAuth callback.
- */
 export function resolveSafeFrontendOrigin(candidateOrigin?: string | null): string {
   const configured = cleanEnvValue(process.env.FRONTEND_URL).replace(/\/+$/, '');
   const allowedOrigins = new Set<string>([
@@ -185,8 +237,7 @@ export function resolveSafeFrontendOrigin(candidateOrigin?: string | null): stri
   const candidate = cleanEnvValue(candidateOrigin).replace(/\/+$/, '');
   if (candidate) {
     try {
-      const parsed = new URL(candidate);
-      const origin = parsed.origin;
+      const origin = new URL(candidate).origin;
       if (
         allowedOrigins.has(origin) ||
         /^https:\/\/[a-z0-9-]+(?:-[a-z0-9-]+)*\.vercel\.app$/i.test(origin) ||
@@ -205,9 +256,6 @@ export function resolveSafeFrontendOrigin(candidateOrigin?: string | null): stri
   return isProductionRuntime() ? PRODUCTION_BACKEND_URL : DEFAULT_LOCAL_FRONTEND_URL;
 }
 
-/**
- * AES-256-GCM symmetric encryption for OAuth tokens stored in PostgreSQL.
- */
 function getEncryptionKey(): Buffer {
   const raw =
     cleanEnvValue(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY) ||
@@ -243,10 +291,7 @@ export function decryptTokenValue(ciphertext: string, ivB64: string, authTagB64:
 }
 
 function getStateSigningSecret(): string {
-  return (
-    cleanEnvValue(process.env.ADMIN_JWT_SECRET) ||
-    'tnpsc_quiz_admin_jwt_secret_key_2026'
-  );
+  return cleanEnvValue(process.env.ADMIN_JWT_SECRET) || 'tnpsc_quiz_admin_jwt_secret_key_2026';
 }
 
 export interface OAuthStatePayload {
@@ -303,10 +348,6 @@ export function verifySignedOAuthState(state: string): { valid: boolean; payload
   }
 }
 
-/**
- * Checks whether an authenticated Google email is permitted by GOOGLE_DRIVE_ALLOWED_EMAILS.
- * If GOOGLE_DRIVE_ALLOWED_EMAILS is configured, only listed emails are allowed to connect.
- */
 export function isAllowedAdminGoogleEmail(email: string): boolean {
   const normalized = cleanEnvValue(email).toLowerCase();
   if (!normalized || !normalized.includes('@')) return false;
@@ -322,8 +363,8 @@ export function isAllowedAdminGoogleEmail(email: string): boolean {
 let driveSchemaReady = false;
 
 /**
- * Idempotently creates Drive OAuth connection & sync log tables and metadata-only textbook columns.
- * Never drops tables, never overwrites existing textbook records, and never creates binary PDF columns.
+ * Idempotently creates Drive OAuth connection, sync logs, and metadata-only textbook columns.
+ * Never drops tables, never deletes existing textbook data, and never stores PDF binaries in PostgreSQL.
  */
 export async function ensureDriveOAuthSchema(): Promise<void> {
   if (driveSchemaReady) return;
@@ -346,10 +387,17 @@ export async function ensureDriveOAuthSchema(): Promise<void> {
       folder_id VARCHAR(255),
       folder_name VARCHAR(255) DEFAULT 'TNPSC Study Hub Textbooks',
       connection_status VARCHAR(40) NOT NULL DEFAULT 'CONNECTED',
+      drive_api_accessible BOOLEAN DEFAULT false,
+      folder_accessible BOOLEAN DEFAULT false,
+      last_verified_at TIMESTAMP WITH TIME ZONE,
       last_error TEXT,
       connected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
+
+    ALTER TABLE google_drive_connections ADD COLUMN IF NOT EXISTS drive_api_accessible BOOLEAN DEFAULT false;
+    ALTER TABLE google_drive_connections ADD COLUMN IF NOT EXISTS folder_accessible BOOLEAN DEFAULT false;
+    ALTER TABLE google_drive_connections ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMP WITH TIME ZONE;
 
     CREATE TABLE IF NOT EXISTS google_drive_textbook_sync_logs (
       id SERIAL PRIMARY KEY,
@@ -377,8 +425,27 @@ export async function ensureDriveOAuthSchema(): Promise<void> {
     ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS drive_modified_time TIMESTAMP WITH TIME ZONE;
     ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS drive_folder_path TEXT;
     ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS drive_available BOOLEAN DEFAULT true;
-    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS publication_status VARCHAR(40) DEFAULT 'pending_review';
+    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS review_status VARCHAR(40) DEFAULT 'PENDING_REVIEW';
+    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS publication_status VARCHAR(40) DEFAULT 'PENDING_REVIEW';
+    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS published_by VARCHAR(150);
     ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS download_count INTEGER DEFAULT 0;
+    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE textbooks ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(150);
+
+    CREATE TABLE IF NOT EXISTS google_drive_textbook_audit_logs (
+      id SERIAL PRIMARY KEY,
+      admin_username VARCHAR(150) NOT NULL,
+      admin_role VARCHAR(50),
+      action VARCHAR(60) NOT NULL,
+      scope VARCHAR(40) NOT NULL,
+      affected_count INTEGER NOT NULL DEFAULT 0,
+      skipped_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      details JSONB,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_textbooks_drive_file_id_unique
       ON textbooks (google_drive_file_id)
@@ -390,13 +457,9 @@ export async function ensureDriveOAuthSchema(): Promise<void> {
 
 export function createDriveOAuth2Client(redirectUri?: string): OAuth2Client {
   const cfg = validateDriveOAuthConfig();
-  const effectiveRedirect = redirectUri || cfg.redirectUri;
-  return new google.auth.OAuth2(cfg.clientId, cfg.clientSecret, effectiveRedirect);
+  return new google.auth.OAuth2(cfg.clientId, cfg.clientSecret, redirectUri || cfg.redirectUri);
 }
 
-/**
- * Generates the Google OAuth 2.0 Authorization URL with CSRF state & account picker.
- */
 export function createDriveAuthorizationUrl(params: {
   adminId: number | null;
   adminUsername: string;
@@ -430,214 +493,120 @@ export function createDriveAuthorizationUrl(params: {
   return { authUrl, redirectUri: cfg.redirectUri, state };
 }
 
-export type DriveOAuthFailureCategory =
-  | 'unapproved_test_user'
-  | 'incorrect_oauth_client'
-  | 'invalid_scope'
-  | 'redirect_uri_mismatch'
-  | 'token_or_grant_error'
-  | 'unknown';
-
-export function extractGoogleProjectNumber(clientId?: string): string | null {
-  const clean = cleanEnvValue(clientId || process.env.GOOGLE_DRIVE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID);
-  const m = clean.match(/^(\d+)-/);
-  return m ? m[1] : null;
+export function extractGoogleProjectNumber(clientId?: string | null): string | null {
+  const clean = cleanEnvValue(clientId);
+  const match = clean.match(/^(\d+)-/);
+  return match ? match[1] : null;
 }
 
 export function diagnoseDriveOAuthError(
   rawError: string,
   redirectUri: string
-): { category: DriveOAuthFailureCategory; message: string; googleCloudProjectNumber: string | null } {
+): {
+  category: 'unapproved_test_user' | 'incorrect_oauth_client' | 'invalid_scope' | 'redirect_uri_mismatch' | 'token_revoked' | 'unknown';
+  message: string;
+} {
   const lower = String(rawError || '').toLowerCase();
-  const projectNumber = extractGoogleProjectNumber();
-  const projectLabel = projectNumber ? `Google Cloud Project ${projectNumber}` : 'your Google Cloud Project';
-
   if (lower.includes('redirect_uri_mismatch')) {
     return {
       category: 'redirect_uri_mismatch',
-      googleCloudProjectNumber: projectNumber,
-      message: `redirect_uri_mismatch: Ensure exact URI "${redirectUri}" is registered under Authorized redirect URIs in ${projectLabel}.`,
+      message: `redirect_uri_mismatch: Register exact URI "${redirectUri}" under Authorized redirect URIs in Google Cloud Console.`,
     };
   }
-  if (lower.includes('access_denied') || lower.includes('approved testers') || lower.includes('org_internal') || lower.includes('403')) {
+  if (lower.includes('access_denied')) {
     return {
       category: 'unapproved_test_user',
-      googleCloudProjectNumber: projectNumber,
-      message: `Error 403 access_denied: Selected Gmail is not approved as an OAuth Test User (or consent was declined). Add your administrator Gmail under ${projectLabel} → Google Auth Platform → Audience → Test users, save, and retry.`,
+      message: '403 access_denied: Account denied or not listed under Google Auth Platform -> Audience -> Test users.',
     };
   }
-  if (lower.includes('invalid_client') || lower.includes('deleted_client') || lower.includes('unauthorized_client')) {
+  if (lower.includes('invalid_client')) {
     return {
       category: 'incorrect_oauth_client',
-      googleCloudProjectNumber: projectNumber,
-      message: `invalid_client: Google OAuth client credentials were rejected. Verify GOOGLE_DRIVE_CLIENT_ID / GOOGLE_CLIENT_ID and Client Secret in ${projectLabel}.`,
+      message: 'Google OAuth client credentials rejected (invalid_client). Verify GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET.',
     };
   }
-  if (lower.includes('invalid_scope') || lower.includes('insufficient_scope') || lower.includes('insufficientpermissions')) {
+  if (lower.includes('invalid_scope')) {
     return {
       category: 'invalid_scope',
-      googleCloudProjectNumber: projectNumber,
-      message: `invalid_scope: Requested Google Drive OAuth scope was rejected or not granted. Required minimal scopes: ${DRIVE_OAUTH_SCOPES.join(', ')}.`,
+      message: 'Google rejected the requested OAuth scope (invalid_scope). Ensure Google Drive API is enabled.',
     };
   }
-  if (lower.includes('invalid_grant') || lower.includes('token has been expired')) {
+  if (lower.includes('invalid_grant')) {
     return {
-      category: 'token_or_grant_error',
-      googleCloudProjectNumber: projectNumber,
-      message: 'OAuth grant expired or revoked (invalid_grant). Please reconnect Google Drive.',
+      category: 'token_revoked',
+      message: 'OAuth refresh token expired or revoked (invalid_grant). Please reconnect Google Drive.',
     };
   }
   return {
     category: 'unknown',
-    googleCloudProjectNumber: projectNumber,
     message: rawError || 'Google Drive OAuth authorization failed.',
   };
 }
 
-/**
- * Translates Google OAuth errors into actionable administrator diagnostics.
- */
 export function mapGoogleOAuthErrorToDiagnostic(rawError: string, redirectUri: string): string {
   return diagnoseDriveOAuthError(rawError, redirectUri).message;
 }
 
-/**
- * Read-only live diagnostic (8s timeout per probe, no login, no DB writes, no secrets exposed).
- * Distinguishes whether a failure is caused by an incorrect OAuth client, redirect URI mismatch,
- * invalid scope, or an unapproved test user (403 access_denied in Testing mode).
- */
-export async function runDriveOAuthDiagnostics(reqHostHint?: string): Promise<{
-  googleCloudProjectNumber: string | null;
-  clientIdMasked: string;
-  redirectUri: string;
-  scopes: readonly string[];
-  adminOnlyDriveAccess: boolean;
-  clientCredentialsStatus: 'valid_client_credentials' | 'invalid_client_secret' | 'invalid_client_id' | 'unconfigured' | 'error';
-  redirectUriStatus: 'registered' | 'not_registered' | 'invalid_client' | 'unknown';
-  scopeValid: boolean;
-  diagnosedBlocker: 'none' | 'incorrect_oauth_client' | 'redirect_uri_mismatch' | 'invalid_scope';
-  testingModeGuidance: string;
-}> {
+export async function runDriveOAuthDiagnostics(reqHostHint?: string) {
   const cfg = validateDriveOAuthConfig(reqHostHint);
-  const projectNumber = extractGoogleProjectNumber(cfg.clientId);
-  const clientIdMasked =
-    cfg.clientId.length > 24 ? `${cfg.clientId.slice(0, 12)}...${cfg.clientId.slice(-20)}` : cfg.clientId;
-  const scopeList: readonly string[] = DRIVE_OAUTH_SCOPES;
-  const scopeValid =
-    scopeList.includes('https://www.googleapis.com/auth/drive.readonly') &&
-    !scopeList.includes('https://www.googleapis.com/auth/drive');
+  const projectNum = extractGoogleProjectNumber(cfg.clientId);
+  let clientCredentialsStatus: 'valid_client_credentials' | 'invalid_client' | 'unconfigured' | 'error' = cfg.valid
+    ? 'valid_client_credentials'
+    : 'unconfigured';
+  let redirectUriStatus: 'registered' | 'mismatch' | 'unknown' = 'unknown';
+  let diagnosedBlocker = 'none';
 
-  if (!cfg.valid) {
-    return {
-      googleCloudProjectNumber: projectNumber,
-      clientIdMasked,
-      redirectUri: cfg.redirectUri,
-      scopes: DRIVE_OAUTH_SCOPES,
-      adminOnlyDriveAccess: true,
-      clientCredentialsStatus: 'unconfigured',
-      redirectUriStatus: 'unknown',
-      scopeValid,
-      diagnosedBlocker: 'incorrect_oauth_client',
-      testingModeGuidance: `Configuration errors: ${cfg.errors.join(' ')}`,
-    };
-  }
-
-  // Probe 1: Google token endpoint (validates client_id + client_secret without login)
-  let clientCredentialsStatus: 'valid_client_credentials' | 'invalid_client_secret' | 'invalid_client_id' | 'error' = 'error';
-  try {
-    const body = new URLSearchParams({
-      code: 'probe_dummy_code',
-      client_id: cfg.clientId,
-      client_secret: cfg.clientSecret,
-      redirect_uri: cfg.redirectUri,
-      grant_type: 'authorization_code',
-    });
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-      signal: AbortSignal.timeout(8_000),
-    });
-    const tokenJson: any = await tokenRes.json().catch(() => ({}));
-    if (tokenJson.error === 'invalid_grant' || tokenJson.error === 'bad_request') {
-      clientCredentialsStatus = 'valid_client_credentials';
-    } else if (tokenJson.error === 'invalid_client') {
-      clientCredentialsStatus = /secret/i.test(String(tokenJson.error_description || ''))
-        ? 'invalid_client_secret'
-        : 'invalid_client_id';
+  if (cfg.valid) {
+    try {
+      const tokenProbe = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: 'diagnostic_probe_invalid_code',
+          client_id: cfg.clientId,
+          client_secret: cfg.clientSecret,
+          redirect_uri: cfg.redirectUri,
+          grant_type: 'authorization_code',
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data: any = await tokenProbe.json().catch(() => ({}));
+      const errCode = String(data?.error || '').toLowerCase();
+      if (errCode === 'invalid_client') {
+        clientCredentialsStatus = 'invalid_client';
+        diagnosedBlocker = 'invalid_client';
+      } else if (errCode === 'redirect_uri_mismatch') {
+        redirectUriStatus = 'mismatch';
+        diagnosedBlocker = 'redirect_uri_mismatch';
+      } else {
+        clientCredentialsStatus = 'valid_client_credentials';
+        redirectUriStatus = 'registered';
+      }
+    } catch {
+      clientCredentialsStatus = 'error';
+      diagnosedBlocker = 'network_error';
     }
-  } catch {
-    clientCredentialsStatus = 'error';
+  } else {
+    diagnosedBlocker = cfg.errors[0] || 'unconfigured';
   }
-
-  // Probe 2: Google authorization endpoint (checks redirect_uri registration without login)
-  let redirectUriStatus: 'registered' | 'not_registered' | 'invalid_client' | 'unknown' = 'unknown';
-  try {
-    const authParams = new URLSearchParams({
-      client_id: cfg.clientId,
-      redirect_uri: cfg.redirectUri,
-      response_type: 'code',
-      scope: DRIVE_OAUTH_SCOPES.join(' '),
-      access_type: 'offline',
-      prompt: 'select_account consent',
-    });
-    const authRes = await fetch(`https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`, {
-      method: 'GET',
-      redirect: 'manual',
-      signal: AbortSignal.timeout(8_000),
-    });
-    const loc = authRes.headers.get('location') || '';
-    if (!/\/signin\/oauth\/error/i.test(loc)) {
-      redirectUriStatus = 'registered';
-    } else {
-      const ae = new URL(loc).searchParams.get('authError') || '';
-      const decoded = Buffer.from(ae.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('latin1');
-      if (/redirect_uri_mismatch/i.test(decoded)) redirectUriStatus = 'not_registered';
-      else if (/invalid_client|deleted_client/i.test(decoded)) redirectUriStatus = 'invalid_client';
-    }
-  } catch {
-    redirectUriStatus = 'unknown';
-  }
-
-  let diagnosedBlocker: 'none' | 'incorrect_oauth_client' | 'redirect_uri_mismatch' | 'invalid_scope' = 'none';
-  if (clientCredentialsStatus !== 'valid_client_credentials' || redirectUriStatus === 'invalid_client') {
-    diagnosedBlocker = 'incorrect_oauth_client';
-  } else if (redirectUriStatus === 'not_registered') {
-    diagnosedBlocker = 'redirect_uri_mismatch';
-  } else if (!scopeValid) {
-    diagnosedBlocker = 'invalid_scope';
-  }
-
-  const testingModeGuidance =
-    diagnosedBlocker === 'none'
-      ? `OAuth client (${clientIdMasked}), redirect URI (${cfg.redirectUri}), and minimal read-only scopes are all valid. ` +
-        `If Google shows "Error 403: access_denied", add your administrator Gmail under Google Cloud Project ${projectNumber || ''} → Google Auth Platform → Audience → Test users (Testing mode is recommended for admin-only Drive access).`
-      : `Detected OAuth blocker: ${diagnosedBlocker}.`;
 
   return {
-    googleCloudProjectNumber: projectNumber,
-    clientIdMasked,
-    redirectUri: cfg.redirectUri,
-    scopes: DRIVE_OAUTH_SCOPES,
-    adminOnlyDriveAccess: true,
+    googleCloudProjectNumber: projectNum,
     clientCredentialsStatus,
     redirectUriStatus,
-    scopeValid,
+    scopeValid: DRIVE_OAUTH_SCOPES.includes('https://www.googleapis.com/auth/drive.readonly'),
     diagnosedBlocker,
-    testingModeGuidance,
+    adminOnlyDriveAccess: true,
+    redirectUri: cfg.redirectUri,
   };
 }
 
-/**
- * Handles the OAuth callback: verifies state, exchanges code using canonical redirect URI,
- * checks allowlist, encrypts tokens with AES-256-GCM, and saves the connection in PostgreSQL.
- */
 export async function handleDriveOAuthCallback(params: {
   code: string;
   state: string;
   reqHostHint?: string;
   oauthClientFactory?: (redirectUri: string) => OAuth2Client;
-}): Promise<{ email: string; name: string | null; frontendOrigin: string }> {
+}): Promise<{ email: string; name: string | null; frontendOrigin: string; verified: boolean }> {
   await ensureDriveOAuthSchema();
 
   const stateCheck = verifySignedOAuthState(params.state);
@@ -664,7 +633,6 @@ export async function handleDriveOAuthCallback(params: {
 
   oauth2Client.setCredentials(tokens);
 
-  // Fetch authenticated Google account identity
   const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
   const profileRes = await oauth2.userinfo.get();
   const email = cleanEnvValue(profileRes.data.email).toLowerCase();
@@ -676,13 +644,12 @@ export async function handleDriveOAuthCallback(params: {
 
   if (!isAllowedAdminGoogleEmail(email)) {
     const err: any = new Error(
-      `Unauthorized Google account (${email}). Only approved administrator emails in GOOGLE_DRIVE_ALLOWED_EMAILS may connect Google Drive.`
+      `Unauthorized Google account (${email}). Only approved administrator emails may connect Google Drive.`
     );
     err.statusCode = 403;
     throw err;
   }
 
-  // Preserve existing refresh token if Google omitted it on a re-consent for the same email
   let effectiveRefreshToken = tokens.refresh_token || '';
   if (!effectiveRefreshToken) {
     const existing = await pool.query(
@@ -710,8 +677,8 @@ export async function handleDriveOAuthCallback(params: {
   const encRefresh = encryptTokenValue(effectiveRefreshToken);
   const encAccess = tokens.access_token ? encryptTokenValue(tokens.access_token) : null;
   const folderName = cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_NAME) || DEFAULT_TEXTBOOKS_FOLDER_NAME;
+  const configuredFolderId = cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_ID) || null;
 
-  // Replace active connection cleanly inside a transaction
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -721,9 +688,10 @@ export async function handleDriveOAuthCallback(params: {
          admin_id, admin_username, account_email, account_name,
          encrypted_refresh_token, refresh_token_iv, refresh_token_auth_tag,
          encrypted_access_token, access_token_iv, access_token_auth_tag,
-         token_expiry, scope, folder_name, connection_status, last_error,
+         token_expiry, scope, folder_id, folder_name, connection_status,
+         drive_api_accessible, folder_accessible, last_error,
          connected_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'CONNECTED',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'CONNECTED',false,false,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
       [
         adminId,
         adminUsername,
@@ -737,6 +705,7 @@ export async function handleDriveOAuthCallback(params: {
         encAccess?.authTag || null,
         tokens.expiry_date || null,
         tokens.scope || DRIVE_OAUTH_SCOPES.join(' '),
+        configuredFolderId,
         folderName,
       ]
     );
@@ -748,13 +717,18 @@ export async function handleDriveOAuthCallback(params: {
     client.release();
   }
 
-  return { email, name, frontendOrigin };
+  // Immediately perform real Drive API verification so status transitions to VERIFIED if Drive API succeeds
+  let verified = false;
+  try {
+    const verifyRes = await verifyLiveDriveConnection();
+    verified = verifyRes.verified;
+  } catch {
+    verified = false;
+  }
+
+  return { email, name, frontendOrigin, verified };
 }
 
-/**
- * Returns an authenticated OAuth2Client, automatically refreshing expired access tokens
- * and persisting rotated encrypted tokens. Marks REAUTHORIZATION_REQUIRED if refresh token is revoked.
- */
 export async function getAuthenticatedDriveClient(options?: {
   oauthClientFactory?: (redirectUri: string) => OAuth2Client;
 }): Promise<{ client: OAuth2Client; connection: any }> {
@@ -766,7 +740,7 @@ export async function getAuthenticatedDriveClient(options?: {
   if (res.rows.length === 0) {
     const err: any = new Error('Google Drive is not connected. Click "Connect Google Drive" to authorize.');
     err.statusCode = 401;
-    err.uiStatus = 'AUTHORIZATION_REQUIRED';
+    err.uiStatus = 'NOT_CONNECTED';
     throw err;
   }
 
@@ -792,7 +766,6 @@ export async function getAuthenticatedDriveClient(options?: {
     expiry_date: conn.token_expiry ? Number(conn.token_expiry) : undefined,
   });
 
-  // Refresh if access token is missing or expires within 2 minutes
   const expiryMs = conn.token_expiry ? Number(conn.token_expiry) : 0;
   const needsRefresh = !accessToken || !expiryMs || expiryMs <= Date.now() + 2 * 60 * 1000;
 
@@ -812,7 +785,7 @@ export async function getAuthenticatedDriveClient(options?: {
              refresh_token_iv = COALESCE($5, refresh_token_iv),
              refresh_token_auth_tag = COALESCE($6, refresh_token_auth_tag),
              token_expiry = COALESCE($7, token_expiry),
-             connection_status = 'CONNECTED',
+             connection_status = CASE WHEN drive_api_accessible THEN 'VERIFIED' ELSE 'CONNECTED' END,
              last_error = NULL,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $8`,
@@ -841,6 +814,7 @@ export async function getAuthenticatedDriveClient(options?: {
       await pool.query(
         `UPDATE google_drive_connections
          SET connection_status = $1,
+             drive_api_accessible = false,
              last_error = $2,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $3`,
@@ -858,12 +832,126 @@ export async function getAuthenticatedDriveClient(options?: {
 }
 
 /**
- * Classifies textbook metadata from folder path + PDF filename (metadata-only).
+ * Performs a real authenticated Google Drive API v3 verification request:
+ * 1) Confirms Drive API is accessible and checks authenticated email
+ * 2) Checks whether the configured textbook folder is accessible
+ * 3) Marks connection_status = 'VERIFIED' only when live Drive API call succeeds.
+ */
+export async function verifyLiveDriveConnection(reqHostHint?: string): Promise<DriveConnectionSummary> {
+  await ensureDriveOAuthSchema();
+
+  const { client, connection } = await getAuthenticatedDriveClient();
+  const drive = google.drive({ version: 'v3', auth: client });
+
+  try {
+    const aboutRes = await drive.about.get({ fields: 'user(emailAddress,displayName)' });
+    const driveEmail = cleanEnvValue(aboutRes.data.user?.emailAddress).toLowerCase() || connection.account_email;
+    const driveName = cleanEnvValue(aboutRes.data.user?.displayName) || connection.account_name;
+
+    let folderId: string | null = connection.folder_id || cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_ID) || null;
+    const folderName: string = connection.folder_name || cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_NAME) || DEFAULT_TEXTBOOKS_FOLDER_NAME;
+    let folderAccessible = false;
+
+    if (folderId) {
+      try {
+        const fMeta = await drive.files.get({
+          fileId: folderId,
+          fields: 'id, name, trashed',
+          supportsAllDrives: true,
+        });
+        folderAccessible = Boolean(fMeta.data.id && !fMeta.data.trashed);
+      } catch {
+        folderAccessible = false;
+      }
+    } else {
+      const escaped = folderName.replace(/'/g, "\\'");
+      const folderSearch = await drive.files.list({
+        q: `name = '${escaped}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id, name)',
+        pageSize: 5,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const found = folderSearch.data.files?.[0];
+      if (found?.id) {
+        folderId = found.id;
+        folderAccessible = true;
+      }
+    }
+
+    await pool.query(
+      `UPDATE google_drive_connections
+       SET account_email = $1,
+           account_name = $2,
+           folder_id = COALESCE($3, folder_id),
+           connection_status = 'VERIFIED',
+           drive_api_accessible = true,
+           folder_accessible = $4,
+           last_verified_at = CURRENT_TIMESTAMP,
+           last_error = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5`,
+      [driveEmail, driveName, folderId, folderAccessible, connection.id]
+    );
+  } catch (verifyErr: any) {
+    const errMsg = verifyErr?.response?.data?.error?.message || verifyErr?.message || 'Drive API verification failed.';
+    await pool.query(
+      `UPDATE google_drive_connections
+       SET connection_status = 'CONNECTION_FAILED',
+           drive_api_accessible = false,
+           last_error = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [errMsg, connection.id]
+    );
+  }
+
+  return getDriveConnectionSummary(reqHostHint);
+}
+
+/**
+ * Lists folders in My Drive / Shared Drives so the Admin can select or browse textbook folders.
+ */
+export async function listDriveFolders(parentFolderId?: string): Promise<Array<{ id: string; name: string; parentId: string | null }>> {
+  const { client } = await getAuthenticatedDriveClient();
+  const drive = google.drive({ version: 'v3', auth: client });
+
+  const q = parentFolderId
+    ? `'${parentFolderId.replace(/'/g, "\\'")}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+    : `mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+
+  const folders: Array<{ id: string; name: string; parentId: string | null }> = [];
+  let pageToken: string | undefined;
+
+  do {
+    const res = await drive.files.list({
+      q,
+      fields: 'nextPageToken, files(id, name, parents)',
+      orderBy: 'name',
+      pageSize: 200,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files || []) {
+      if (f.id && f.name) {
+        folders.push({ id: f.id, name: f.name, parentId: f.parents?.[0] || null });
+      }
+    }
+    pageToken = res.data.nextPageToken || undefined;
+  } while (pageToken && folders.length < 500);
+
+  return folders;
+}
+
+/**
+ * Smart metadata classifier: only assigns Standard/Subject/Unit when confidently detected;
+ * otherwise flags needsReview = true so the Admin verifies before publishing.
  */
 export function classifyTextbookFromDrivePath(fileName: string, folderSegments: string[]) {
   const combined = [...folderSegments, fileName].join(' ').replace(/[_.-]+/g, ' ');
 
-  let standard = 6;
+  let standard: number | null = null;
   const stdMatch = combined.match(/(?:class|std|standard)?\s*(12|11|10|9|8|7|6)(?:th)?\b/i);
   if (stdMatch) standard = parseInt(stdMatch[1], 10);
 
@@ -872,13 +960,17 @@ export function classifyTextbookFromDrivePath(fileName: string, folderSegments: 
 
   let term: string | null = null;
   let volume: string | null = null;
-  if (standard <= 10) {
+  if (standard !== null && standard <= 10) {
     const tm = combined.match(/\bterm\s*([1-3])\b/i);
     if (tm) term = `Term ${tm[1]}`;
-  } else {
+  } else if (standard !== null && standard >= 11) {
     const vm = combined.match(/\bvol(?:ume)?\s*([1-3])\b/i);
     if (vm) volume = `Volume ${vm[1]}`;
   }
+
+  let unit: number | null = null;
+  const unitMatch = combined.match(/\bunit\s*(\d{1,2})\b/i);
+  if (unitMatch) unit = parseInt(unitMatch[1], 10);
 
   const subjectHint = [
     ...folderSegments.filter((s) => !/medium|term|vol|standard|std|class|textbook/i.test(s)),
@@ -905,7 +997,7 @@ export function classifyTextbookFromDrivePath(fileName: string, folderSegments: 
     [/\benglish\b/i, 'English'],
   ];
 
-  let subject = 'General Studies';
+  let subject: string | null = null;
   for (const [pat, label] of subjectRules) {
     if (pat.test(subjectHint)) {
       subject = label;
@@ -913,30 +1005,33 @@ export function classifyTextbookFromDrivePath(fileName: string, folderSegments: 
     }
   }
 
+  const confident = standard !== null && subject !== null;
+  const resolvedStandard = standard ?? 6;
+  const resolvedSubject = subject ?? 'Unclassified';
   const baseName = fileName.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').trim();
-  const bookName = baseName || `${standard}th ${subject} ${term || volume || ''} (${medium})`.replace(/\s+/g, ' ').trim();
+  const bookName = baseName || `${resolvedStandard}th ${resolvedSubject} (${medium})`;
 
-  return { standard, medium, term, volume, subject, bookName };
-}
-
-export interface DiscoveredDrivePdf {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  modifiedTime: string | null;
-  parentFolderId: string | null;
-  folderSegments: string[];
+  return {
+    standard: resolvedStandard,
+    medium,
+    term,
+    volume,
+    unit,
+    subject: resolvedSubject,
+    bookName,
+    reviewStatus: (confident ? 'PENDING_REVIEW' : 'NEEDS_REVIEW') as ReviewStatus,
+  };
 }
 
 /**
  * Metadata-only recursive Google Drive PDF textbook synchronization into PostgreSQL.
- * Never downloads PDF binaries into PostgreSQL, avoids duplicates, skips unchanged records,
- * and marks missing/inaccessible Drive files cleanly.
+ * Supports pagination (>100 files), My Drive + Shared Drives, skips unchanged files,
+ * prevents duplicates via unique google_drive_file_id, and never auto-publishes.
  */
 export async function syncDriveTextbooksMetadata(params: {
   adminId: number | null;
   adminUsername: string;
+  folderId?: string;
   folderName?: string;
   discoveredPdfsOverride?: DiscoveredDrivePdf[];
   folderIdOverride?: string;
@@ -956,39 +1051,48 @@ export async function syncDriveTextbooksMetadata(params: {
   );
   const logId = Number(logIns.rows[0].id);
 
-  let folderId = params.folderIdOverride || cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_ID) || '';
+  let folderId =
+    cleanEnvValue(params.folderId) ||
+    params.folderIdOverride ||
+    cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_ID) ||
+    '';
   const errors: string[] = [];
 
   try {
     let discovered: DiscoveredDrivePdf[] = [];
 
     if (params.discoveredPdfsOverride) {
-      discovered = params.discoveredPdfsOverride;
+      discovered = params.discoveredPdfsOverride.filter(
+        (f) => f.mimeType === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+      );
       folderId = folderId || 'mock_root_folder';
     } else {
-      const { client } = await getAuthenticatedDriveClient();
+      const { client, connection } = await getAuthenticatedDriveClient();
       const drive = google.drive({ version: 'v3', auth: client });
 
-      // 1. Locate root folder
+      // 1. Resolve target root folder
+      if (!folderId && connection.folder_id && (!params.folderName || params.folderName === connection.folder_name)) {
+        folderId = connection.folder_id;
+      }
       if (!folderId) {
         const escaped = targetFolderName.replace(/'/g, "\\'");
         const folderRes = await drive.files.list({
           q: `name = '${escaped}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
           fields: 'files(id, name)',
-          pageSize: 5,
+          pageSize: 10,
           supportsAllDrives: true,
           includeItemsFromAllDrives: true,
         });
         const match = folderRes.data.files?.[0];
         if (!match?.id) {
           throw new Error(
-            `Google Drive folder "${targetFolderName}" was not found. Create or share this folder in the connected Google account, or set GOOGLE_DRIVE_TEXTBOOKS_FOLDER_ID.`
+            `Google Drive folder "${targetFolderName}" was not found. Select a folder from the folder picker or create/share "${targetFolderName}" in ${connection.account_email}.`
           );
         }
         folderId = match.id;
       }
 
-      // 2. Recursive BFS metadata scan (zero PDF downloads!)
+      // 2. Recursive BFS metadata scan with full nextPageToken pagination (supports 1000+ PDFs)
       const queue: Array<{ id: string; segments: string[] }> = [{ id: folderId, segments: [targetFolderName] }];
       const visitedFolders = new Set<string>([folderId]);
 
@@ -999,7 +1103,7 @@ export async function syncDriveTextbooksMetadata(params: {
           const listRes = await drive.files.list({
             q: `'${current.id}' in parents and trashed = false`,
             fields: 'nextPageToken, files(id, name, mimeType, size, modifiedTime, parents)',
-            pageSize: 500,
+            pageSize: 1000,
             pageToken,
             supportsAllDrives: true,
             includeItemsFromAllDrives: true,
@@ -1011,11 +1115,11 @@ export async function syncDriveTextbooksMetadata(params: {
                 visitedFolders.add(f.id);
                 queue.push({ id: f.id, segments: [...current.segments, f.name] });
               }
-            } else if (f.mimeType === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+            } else if (f.mimeType === 'application/pdf') {
               discovered.push({
                 id: f.id,
                 name: f.name,
-                mimeType: f.mimeType || 'application/pdf',
+                mimeType: 'application/pdf',
                 size: Number(f.size || 0),
                 modifiedTime: f.modifiedTime || null,
                 parentFolderId: f.parents?.[0] || current.id,
@@ -1029,12 +1133,18 @@ export async function syncDriveTextbooksMetadata(params: {
 
       await pool.query(
         `UPDATE google_drive_connections
-         SET folder_id = $1, folder_name = $2, updated_at = CURRENT_TIMESTAMP`,
+         SET folder_id = $1,
+             folder_name = $2,
+             folder_accessible = true,
+             drive_api_accessible = true,
+             connection_status = 'VERIFIED',
+             last_verified_at = CURRENT_TIMESTAMP,
+             last_error = NULL,
+             updated_at = CURRENT_TIMESTAMP`,
         [folderId, targetFolderName]
       );
     }
 
-    // Load existing Drive-linked textbooks to skip unchanged & detect missing files
     const existingRes = await pool.query(
       `SELECT id, google_drive_file_id, file_size, drive_modified_time, drive_available
        FROM textbooks
@@ -1069,10 +1179,7 @@ export async function syncDriveTextbooksMetadata(params: {
           existing.drive_available === true
         ) {
           unchangedCount += 1;
-          await pool.query(
-            `UPDATE textbooks SET last_synced_at = CURRENT_TIMESTAMP WHERE id = $1`,
-            [existing.id]
-          );
+          await pool.query(`UPDATE textbooks SET last_synced_at = CURRENT_TIMESTAMP WHERE id = $1`, [existing.id]);
           continue;
         }
 
@@ -1098,17 +1205,17 @@ export async function syncDriveTextbooksMetadata(params: {
         } else {
           await pool.query(
             `INSERT INTO textbooks (
-               group_id, standard, subject, medium, term, volume, book_name,
+               group_id, standard, subject, medium, term, volume, unit, book_name,
                file_path, file_name, mime_type, file_size,
                google_drive_file_id, google_drive_parent_folder_id,
                drive_modified_time, drive_folder_path, drive_available,
-               publication_status, status, last_synced_at, updated_at
+               review_status, publication_status, status, last_synced_at, updated_at
              ) VALUES (
-               'group1', $1, $2, $3, $4, $5, $6,
-               $7, $8, $9, $10,
-               $11, $12,
-               $13, $14, true,
-               'pending_review', 'uploaded', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+               'group1', $1, $2, $3, $4, $5, $6, $7,
+               $8, $9, $10, $11,
+               $12, $13,
+               $14, $15, true,
+               $16, 'PENDING_REVIEW', 'uploaded', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
              )
              ON CONFLICT (google_drive_file_id) WHERE google_drive_file_id IS NOT NULL DO NOTHING`,
             [
@@ -1117,6 +1224,7 @@ export async function syncDriveTextbooksMetadata(params: {
               meta.medium,
               meta.term || (meta.standard >= 11 ? meta.volume || 'Full Book' : 'Full Year'),
               meta.volume,
+              meta.unit,
               meta.bookName,
               `gdrive://${pdf.id}`,
               pdf.name,
@@ -1126,6 +1234,7 @@ export async function syncDriveTextbooksMetadata(params: {
               pdf.parentFolderId,
               remoteModIso,
               folderPath,
+              meta.reviewStatus,
             ]
           );
           insertedCount += 1;
@@ -1136,18 +1245,21 @@ export async function syncDriveTextbooksMetadata(params: {
       }
     }
 
-    // Mark previously synced Drive textbooks that are no longer accessible in Drive
     let missingCount = 0;
-    for (const [driveId, row] of existingByDriveId.entries()) {
-      if (!seenDriveIds.has(driveId) && row.drive_available !== false) {
-        await pool.query(
-          `UPDATE textbooks
-           SET drive_available = false,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1`,
-          [row.id]
-        );
-        missingCount += 1;
+    // Never mark unrelated real Drive records as unavailable during mock/override test runs
+    if (!params.discoveredPdfsOverride) {
+      for (const [driveId, row] of existingByDriveId.entries()) {
+        if (!seenDriveIds.has(driveId) && row.drive_available !== false) {
+          await pool.query(
+            `UPDATE textbooks
+             SET drive_available = false,
+                 publication_status = CASE WHEN UPPER(publication_status) = 'PUBLISHED' THEN 'UNAVAILABLE' ELSE publication_status END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [row.id]
+          );
+          missingCount += 1;
+        }
       }
     }
 
@@ -1205,6 +1317,646 @@ export async function syncDriveTextbooksMetadata(params: {
   }
 }
 
+function mapTextbookRow(r: any): DriveTextbookRow {
+  const pubRaw = String(r.publication_status || 'PENDING_REVIEW').toUpperCase();
+  const revRaw = String(r.review_status || 'PENDING_REVIEW').toUpperCase();
+  return {
+    id: Number(r.id),
+    groupId: String(r.group_id || 'group1'),
+    bookName: String(r.book_name || r.file_name || 'Untitled Textbook'),
+    standard: Number(r.standard || 6),
+    term: r.term || null,
+    volume: r.volume || null,
+    subject: String(r.subject || 'Unclassified'),
+    medium: String(r.medium || '').toLowerCase().includes('tamil') ? 'Tamil' : 'English',
+    unit: r.unit !== null && r.unit !== undefined ? Number(r.unit) : null,
+    fileName: String(r.file_name || `${r.book_name || 'textbook'}.pdf`),
+    mimeType: String(r.mime_type || 'application/pdf'),
+    fileSize: Number(r.file_size || 0),
+    googleDriveFileId: String(r.google_drive_file_id),
+    googleDriveParentFolderId: r.google_drive_parent_folder_id || null,
+    driveFolderPath: r.drive_folder_path || null,
+    driveModifiedTime: r.drive_modified_time ? new Date(r.drive_modified_time).toISOString() : null,
+    driveAvailable: r.drive_available !== false,
+    reviewStatus: revRaw as ReviewStatus,
+    publicationStatus: pubRaw as PublicationStatus,
+    publishedAt: r.published_at ? new Date(r.published_at).toISOString() : null,
+    publishedBy: r.published_by || null,
+    lastSyncedAt: r.last_synced_at ? new Date(r.last_synced_at).toISOString() : null,
+    downloadCount: Number(r.download_count || 0),
+  };
+}
+
+export async function listDriveTextbooksForAdmin(filters?: {
+  search?: string;
+  standard?: string;
+  termOrVolume?: string;
+  subject?: string;
+  medium?: string;
+  publicationStatus?: string;
+}): Promise<DriveTextbookRow[]> {
+  await ensureDriveOAuthSchema();
+
+  const clauses = ['google_drive_file_id IS NOT NULL'];
+  const params: any[] = [];
+  let idx = 1;
+
+  if (filters?.standard && filters.standard !== 'all') {
+    clauses.push(`standard = $${idx++}`);
+    params.push(Number(filters.standard));
+  }
+  if (filters?.medium && filters.medium !== 'all') {
+    clauses.push(`LOWER(medium) = LOWER($${idx++})`);
+    params.push(filters.medium);
+  }
+  if (filters?.subject && filters.subject !== 'all') {
+    clauses.push(`LOWER(subject) = LOWER($${idx++})`);
+    params.push(filters.subject);
+  }
+  if (filters?.termOrVolume && filters.termOrVolume !== 'all') {
+    clauses.push(`(LOWER(COALESCE(term, '')) = LOWER($${idx}) OR LOWER(COALESCE(volume, '')) = LOWER($${idx}))`);
+    params.push(filters.termOrVolume);
+    idx += 1;
+  }
+  if (filters?.publicationStatus && filters.publicationStatus !== 'all') {
+    clauses.push(`UPPER(COALESCE(publication_status, 'PENDING_REVIEW')) = UPPER($${idx++})`);
+    params.push(filters.publicationStatus);
+  }
+  if (filters?.search && filters.search.trim()) {
+    clauses.push(`(book_name ILIKE $${idx} OR file_name ILIKE $${idx} OR subject ILIKE $${idx} OR COALESCE(drive_folder_path, '') ILIKE $${idx})`);
+    params.push(`%${filters.search.trim()}%`);
+    idx += 1;
+  }
+
+  const res = await pool.query(
+    `SELECT * FROM textbooks
+     WHERE ${clauses.join(' AND ')}
+     ORDER BY standard ASC, subject ASC, book_name ASC`,
+    params
+  );
+  return res.rows.map(mapTextbookRow);
+}
+
+export async function updateDriveTextbookMetadataById(
+  id: number,
+  updates: {
+    groupId?: string;
+    bookName?: string;
+    standard?: number;
+    term?: string | null;
+    volume?: string | null;
+    subject?: string;
+    medium?: string;
+    unit?: number | null;
+    reviewStatus?: ReviewStatus;
+  }
+): Promise<DriveTextbookRow | null> {
+  await ensureDriveOAuthSchema();
+
+  const existing = await pool.query(`SELECT * FROM textbooks WHERE id = $1 AND google_drive_file_id IS NOT NULL`, [id]);
+  if (existing.rows.length === 0) return null;
+
+  const cur = existing.rows[0];
+  const nextStd = updates.standard !== undefined ? Number(updates.standard) : Number(cur.standard);
+  const nextTerm = nextStd <= 10 ? (updates.term !== undefined ? updates.term : cur.term) : null;
+  const nextVol = nextStd >= 11 ? (updates.volume !== undefined ? updates.volume : cur.volume) : null;
+  const nextUnit = updates.unit !== undefined ? (updates.unit === null ? null : Number(updates.unit)) : cur.unit;
+
+  const res = await pool.query(
+    `UPDATE textbooks
+     SET group_id = $1,
+         book_name = $2,
+         standard = $3,
+         term = $4,
+         volume = $5,
+         subject = $6,
+         medium = $7,
+         unit = $8,
+         review_status = COALESCE($9, review_status),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $10
+     RETURNING *`,
+    [
+      updates.groupId || cur.group_id || 'group1',
+      (updates.bookName || cur.book_name).trim(),
+      nextStd,
+      nextTerm || (nextStd >= 11 ? nextVol || 'Full Book' : 'Full Year'),
+      nextVol,
+      (updates.subject || cur.subject).trim(),
+      updates.medium || cur.medium || 'English',
+      Number.isFinite(nextUnit) ? nextUnit : null,
+      updates.reviewStatus || null,
+      id,
+    ]
+  );
+  return mapTextbookRow(res.rows[0]);
+}
+
+export async function resyncSingleDriveTextbook(id: number): Promise<DriveTextbookRow | null> {
+  await ensureDriveOAuthSchema();
+  const res = await pool.query(`SELECT * FROM textbooks WHERE id = $1 AND google_drive_file_id IS NOT NULL`, [id]);
+  if (res.rows.length === 0) return null;
+
+  const row = res.rows[0];
+  const { client } = await getAuthenticatedDriveClient();
+  const drive = google.drive({ version: 'v3', auth: client });
+
+  try {
+    const meta = await drive.files.get({
+      fileId: row.google_drive_file_id,
+      fields: 'id, name, mimeType, size, modifiedTime, trashed, parents',
+      supportsAllDrives: true,
+    });
+    const available = Boolean(meta.data.id && !meta.data.trashed);
+    const upd = await pool.query(
+      `UPDATE textbooks
+       SET file_name = COALESCE($1, file_name),
+           file_size = COALESCE($2, file_size),
+           drive_modified_time = COALESCE($3, drive_modified_time),
+           drive_available = $4,
+           publication_status = CASE WHEN $4 = false AND UPPER(publication_status) = 'PUBLISHED' THEN 'UNAVAILABLE' ELSE publication_status END,
+           last_synced_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5
+       RETURNING *`,
+      [
+        meta.data.name || null,
+        meta.data.size ? Number(meta.data.size) : null,
+        meta.data.modifiedTime ? new Date(meta.data.modifiedTime).toISOString() : null,
+        available,
+        id,
+      ]
+    );
+    return mapTextbookRow(upd.rows[0]);
+  } catch {
+    const upd = await pool.query(
+      `UPDATE textbooks
+       SET drive_available = false,
+           publication_status = CASE WHEN UPPER(publication_status) = 'PUBLISHED' THEN 'UNAVAILABLE' ELSE publication_status END,
+           last_synced_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return mapTextbookRow(upd.rows[0]);
+  }
+}
+
+export async function applyDriveTextbookWorkflowAction(params: {
+  ids: number[];
+  action: 'mark_review' | 'approve' | 'reject' | 'publish' | 'unpublish';
+  adminUsername: string;
+  skipDriveCheck?: boolean;
+}): Promise<{ updatedCount: number; failed: Array<{ id: number; reason: string }> }> {
+  await ensureDriveOAuthSchema();
+  const cleanIds = Array.from(new Set(params.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0)));
+  if (cleanIds.length === 0) return { updatedCount: 0, failed: [] };
+
+  const failed: Array<{ id: number; reason: string }> = [];
+  let updatedCount = 0;
+
+  let driveClient: ReturnType<typeof google.drive> | null = null;
+  if (params.action === 'publish' && !params.skipDriveCheck) {
+    const { client } = await getAuthenticatedDriveClient();
+    driveClient = google.drive({ version: 'v3', auth: client });
+  }
+
+  const dbClient = await pool.connect();
+  try {
+    await dbClient.query('BEGIN');
+    for (const id of cleanIds) {
+      const rowRes = await dbClient.query(
+        `SELECT * FROM textbooks WHERE id = $1 AND google_drive_file_id IS NOT NULL`,
+        [id]
+      );
+      if (rowRes.rows.length === 0) {
+        failed.push({ id, reason: 'Textbook record not found.' });
+        continue;
+      }
+      const tb = rowRes.rows[0];
+
+      if (params.action === 'publish') {
+        if (!tb.book_name || !tb.subject || String(tb.subject).toLowerCase() === 'unclassified') {
+          failed.push({ id, reason: 'Metadata incomplete: assign Subject & Title before publishing.' });
+          continue;
+        }
+        if (driveClient) {
+          try {
+            const check = await driveClient.files.get({
+              fileId: tb.google_drive_file_id,
+              fields: 'id, trashed',
+              supportsAllDrives: true,
+            });
+            if (!check.data.id || check.data.trashed) {
+              failed.push({ id, reason: 'Original PDF is trashed or missing in Google Drive.' });
+              continue;
+            }
+          } catch (driveErr: any) {
+            failed.push({ id, reason: `Drive accessibility check failed: ${driveErr?.message || 'Inaccessible'}` });
+            continue;
+          }
+        }
+        await dbClient.query(
+          `UPDATE textbooks
+           SET review_status = 'APPROVED',
+               publication_status = 'PUBLISHED',
+               drive_available = true,
+               published_by = $1,
+               published_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [params.adminUsername, id]
+        );
+        updatedCount += 1;
+      } else if (params.action === 'unpublish') {
+        await dbClient.query(
+          `UPDATE textbooks
+           SET publication_status = 'UNPUBLISHED',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [id]
+        );
+        updatedCount += 1;
+      } else if (params.action === 'approve') {
+        await dbClient.query(
+          `UPDATE textbooks
+           SET review_status = 'APPROVED',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [id]
+        );
+        updatedCount += 1;
+      } else if (params.action === 'reject') {
+        await dbClient.query(
+          `UPDATE textbooks
+           SET review_status = 'REJECTED',
+               publication_status = 'REJECTED',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [id]
+        );
+        updatedCount += 1;
+      } else if (params.action === 'mark_review') {
+        await dbClient.query(
+          `UPDATE textbooks
+           SET review_status = 'PENDING_REVIEW',
+               publication_status = CASE WHEN UPPER(publication_status) = 'PUBLISHED' THEN 'PENDING_REVIEW' ELSE publication_status END,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [id]
+        );
+        updatedCount += 1;
+      }
+    }
+    await dbClient.query('COMMIT');
+  } catch (txErr) {
+    await dbClient.query('ROLLBACK');
+    throw txErr;
+  } finally {
+    dbClient.release();
+  }
+
+  return { updatedCount, failed };
+}
+
+function normalizeMediumParam(raw?: string): string | null {
+  if (!raw || raw === 'all') return null;
+  const lower = raw.toLowerCase().trim();
+  if (lower.includes('tamil')) return 'Tamil';
+  if (lower.includes('english')) return 'English';
+  return raw.trim();
+}
+
+/**
+ * Student Textbook Library query: strictly returns ONLY publication_status = 'PUBLISHED'
+ * AND drive_available = true AND deleted_at IS NULL. Supports medium, standard, subject,
+ * term, volume, termOrVolume, search, page, and limit.
+ */
+export async function listPublishedStudentTextbooks(filters?: {
+  group?: string;
+  standard?: string;
+  subject?: string;
+  medium?: string;
+  term?: string;
+  volume?: string;
+  termOrVolume?: string;
+  unit?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<DriveTextbookRow[]> {
+  const result = await queryPublishedStudentTextbooksPaginated(filters);
+  return result.items;
+}
+
+export async function queryPublishedStudentTextbooksPaginated(filters?: {
+  group?: string;
+  standard?: string;
+  subject?: string;
+  medium?: string;
+  term?: string;
+  volume?: string;
+  termOrVolume?: string;
+  unit?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{
+  items: DriveTextbookRow[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}> {
+  await ensureDriveOAuthSchema();
+
+  const clauses = [
+    'google_drive_file_id IS NOT NULL',
+    'deleted_at IS NULL',
+    "UPPER(COALESCE(publication_status, '')) = 'PUBLISHED'",
+    'COALESCE(drive_available, true) = true',
+  ];
+  const params: any[] = [];
+  let idx = 1;
+
+  if (filters?.group && filters.group !== 'all') {
+    clauses.push(`LOWER(group_id) = LOWER($${idx++})`);
+    params.push(filters.group);
+  }
+  if (filters?.standard && filters.standard !== 'all') {
+    clauses.push(`standard = $${idx++}`);
+    params.push(Number(filters.standard));
+  }
+  if (filters?.subject && filters.subject !== 'all') {
+    clauses.push(`LOWER(subject) = LOWER($${idx++})`);
+    params.push(filters.subject.trim());
+  }
+  const normMed = normalizeMediumParam(filters?.medium);
+  if (normMed) {
+    clauses.push(`LOWER(medium) = LOWER($${idx++})`);
+    params.push(normMed);
+  }
+  if (filters?.term && filters.term !== 'all') {
+    clauses.push(`LOWER(COALESCE(term, '')) = LOWER($${idx++})`);
+    params.push(filters.term.trim());
+  }
+  if (filters?.volume && filters.volume !== 'all') {
+    clauses.push(`(LOWER(COALESCE(volume, '')) = LOWER($${idx}) OR LOWER(COALESCE(term, '')) = LOWER($${idx}))`);
+    params.push(filters.volume.trim());
+    idx += 1;
+  }
+  if (filters?.termOrVolume && filters.termOrVolume !== 'all') {
+    clauses.push(`(LOWER(COALESCE(term, '')) = LOWER($${idx}) OR LOWER(COALESCE(volume, '')) = LOWER($${idx}))`);
+    params.push(filters.termOrVolume.trim());
+    idx += 1;
+  }
+  if (filters?.unit && filters.unit !== 'all') {
+    clauses.push(`unit = $${idx++}`);
+    params.push(Number(filters.unit));
+  }
+  if (filters?.search && filters.search.trim()) {
+    clauses.push(`(book_name ILIKE $${idx} OR file_name ILIKE $${idx} OR subject ILIKE $${idx})`);
+    params.push(`%${filters.search.trim()}%`);
+    idx += 1;
+  }
+
+  const whereSql = clauses.join(' AND ');
+  const page = Math.max(1, Number(filters?.page) || 1);
+  const limit = Math.min(200, Math.max(1, Number(filters?.limit) || 100));
+  const offset = (page - 1) * limit;
+
+  const [countRes, rowsRes] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int AS total FROM textbooks WHERE ${whereSql}`, params),
+    pool.query(
+      `SELECT * FROM textbooks
+       WHERE ${whereSql}
+       ORDER BY standard ASC, subject ASC, term ASC NULLS LAST, volume ASC NULLS LAST, book_name ASC
+       LIMIT $${idx} OFFSET $${idx + 1}`,
+      [...params, limit, offset]
+    ),
+  ]);
+
+  const total = Number(countRes.rows[0]?.total || 0);
+  return {
+    items: rowsRes.rows.map(mapTextbookRow),
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
+  };
+}
+
+/**
+ * Dynamic cascading filter options derived strictly from PUBLISHED, Drive-available textbooks.
+ */
+export async function getPublishedStudentTextbookFilters(filters?: {
+  medium?: string;
+  standard?: string;
+  subject?: string;
+  term?: string;
+  volume?: string;
+}) {
+  await ensureDriveOAuthSchema();
+
+  const baseWhere = `
+    google_drive_file_id IS NOT NULL
+    AND deleted_at IS NULL
+    AND UPPER(COALESCE(publication_status, '')) = 'PUBLISHED'
+    AND COALESCE(drive_available, true) = true
+  `;
+
+  const normMed = normalizeMediumParam(filters?.medium);
+  const stdNum = filters?.standard && filters.standard !== 'all' ? Number(filters.standard) : null;
+  const subj = filters?.subject && filters.subject !== 'all' ? filters.subject.trim() : null;
+
+  // 1. Mediums across all published textbooks
+  const mediumsRes = await pool.query(`
+    SELECT
+      CASE WHEN LOWER(medium) LIKE '%tamil%' THEN 'Tamil' ELSE 'English' END AS medium,
+      COUNT(*)::int AS count
+    FROM textbooks
+    WHERE ${baseWhere}
+    GROUP BY 1
+    ORDER BY 1 ASC
+  `);
+
+  // 2. Standards available for selected medium
+  const stdParams: any[] = [];
+  let stdClause = baseWhere;
+  if (normMed) {
+    stdParams.push(normMed);
+    stdClause += ` AND LOWER(medium) = LOWER($${stdParams.length})`;
+  }
+  const standardsRes = await pool.query(
+    `SELECT standard::int AS standard, COUNT(*)::int AS count
+     FROM textbooks
+     WHERE ${stdClause}
+     GROUP BY standard
+     ORDER BY standard ASC`,
+    stdParams
+  );
+
+  // 3. Subjects available for selected medium + standard
+  const subjParams: any[] = [...stdParams];
+  let subjClause = stdClause;
+  if (stdNum && Number.isInteger(stdNum)) {
+    subjParams.push(stdNum);
+    subjClause += ` AND standard = $${subjParams.length}`;
+  }
+  const subjectsRes = await pool.query(
+    `SELECT subject, COUNT(*)::int AS count
+     FROM textbooks
+     WHERE ${subjClause} AND subject IS NOT NULL AND TRIM(subject) <> ''
+     GROUP BY subject
+     ORDER BY subject ASC`,
+    subjParams
+  );
+
+  // 4. Terms & Volumes available for selected medium + standard + subject
+  const tvParams: any[] = [...subjParams];
+  let tvClause = subjClause;
+  if (subj) {
+    tvParams.push(subj);
+    tvClause += ` AND LOWER(subject) = LOWER($${tvParams.length})`;
+  }
+  const tvRes = await pool.query(
+    `SELECT term, volume, COUNT(*)::int AS count
+     FROM textbooks
+     WHERE ${tvClause}
+     GROUP BY term, volume`,
+    tvParams
+  );
+
+  const termCounts = new Map<string, number>();
+  const volumeCounts = new Map<string, number>();
+
+  for (const r of tvRes.rows) {
+    const t = String(r.term || '').trim();
+    const v = String(r.volume || '').trim();
+    const cnt = Number(r.count || 0);
+
+    if (/^term\s*\d+/i.test(t)) {
+      termCounts.set(t, (termCounts.get(t) || 0) + cnt);
+    }
+    if (/^vol(?:ume)?\s*\d+/i.test(v)) {
+      volumeCounts.set(v, (volumeCounts.get(v) || 0) + cnt);
+    } else if (/^vol(?:ume)?\s*\d+/i.test(t)) {
+      volumeCounts.set(t, (volumeCounts.get(t) || 0) + cnt);
+    }
+  }
+
+  const sortNumLabel = (a: string, b: string) => {
+    const na = parseInt(a.replace(/\D/g, ''), 10) || 99;
+    const nb = parseInt(b.replace(/\D/g, ''), 10) || 99;
+    return na - nb || a.localeCompare(b);
+  };
+
+  const terms = Array.from(termCounts.entries())
+    .sort(([a], [b]) => sortNumLabel(a, b))
+    .map(([label, count]) => ({ label, count }));
+
+  const volumes = Array.from(volumeCounts.entries())
+    .sort(([a], [b]) => sortNumLabel(a, b))
+    .map(([label, count]) => ({ label, count }));
+
+  const structureType: 'term' | 'volume' | 'both' | 'none' =
+    terms.length > 0 && volumes.length > 0
+      ? 'both'
+      : terms.length > 0
+        ? 'term'
+        : volumes.length > 0
+          ? 'volume'
+          : 'none';
+
+  const totalPublished = mediumsRes.rows.reduce((sum, r) => sum + Number(r.count || 0), 0);
+
+  return {
+    totalPublished,
+    mediums: mediumsRes.rows.map((r) => ({ medium: r.medium as 'Tamil' | 'English', count: Number(r.count) })),
+    standards: standardsRes.rows.map((r) => ({ standard: Number(r.standard), count: Number(r.count) })),
+    subjects: subjectsRes.rows.map((r) => ({ subject: String(r.subject), count: Number(r.count) })),
+    terms,
+    volumes,
+    structureType,
+  };
+}
+
+export async function getPublishedStudentTextbookById(id: number): Promise<DriveTextbookRow | null> {
+  await ensureDriveOAuthSchema();
+  const res = await pool.query(
+    `SELECT * FROM textbooks
+     WHERE id = $1
+       AND google_drive_file_id IS NOT NULL
+       AND deleted_at IS NULL
+       AND UPPER(COALESCE(publication_status, '')) = 'PUBLISHED'
+       AND COALESCE(drive_available, true) = true
+     LIMIT 1`,
+    [id]
+  );
+  return res.rows.length > 0 ? mapTextbookRow(res.rows[0]) : null;
+}
+
+/**
+ * Streams a Google Drive PDF directly as a Node Readable stream (zero full-file buffering in RAM).
+ * Enforces publication_status = 'PUBLISHED' for student requests!
+ */
+export async function openDriveTextbookPdfStream(params: {
+  textbookId: number;
+  isAdmin: boolean;
+  incrementDownloadCount?: boolean;
+}): Promise<{ stream: Readable; fileName: string; fileSize: number; mimeType: string }> {
+  await ensureDriveOAuthSchema();
+
+  const res = await pool.query(
+    `SELECT id, book_name, file_name, file_size, google_drive_file_id, publication_status, drive_available
+     FROM textbooks
+     WHERE id = $1 AND google_drive_file_id IS NOT NULL AND deleted_at IS NULL
+     LIMIT 1`,
+    [params.textbookId]
+  );
+  if (res.rows.length === 0) {
+    const err: any = new Error('Textbook not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const row = res.rows[0];
+  if (!params.isAdmin && String(row.publication_status || '').toUpperCase() !== 'PUBLISHED') {
+    const err: any = new Error('This textbook is not published in the Student Textbook Library.');
+    err.statusCode = 403;
+    throw err;
+  }
+  if (row.drive_available === false) {
+    const err: any = new Error('Original Google Drive PDF is currently unavailable.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const { client } = await getAuthenticatedDriveClient();
+  const drive = google.drive({ version: 'v3', auth: client });
+
+  const mediaRes = await drive.files.get(
+    { fileId: row.google_drive_file_id, alt: 'media', supportsAllDrives: true },
+    { responseType: 'stream' }
+  );
+
+  if (params.incrementDownloadCount) {
+    pool
+      .query(`UPDATE textbooks SET download_count = COALESCE(download_count, 0) + 1 WHERE id = $1`, [row.id])
+      .catch(() => {});
+  }
+
+  const rawName = String(row.file_name || `${row.book_name || 'textbook'}.pdf`).trim();
+  const safeName = rawName.toLowerCase().endsWith('.pdf') ? rawName : `${rawName}.pdf`;
+
+  return {
+    stream: mediaRes.data as unknown as Readable,
+    fileName: safeName,
+    fileSize: Number(row.file_size || 0),
+    mimeType: 'application/pdf',
+  };
+}
+
 export async function getDriveConnectionSummary(reqHostHint?: string): Promise<DriveConnectionSummary> {
   await ensureDriveOAuthSchema();
   const cfg = validateDriveOAuthConfig(reqHostHint);
@@ -1214,13 +1966,15 @@ export async function getDriveConnectionSummary(reqHostHint?: string): Promise<D
     pool.query(`
       SELECT
         COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL)::int AS synced_total,
-        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND publication_status = 'pending_review')::int AS pending_review,
-        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND publication_status = 'published')::int AS published,
-        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND drive_available = false)::int AS missing_in_drive
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND UPPER(COALESCE(publication_status, 'PENDING_REVIEW')) = 'PENDING_REVIEW')::int AS pending_review,
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND UPPER(COALESCE(review_status, '')) = 'APPROVED')::int AS approved,
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND UPPER(COALESCE(publication_status, '')) = 'PUBLISHED')::int AS published,
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND UPPER(COALESCE(publication_status, '')) = 'REJECTED')::int AS rejected,
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND drive_available = false)::int AS unavailable_files
       FROM textbooks
     `),
     pool.query(`
-      SELECT status, completed_at, started_at, error_details
+      SELECT status, discovered_count, completed_at, started_at, error_details
       FROM google_drive_textbook_sync_logs
       ORDER BY started_at DESC LIMIT 1
     `),
@@ -1236,44 +1990,61 @@ export async function getDriveConnectionSummary(reqHostHint?: string): Promise<D
   const conn = connRes.rows[0] || null;
 
   let uiStatus: DriveUiStatus = 'NOT_CONNECTED';
-  if (!cfg.valid) {
-    uiStatus = 'AUTHORIZATION_REQUIRED';
-  } else if (!conn) {
+  let tokenStatus: 'VALID' | 'EXPIRED' | 'REVOKED' | 'MISSING' = 'MISSING';
+
+  if (!conn) {
     uiStatus = 'NOT_CONNECTED';
+    tokenStatus = 'MISSING';
   } else if (conn.connection_status === 'REAUTHORIZATION_REQUIRED') {
     uiStatus = 'REAUTHORIZATION_REQUIRED';
+    tokenStatus = 'REVOKED';
   } else if (conn.connection_status === 'TOKEN_EXPIRED') {
     uiStatus = 'TOKEN_EXPIRED';
-  } else if (lastLog?.status === 'SYNCING') {
-    uiStatus = 'SYNCING';
-  } else if (lastLog?.status === 'SYNC_FAILED') {
-    uiStatus = 'SYNC_FAILED';
-  } else if (lastLog?.status === 'SYNC_COMPLETED') {
-    uiStatus = 'SYNC_COMPLETED';
+    tokenStatus = 'EXPIRED';
+  } else if (conn.connection_status === 'CONNECTION_FAILED') {
+    uiStatus = 'CONNECTION_FAILED';
+    tokenStatus = 'VALID';
+  } else if (conn.connection_status === 'VERIFIED' && conn.drive_api_accessible) {
+    uiStatus = 'VERIFIED';
+    tokenStatus = 'VALID';
   } else {
     uiStatus = 'CONNECTED';
+    tokenStatus = 'VALID';
   }
+
+  const syncedTotal = Number(countsRow.synced_total || 0);
+  const lastDiscovered = Math.max(syncedTotal, Number(lastLog?.discovered_count || 0));
 
   return {
     status: uiStatus,
-    connected: Boolean(conn && !['REAUTHORIZATION_REQUIRED', 'TOKEN_EXPIRED'].includes(conn.connection_status)),
+    connected: Boolean(conn && ['CONNECTED', 'VERIFIED'].includes(uiStatus)),
+    verified: uiStatus === 'VERIFIED',
     configured: cfg.valid,
     accountEmail: conn?.account_email || null,
     accountName: conn?.account_name || null,
     adminId: conn?.admin_id ?? null,
     adminUsername: conn?.admin_username || null,
-    folderId: conn?.folder_id || null,
+    oauthVerified: Boolean(conn && ['CONNECTED', 'VERIFIED'].includes(uiStatus)),
+    driveApiAccessible: Boolean(conn?.drive_api_accessible),
+    tokenStatus,
+    folderAccessible: Boolean(conn?.folder_accessible),
+    folderId: conn?.folder_id || cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_ID) || null,
     folderName: conn?.folder_name || cleanEnvValue(process.env.GOOGLE_DRIVE_TEXTBOOKS_FOLDER_NAME) || DEFAULT_TEXTBOOKS_FOLDER_NAME,
     redirectUri: cfg.redirectUri,
     scopes: DRIVE_OAUTH_SCOPES,
+    connectedAt: conn?.connected_at ? new Date(conn.connected_at).toISOString() : null,
+    lastVerifiedAt: conn?.last_verified_at ? new Date(conn.last_verified_at).toISOString() : null,
     lastSyncAt: lastLog?.completed_at || lastLog?.started_at || null,
     lastError: conn?.last_error || (lastLog?.status === 'SYNC_FAILED' ? lastLog.error_details : null) || (!cfg.valid ? cfg.errors.join(' ') : null),
     counts: {
-      synchronizedTextbooks: Number(countsRow.synced_total || 0),
+      drivePdfsDiscovered: lastDiscovered,
+      synchronizedBooks: syncedTotal,
       pendingReview: Number(countsRow.pending_review || 0),
-      published: Number(countsRow.published || 0),
-      missingInDrive: Number(countsRow.missing_in_drive || 0),
-      failedSyncRuns: Number(failedLogsRes.rows[0]?.failed_runs || 0),
+      approved: Number(countsRow.approved || 0),
+      publishedTextbooks: Number(countsRow.published || 0),
+      rejected: Number(countsRow.rejected || 0),
+      failedSync: Number(failedLogsRes.rows[0]?.failed_runs || 0),
+      unavailableFiles: Number(countsRow.unavailable_files || 0),
     },
   };
 }

@@ -1,91 +1,65 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  BookOpen,
-  ChevronRight,
-  GraduationCap,
+  AlertCircle,
   ArrowLeft,
-  FileText,
+  BookMarked,
+  BookOpen,
+  CheckCircle2,
   Download,
   Eye,
+  FileText,
+  GraduationCap,
+  Layers,
   Loader2,
-  AlertCircle,
-  BookMarked,
+  Search,
+  X,
 } from 'lucide-react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch, getAuthenticatedApiUrl } from '../utils/api'
 import { GoogleDrivePdfViewer, type GoogleDriveMaterialItem } from '../components/GoogleDrivePdfViewer'
+import { GlassSelect } from '../components/admin/GlassSelect'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { buildAuthRedirectUrl, savePostLoginRedirect } from '../utils/authRedirect'
+import { subscribeStudentSync } from '../utils/studentSync'
 import './SchoolMaterials.css'
 
-interface TextbookRecord {
+type MediumFilter = 'English' | 'Tamil'
+
+interface PublishedTextbookCard {
   id: number
+  groupId: string
+  bookName: string
   standard: number
   subject: string
-  medium: 'English' | 'Tamil'
+  medium: 'Tamil' | 'English'
   term: string | null
   volume: string | null
-  bookName: string
-  fileName?: string
-  fileSize?: number
-  pageCount?: number
-  totalPages?: number
-  googleDriveFileId?: string | null
+  unit: number | null
+  fileName: string
+  fileSize: number
+  publishedAt: string | null
+  downloadCount: number
   previewUrl: string
   downloadUrl: string
 }
 
-type MediumFilter = 'English' | 'Tamil'
-
-const PREFERRED_SUBJECT_ORDER = [
-  'Tamil',
-  'English',
-  'Mathematics',
-  'Science',
-  'Social Science',
-  'Physics',
-  'Chemistry',
-  'Biology',
-  'Botany',
-  'Zoology',
-  'History',
-  'Geography',
-  'Economics',
-  'Commerce',
-  'Accountancy',
-  'Political Science',
-  'Computer Science',
-]
-
-function normalizeSubjectName(raw?: string): string {
-  const trimmed = String(raw || '').trim()
-  if (!trimmed) return 'General'
-  const lower = trimmed.toLowerCase()
-  if (lower === 'maths' || lower === 'mathematics') return 'Mathematics'
-  if (lower === 'social' || lower === 'social science' || lower === 'social studies') return 'Social Science'
-  if (lower === 'tamil' || lower === 'general tamil') return 'Tamil'
-  if (lower === 'english' || lower === 'general english') return 'English'
-  if (lower === 'science') return 'Science'
-  return trimmed
-}
-
-function normalizeMediumName(raw?: string): MediumFilter {
-  return String(raw || '').toLowerCase().includes('tamil') ? 'Tamil' : 'English'
+interface DynamicFilterOptions {
+  totalPublished: number
+  mediums: Array<{ medium: 'Tamil' | 'English'; count: number }>
+  standards: Array<{ standard: number; count: number }>
+  subjects: Array<{ subject: string; count: number }>
+  terms: Array<{ label: string; count: number }>
+  volumes: Array<{ label: string; count: number }>
+  structureType: 'term' | 'volume' | 'both' | 'none'
 }
 
 function formatFileSize(bytes?: number): string {
   const value = Number(bytes || 0)
-  if (!Number.isFinite(value) || value <= 0) return ''
+  if (!Number.isFinite(value) || value <= 0) return 'PDF'
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function groupSortOrder(label: string): number {
-  const match = label.match(/(?:term|volume)\s*(\d+)/i)
-  if (match) return parseInt(match[1], 10)
-  return 99
 }
 
 const SchoolMaterials = () => {
@@ -102,448 +76,447 @@ const SchoolMaterials = () => {
   }
 
   const initialStdParam = searchParams.get('standard')
-  const initialStd =
-    initialStdParam && Number(initialStdParam) >= 6 && Number(initialStdParam) <= 12
-      ? Number(initialStdParam)
-      : null
+  const initialMedParam = searchParams.get('medium')
 
-  const [selectedStandard, setSelectedStandard] = useState<number | null>(initialStd)
-  const [selectedMedium, setSelectedMedium] = useState<MediumFilter>('English')
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('all')
-  const [availableTerms, setAvailableTerms] = useState<string[]>([])
-  const [availableVolumes, setAvailableVolumes] = useState<string[]>([])
-  const [textbooks, setTextbooks] = useState<TextbookRecord[]>([])
-  const [isLoading, setIsLoading] = useState<boolean>(false)
+  const [selectedMedium, setSelectedMedium] = useState<MediumFilter>(
+    initialMedParam && initialMedParam.toLowerCase().includes('tamil') ? 'Tamil' : 'English'
+  )
+  const [selectedStandard, setSelectedStandard] = useState<string>(
+    initialStdParam && Number(initialStdParam) >= 6 && Number(initialStdParam) <= 12 ? initialStdParam : 'all'
+  )
+  const [selectedSubject, setSelectedSubject] = useState<string>('all')
+  const [selectedTerm, setSelectedTerm] = useState<string>('all')
+  const [selectedVolume, setSelectedVolume] = useState<string>('all')
+  const [search, setSearch] = useState<string>('')
+
+  const [filtersMeta, setFiltersMeta] = useState<DynamicFilterOptions>({
+    totalPublished: 0,
+    mediums: [],
+    standards: [],
+    subjects: [],
+    terms: [],
+    volumes: [],
+    structureType: 'none',
+  })
+  const [books, setBooks] = useState<PublishedTextbookCard[]>([])
+  const [loadingFilters, setLoadingFilters] = useState(true)
+  const [loadingBooks, setLoadingBooks] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [viewerMaterial, setViewerMaterial] = useState<GoogleDriveMaterialItem | null>(null)
 
-  const standards = [
-    { id: 6, name: '6th Standard' },
-    { id: 7, name: '7th Standard' },
-    { id: 8, name: '8th Standard' },
-    { id: 9, name: '9th Standard' },
-    { id: 10, name: '10th Standard' },
-    { id: 11, name: '11th Standard' },
-    { id: 12, name: '12th Standard' },
-  ]
+  const loadFilters = useCallback(async () => {
+    setLoadingFilters(true)
+    try {
+      const params = new URLSearchParams()
+      params.set('medium', selectedMedium)
+      if (selectedStandard !== 'all') params.set('standard', selectedStandard)
+      if (selectedSubject !== 'all') params.set('subject', selectedSubject)
 
-  const isHigherSecondary = selectedStandard !== null && selectedStandard >= 11
-  const periodLabel = isHigherSecondary ? 'Volume' : 'Term'
-  const availablePeriods = isHigherSecondary ? availableVolumes : availableTerms
+      const res = await apiFetch(`/api/student/textbooks/filters?${params.toString()}`)
+      const json = await res.json().catch(() => null)
+      if (res.ok && json?.status === 'success' && json.data) {
+        const meta: DynamicFilterOptions = json.data
+        setFiltersMeta(meta)
 
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-    if (document.documentElement) document.documentElement.scrollTop = 0
-    if (document.body) document.body.scrollTop = 0
-  }, [selectedStandard])
-
-  // Fetch strictly published, Google Drive-backed textbooks for the selected standard
-  useEffect(() => {
-    if (!selectedStandard) {
-      setTextbooks([])
-      setAvailableTerms([])
-      setAvailableVolumes([])
-      setSelectedPeriod('all')
-      setLoadError(null)
-      return
+        // Auto-reset any now-invalid cascading selection
+        if (selectedStandard !== 'all' && !meta.standards.some((s) => String(s.standard) === selectedStandard)) {
+          setSelectedStandard('all')
+        }
+        if (selectedSubject !== 'all' && !meta.subjects.some((s) => s.subject === selectedSubject)) {
+          setSelectedSubject('all')
+        }
+        if (selectedTerm !== 'all' && !meta.terms.some((t) => t.label === selectedTerm)) {
+          setSelectedTerm('all')
+        }
+        if (selectedVolume !== 'all' && !meta.volumes.some((v) => v.label === selectedVolume)) {
+          setSelectedVolume('all')
+        }
+      }
+    } finally {
+      setLoadingFilters(false)
     }
+  }, [selectedMedium, selectedStandard, selectedSubject, selectedTerm, selectedVolume])
 
-    let cancelled = false
-    setIsLoading(true)
+  const loadPublishedBooks = useCallback(async () => {
+    setLoadingBooks(true)
     setLoadError(null)
-    setSelectedPeriod('all')
+    try {
+      const params = new URLSearchParams()
+      params.set('medium', selectedMedium)
+      if (selectedStandard !== 'all') params.set('standard', selectedStandard)
+      if (selectedSubject !== 'all') params.set('subject', selectedSubject)
+      if (selectedTerm !== 'all') params.set('term', selectedTerm)
+      if (selectedVolume !== 'all') params.set('volume', selectedVolume)
+      if (search.trim()) params.set('search', search.trim())
+      params.set('limit', '150')
 
-    const loadStandardTextbooks = async () => {
-      try {
-        const res = await apiFetch(`/api/textbooks/library?standard=${selectedStandard}`)
-        const json = await res.json().catch(() => null)
-        if (!res.ok || !json?.success) {
-          throw new Error(json?.error || 'Failed to load published textbooks.')
-        }
-
-        const payload = json.data || {}
-        const rawBooks = Array.isArray(payload.books) ? payload.books : []
-        const normalized: TextbookRecord[] = rawBooks.map((r: any) => ({
-          id: Number(r.id),
-          standard: Number(r.standard),
-          subject: normalizeSubjectName(r.subject),
-          medium: normalizeMediumName(r.medium),
-          term: selectedStandard <= 10 ? (r.term || null) : null,
-          volume: selectedStandard >= 11 ? (r.volume || null) : null,
-          bookName: r.bookName || r.fileName || `${r.subject} Textbook`,
-          fileName: r.fileName || undefined,
-          fileSize: Number(r.fileSize) || undefined,
-          pageCount: Number(r.pageCount) || undefined,
-          totalPages: Number(r.totalPages || r.pageCount) || undefined,
-          googleDriveFileId: r.googleDriveFileId || null,
-          previewUrl: r.previewUrl || `/api/textbooks/library/${r.id}/preview`,
-          downloadUrl: r.downloadUrl || `/api/textbooks/library/${r.id}/download`,
-        }))
-
-        if (!cancelled) {
-          setTextbooks(normalized)
-          setAvailableTerms(Array.isArray(payload.availableTerms) ? payload.availableTerms : [])
-          setAvailableVolumes(Array.isArray(payload.availableVolumes) ? payload.availableVolumes : [])
-          setIsLoading(false)
-        }
-      } catch (err: any) {
-        if (!cancelled) {
-          setLoadError(err?.message || 'Failed to load textbooks from the Google Drive library.')
-          setIsLoading(false)
-        }
+      const res = await apiFetch(`/api/student/textbooks?${params.toString()}`)
+      const json = await res.json().catch(() => null)
+      if (!res.ok || json?.status !== 'success') {
+        throw new Error(json?.message || 'Failed to load published textbooks.')
       }
+      setBooks(Array.isArray(json.data) ? json.data : [])
+    } catch (err: any) {
+      setLoadError(err?.message || 'Unable to load Textbook Library.')
+    } finally {
+      setLoadingBooks(false)
     }
+  }, [selectedMedium, selectedStandard, selectedSubject, selectedTerm, selectedVolume, search])
 
-    void loadStandardTextbooks()
-    return () => {
-      cancelled = true
-    }
-  }, [selectedStandard])
+  useEffect(() => {
+    void loadFilters()
+  }, [loadFilters])
 
-  const handleSelectStandard = (stdId: number) => {
-    setSelectedStandard(stdId)
-    setSearchParams({ standard: String(stdId) })
+  useEffect(() => {
+    void loadPublishedBooks()
+  }, [loadPublishedBooks])
+
+  // Real-time refresh whenever Admin publishes/unpublishes a textbook
+  useEffect(() => {
+    return subscribeStudentSync(() => {
+      void loadFilters()
+      void loadPublishedBooks()
+    })
+  }, [loadFilters, loadPublishedBooks])
+
+  const handleMediumChange = (med: MediumFilter) => {
+    if (med === selectedMedium) return
+    setSelectedMedium(med)
+    setSelectedStandard('all')
+    setSelectedSubject('all')
+    setSelectedTerm('all')
+    setSelectedVolume('all')
+    setSearchParams({ medium: med })
   }
 
-  const handleBack = () => {
-    if (selectedStandard !== null) {
-      setSelectedStandard(null)
-      setSearchParams({})
-    } else {
-      navigate('/materials')
-    }
+  const handleStandardChange = (std: string) => {
+    setSelectedStandard(std)
+    setSelectedSubject('all')
+    setSelectedTerm('all')
+    setSelectedVolume('all')
+    if (std !== 'all') setSearchParams({ medium: selectedMedium, standard: std })
+    else setSearchParams({ medium: selectedMedium })
   }
 
-  // Group published textbooks by subject, filtered by selected Medium & Term (6–10) or Volume (11–12)
-  const subjectColumns = useMemo(() => {
-    const filteredByPeriod = textbooks.filter((tb) => {
-      if (selectedPeriod === 'all') return true
-      const periodValue = isHigherSecondary ? tb.volume : tb.term
-      return periodValue === selectedPeriod
-    })
+  const handleSubjectChange = (subj: string) => {
+    setSelectedSubject(subj)
+    setSelectedTerm('all')
+    setSelectedVolume('all')
+  }
 
-    const subjectSet = new Set<string>()
-    for (const tb of filteredByPeriod) {
-      subjectSet.add(tb.subject)
-    }
+  const clearFilters = () => {
+    setSelectedStandard('all')
+    setSelectedSubject('all')
+    setSelectedTerm('all')
+    setSelectedVolume('all')
+    setSearch('')
+    setSearchParams({ medium: selectedMedium })
+  }
 
-    const orderedSubjects = Array.from(subjectSet).sort((a, b) => {
-      const idxA = PREFERRED_SUBJECT_ORDER.indexOf(a)
-      const idxB = PREFERRED_SUBJECT_ORDER.indexOf(b)
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB
-      if (idxA !== -1) return -1
-      if (idxB !== -1) return 1
-      return a.localeCompare(b)
-    })
-
-    return orderedSubjects.map((subject) => {
-      // Tamil and English are common language subjects visible in both Medium views
-      const isCommonSubject = subject === 'Tamil' || subject === 'English'
-      const mediumBooks = filteredByPeriod.filter(
-        (tb) => tb.subject === subject && (isCommonSubject || tb.medium === selectedMedium)
-      )
-
-      const groupMap = new Map<string, TextbookRecord[]>()
-      for (const book of mediumBooks) {
-        const groupKey = isHigherSecondary
-          ? (book.volume || 'Full Textbook')
-          : (book.term || 'Full Textbook')
-        const list = groupMap.get(groupKey) || []
-        list.push(book)
-        groupMap.set(groupKey, list)
-      }
-
-      const groups = Array.from(groupMap.entries())
-        .sort(([a], [b]) => groupSortOrder(a) - groupSortOrder(b) || a.localeCompare(b))
-        .map(([groupName, books]) => ({ groupName, books }))
-
-      return {
-        subject,
-        isCommonSubject,
-        totalForMedium: mediumBooks.length,
-        groups,
-      }
-    })
-  }, [textbooks, selectedMedium, selectedPeriod, isHigherSecondary])
-
-  const openPdfReader = (book: TextbookRecord) => {
+  const openPdfReader = (book: PublishedTextbookCard) => {
     setViewerMaterial({
       id: book.id,
       fileName: book.fileName || book.bookName,
       subject: book.subject,
       standard: book.standard,
-      term: (isHigherSecondary ? book.volume : book.term) || undefined,
+      term: book.term || book.volume || undefined,
       medium: book.medium,
       fileSize: book.fileSize,
-      totalPages: book.totalPages || book.pageCount,
       viewUrl: book.previewUrl,
       downloadUrl: book.downloadUrl,
     })
   }
 
-  if (selectedStandard !== null) {
-    const totalVisiblePdfs = subjectColumns.reduce((acc, col) => acc + col.totalForMedium, 0)
-
-    return (
-      <div className="school-materials">
-        <div className="school-container">
-          <motion.div
-            className="school-header"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <button type="button" className="back-btn" onClick={handleBack}>
-              <ArrowLeft size={20} />
-              <span>Back to Standards</span>
-            </button>
-
-            <div className="library-header-row">
-              <div>
-                <h1 className="school-title">
-                  <GraduationCap size={28} />
-                  <span>{`${selectedStandard}th Standard — Textbook Library`}</span>
-                </h1>
-                <p className="school-subtitle">
-                  {isHigherSecondary
-                    ? 'Official Samacheer Kalvi Higher Secondary PDFs organized by Volume, Medium & Subject'
-                    : 'Official Samacheer Kalvi PDFs organized by Term, Medium & Subject for instant preview & download'}
-                </p>
-              </div>
-
-              {/* Medium Filter Toggle */}
-              <div className="medium-filter-bar" role="group" aria-label="Medium filter">
-                <span className="medium-filter-label">Medium:</span>
-                <button
-                  type="button"
-                  className={`medium-filter-btn ${selectedMedium === 'English' ? 'active' : ''}`}
-                  onClick={() => setSelectedMedium('English')}
-                >
-                  English Medium
-                </button>
-                <button
-                  type="button"
-                  className={`medium-filter-btn ${selectedMedium === 'Tamil' ? 'active' : ''}`}
-                  onClick={() => setSelectedMedium('Tamil')}
-                >
-                  Tamil Medium
-                </button>
-              </div>
-            </div>
-
-            {/* Dynamic Term (6–10) OR Volume (11–12) Filter Bar */}
-            {availablePeriods.length > 0 && (
-              <div
-                className="medium-filter-bar"
-                role="group"
-                aria-label={`${periodLabel} filter`}
-                style={{ marginTop: '0.85rem', width: 'fit-content', flexWrap: 'wrap' }}
-              >
-                <span className="medium-filter-label">{periodLabel}:</span>
-                <button
-                  type="button"
-                  className={`medium-filter-btn ${selectedPeriod === 'all' ? 'active' : ''}`}
-                  onClick={() => setSelectedPeriod('all')}
-                >
-                  All {periodLabel}s
-                </button>
-                {availablePeriods.map((period) => (
-                  <button
-                    key={period}
-                    type="button"
-                    className={`medium-filter-btn ${selectedPeriod === period ? 'active' : ''}`}
-                    onClick={() => setSelectedPeriod(period)}
-                  >
-                    {period}
-                  </button>
-                ))}
-              </div>
-            )}
-          </motion.div>
-
-          {isLoading ? (
-            <div className="library-state-card glass">
-              <Loader2 size={32} className="spin" style={{ color: 'var(--gold-primary)' }} />
-              <span>Loading {selectedStandard}th Standard textbooks...</span>
-            </div>
-          ) : loadError ? (
-            <div className="library-state-card glass library-error">
-              <AlertCircle size={28} />
-              <span>{loadError}</span>
-            </div>
-          ) : subjectColumns.length === 0 ? (
-            <div className="library-state-card glass">
-              <BookMarked size={32} style={{ color: 'var(--gold-primary)' }} />
-              <span>
-                No published textbooks are currently available for {selectedStandard}th Standard.
-              </span>
-            </div>
-          ) : (
-            <>
-              <div className="library-summary-strip">
-                <span>
-                  Showing <strong>{totalVisiblePdfs}</strong> PDF
-                  {totalVisiblePdfs === 1 ? '' : 's'} ({selectedMedium} Medium
-                  {selectedPeriod !== 'all' ? ` • ${selectedPeriod}` : ''}) across{' '}
-                  <strong>{subjectColumns.length}</strong> subject
-                  {subjectColumns.length === 1 ? '' : 's'}
-                </span>
-              </div>
-
-              <div className="subject-columns-grid">
-                {subjectColumns.map((col, idx) => (
-                  <motion.section
-                    key={col.subject}
-                    className="subject-column-card glass"
-                    initial={{ opacity: 0, y: 18 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.04 }}
-                  >
-                    <header className="subject-column-header">
-                      <div className="subject-column-title-wrap">
-                        <div className="subject-icon">
-                          <BookOpen size={20} />
-                        </div>
-                        <div>
-                          <h2 className="subject-column-title">{col.subject}</h2>
-                          <span className="subject-column-count">
-                            {col.isCommonSubject
-                              ? `${col.totalForMedium} Common ${col.subject} PDF${col.totalForMedium === 1 ? '' : 's'}`
-                              : `${col.totalForMedium} ${selectedMedium} Medium PDF${col.totalForMedium === 1 ? '' : 's'}`}
-                          </span>
-                        </div>
-                      </div>
-                    </header>
-
-                    <div className="subject-column-body">
-                      {col.groups.length === 0 ? (
-                        <div className="subject-empty-medium">
-                          {col.isCommonSubject ? (
-                            `No ${col.subject} textbook PDFs available for this standard yet.`
-                          ) : (
-                            <>
-                              No {selectedMedium} Medium PDFs available for {col.subject}.
-                              <br />
-                              Switch to {selectedMedium === 'English' ? 'Tamil' : 'English'} Medium above to view available PDFs.
-                            </>
-                          )}
-                        </div>
-                      ) : (
-                        col.groups.map((group) => (
-                          <div key={group.groupName} className="term-group-block">
-                            <div className="term-group-heading">{group.groupName}</div>
-                            <div className="term-pdf-list">
-                              {group.books.map((book) => {
-                                const dlUrl = getAuthenticatedApiUrl(book.downloadUrl)
-                                const sizeLabel = formatFileSize(book.fileSize)
-                                return (
-                                  <div key={book.id} className="pdf-item-card">
-                                    <div className="pdf-item-info">
-                                      <div className="pdf-item-title-row">
-                                        <FileText size={16} className="pdf-item-icon" />
-                                        <span className="pdf-item-name">{book.bookName}</span>
-                                      </div>
-                                      <div className="pdf-item-meta">
-                                        <span className="pdf-meta-pill">{book.medium} Medium</span>
-                                        {sizeLabel ? (
-                                          <span className="pdf-meta-pill">{sizeLabel}</span>
-                                        ) : null}
-                                        {book.totalPages ? (
-                                          <span className="pdf-meta-pill">{book.totalPages} Pages</span>
-                                        ) : null}
-                                      </div>
-                                    </div>
-
-                                    <div className="pdf-item-actions">
-                                      <button
-                                        type="button"
-                                        className="pdf-action-btn pdf-read-btn"
-                                        onClick={() => {
-                                          if (!isAuthenticated) {
-                                            redirectToLogin()
-                                            return
-                                          }
-                                          openPdfReader(book)
-                                        }}
-                                      >
-                                        <Eye size={14} />
-                                        <span>Preview</span>
-                                      </button>
-                                      <a
-                                        href={isAuthenticated ? dlUrl : '#'}
-                                        download={isAuthenticated ? (book.fileName || `${book.bookName}.pdf`) : undefined}
-                                        className="pdf-action-btn pdf-download-btn"
-                                        onClick={(e) => {
-                                          if (!isAuthenticated) {
-                                            e.preventDefault()
-                                            redirectToLogin()
-                                          }
-                                        }}
-                                      >
-                                        <Download size={14} />
-                                        <span>Download</span>
-                                      </a>
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </motion.section>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        <GoogleDrivePdfViewer
-          isOpen={Boolean(viewerMaterial)}
-          onClose={() => setViewerMaterial(null)}
-          material={viewerMaterial}
-        />
-      </div>
-    )
-  }
+  const tamilCount = filtersMeta.mediums.find((m) => m.medium === 'Tamil')?.count ?? 0
+  const englishCount = filtersMeta.mediums.find((m) => m.medium === 'English')?.count ?? 0
+  const hasSecondaryFilters =
+    selectedStandard !== 'all' ||
+    selectedSubject !== 'all' ||
+    selectedTerm !== 'all' ||
+    selectedVolume !== 'all' ||
+    Boolean(search.trim())
 
   return (
     <div className="school-materials">
       <div className="school-container">
-        <motion.div className="school-header" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-          <button type="button" className="back-btn" onClick={() => navigate('/materials')}>
+        <motion.div className="school-header" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+          <button type="button" className="back-btn" onClick={() => navigate('/dashboard')}>
             <ArrowLeft size={20} />
-            <span>Back to TNPSC Materials</span>
+            <span>Back to Dashboard</span>
           </button>
-          <h1 className="school-title">
-            <GraduationCap size={32} />
-            <span>
-              Class-Wise <span className="gradient-text">Textbook Library</span>
-            </span>
-          </h1>
-          <p className="school-subtitle">
-            6th to 12th Standard — Select a standard to browse Terms (6th–10th), Volumes (11th–12th), Tamil &amp; English Medium PDFs
-          </p>
+
+          <div className="library-header-row" style={{ alignItems: 'center' }}>
+            <div>
+              <h1 className="school-title">
+                <GraduationCap size={30} />
+                <span>
+                  Samacheer Kalvi <span className="gradient-text">Textbook Library</span>
+                </span>
+              </h1>
+              <p className="school-subtitle">
+                Official published TNPSC school textbooks — filter by Medium, Standard (6th–12th), Subject, and Term / Volume
+              </p>
+            </div>
+
+            {/* A. Clear Medium Selection (Strictly Separated Tamil vs English Medium) */}
+            <div className="medium-filter-bar" role="group" aria-label="Select Textbook Medium">
+              <button
+                type="button"
+                className={`medium-filter-btn ${selectedMedium === 'Tamil' ? 'active' : ''}`}
+                onClick={() => handleMediumChange('Tamil')}
+              >
+                தமிழ் வழி (Tamil Medium) {tamilCount > 0 ? `(${tamilCount})` : ''}
+              </button>
+              <button
+                type="button"
+                className={`medium-filter-btn ${selectedMedium === 'English' ? 'active' : ''}`}
+                onClick={() => handleMediumChange('English')}
+              >
+                English Medium {englishCount > 0 ? `(${englishCount})` : ''}
+              </button>
+            </div>
+          </div>
         </motion.div>
 
-        <div className="standards-grid">
-          {standards.map((standard, index) => (
-            <motion.div
-              key={standard.id}
-              className="standard-card glass"
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-              whileHover={{ scale: 1.04 }}
-              onClick={() => handleSelectStandard(standard.id)}
+        {/* B. Dynamic Standard Pills (Only standards that have published textbooks for selected medium) */}
+        {filtersMeta.standards.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.1rem' }}>
+            <button
+              type="button"
+              className={`medium-filter-btn ${selectedStandard === 'all' ? 'active' : ''}`}
+              onClick={() => handleStandardChange('all')}
             >
-              <div className="standard-number">{standard.id}</div>
-              <div className="standard-name">{standard.name}</div>
-              <ChevronRight size={24} className="standard-arrow" />
-            </motion.div>
-          ))}
+              All Standards ({selectedMedium === 'Tamil' ? tamilCount : englishCount})
+            </button>
+            {filtersMeta.standards.map((s) => (
+              <button
+                key={s.standard}
+                type="button"
+                className={`medium-filter-btn ${selectedStandard === String(s.standard) ? 'active' : ''}`}
+                onClick={() => handleStandardChange(String(s.standard))}
+              >
+                {s.standard}th Standard ({s.count})
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* C & D. Cascading Glassmorphism Filters (Subject, Term / Volume, Search) */}
+        <div
+          className="glass"
+          style={{
+            padding: '1rem 1.2rem',
+            borderRadius: '14px',
+            border: '1px solid rgba(148,163,184,0.18)',
+            marginBottom: '1.25rem',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '0.85rem',
+            alignItems: 'end',
+          }}
+        >
+          <div className="glass-select-root">
+            <span className="glass-select-label">
+              <Search size={12} /> <span>Search Textbooks</span>
+            </span>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search textbook title or subject..."
+              style={{
+                width: '100%',
+                height: '42px',
+                padding: '0 0.85rem',
+                borderRadius: '11px',
+                background: 'rgba(15, 23, 42, 0.9)',
+                border: '1px solid rgba(148, 163, 184, 0.24)',
+                color: '#f8fafc',
+                fontSize: '0.84rem',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          <GlassSelect
+            label="Subject"
+            icon={<BookOpen size={12} />}
+            value={selectedSubject}
+            loading={loadingFilters}
+            onChange={handleSubjectChange}
+            options={[
+              { value: 'all', label: 'All Available Subjects' },
+              ...filtersMeta.subjects.map((s) => ({ value: s.subject, label: s.subject, count: s.count })),
+            ]}
+          />
+
+          {(filtersMeta.structureType === 'term' || filtersMeta.structureType === 'both') && (
+            <GlassSelect
+              label="Term"
+              icon={<Layers size={12} />}
+              value={selectedTerm}
+              loading={loadingFilters}
+              onChange={(v) => { setSelectedTerm(v); setSelectedVolume('all') }}
+              options={[
+                { value: 'all', label: 'All Terms' },
+                ...filtersMeta.terms.map((t) => ({ value: t.label, label: t.label, count: t.count })),
+              ]}
+            />
+          )}
+
+          {(filtersMeta.structureType === 'volume' || filtersMeta.structureType === 'both') && (
+            <GlassSelect
+              label="Volume"
+              icon={<Layers size={12} />}
+              value={selectedVolume}
+              loading={loadingFilters}
+              onChange={(v) => { setSelectedVolume(v); setSelectedTerm('all') }}
+              options={[
+                { value: 'all', label: 'All Volumes' },
+                ...filtersMeta.volumes.map((v) => ({ value: v.label, label: v.label, count: v.count })),
+              ]}
+            />
+          )}
+
+          {hasSecondaryFilters && (
+            <button
+              type="button"
+              className="medium-filter-btn"
+              style={{ height: '42px', justifyContent: 'center', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+              onClick={clearFilters}
+            >
+              <X size={14} /> Clear Filters
+            </button>
+          )}
         </div>
+
+        {/* E. Published Textbook Cards */}
+        {loadingBooks ? (
+          <div className="library-state-card glass">
+            <Loader2 size={32} className="spin" style={{ color: 'var(--gold-primary)' }} />
+            <span>Loading published {selectedMedium} Medium textbooks...</span>
+          </div>
+        ) : loadError ? (
+          <div className="library-state-card glass library-error">
+            <AlertCircle size={28} />
+            <span>{loadError}</span>
+          </div>
+        ) : books.length === 0 ? (
+          <div className="library-state-card glass">
+            <BookMarked size={32} style={{ color: 'var(--gold-primary)' }} />
+            <span>
+              No published textbooks are currently available for <strong>{selectedMedium} Medium</strong>
+              {selectedStandard !== 'all' ? ` • ${selectedStandard}th Standard` : ''}.
+            </span>
+          </div>
+        ) : (
+          <>
+            <div className="library-summary-strip">
+              <span>
+                Showing <strong>{books.length}</strong> published{' '}
+                <strong>{selectedMedium === 'Tamil' ? 'தமிழ் வழி (Tamil Medium)' : 'English Medium'}</strong>{' '}
+                textbook{books.length === 1 ? '' : 's'}
+                {selectedStandard !== 'all' ? ` • ${selectedStandard}th Standard` : ''}
+                {selectedSubject !== 'all' ? ` • ${selectedSubject}` : ''}
+                {selectedTerm !== 'all' ? ` • ${selectedTerm}` : ''}
+                {selectedVolume !== 'all' ? ` • ${selectedVolume}` : ''}
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))',
+                gap: '1rem',
+              }}
+            >
+              {books.map((book) => {
+                const dlUrl = getAuthenticatedApiUrl(book.downloadUrl)
+                const periodBadge = book.volume || book.term
+                return (
+                  <motion.article
+                    key={book.id}
+                    className="pdf-item-card glass"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '0.85rem',
+                      padding: '1.1rem',
+                      borderRadius: '14px',
+                      border: '1px solid rgba(148,163,184,0.18)',
+                    }}
+                  >
+                    <div className="pdf-item-info">
+                      <div className="pdf-item-title-row" style={{ alignItems: 'flex-start', gap: '0.55rem' }}>
+                        <FileText size={18} className="pdf-item-icon" style={{ marginTop: '2px', flexShrink: 0 }} />
+                        <span className="pdf-item-name" style={{ fontSize: '0.94rem', fontWeight: 700, lineHeight: 1.35 }}>
+                          {book.bookName}
+                        </span>
+                      </div>
+
+                      <div className="pdf-item-meta" style={{ marginTop: '0.6rem', display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                        <span className="pdf-meta-pill">{book.standard}th Standard</span>
+                        <span className="pdf-meta-pill">{book.subject}</span>
+                        <span className="pdf-meta-pill">{book.medium === 'Tamil' ? 'தமிழ் வழி' : 'English Medium'}</span>
+                        {periodBadge && <span className="pdf-meta-pill">{periodBadge}</span>}
+                        <span className="pdf-meta-pill">{formatFileSize(book.fileSize)}</span>
+                        <span
+                          className="pdf-meta-pill"
+                          style={{ background: 'rgba(16,185,129,0.16)', color: '#34d399', borderColor: 'rgba(52,211,153,0.35)' }}
+                        >
+                          <CheckCircle2 size={11} style={{ marginRight: '3px', verticalAlign: '-1px' }} /> Published
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pdf-item-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        type="button"
+                        className="pdf-action-btn pdf-read-btn"
+                        style={{ flex: 1, justifyContent: 'center' }}
+                        onClick={() => {
+                          if (!isAuthenticated) {
+                            redirectToLogin()
+                            return
+                          }
+                          openPdfReader(book)
+                        }}
+                      >
+                        <Eye size={14} />
+                        <span>View PDF</span>
+                      </button>
+                      <a
+                        href={isAuthenticated ? dlUrl : '#'}
+                        download={isAuthenticated ? (book.fileName || `${book.bookName}.pdf`) : undefined}
+                        className="pdf-action-btn pdf-download-btn"
+                        style={{ flex: 1, justifyContent: 'center' }}
+                        onClick={(e) => {
+                          if (!isAuthenticated) {
+                            e.preventDefault()
+                            redirectToLogin()
+                          }
+                        }}
+                      >
+                        <Download size={14} />
+                        <span>Download PDF</span>
+                      </a>
+                    </div>
+                  </motion.article>
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
+
+      <GoogleDrivePdfViewer
+        isOpen={Boolean(viewerMaterial)}
+        onClose={() => setViewerMaterial(null)}
+        material={viewerMaterial}
+      />
     </div>
   )
 }

@@ -55,6 +55,12 @@ import {
   updateGradeBoundaries,
 } from '../services/gradeService';
 import {
+  getPublishedStudentTextbookById,
+  getPublishedStudentTextbookFilters,
+  openDriveTextbookPdfStream,
+  queryPublishedStudentTextbooksPaginated,
+} from '../services/driveOAuthService';
+import {
   getAwardSettings,
   updateAwardSettings,
   resetAwardSettingsToDefault,
@@ -2297,6 +2303,144 @@ router.get('/study-materials', async (req: Request, res: Response) => {
     return res.status(500).json({ status: 'error', success: false, message: err.message });
   }
 });
+
+// ============================================================================
+// STUDENT TEXTBOOK LIBRARY (PUBLISHED GOOGLE DRIVE TEXTBOOKS ONLY)
+// ============================================================================
+
+router.get('/textbooks/filters', async (req: Request, res: Response) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    const data = await getPublishedStudentTextbookFilters({
+      medium: typeof req.query.medium === 'string' ? req.query.medium : undefined,
+      standard: typeof req.query.standard === 'string' ? req.query.standard : undefined,
+      subject: typeof req.query.subject === 'string' ? req.query.subject : undefined,
+      term: typeof req.query.term === 'string' ? req.query.term : undefined,
+      volume: typeof req.query.volume === 'string' ? req.query.volume : undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err?.message || 'Failed to load textbook filters.' });
+  }
+});
+
+router.get('/textbooks', async (req: Request, res: Response) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    const result = await queryPublishedStudentTextbooksPaginated({
+      group: typeof req.query.group === 'string' ? req.query.group : undefined,
+      standard: typeof req.query.standard === 'string' ? req.query.standard : undefined,
+      subject: typeof req.query.subject === 'string' ? req.query.subject : undefined,
+      medium: typeof req.query.medium === 'string' ? req.query.medium : undefined,
+      term: typeof req.query.term === 'string' ? req.query.term : undefined,
+      volume: typeof req.query.volume === 'string' ? req.query.volume : undefined,
+      termOrVolume: typeof req.query.termOrVolume === 'string' ? req.query.termOrVolume : undefined,
+      unit: typeof req.query.unit === 'string' ? req.query.unit : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+      page: typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1,
+      limit: typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 100,
+    });
+
+    const sanitized = result.items.map((b) => ({
+      id: b.id,
+      groupId: b.groupId,
+      bookName: b.bookName,
+      standard: b.standard,
+      subject: b.subject,
+      medium: b.medium,
+      term: /^term\s*\d+/i.test(String(b.term || '')) ? b.term : null,
+      volume: b.volume || (/^vol(?:ume)?\s*\d+/i.test(String(b.term || '')) ? b.term : null),
+      unit: b.unit,
+      fileName: b.fileName,
+      fileSize: b.fileSize,
+      publishedAt: b.publishedAt,
+      downloadCount: b.downloadCount,
+      previewUrl: `/api/student/textbooks/${b.id}/preview`,
+      downloadUrl: `/api/student/textbooks/${b.id}/download`,
+    }));
+
+    return res.status(200).json({
+      status: 'success',
+      data: sanitized,
+      pagination: result.pagination,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err?.message || 'Failed to load published textbooks.' });
+  }
+});
+
+router.get('/textbooks/:id(\\d+)', async (req: Request, res: Response) => {
+  try {
+    const book = await getPublishedStudentTextbookById(Number(req.params.id));
+    if (!book) {
+      return res.status(404).json({ status: 'error', message: 'Published textbook not found.' });
+    }
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        id: book.id,
+        groupId: book.groupId,
+        bookName: book.bookName,
+        standard: book.standard,
+        subject: book.subject,
+        medium: book.medium,
+        term: book.standard <= 10 ? book.term : null,
+        volume: book.standard >= 11 ? book.volume : null,
+        unit: book.unit,
+        fileName: book.fileName,
+        fileSize: book.fileSize,
+        publishedAt: book.publishedAt,
+        downloadCount: book.downloadCount,
+        previewUrl: `/api/student/textbooks/${book.id}/preview`,
+        downloadUrl: `/api/student/textbooks/${book.id}/download`,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err?.message || 'Failed to fetch textbook details.' });
+  }
+});
+
+router.get(
+  '/textbooks/:id(\\d+)/:mode(preview|download)',
+  requireStudentAuth,
+  async (req: StudentAuthenticatedRequest, res: Response) => {
+    try {
+      const textbookId = Number(req.params.id);
+      const isDownload = req.params.mode === 'download';
+
+      const { stream, fileName, fileSize, mimeType } = await openDriveTextbookPdfStream({
+        textbookId,
+        isAdmin: false,
+        incrementDownloadCount: isDownload,
+      });
+
+      const safeAscii = fileName.replace(/["\\\r\n]/g, '_');
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader(
+        'Content-Disposition',
+        `${isDownload ? 'attachment' : 'inline'}; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
+      if (fileSize > 0) res.setHeader('Content-Length', String(fileSize));
+
+      req.on('close', () => {
+        if (typeof (stream as any).destroy === 'function') (stream as any).destroy();
+      });
+      stream.on('error', () => {
+        if (!res.headersSent) {
+          res.status(502).json({ status: 'error', message: 'Failed to stream PDF from Google Drive.' });
+        } else {
+          res.end();
+        }
+      });
+      stream.pipe(res);
+    } catch (err: any) {
+      return res.status(err?.statusCode || 500).json({
+        status: 'error',
+        message: err?.message || 'Unable to stream textbook PDF.',
+      });
+    }
+  }
+);
 
 export default router;
 
