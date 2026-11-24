@@ -65,6 +65,10 @@ export async function ensurePreviousPapersAdminSchema(): Promise<void> {
         ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) DEFAULT 'seed';
         ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
         ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;
+        ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS published_by TEXT;
+        ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+        ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+        ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS deleted_by TEXT;
         ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS created_by INT;
         ALTER TABLE previous_year_papers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
 
@@ -112,6 +116,23 @@ export async function ensurePreviousPapersAdminSchema(): Promise<void> {
 
         CREATE INDEX IF NOT EXISTS idx_pyp_logs_paper_created
           ON previous_paper_processing_logs (paper_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS previous_paper_audit_logs (
+          id SERIAL PRIMARY KEY,
+          admin_id TEXT NOT NULL,
+          paper_id INT REFERENCES previous_year_papers(id) ON DELETE SET NULL,
+          action VARCHAR(64) NOT NULL,
+          previous_status VARCHAR(32),
+          new_status VARCHAR(32),
+          bulk_operation_id VARCHAR(64),
+          details JSONB,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_pyp_audit_created
+          ON previous_paper_audit_logs (created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_pyp_audit_bulk_op
+          ON previous_paper_audit_logs (bulk_operation_id);
       `);
     })().catch((err) => {
       adminSchemaPromise = null;
@@ -211,26 +232,34 @@ export async function getAdminPreviousPapersStats() {
   const [summaryRes, byGroupRes, byYearRes] = await Promise.all([
     pool.query(`
       SELECT
-        COUNT(*)::int AS total_papers,
-        COUNT(*) FILTER (WHERE pdf_filename IS NOT NULL)::int AS total_pdfs_uploaded,
-        COALESCE((SELECT COUNT(*)::int FROM previous_year_paper_questions), 0)::int AS total_questions_extracted,
-        COUNT(*) FILTER (WHERE status = 'draft')::int AS draft_papers,
-        COUNT(*) FILTER (WHERE status = 'staging')::int AS staging_papers,
-        COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_papers,
-        COUNT(*) FILTER (WHERE status = 'published')::int AS published_papers,
-        COUNT(*) FILTER (WHERE status = 'unpublished')::int AS unpublished_papers,
-        COUNT(*) FILTER (WHERE processing_status = 'processing')::int AS processing_papers
+        COUNT(*) FILTER (WHERE deleted_at IS NULL)::int AS total_papers,
+        COUNT(*) FILTER (WHERE deleted_at IS NULL AND pdf_filename IS NOT NULL)::int AS total_pdfs_uploaded,
+        COALESCE((
+          SELECT COUNT(*)::int
+          FROM previous_year_paper_questions q
+          INNER JOIN previous_year_papers p ON p.id = q.paper_id
+          WHERE p.deleted_at IS NULL
+        ), 0)::int AS total_questions_extracted,
+        COUNT(*) FILTER (WHERE deleted_at IS NULL AND status = 'draft')::int AS draft_papers,
+        COUNT(*) FILTER (WHERE deleted_at IS NULL AND status = 'staging')::int AS staging_papers,
+        COUNT(*) FILTER (WHERE deleted_at IS NULL AND status = 'approved')::int AS approved_papers,
+        COUNT(*) FILTER (WHERE deleted_at IS NULL AND status = 'published')::int AS published_papers,
+        COUNT(*) FILTER (WHERE deleted_at IS NULL AND status = 'unpublished')::int AS unpublished_papers,
+        COUNT(*) FILTER (WHERE deleted_at IS NULL AND processing_status = 'processing')::int AS processing_papers,
+        COUNT(*) FILTER (WHERE deleted_at IS NOT NULL)::int AS deleted_papers
       FROM previous_year_papers
     `),
     pool.query(`
       SELECT category, exam, COUNT(*)::int AS count
       FROM previous_year_papers
+      WHERE deleted_at IS NULL
       GROUP BY category, exam
       ORDER BY category ASC
     `),
     pool.query(`
       SELECT year, COUNT(*)::int AS count
       FROM previous_year_papers
+      WHERE deleted_at IS NULL
       GROUP BY year
       ORDER BY year DESC
     `),
@@ -248,6 +277,7 @@ export async function getAdminPreviousPapersStats() {
     publishedPapers: Number(s.published_papers || 0),
     unpublishedPapers: Number(s.unpublished_papers || 0),
     processingPapers: Number(s.processing_papers || 0),
+    deletedPapers: Number(s.deleted_papers || 0),
     byGroup: byGroupRes.rows.map((r) => ({
       category: r.category,
       exam: r.exam,
@@ -260,17 +290,22 @@ export async function getAdminPreviousPapersStats() {
   };
 }
 
-export async function listAdminPreviousPapers(filters: {
+export async function listAdminPreviousPapersPaginated(filters: {
   group?: string;
   year?: number | string;
   subject?: string;
   medium?: string;
   status?: string;
   search?: string;
+  includeDeleted?: boolean;
+  sortBy?: 'year' | 'exam' | 'status' | 'questions';
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
 } = {}) {
   await ensurePreviousPapersAdminSchema();
 
-  const conditions: string[] = [];
+  const conditions: string[] = [filters.includeDeleted ? `p.deleted_at IS NOT NULL` : `p.deleted_at IS NULL`];
   const params: any[] = [];
 
   if (filters.group && filters.group !== 'all') {
@@ -305,30 +340,48 @@ export async function listAdminPreviousPapers(filters: {
     );
   }
 
-  const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereSql = `WHERE ${conditions.join(' AND ')}`;
+  const dir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+  const orderSql =
+    filters.sortBy === 'exam'
+      ? `ORDER BY LOWER(COALESCE(p.paper_title, p.exam)) ${dir}, p.year DESC, p.id DESC`
+      : filters.sortBy === 'status'
+        ? `ORDER BY LOWER(COALESCE(p.status, 'draft')) ${dir}, p.year DESC, p.id DESC`
+        : filters.sortBy === 'questions'
+          ? `ORDER BY p.total_questions ${dir}, p.year DESC, p.id DESC`
+          : `ORDER BY p.year ${dir}, p.id DESC`;
 
-  const res = await pool.query(
-    `SELECT
-       p.id, p.year, p.exam, p.category, p.subjects, p.paper_title, p.paper_type,
-       p.medium, p.difficulty, p.total_questions, p.expected_questions, p.duration_minutes,
-       p.marks_per_question::float AS marks_per_question,
-       COALESCE(p.negative_marking, 0)::float AS negative_marking,
-       p.status, p.pdf_filename, p.answer_key_filename, p.extraction_method,
-       p.failed_extraction_count, p.matched_answer_count, p.unverified_answer_count,
-       p.duplicate_count, p.conflict_count, p.explanation_status, p.explanation_generated_count,
-       p.processing_status, p.processing_progress, p.processing_message,
-       p.paper_code, p.booklet_code, p.answer_key_type,
-       p.source_type, p.approved_at, p.published_at, p.updated_at,
-       (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id) AS question_count,
-       (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id AND COALESCE(q.needs_review, false) = true) AS flagged_count,
-       (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id AND COALESCE(q.is_approved, false) = true) AS approved_question_count
-     FROM previous_year_papers p
-     ${whereSql}
-     ORDER BY p.year DESC, p.id DESC`,
-    params
-  );
+  const page = Math.max(1, Number(filters.page) || 1);
+  const limit = Math.min(200, Math.max(1, Number(filters.limit) || 100));
+  const offset = (page - 1) * limit;
 
-  return res.rows.map((r: any) => ({
+  const [countRes, res] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int AS total FROM previous_year_papers p ${whereSql}`, params),
+    pool.query(
+      `SELECT
+         p.id, p.year, p.exam, p.category, p.subjects, p.paper_title, p.paper_type,
+         p.medium, p.difficulty, p.total_questions, p.expected_questions, p.duration_minutes,
+         p.marks_per_question::float AS marks_per_question,
+         COALESCE(p.negative_marking, 0)::float AS negative_marking,
+         p.status, p.pdf_filename, p.answer_key_filename, p.extraction_method,
+         p.failed_extraction_count, p.matched_answer_count, p.unverified_answer_count,
+         p.duplicate_count, p.conflict_count, p.explanation_status, p.explanation_generated_count,
+         p.processing_status, p.processing_progress, p.processing_message,
+         p.paper_code, p.booklet_code, p.answer_key_type,
+         p.source_type, p.approved_at, p.published_at, p.published_by, p.deleted_at, p.deleted_by, p.updated_at,
+         (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id) AS question_count,
+         (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id AND COALESCE(q.needs_review, false) = true) AS flagged_count,
+         (SELECT COUNT(*)::int FROM previous_year_paper_questions q WHERE q.paper_id = p.id AND COALESCE(q.is_approved, false) = true) AS approved_question_count
+       FROM previous_year_papers p
+       ${whereSql}
+       ${orderSql}
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    ),
+  ]);
+
+  const total = Number(countRes.rows[0]?.total || 0);
+  const items = res.rows.map((r: any) => ({
     id: Number(r.id),
     year: Number(r.year),
     exam: r.exam,
@@ -366,8 +419,33 @@ export async function listAdminPreviousPapers(filters: {
     sourceType: r.source_type || 'seed',
     approvedAt: r.approved_at || null,
     publishedAt: r.published_at || null,
+    publishedBy: r.published_by || null,
+    deletedAt: r.deleted_at || null,
+    deletedBy: r.deleted_by || null,
     updatedAt: r.updated_at || null,
   }));
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
+  };
+}
+
+export async function listAdminPreviousPapers(filters: {
+  group?: string;
+  year?: number | string;
+  subject?: string;
+  medium?: string;
+  status?: string;
+  search?: string;
+} = {}) {
+  const res = await listAdminPreviousPapersPaginated({ ...filters, page: 1, limit: 200 });
+  return res.items;
 }
 
 export async function getAdminPreviousPaperDetail(paperId: number) {
@@ -1759,7 +1837,8 @@ function validatePaperReadyForPublish(detail: NonNullable<Awaited<ReturnType<typ
 
 export async function updateAdminPreviousPaperStatus(
   paperId: number,
-  nextStatus: 'draft' | 'staging' | 'approved' | 'published' | 'unpublished'
+  nextStatus: 'draft' | 'staging' | 'approved' | 'published' | 'unpublished',
+  adminUsername = 'admin'
 ) {
   await ensurePreviousPapersAdminSchema();
 
@@ -1771,8 +1850,10 @@ export async function updateAdminPreviousPaperStatus(
   const detail = await getAdminPreviousPaperDetail(paperId);
   if (!detail) return null;
 
+  const prevStatus = detail.paper.status;
+
   if (nextStatus === 'published') {
-    if (detail.paper.status !== 'approved' && detail.paper.status !== 'unpublished' && detail.paper.status !== 'published') {
+    if (prevStatus !== 'approved' && prevStatus !== 'unpublished' && prevStatus !== 'published') {
       const err: any = new Error(
         'Examination must be Approved by Admin before publishing to the Student Website.'
       );
@@ -1784,15 +1865,29 @@ export async function updateAdminPreviousPaperStatus(
 
   await pool.query(
     `UPDATE previous_year_papers
-     SET status = $1,
-         approved_at = CASE WHEN $1 = 'approved' THEN CURRENT_TIMESTAMP ELSE approved_at END,
-         published_at = CASE WHEN $1 = 'published' THEN CURRENT_TIMESTAMP ELSE published_at END,
+     SET status = $1::varchar,
+         approved_at = CASE WHEN $1::text = 'approved' THEN CURRENT_TIMESTAMP ELSE approved_at END,
+         published_at = CASE WHEN $1::text = 'published' THEN CURRENT_TIMESTAMP ELSE published_at END,
+         published_by = CASE WHEN $1::text = 'published' THEN $3::text ELSE published_by END,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $2`,
-    [nextStatus, paperId]
+     WHERE id = $2 AND deleted_at IS NULL`,
+    [nextStatus, paperId, adminUsername]
   );
 
-  await logPaperProcessing(paperId, 'status', 'info', `Paper status changed to ${nextStatus.toUpperCase()}.`);
+  await pool.query(
+    `INSERT INTO previous_paper_audit_logs (admin_id, paper_id, action, previous_status, new_status, details)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [
+      adminUsername,
+      paperId,
+      nextStatus === 'published' ? 'PUBLISH' : nextStatus === 'unpublished' ? 'UNPUBLISH' : 'STATUS_CHANGE',
+      prevStatus,
+      nextStatus,
+      JSON.stringify({ paperTitle: detail.paper.paperTitle }),
+    ]
+  );
+
+  await logPaperProcessing(paperId, 'status', 'info', `Paper status changed to ${nextStatus.toUpperCase()} by ${adminUsername}.`);
 
   if (nextStatus === 'published' || nextStatus === 'unpublished') {
     broadcastAnalyticsEvent('previous_paper_published', { paperId, status: nextStatus });
@@ -1869,6 +1964,9 @@ export async function createPaperFromPastedQuestions(params: {
     optionC: string;
     optionD: string;
     correctAnswer: number | null;
+    answerVerificationStatus?: string;
+    verificationSource?: string;
+    medium?: string;
     explanation?: string;
     subject?: string;
     topic?: string;
@@ -1901,7 +1999,8 @@ export async function createPaperFromPastedQuestions(params: {
   // Prevent accidental duplicate examination imports (by metadata OR content hash)
   const dupMeta = await pool.query(
     `SELECT id FROM previous_year_papers
-     WHERE category = $1 AND year = $2
+     WHERE deleted_at IS NULL
+       AND category = $1 AND year = $2
        AND LOWER(COALESCE(paper_title, '')) = LOWER($3)
        AND LOWER(COALESCE(medium, 'English')) = LOWER($4)
      LIMIT 1`,
@@ -1921,7 +2020,7 @@ export async function createPaperFromPastedQuestions(params: {
   const contentHash = computeBufferSha256(Buffer.from(contentSignature, 'utf8'));
 
   const dupHash = await pool.query(
-    `SELECT id, exam, year, paper_title FROM previous_year_papers WHERE pdf_file_hash = $1 LIMIT 1`,
+    `SELECT id, exam, year, paper_title FROM previous_year_papers WHERE deleted_at IS NULL AND pdf_file_hash = $1 LIMIT 1`,
     [contentHash]
   );
   if (dupHash.rows.length > 0) {
@@ -1980,37 +2079,54 @@ export async function createPaperFromPastedQuestions(params: {
     );
     paperId = Number(insertPaper.rows[0].id);
 
-    for (let i = 0; i < params.questions.length; i++) {
-      const q = params.questions[i];
-      const hasValidAns =
-        q.correctAnswer !== null &&
-        q.correctAnswer !== undefined &&
-        Number.isInteger(Number(q.correctAnswer)) &&
-        Number(q.correctAnswer) >= 0 &&
-        Number(q.correctAnswer) <= 3;
-      const missingOpts =
-        !String(q.optionA || '').trim() ||
-        !String(q.optionB || '').trim() ||
-        !String(q.optionC || '').trim() ||
-        !String(q.optionD || '').trim();
-      const ansStatus: AnswerVerificationStatus = hasValidAns ? 'admin_verified' : 'unverified';
-      const needsReview = Boolean(q.needsReview) || missingOpts || !hasValidAns || Boolean(q.isDuplicate);
-      const expText = q.explanation?.trim() || null;
+    // Batch insert questions (50 rows per statement) inside the transaction so 200-500+ questions save in < 500ms
+    const INSERT_BATCH_SIZE = 50;
+    const COLS_PER_ROW = 21;
 
-      await client.query(
-        `INSERT INTO previous_year_paper_questions (
-           paper_id, question_number, original_question_number, section,
-           subject, topic, question_text, option_a, option_b, option_c, option_d,
-           correct_answer, answer_status, answer_source, explanation, explanation_source,
-           is_duplicate, extraction_status, needs_review, review_note, medium, is_approved
-         )
-         VALUES (
-           $1, $2, $3, $4,
-           $5, $6, $7, $8, $9, $10, $11,
-           $12, $13, $14, $15, $16,
-           $17, $18, $19, $20, $21, false
-         )`,
-        [
+    for (let batchStart = 0; batchStart < params.questions.length; batchStart += INSERT_BATCH_SIZE) {
+      const batch = params.questions.slice(batchStart, batchStart + INSERT_BATCH_SIZE);
+      const values: any[] = [];
+      const rowPlaceholders: string[] = [];
+
+      for (let offset = 0; offset < batch.length; offset++) {
+        const i = batchStart + offset;
+        const q = batch[offset];
+        const hasValidAns =
+          q.correctAnswer !== null &&
+          q.correctAnswer !== undefined &&
+          Number.isInteger(Number(q.correctAnswer)) &&
+          Number(q.correctAnswer) >= 0 &&
+          Number(q.correctAnswer) <= 3;
+        const missingOpts =
+          !String(q.optionA || '').trim() ||
+          !String(q.optionB || '').trim() ||
+          !String(q.optionC || '').trim() ||
+          !String(q.optionD || '').trim();
+        const rawVerifyStatus = String(q.answerVerificationStatus || '').toUpperCase();
+        const ansStatus: AnswerVerificationStatus =
+          rawVerifyStatus === 'VERIFIED'
+            ? 'admin_verified'
+            : rawVerifyStatus === 'ANSWER_CONFLICT' || rawVerifyStatus === 'NEEDS_REVIEW' || rawVerifyStatus === 'ANSWER_MISSING'
+            ? 'unverified'
+            : hasValidAns
+            ? 'admin_verified'
+            : 'unverified';
+        const needsReview =
+          Boolean(q.needsReview) ||
+          missingOpts ||
+          !hasValidAns ||
+          rawVerifyStatus === 'ANSWER_CONFLICT' ||
+          Boolean(q.isDuplicate);
+        const expText = q.explanation?.trim() || null;
+        const ansSource = q.verificationSource?.trim() || (hasValidAns ? 'manual_paste' : null);
+        const rowMedium = q.medium?.trim() || cleanMedium;
+
+        const base = offset * COLS_PER_ROW;
+        rowPlaceholders.push(
+          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}, $${base + 20}, $${base + 21}, false)`
+        );
+
+        values.push(
           paperId,
           i + 1,
           q.originalQuestionNumber || String(i + 1),
@@ -2024,15 +2140,26 @@ export async function createPaperFromPastedQuestions(params: {
           String(q.optionD || '').trim(),
           hasValidAns ? Number(q.correctAnswer) : 0,
           ansStatus,
-          hasValidAns ? 'manual_paste' : null,
+          ansSource,
           expText,
           expText ? 'admin' : 'none',
           Boolean(q.isDuplicate),
           needsReview ? 'needs_review' : 'ok',
           needsReview,
           q.reviewNote || null,
-          cleanMedium,
-        ]
+          rowMedium
+        );
+      }
+
+      await client.query(
+        `INSERT INTO previous_year_paper_questions (
+           paper_id, question_number, original_question_number, section,
+           subject, topic, question_text, option_a, option_b, option_c, option_d,
+           correct_answer, answer_status, answer_source, explanation, explanation_source,
+           is_duplicate, extraction_status, needs_review, review_note, medium, is_approved
+         )
+         VALUES ${rowPlaceholders.join(', ')}`,
+        values
       );
     }
 
@@ -2145,8 +2272,47 @@ export async function approvePaperQuestions(
   return { ...finalDetail, updatedCount, skippedInvalidCount };
 }
 
-export async function deleteAdminPreviousPaper(paperId: number): Promise<boolean> {
+export async function deleteAdminPreviousPaper(paperId: number, adminUsername = 'admin'): Promise<boolean> {
   await ensurePreviousPapersAdminSchema();
-  const res = await pool.query(`DELETE FROM previous_year_papers WHERE id = $1 RETURNING id`, [paperId]);
-  return res.rows.length > 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT id, status, paper_title FROM previous_year_papers WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+      [paperId]
+    );
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    const prevStatus = String(existing.rows[0].status || 'staging');
+    const nextStatus = prevStatus === 'published' ? 'unpublished' : prevStatus;
+
+    await client.query(
+      `UPDATE previous_year_papers
+       SET deleted_at = CURRENT_TIMESTAMP,
+           deleted_by = $2,
+           status = $3,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [paperId, adminUsername, nextStatus]
+    );
+
+    await client.query(
+      `INSERT INTO previous_paper_audit_logs (admin_id, paper_id, action, previous_status, new_status, details)
+       VALUES ($1, $2, 'SOFT_DELETE', $3, 'deleted', $4::jsonb)`,
+      [adminUsername, paperId, prevStatus, JSON.stringify({ paperTitle: existing.rows[0].paper_title })]
+    );
+
+    await client.query('COMMIT');
+    if (prevStatus === 'published') {
+      broadcastAnalyticsEvent('previous_paper_published', { paperId, status: 'unpublished' });
+    }
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }

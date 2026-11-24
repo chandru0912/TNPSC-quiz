@@ -446,3 +446,306 @@ select.pypm-input option {
     padding: 1rem;
   }
 }
+
+/* ============================================================================
+   BULK MANAGEMENT TOOLBAR, SELECT-ALL MENU, TABLE & CONFIRMATION MODALS
+   ============================================================================ */
+
+.pypm-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1.1rem;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.32) 0%, rgba(15, 23, 42, 0.92) 100%);
+  border: 1px solid rgba(168, 85, 247, 0.48);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42), 0 0 18px rgba(168, 85, 247, 0.16);
+}
+
+.pypm-bulk-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.24);
+  border: 1px solid rgba(192, 132, 252, 0.5);
+  color: #e9d5ff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.pypm-btn-purple {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.3) 0%, rgba(109, 40, 217, 0.38) 100%);
+  border-color: rgba(192, 132, 252, 0.55);
+  color: #f3e8ff;
+}
+
+.pypm-btn-purple:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.45) 0%, rgba(109, 40, 217, 0.55) 100%);
+  color: #ffffff;
+}
+
+.pypm-btn-green {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.28) 0%, rgba(5, 150, 105, 0.38) 100%);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: #a7f3d0;
+}
+
+.pypm-btn-green:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.42) 0%, rgba(5, 150, 105, 0.55) 100%);
+  color: #ffffff;
+}
+
+.pypm-dropdown-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.pypm-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 245px;
+  z-index: 60;
+  padding: 0.4rem;
+  border-radius: 13px;
+  background: rgba(11, 17, 32, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.pypm-dropdown-menu.align-left {
+  left: 0;
+  right: auto;
+}
+
+.pypm-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pypm-dropdown-item:hover {
+  background: rgba(148, 163, 184, 0.14);
+  color: #ffffff;
+}
+
+.pypm-dropdown-item.is-green {
+  color: #6ee7b7;
+}
+.pypm-dropdown-item.is-green:hover {
+  background: rgba(16, 185, 129, 0.18);
+}
+
+.pypm-dropdown-item.is-danger {
+  color: #fca5a5;
+}
+.pypm-dropdown-item.is-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.pypm-table-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 0.15s ease;
+}
+
+.pypm-table-row:hover {
+  background: rgba(148, 163, 184, 0.07);
+}
+
+.pypm-table-row.is-selected {
+  background: rgba(139, 92, 246, 0.12);
+}
+
+.pypm-checkbox {
+  width: 17px;
+  height: 17px;
+  accent-color: #a855f7;
+  cursor: pointer;
+}
+
+.pypm-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pypm-sort-btn:hover {
+  color: #f8fafc;
+}
+
+.pypm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.pypm-modal-card {
+  width: 100%;
+  max-width: 560px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 1.45rem 1.6rem;
+  border-radius: 18px;
+  background: linear-gradient(155deg, rgba(18, 27, 50, 0.98) 0%, rgba(10, 16, 32, 0.99) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pypm-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.pypm-preview-stat {
+  padding: 0.7rem 0.85rem;
+  border-radius: 11px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.pypm-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 0.85rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+/* Permanent 6-Button Bulk Action Toolbar directly below Filters */
+.pypm-permanent-bulk-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.9rem 1.05rem;
+  border-radius: 14px;
+  background: linear-gradient(155deg, rgba(17, 24, 46, 0.86) 0%, rgba(10, 15, 30, 0.94) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.pypm-permanent-bulk-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.pypm-bulk-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  height: 38px;
+  padding: 0 0.95rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+}
+
+.pypm-bulk-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.pypm-bulk-action-btn:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.pypm-btn-purple-blue {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.28) 0%, rgba(139, 92, 246, 0.36) 100%);
+  border-color: rgba(165, 180, 252, 0.48);
+  color: #e0e7ff;
+}
+
+.pypm-btn-purple-blue:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.44) 0%, rgba(139, 92, 246, 0.52) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.28);
+}
+
+.pypm-btn-orange {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.24) 0%, rgba(234, 88, 12, 0.34) 100%);
+  border-color: rgba(251, 146, 60, 0.5);
+  color: #fed7aa;
+}
+
+.pypm-btn-orange:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.38) 0%, rgba(234, 88, 12, 0.48) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(249, 115, 22, 0.25);
+}
+
+.pypm-btn-emerald {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.3) 0%, rgba(4, 120, 87, 0.44) 100%);
+  border-color: rgba(52, 211, 153, 0.58);
+  color: #d1fae5;
+}
+
+.pypm-btn-emerald:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.46) 0%, rgba(4, 120, 87, 0.6) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.3);
+}
+
+.pypm-btn-dark-red {
+  background: linear-gradient(135deg, rgba(153, 27, 27, 0.45) 0%, rgba(127, 29, 29, 0.62) 100%);
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fecaca;
+}
+
+.pypm-btn-dark-red:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(185, 28, 28, 0.62) 0%, rgba(127, 29, 29, 0.78) 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(185, 28, 28, 0.35);
+}

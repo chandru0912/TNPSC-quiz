@@ -1826,8 +1826,13 @@ export async function startSyllabusMockTestSession(params: {
   }
 
   if (testCategory !== 'full_length' && params.subject && params.subject !== 'all' && params.subject !== 'Full Syllabus') {
-    const cleanSub = params.subject.trim().toLowerCase();
-    if (cleanSub !== 'general-studies') {
+    const aliases = getSubjectAliases(params.subject);
+    if (aliases && aliases.length > 0) {
+      where.push(`(LOWER(COALESCE(subject, '')) = ANY($${idx}::text[]) OR LOWER(COALESCE(subject_id, '')) = ANY($${idx}::text[]))`);
+      queryParams.push(aliases);
+      idx++;
+    } else {
+      const cleanSub = params.subject.trim().toLowerCase();
       where.push(`(LOWER(COALESCE(subject, '')) LIKE $${idx} OR LOWER(COALESCE(subject_id, '')) = $${idx + 1})`);
       queryParams.push(`%${cleanSub.replace(/-/g, ' ')}%`, cleanSub);
       idx += 2;
@@ -1864,7 +1869,12 @@ export async function startSyllabusMockTestSession(params: {
     }
   }
 
-  const maxLimit = Math.min(200, Math.max(1, Number(params.limit) || (testCategory === 'full_length' ? 200 : 100)));
+  const requestedLimit =
+    params.limit !== undefined && params.limit !== null && Number(params.limit) > 0
+      ? Math.min(500, Math.floor(Number(params.limit)))
+      : null;
+  const fetchLimit = testCategory === 'unit_wise' ? 500 : requestedLimit || (testCategory === 'full_length' ? 200 : 100);
+
   const res = await pool.query(
     `SELECT
        id, category, unit_id, class_id, subject, lesson_title, topic,
@@ -1873,7 +1883,7 @@ export async function startSyllabusMockTestSession(params: {
      WHERE ${where.join(' AND ')}
      ORDER BY ${testCategory === 'full_length' ? 'RANDOM()' : 'id ASC'}
      LIMIT $${idx}`,
-    [...queryParams, maxLimit]
+    [...queryParams, fetchLimit]
   );
 
   // Deduplicate by question ID and normalized text
@@ -1893,18 +1903,63 @@ export async function startSyllabusMockTestSession(params: {
     throw err;
   }
 
+  // For Unit Wise Tests:
+  // - If a smaller limit is explicitly requested, distribute evenly across all lessons/topics in the unit
+  // - Otherwise include ALL eligible published questions across the entire unit
+  // - Randomize question order for examination realism
+  let selectedRows = uniqueRows;
+  let warning: string | null = null;
+  if (testCategory === 'unit_wise') {
+    if (requestedLimit !== null && requestedLimit > uniqueRows.length) {
+      warning = `Requested ${requestedLimit} questions, but only ${uniqueRows.length} published question(s) are available in this unit. Loading all ${uniqueRows.length} available questions.`;
+    }
+    if (requestedLimit !== null && requestedLimit < uniqueRows.length) {
+      const buckets = new Map<string, any[]>();
+      for (const r of uniqueRows) {
+        const bucketKey = String(r.lesson_title || r.topic || 'general').trim().toLowerCase();
+        const arr = buckets.get(bucketKey) || [];
+        arr.push(r);
+        buckets.set(bucketKey, arr);
+      }
+      const bucketList = Array.from(buckets.values());
+      const distributed: any[] = [];
+      let round = 0;
+      while (distributed.length < requestedLimit) {
+        let addedInRound = false;
+        for (const bucket of bucketList) {
+          if (round < bucket.length && distributed.length < requestedLimit) {
+            distributed.push(bucket[round]);
+            addedInRound = true;
+          }
+        }
+        if (!addedInRound) break;
+        round++;
+      }
+      selectedRows = distributed;
+    }
+
+    // Fisher-Yates shuffle for randomized question order
+    selectedRows = [...selectedRows];
+    for (let i = selectedRows.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [selectedRows[i], selectedRows[j]] = [selectedRows[j], selectedRows[i]];
+    }
+  }
+
   const marksPerQ = Number(params.marksPerQuestion) || 1.5;
   const negativeMarking = Number(params.negativeMarking) || 0;
-  const durationMinutes = Number(params.durationMinutes) || Math.max(15, uniqueRows.length);
+  const durationMinutes = Number(params.durationMinutes) || Math.max(15, selectedRows.length);
   const title =
     params.title?.trim() ||
     (testCategory === 'lesson_wise'
-      ? `${params.lessonTitle || 'Lesson'} â€” Mock Test`
+      ? `${params.lessonTitle || 'Lesson'} — Unit Wise Test`
       : testCategory === 'unit_wise'
-        ? `Unit ${unitNum || ''} â€” Unit Mock Test`
+        ? `Unit ${unitNum || ''} — Unit Wise Test`
         : `${groupInfo.tnpscGroup} ${stdNum ? `${stdNum}th Standard ` : ''}Full-length Mock Test`);
 
   return {
+    warning,
+    availableCount: uniqueRows.length,
     test: {
       id: 0,
       slug: `syllabus-${testCategory}-${Date.now()}`,
@@ -1916,14 +1971,14 @@ export async function startSyllabusMockTestSession(params: {
       subject: params.subject || 'General Studies',
       standard: stdNum ? `${stdNum}th Standard` : null,
       unit: unitNum ? `Unit ${unitNum}` : null,
-      lesson: params.lessonTitle || null,
-      questionsCount: uniqueRows.length,
+      lesson: testCategory === 'unit_wise' ? null : params.lessonTitle || null,
+      questionsCount: selectedRows.length,
       durationMinutes,
-      totalMarks: Number((uniqueRows.length * marksPerQ).toFixed(2)),
+      totalMarks: Number((selectedRows.length * marksPerQ).toFixed(2)),
       marksPerQuestion: marksPerQ,
       negativeMarking,
     },
-    questions: uniqueRows.map((r, i) => ({
+    questions: selectedRows.map((r, i) => ({
       id: r.id,
       order: i + 1,
       category: r.category,

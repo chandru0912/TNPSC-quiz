@@ -246,8 +246,20 @@ export interface ClassifiedGeminiError {
 }
 
 export function classifyGeminiError(error: any): ClassifiedGeminiError {
-  const errMsg = String(error?.message || '').toLowerCase();
+  const rawMessage = String(error?.message || '').trim();
+  const errMsg = rawMessage.toLowerCase();
   const status = error?.status || error?.statusCode || (errMsg.includes('503') ? 503 : errMsg.includes('429') ? 429 : errMsg.includes('504') ? 504 : 500);
+
+  // 0. Internal Circuit Breaker Open (never mislabel as Gemini 503 overload)
+  if (error?.code === 'SERVICE_CIRCUIT_OPEN' || error?.name === 'CircuitOpenError') {
+    return {
+      message: rawMessage || 'Gemini circuit breaker is temporarily open after repeated failures. Retrying shortly.',
+      statusCode: 503,
+      errorType: 'service_unavailable',
+      retryable: true,
+      retryAfterSeconds: 10,
+    };
+  }
 
   // Extract Retry-After if available
   let retryAfterSeconds: number | undefined;

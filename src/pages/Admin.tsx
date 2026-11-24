@@ -61,6 +61,7 @@ import { BulkMcqPastePanel } from '../components/admin/BulkMcqPastePanel'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
 import { MockTestMcqGenerator } from '../components/admin/MockTestMcqGenerator'
 import { PreviousYearPapersManager } from '../components/admin/PreviousYearPapersManager'
+import { PreviousPaperAiPdfGenerator } from '../components/admin/PreviousPaperAiPdfGenerator'
 import { GradeAndProgressSettings } from '../components/admin/GradeAndProgressSettings'
 import { NewStudentPage } from '../components/admin/pages/NewStudentPage'
 import { RestoreStudentPage } from '../components/admin/pages/RestoreStudentPage'
@@ -796,7 +797,7 @@ const Admin = () => {
   // Modals state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState<Partial<QuestionItem> | null>(null)
-  const [mcqModalMode, setMcqModalMode] = useState<'single' | 'bulk_paste'>('bulk_paste')
+  const [mcqModalMode, setMcqModalMode] = useState<'gemini_ai' | 'bulk_paste' | 'single'>('gemini_ai')
   const [isMcqModalExpanded, setIsMcqModalExpanded] = useState<boolean>(true)
   const [bulkPasteTerm, setBulkPasteTerm] = useState<string>('Term 1')
   const [bulkPasteLessonNumber, setBulkPasteLessonNumber] = useState<string>('')
@@ -3753,6 +3754,8 @@ const Admin = () => {
       sourceReference: `Samacheer Kalvi Class ${defaultClassId}`,
       status: 'staging',
     })
+    setMcqModalMode('gemini_ai')
+    setIsMcqModalExpanded(true)
     setIsEditModalOpen(true)
   }
 
@@ -8228,6 +8231,28 @@ const Admin = () => {
                       <button
                         type="button"
                         onClick={() => {
+                          setMcqModalMode('gemini_ai')
+                          setIsMcqModalExpanded(true)
+                        }}
+                        style={{
+                          padding: '0.35rem 0.85rem',
+                          borderRadius: '8px',
+                          border: 'none',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          background: mcqModalMode === 'gemini_ai' ? 'rgba(168, 85, 247, 0.28)' : 'transparent',
+                          color: mcqModalMode === 'gemini_ai' ? '#d8b4fe' : '#94a3b8',
+                        }}
+                      >
+                        <Sparkles size={13} /> Gemini AI Text / JSON
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
                           setMcqModalMode('bulk_paste')
                           setIsMcqModalExpanded(true)
                         }}
@@ -8278,7 +8303,7 @@ const Admin = () => {
                     className="admin-modal-close"
                     onClick={() => {
                       setIsEditModalOpen(false)
-                      setMcqModalMode('bulk_paste')
+                      setMcqModalMode('gemini_ai')
                     }}
                   >
                     <X size={18} />
@@ -8586,8 +8611,58 @@ const Admin = () => {
                     })()}
                   </div>
 
-                  {/* Bulk MCQ Paste Import OR Manual Single MCQ Fields */}
-                  {!editingQuestion.id && mcqModalMode === 'bulk_paste' ? (
+                  {/* Gemini AI Text / JSON, Bulk MCQ Paste Import, OR Manual Single MCQ Fields */}
+                  {!editingQuestion.id && mcqModalMode === 'gemini_ai' ? (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <PreviousPaperAiPdfGenerator
+                        token={token}
+                        mode="question_bank"
+                        questionBankContext={{
+                          category: String(editingQuestion.category || 'group1'),
+                          subject: String(editingQuestion.subject || 'General Studies'),
+                          classId: Number(editingQuestion.classId || 6),
+                          unitId: Number(editingQuestion.unitId || 1),
+                          lessonTitle: String(editingQuestion.lessonTitle || ''),
+                          lessonId: editingQuestion.lessonId || null,
+                          topic: String(editingQuestion.topic || ''),
+                          difficulty: (editingQuestion.difficulty as 'Easy' | 'Medium' | 'Hard') || 'Medium',
+                          medium:
+                            bulkPasteLanguage === 'english'
+                              ? 'English'
+                              : bulkPasteLanguage === 'tamil'
+                                ? 'Tamil'
+                                : 'English',
+                          targetSystem: targetSystemFilter,
+                          sourceReference: editingQuestion.sourceReference || undefined,
+                        }}
+                        onQuestionBankFieldChange={(patch) => {
+                          if (patch.difficulty !== undefined) {
+                            setEditingQuestion({ ...editingQuestion, difficulty: patch.difficulty })
+                          }
+                          if (patch.medium !== undefined) {
+                            setBulkPasteLanguage(patch.medium === 'English' ? 'english' : 'tamil')
+                          }
+                        }}
+                        onSavedToQuestionBank={(_ids, count) => {
+                          fetchQuestions()
+                          showToast('success', `Question Bank updated (${count} MCQ(s))`)
+                        }}
+                        onViewInQuestionBank={() => {
+                          setIsEditModalOpen(false)
+                          setMcqModalMode('gemini_ai')
+                          qbSyllabusCascade.resetFilters()
+                          setSearchQuery('')
+                          setDebouncedSearchQuery('')
+                          setDifficultyFilter('all')
+                          setStatusFilter('staging')
+                          setPage(1)
+                          setTimeout(() => {
+                            fetchQuestions()
+                          }, 50)
+                        }}
+                      />
+                    </div>
+                  ) : !editingQuestion.id && mcqModalMode === 'bulk_paste' ? (
                     <BulkMcqPastePanel
                       token={token}
                       targetSystem={targetSystemFilter}
@@ -8736,7 +8811,7 @@ const Admin = () => {
                     className="admin-btn admin-btn-secondary"
                     onClick={() => {
                       setIsEditModalOpen(false)
-                      setMcqModalMode('bulk_paste')
+                      setMcqModalMode('gemini_ai')
                     }}
                   >
                     Close

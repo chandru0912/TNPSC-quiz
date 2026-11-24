@@ -1571,7 +1571,7 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
       const rawTargetSystem = q.targetSystem || q.target_system || req.body?.targetSystem || 'study_materials';
       const resolvedTargetSystem = ['study_materials', 'main_practice'].includes(rawTargetSystem) ? rawTargetSystem : 'study_materials';
       const rawLang = String(q.language || req.body?.language || '').trim().toLowerCase();
-      const resolvedLang = rawLang === 'english' ? 'english' : 'tamil';
+      const resolvedLang = rawLang === 'english' ? 'english' : rawLang === 'bilingual' ? 'bilingual' : 'tamil';
       const resolvedClassId = q.classId || q.class_id || q.standard || null;
       const resolvedSubj = q.subject || 'General Studies';
       const resolvedSubjId = q.subjectId || q.subject_id || resolvedSubj.toLowerCase().replace(/\s+/g, '-');
@@ -1618,13 +1618,23 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
           : 'needs_review',
         targetSystem: resolvedTargetSystem,
         language: resolvedLang,
+        aiProvider: (q.aiProvider || q.ai_provider || req.body?.aiProvider || null) ? String(q.aiProvider || q.ai_provider || req.body?.aiProvider).trim() : null,
+        modelId: (q.aiModel || q.modelId || q.model_id || req.body?.modelId || null) ? String(q.aiModel || q.modelId || q.model_id || req.body?.modelId).trim() : null,
+        generationJobId: (q.generationJobId || q.generation_job_id || req.body?.generationJobId || null) ? String(q.generationJobId || q.generation_job_id || req.body?.generationJobId).trim() : null,
+        sourceQuestionId: (q.sourceQuestionId || q.source_question_id || null) ? String(q.sourceQuestionId || q.source_question_id).trim() : null,
+        sourceType: (q.sourceType || q.source_type || req.body?.sourceType || null) ? String(q.sourceType || q.source_type || req.body?.sourceType).trim() : null,
       });
     });
 
-    if (validationErrors.length > 0) {
+    const allowPartialStaging = Boolean(req.body?.allowPartialStaging);
+    if (validationErrors.length > 0 && (!allowPartialStaging || validQuestions.length === 0)) {
+      const sampleReason = validationErrors
+        .slice(0, 3)
+        .map((e) => `#${e.index}: ${e.reason}`)
+        .join('; ');
       return res.status(400).json({
         status: 'error',
-        message: `Validation failed: ${validationErrors.length} question(s) had errors. Rejecting batch to prevent invalid mappings.`,
+        message: `Validation failed: ${validationErrors.length} question(s) had errors (${sampleReason}).`,
         errors: validationErrors,
       });
     }
@@ -1661,6 +1671,12 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
     const acceptedForInsert: Array<{ question: string; correctAnswerText?: string }> = [];
     const uploadBatchId = `bulk_${Date.now().toString(36)}`;
 
+    // Ensure optional AI provenance columns exist (safe additive check)
+    await client.query(`
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS source_question_id VARCHAR(64);
+      ALTER TABLE questions ADD COLUMN IF NOT EXISTS source_type VARCHAR(48);
+    `);
+
     await client.query('BEGIN');
 
     for (const q of validQuestions) {
@@ -1676,7 +1692,8 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
           options, option_a, option_b, option_c, option_d, correct_answer,
           explanation, source_reference, status, textbook_id, source_page, verification_status,
           target_system, language, term, lesson_number,
-          normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id
+          normalized_question_hash, concept_fingerprint, duplicate_check_status, generation_batch_id,
+          ai_provider, model_id, generation_job_id, source_question_id, source_type
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, $7,
@@ -1684,7 +1701,8 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
           $14, $15, $16, $17, $18, $19,
           $20, $21, 'staging', $22, $23, $24,
           $25, $26, $27, $28,
-          $29, $30, 'passed', $31
+          $29, $30, 'passed', $31,
+          $32, $33, $34, $35, $36
         )
         ON CONFLICT (lesson_title, question_text) DO NOTHING
         RETURNING id;
@@ -1721,6 +1739,11 @@ router.post('/upload', requireAdminAuth, async (req: Request, res: Response) => 
         q.normalizedQuestionHash || null,
         q.conceptFingerprint || null,
         uploadBatchId,
+        q.aiProvider || null,
+        q.modelId || null,
+        q.generationJobId || null,
+        q.sourceQuestionId || null,
+        q.sourceType || null,
       ];
 
       const resInsert = await client.query(insertQuery, values);

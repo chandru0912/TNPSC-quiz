@@ -222,7 +222,7 @@ export async function listPreviousPapers(filters?: string | {
   await ensurePreviousPapersSeeded();
   const f = typeof filters === 'string' ? { category: filters } : (filters || {});
   const params: any[] = [];
-  const conditions: string[] = [`p.status = 'published'`];
+  const conditions: string[] = [`p.status = 'published'`, `p.deleted_at IS NULL`];
 
   if (f.category && f.category !== 'all') {
     const c = f.category.trim().toLowerCase();
@@ -287,7 +287,7 @@ export async function startOrResumePaperSession(studentId: number, paperId: numb
   const paperRes = await pool.query(
     `SELECT id, year, exam, category, subjects, total_questions, duration_minutes, marks_per_question::float AS marks_per_question
      FROM previous_year_papers
-     WHERE id = $1 AND status = 'published'`,
+     WHERE id = $1 AND status = 'published' AND deleted_at IS NULL`,
     [paperId]
   );
   if (paperRes.rows.length === 0) {

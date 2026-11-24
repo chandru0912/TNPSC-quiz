@@ -184,6 +184,28 @@ export function isReverseQuestionPair(
 ): boolean {
   if (!candidateAnswer || !existingAnswer) return false;
 
+  // Never treat generic MCQ meta-answers (e.g., "(i) and (iii) only", "Both [A] and [R] are true", "All of the above", "12 days") as reverse-question inversions
+  const isGenericMetaAnswer = (ans: string) => {
+    const clean = normalizeText(ans);
+    if (!clean || clean.length < 4) return true;
+    if (/^\d+(?:\.\d+)?\s*(?:days?|hours?|years?|months?|minutes?|seconds?|km|m|cm|kg|g|rs|percent|%)?$/.test(clean)) return true;
+    if (/(?:correct explanation|all of the above|none of the above|statements?\s+(?:are|is)\s+(?:true|false|correct))/i.test(clean)) {
+      return true;
+    }
+    // Check if removing generic choice tokens leaves zero meaningful domain words
+    const META_TOKENS = new Set([
+      'i', 'ii', 'iii', 'iv', 'v', 'a', 'b', 'c', 'd', '1', '2', '3', '4',
+      'and', 'or', 'only', 'both', 'all', 'none', 'neither', 'either',
+      'is', 'are', 'true', 'false', 'correct', 'incorrect', 'wrong', 'right',
+      'statement', 'statements', 'option', 'options', 'above', 'below',
+    ]);
+    const domainTokens = clean.split(' ').filter((t) => t.length > 0 && !META_TOKENS.has(t));
+    return domainTokens.length === 0;
+  };
+  if (isGenericMetaAnswer(candidateAnswer) || isGenericMetaAnswer(existingAnswer)) {
+    return false;
+  }
+
   const candQTokens = tokenSet(candidateQuestion);
   const candATokens = tokenSet(candidateAnswer);
   const existQTokens = tokenSet(existingQuestion);
@@ -522,7 +544,7 @@ export function cleanOption(opt: unknown): string {
  */
 export function isValidQuestionText(rawQuestion: string): { valid: boolean; normalizedQuestion: string; reason?: string } {
   let q = String(rawQuestion || '').trim();
-  if (q.length < 12) {
+  if (q.length < 8) {
     return { valid: false, normalizedQuestion: q, reason: 'Question text is too short.' };
   }
 
@@ -534,14 +556,29 @@ export function isValidQuestionText(rawQuestion: string): { valid: boolean; norm
     return { valid: false, normalizedQuestion: q, reason: 'Appears to be a lesson description or summary.' };
   }
 
-  if (q.endsWith(':')) {
+  // Accept all authentic TNPSC MCQ formats:
+  // 1. Standard interrogative questions ending with '?' (or containing '?' in multi-line statement prompts)
+  // 2. Assertion [A] / Reason [R], Match the following, Statement I/II, Choose/Find/Identify/Select/Arrange/Pick/Fill-in-the-blank
+  // 3. Tamil exam prompts (பொருத்துக, கூற்று, காரணம், சரியான, தவறான, கோடிட்ட, தேர்ந்தெடு, கண்டறிக)
+  const isRecognizedExamPrompt =
+    q.includes('?') ||
+    q.includes('___') ||
+    q.includes('……') ||
+    q.includes('...') ||
+    /\n/.test(q) ||
+    /(?:assertion|reason|match\s+the\s+following|statement|choose|select|identify|find|arrange|consider\s+the\s+following|pick\s+out|which\s+of|fill\s+in|read\s+the\s+following|pair|chronological|simplify|evaluate|solve|calculate|compute|value\s+of|பொருத்துக|கூற்று|காரணம்|சரியான|தவறான|கோடிட்ட|தேர்ந்தெடு|கண்டறிக|வரிசைப்படுத்துக|சுருக்குக|மதிப்பு)/i.test(
+      q
+    );
+
+  if (q.endsWith(':') && !/\n/.test(q) && !isRecognizedExamPrompt) {
     q = `${q.slice(0, -1).trim()}?`;
   }
-  if (!q.endsWith('?')) {
+
+  if (!isRecognizedExamPrompt && !q.endsWith('?') && !q.endsWith('.')) {
     return {
       valid: false,
       normalizedQuestion: q,
-      reason: 'Every question must end with a question mark (?).',
+      reason: 'Question text must be a valid question or TNPSC exam prompt.',
     };
   }
 
