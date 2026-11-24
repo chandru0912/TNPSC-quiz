@@ -55,6 +55,7 @@ import { AdminTopHeader } from '../components/admin/AdminTopHeader'
 import { UnifiedDashboardOverview } from '../components/analytics/UnifiedDashboardOverview'
 import { StudyMaterialsManagement } from '../components/admin/StudyMaterialsManagement'
 import { TextbookIndexingControlCenter } from '../components/admin/TextbookIndexingControlCenter'
+import { GoogleDriveTextbooksPanel } from '../components/admin/GoogleDriveTextbooksPanel'
 import { GoogleDriveTextbooksTab } from '../components/admin/GoogleDriveTextbooksTab'
 import { BulkMcqPastePanel } from '../components/admin/BulkMcqPastePanel'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
@@ -1761,22 +1762,22 @@ const Admin = () => {
     }
   }
 
-  // Connect Google Drive
+  // Connect Google Drive (also used for "Change Google Account")
   const handleConnectGoogleDrive = async () => {
+    if (isConnectingDrive) return
     try {
       setIsConnectingDrive(true)
       setDriveConnectionError(null)
       const authHeader: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
       const originParam = encodeURIComponent(window.location.origin)
-      const clientIdParam = import.meta.env.VITE_GOOGLE_CLIENT_ID
-        ? `&clientId=${encodeURIComponent(import.meta.env.VITE_GOOGLE_CLIENT_ID)}`
-        : ''
-      const res = await apiFetch(`/api/drive/auth/url?origin=${originParam}${clientIdParam}`, {
+      const res = await apiFetch(`/api/drive/auth/url?origin=${originParam}`, {
         headers: authHeader,
+        timeoutMs: 20000,
       })
-      const data = await res.json()
-      if (res.ok && data.data?.authUrl) {
-        window.location.href = data.data.authUrl
+      const data = await res.json().catch(() => ({}))
+      const authUrl: string | undefined = data?.data?.authUrl
+      if (res.ok && typeof authUrl === 'string' && authUrl.startsWith('https://accounts.google.com/')) {
+        window.location.href = authUrl
       } else {
         setIsConnectingDrive(false)
         const errMsg = data.message || 'Could not initiate Google authorization. Please check server credentials.'
@@ -2495,7 +2496,7 @@ const Admin = () => {
     fetchAiProvidersStatus()
 
     const urlParams = new URLSearchParams(window.location.search)
-    if (urlParams.get('gdrive') === 'connected') {
+    if (urlParams.get('gdrive') === 'connected' || urlParams.get('drive_status') === 'connected') {
       const email = urlParams.get('email')
       setIsConnectingDrive(false)
       setDriveConnectionError(null)
@@ -2508,8 +2509,8 @@ const Admin = () => {
       // Immediately refresh status and materials list
       checkDriveStatus()
       fetchDriveMaterials()
-    } else if (urlParams.get('gdrive_error')) {
-      const err = urlParams.get('gdrive_error') || 'Unknown OAuth error'
+    } else if (urlParams.get('gdrive_error') || urlParams.get('drive_error')) {
+      const err = urlParams.get('gdrive_error') || urlParams.get('drive_error') || 'Unknown OAuth error'
       setIsConnectingDrive(false)
       setDriveConnectionError(err)
       setActionMessage({
@@ -5425,6 +5426,12 @@ const Admin = () => {
               </div>
             </div>
 
+            {/* Google Drive OAuth & Metadata-Only Textbook Sync Panel */}
+            <GoogleDriveTextbooksPanel
+              token={token}
+              onSyncCompleted={() => fetchTextbooks(false)}
+            />
+
             {/* Global Textbook Extraction & Indexing Control Center (Standards 6–12) */}
             <TextbookIndexingControlCenter
               token={token}
@@ -6294,6 +6301,19 @@ const Admin = () => {
                         <span>{driveConnectionError || driveStatus.error}</span>
                       </div>
                     )}
+                    {!driveStatus.connected &&
+                      /access_denied|test user|approved testers|403/i.test(driveConnectionError || driveStatus.error || '') && (
+                        <div style={{ marginTop: '0.65rem', padding: '0.65rem 0.85rem', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fde68a', fontSize: '0.82rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: '#f59e0b', marginBottom: '0.25rem' }}>
+                            <AlertTriangle size={15} />
+                            <span>Action Required: Approve Administrator Gmail as an OAuth Test User</span>
+                          </div>
+                          <div>
+                            Your Google OAuth app is in <strong>Testing</strong> mode (recommended for admin-only Google Drive access). Add your administrator Gmail under{' '}
+                            <strong>Google Cloud Console → Google Auth Platform → Audience → Test users</strong>, click <strong>Save</strong>, then click <strong>Retry Connection</strong>. Students do not need Google Drive OAuth to download published textbooks.
+                          </div>
+                        </div>
+                      )}
                     {!driveStatus.connected && !driveStatus.configured && driveStatus.errorSource === 'config' && (
                       <div style={{ marginTop: '0.65rem', padding: '0.65rem 0.85rem', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#fde68a', fontSize: '0.82rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: '#f59e0b', marginBottom: '0.25rem' }}>
@@ -6332,6 +6352,15 @@ const Admin = () => {
                       >
                         <RefreshCw size={14} className={isCheckingDrive ? 'spinning' : ''} />
                         <span>Check Status</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn-secondary"
+                        onClick={handleConnectGoogleDrive}
+                        title="Reconnect with a different Google account"
+                      >
+                        <Cloud size={14} />
+                        <span>Change Google Account</span>
                       </button>
                       <button
                         type="button"

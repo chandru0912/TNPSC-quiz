@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "test": "tsx src/tests/ci-security-cache.test.ts",
+    "verify:oauth:local": "tsx src/scripts/verifyLocalOAuth.ts",
     "migrate:validate": "tsx src/scripts/validateMigrations.ts",
     "start": "node dist/server.js",
     "db:prod:check": "tsx src/scripts/checkProdDb.ts"

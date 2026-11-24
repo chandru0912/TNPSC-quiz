@@ -19,6 +19,10 @@ import { CLASS_6_TAMIL_TERM_1_PAGES } from './class6TamilTerm1Corpus';
 export const TARGET_FOLDER_NAME = 'TNPSC Study Hub Materials';
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
+export function getDriveScope(): string {
+  return cleanCredential(process.env.GOOGLE_DRIVE_SCOPE) || DRIVE_SCOPE;
+}
+
 export type DriveConnectionState =
   | 'CONNECTED'
   | 'DISCONNECTED'
@@ -206,6 +210,35 @@ function getJwtSecret(): string {
   return process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_2026';
 }
 
+const TOKEN_ENC_PREFIX = 'enc:v1:';
+
+function getTokenEncryptionKey(): Buffer {
+  const secret = cleanCredential(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY) || getJwtSecret();
+  return crypto.createHash('sha256').update(secret).digest();
+}
+
+export function encryptDriveToken(plain: string): string {
+  if (!plain || plain.startsWith(TOKEN_ENC_PREFIX)) return plain;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getTokenEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${TOKEN_ENC_PREFIX}${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+export function decryptDriveToken(stored?: string | null): string | null {
+  if (!stored) return null;
+  if (!stored.startsWith(TOKEN_ENC_PREFIX)) return stored;
+  const parts = stored.slice(TOKEN_ENC_PREFIX.length).split(':');
+  if (parts.length !== 3) {
+    throw new Error('Stored Google Drive token is malformed. Please reconnect Google Drive.');
+  }
+  const [ivHex, authTagHex, ciphertextHex] = parts;
+  const decipher = crypto.createDecipheriv('aes-256-gcm', getTokenEncryptionKey(), Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+  return Buffer.concat([decipher.update(Buffer.from(ciphertextHex, 'hex')), decipher.final()]).toString('utf8');
+}
+
 /**
  * Sanitizes credentials by trimming whitespace, stripping enclosing quotes,
  * removing carriage returns (\r) and newlines, and stripping zero-width unicode characters.
@@ -220,13 +253,216 @@ export function cleanCredential(val?: string | null): string {
     .trim();
 }
 
+export interface ResolvedDriveOAuthCredentials {
+  clientId: string;
+  clientSecret: string;
+  rawClientId: string;
+  rawClientSecret: string;
+  source: 'GOOGLE_DRIVE_CLIENT_ID' | 'GOOGLE_CLIENT_ID' | 'none';
+  isPlaceholderSecret: boolean;
+  wasJsonBlob: boolean;
+  hasFormattingIssue: boolean;
+}
+
+export function resolveDriveOAuthCredentials(
+  clientIdOverride?: string,
+  clientSecretOverride?: string
+): ResolvedDriveOAuthCredentials {
+  const hasDedicatedId = Boolean(process.env.GOOGLE_DRIVE_CLIENT_ID && process.env.GOOGLE_DRIVE_CLIENT_ID.trim());
+  const rawClientId = clientIdOverride ?? (hasDedicatedId ? process.env.GOOGLE_DRIVE_CLIENT_ID! : (process.env.GOOGLE_CLIENT_ID || ''));
+  const hasDedicatedSecret = Boolean(process.env.GOOGLE_DRIVE_CLIENT_SECRET && process.env.GOOGLE_DRIVE_CLIENT_SECRET.trim());
+  const rawClientSecret =
+    clientSecretOverride ??
+    (hasDedicatedSecret ? process.env.GOOGLE_DRIVE_CLIENT_SECRET! : (process.env.GOOGLE_CLIENT_SECRET || ''));
+
+  let clientId = cleanCredential(rawClientId);
+  let clientSecret = cleanCredential(rawClientSecret);
+  let wasJsonBlob = false;
+
+  const trimmedRawId = rawClientId.trim();
+  if (trimmedRawId.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmedRawId);
+      const extractedId = parsed?.web?.client_id || parsed?.installed?.client_id || parsed?.client_id;
+      const extractedSecret = parsed?.web?.client_secret || parsed?.installed?.client_secret || parsed?.client_secret;
+      if (typeof extractedId === 'string' && extractedId.trim()) {
+        clientId = cleanCredential(extractedId);
+        wasJsonBlob = true;
+      }
+      if (!clientSecret && typeof extractedSecret === 'string' && extractedSecret.trim()) {
+        clientSecret = cleanCredential(extractedSecret);
+      }
+    } catch {
+      // Fall back to cleaned raw string
+    }
+  }
+
+  const isPlaceholderSecret =
+    !clientSecret ||
+    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
+    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
+    clientSecret.includes('YOUR_') ||
+    clientSecret.includes('your_');
+
+  const hasFormattingIssue =
+    wasJsonBlob ||
+    /^["']|["']$/.test(rawClientId) ||
+    /^["']|["']$/.test(rawClientSecret) ||
+    /\s/.test(rawClientId) ||
+    /\s/.test(rawClientSecret);
+
+  return {
+    clientId,
+    clientSecret,
+    rawClientId,
+    rawClientSecret,
+    source: clientIdOverride
+      ? 'GOOGLE_DRIVE_CLIENT_ID'
+      : hasDedicatedId
+      ? 'GOOGLE_DRIVE_CLIENT_ID'
+      : clientId
+      ? 'GOOGLE_CLIENT_ID'
+      : 'none',
+    isPlaceholderSecret,
+    wasJsonBlob,
+    hasFormattingIssue,
+  };
+}
+
+export type OAuthFailureCategory =
+  | 'unapproved_test_user'
+  | 'incorrect_oauth_client'
+  | 'invalid_scope'
+  | 'redirect_uri_mismatch'
+  | 'token_or_grant_error'
+  | 'api_unavailable'
+  | 'unknown';
+
+export interface OAuthFailureDiagnosis {
+  category: OAuthFailureCategory;
+  summary: string;
+  remediation: string;
+  googleCloudProjectNumber: string | null;
+}
+
+export function extractGoogleCloudProjectNumber(clientId?: string): string | null {
+  const clean = cleanCredential(clientId || resolveDriveOAuthCredentials().clientId);
+  const match = clean.match(/^(\d+)-/);
+  return match ? match[1] : null;
+}
+
+const ALLOWED_MINIMAL_DRIVE_SCOPES = new Set([
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive.readonly',
+]);
+
+export function getRequiredDriveScopes(): string[] {
+  return [getDriveScope(), 'https://www.googleapis.com/auth/userinfo.email'];
+}
+
+export function validateDriveScopes(): {
+  scopes: string[];
+  driveScope: string;
+  isValid: boolean;
+  isMinimal: boolean;
+  warning: string | null;
+} {
+  const driveScope = getDriveScope();
+  const scopes = getRequiredDriveScopes();
+  const isValid = /^https:\/\/www\.googleapis\.com\/auth\/drive(\.[a-z]+)?$/.test(driveScope);
+  const isMinimal = ALLOWED_MINIMAL_DRIVE_SCOPES.has(driveScope);
+  let warning: string | null = null;
+  if (!isValid) {
+    warning = `Invalid Google Drive scope "${driveScope}". Use https://www.googleapis.com/auth/drive.file.`;
+  } else if (!isMinimal) {
+    warning = `Broad Google Drive scope "${driveScope}" triggers restricted Google verification. Use https://www.googleapis.com/auth/drive.file for minimal admin access.`;
+  }
+  return { scopes, driveScope, isValid, isMinimal, warning };
+}
+
+/**
+ * Classifies an OAuth authorization/callback failure into its root cause:
+ * unapproved test user (403 access_denied), incorrect OAuth client, invalid scope, or redirect mismatch.
+ */
+export function diagnoseDriveOAuthFailure(rawError: string, redirectUri?: string): OAuthFailureDiagnosis {
+  const err = String(rawError || '').trim();
+  const lower = err.toLowerCase();
+  const expectedUri = redirectUri || resolveRedirectUri();
+  const projectNumber = extractGoogleCloudProjectNumber();
+  const projectLabel = projectNumber ? `Google Cloud Project ${projectNumber}` : 'your Google Cloud Project';
+
+  if (lower.includes('redirect_uri_mismatch')) {
+    return {
+      category: 'redirect_uri_mismatch',
+      summary: `OAuth redirect URI mismatch (redirect_uri_mismatch).`,
+      remediation: `Ensure "${expectedUri}" is listed under Authorized redirect URIs in ${projectLabel} → APIs & Services → Credentials.`,
+      googleCloudProjectNumber: projectNumber,
+    };
+  }
+  if (lower.includes('access_denied') || lower.includes('org_internal') || lower.includes('approved testers') || lower.includes('403')) {
+    return {
+      category: 'unapproved_test_user',
+      summary: 'Google OAuth Error 403: access_denied (Unapproved Test User or Consent Declined).',
+      remediation: `Add your administrator Gmail under ${projectLabel} → Google Auth Platform → Audience → Test users (OAuth consent screen is in Testing mode), save, and click Retry Connection.`,
+      googleCloudProjectNumber: projectNumber,
+    };
+  }
+  if (lower.includes('invalid_client') || lower.includes('deleted_client') || lower.includes('unauthorized_client') || lower.includes('client secret is invalid')) {
+    return {
+      category: 'incorrect_oauth_client',
+      summary: 'Incorrect Google OAuth client or secret (invalid_client).',
+      remediation: 'Verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (or GOOGLE_DRIVE_CLIENT_ID / GOOGLE_DRIVE_CLIENT_SECRET) match the active Web OAuth Client in Google Cloud Console.',
+      googleCloudProjectNumber: projectNumber,
+    };
+  }
+  if (lower.includes('invalid_scope') || lower.includes('insufficient_scope') || lower.includes('insufficientpermissions')) {
+    return {
+      category: 'invalid_scope',
+      summary: 'Invalid or insufficient Google Drive OAuth scope.',
+      remediation: 'Use the minimum required scope (https://www.googleapis.com/auth/drive.file) and approve Drive permissions on the consent screen.',
+      googleCloudProjectNumber: projectNumber,
+    };
+  }
+  if (lower.includes('invalid_grant') || lower.includes('access_token_expired') || lower.includes('token has been expired')) {
+    return {
+      category: 'token_or_grant_error',
+      summary: 'Google OAuth authorization code or token expired/revoked.',
+      remediation: 'Click Connect Google Drive to start a fresh authorization.',
+      googleCloudProjectNumber: projectNumber,
+    };
+  }
+  if (lower.includes('accessnotconfigured') || lower.includes('service unavailable') || lower.includes('econnrefused') || lower.includes('enotfound')) {
+    return {
+      category: 'api_unavailable',
+      summary: 'Google Drive API is disabled or temporarily unavailable.',
+      remediation: `Verify Google Drive API is enabled in ${projectLabel} → APIs & Services → Library and try again.`,
+      googleCloudProjectNumber: projectNumber,
+    };
+  }
+  return {
+    category: 'unknown',
+    summary: err || 'Google Drive OAuth failed.',
+    remediation: 'Click Retry Connection or run /api/drive/config-check to inspect OAuth diagnostics.',
+    googleCloudProjectNumber: projectNumber,
+  };
+}
+
+export function formatOAuthCallbackError(rawError: string, redirectUri?: string): string {
+  const diagnosis = diagnoseDriveOAuthFailure(rawError, redirectUri);
+  return `${diagnosis.summary} ${diagnosis.remediation}`.trim();
+}
+
 /**
  * Derives the exact Google OAuth redirect URI based on environment, request hint, and configuration.
  */
 export function resolveRedirectUri(customRedirectUri?: string, reqHostHint?: string): string {
   if (customRedirectUri && customRedirectUri.trim()) {
-    return cleanCredential(customRedirectUri);
+    return cleanCredential(customRedirectUri).replace(/\/+$/, '');
   }
+
+  const configuredRedirectUri = cleanCredential(
+    process.env.GOOGLE_DRIVE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI
+  ).replace(/\/+$/, '');
 
   const isProduction =
     process.env.NODE_ENV === 'production' ||
@@ -239,15 +475,15 @@ export function resolveRedirectUri(customRedirectUri?: string, reqHostHint?: str
 
   // Local development: strictly guarantee the backend callback uses port 5000
   if (!isProduction || isLocalHostHint) {
-    if (process.env.GOOGLE_REDIRECT_URI && process.env.GOOGLE_REDIRECT_URI.includes('localhost')) {
-      return cleanCredential(process.env.GOOGLE_REDIRECT_URI);
+    if (configuredRedirectUri && configuredRedirectUri.includes('localhost:5000')) {
+      return configuredRedirectUri;
     }
-    return `${LOCAL_BACKEND_URL}/api/drive/oauth/callback`; // http://localhost:5000/api/drive/oauth/callback
+    return `${LOCAL_BACKEND_URL}/api/drive/oauth/callback`;
   }
 
-  // Production: use configured production redirect URI
-  if (process.env.GOOGLE_REDIRECT_URI && process.env.GOOGLE_REDIRECT_URI.trim()) {
-    return cleanCredential(process.env.GOOGLE_REDIRECT_URI);
+  // Production: use configured production redirect URI (never leak localhost URI into production)
+  if (configuredRedirectUri && !configuredRedirectUri.includes('localhost')) {
+    return configuredRedirectUri;
   }
   if (process.env.BACKEND_URL && process.env.BACKEND_URL.trim()) {
     return `${cleanCredential(process.env.BACKEND_URL).replace(/\/+$/, '')}/api/drive/oauth/callback`;
@@ -266,8 +502,7 @@ export function createOAuth2Client(
   clientIdOverride?: string,
   clientSecretOverride?: string
 ) {
-  const clientId = cleanCredential(clientIdOverride || process.env.GOOGLE_CLIENT_ID);
-  const clientSecret = cleanCredential(clientSecretOverride || process.env.GOOGLE_CLIENT_SECRET);
+  const { clientId, clientSecret } = resolveDriveOAuthCredentials(clientIdOverride, clientSecretOverride);
   const effectiveRedirectUri = resolveRedirectUri(redirectUri);
 
   return new google.auth.OAuth2(clientId, clientSecret, effectiveRedirectUri);
@@ -344,7 +579,7 @@ export function getAuthorizationUrl(
   frontendOrigin?: string,
   clientIdOverride?: string
 ): string {
-  const clientId = cleanCredential(clientIdOverride || process.env.GOOGLE_CLIENT_ID);
+  const { clientId, isPlaceholderSecret } = resolveDriveOAuthCredentials(clientIdOverride);
   if (!clientId) {
     throw new Error(
       'Google Cloud OAuth configuration missing: GOOGLE_CLIENT_ID is not configured. ' +
@@ -352,18 +587,10 @@ export function getAuthorizationUrl(
     );
   }
 
-  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
-  const isPlaceholderSecret =
-    !clientSecret ||
-    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
-    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
-    clientSecret.includes('YOUR_') ||
-    clientSecret.includes('your_');
-
   if (isPlaceholderSecret) {
     throw new Error(
       'Google Cloud OAuth configuration missing: GOOGLE_CLIENT_SECRET is not configured in backend/.env. ' +
-      'Please open backend/.env and paste your newly rotated Google Client Secret (starting with GOCSPX-) before connecting.'
+      'Please configure your Google Client Secret (starting with GOCSPX-) before connecting.'
     );
   }
 
@@ -373,12 +600,8 @@ export function getAuthorizationUrl(
 
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
-    scope: [
-      DRIVE_SCOPE,
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile',
-    ],
+    prompt: 'select_account consent',
+    scope: getRequiredDriveScopes(),
     state,
     include_granted_scopes: true,
   });
@@ -411,11 +634,14 @@ export async function getStoredTokens(): Promise<{
 
     if (res.rows.length > 0) {
       const row = res.rows[0];
+      const decryptedRefresh = decryptDriveToken(row.refresh_token);
+      const decryptedAccess = decryptDriveToken(row.access_token);
+      if (!decryptedRefresh) return null;
       return {
         id: row.id,
         accountEmail: row.account_email,
-        refreshToken: row.refresh_token,
-        accessToken: row.access_token,
+        refreshToken: decryptedRefresh,
+        accessToken: decryptedAccess,
         expiryDate: row.expiry_date ? Number(row.expiry_date) : null,
         folderId: row.folder_id,
       };
@@ -450,6 +676,9 @@ export async function saveTokens(params: {
   accountEmail?: string | null;
   folderId?: string | null;
 }): Promise<void> {
+  const encryptedRefresh = encryptDriveToken(params.refreshToken);
+  const encryptedAccess = params.accessToken ? encryptDriveToken(params.accessToken) : null;
+
   const existing = await pool.query(`SELECT id FROM google_drive_tokens LIMIT 1`);
   if (existing.rows.length > 0) {
     await pool.query(
@@ -462,8 +691,8 @@ export async function saveTokens(params: {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $6`,
       [
-        params.refreshToken,
-        params.accessToken || null,
+        encryptedRefresh,
+        encryptedAccess,
         params.expiryDate || null,
         params.accountEmail || null,
         params.folderId || null,
@@ -476,8 +705,8 @@ export async function saveTokens(params: {
         (refresh_token, access_token, expiry_date, account_email, folder_id)
        VALUES ($1, $2, $3, $4, $5)`,
       [
-        params.refreshToken,
-        params.accessToken || null,
+        encryptedRefresh,
+        encryptedAccess,
         params.expiryDate || null,
         params.accountEmail || null,
         params.folderId || null,
@@ -490,10 +719,9 @@ export async function saveTokens(params: {
  * Obtains an authenticated Google OAuth2 client with automatic access-token refresh.
  */
 export async function getAuthenticatedClient(redirectUri?: string) {
-  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
-  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  const { clientId, clientSecret, isPlaceholderSecret } = resolveDriveOAuthCredentials();
 
-  if (!clientId || !clientSecret) {
+  if (!clientId || isPlaceholderSecret || !clientSecret) {
     throw new Error('Google Cloud credentials missing: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured.');
   }
 
@@ -689,16 +917,8 @@ export async function verifyGoogleClientCredentials(redirectUri?: string): Promi
   details: string;
   isAuthentic: boolean;
 }> {
-  const clientId = cleanCredential(process.env.GOOGLE_CLIENT_ID);
-  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
+  const { clientId, clientSecret, isPlaceholderSecret } = resolveDriveOAuthCredentials();
   const effectiveRedirectUri = resolveRedirectUri(redirectUri);
-
-  const isPlaceholderSecret =
-    !clientSecret ||
-    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
-    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
-    clientSecret.includes('YOUR_') ||
-    clientSecret.includes('your_');
 
   if (!clientId || isPlaceholderSecret) {
     return {
@@ -717,11 +937,19 @@ export async function verifyGoogleClientCredentials(redirectUri?: string): Promi
       grant_type: 'authorization_code',
     });
 
-    const res = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: probeParams.toString(),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    let res: globalThis.Response;
+    try {
+      res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: probeParams.toString(),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     const data: any = await res.json().catch(() => ({}));
 
@@ -741,12 +969,10 @@ export async function verifyGoogleClientCredentials(redirectUri?: string): Promi
       };
     }
 
-    // Google returns invalid_grant when the client credentials ARE valid,
-    // but the authorization code was a probe dummy!
     if (data.error === 'invalid_grant' || data.error === 'bad_request') {
       return {
         status: 'valid_client_credentials',
-        details: 'Google Cloud successfully validated and accepted GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.',
+        details: 'Google Cloud successfully validated and accepted Google Drive OAuth credentials.',
         isAuthentic: true,
       };
     }
@@ -757,11 +983,92 @@ export async function verifyGoogleClientCredentials(redirectUri?: string): Promi
       isAuthentic: false,
     };
   } catch (err: any) {
+    const isTimeout = err?.name === 'AbortError' || /aborted|timeout/i.test(String(err?.message || ''));
     return {
       status: 'error',
-      details: `Failed to contact Google OAuth token endpoint: ${err.message}`,
+      details: isTimeout
+        ? 'Google OAuth token endpoint probe timed out after 10 seconds.'
+        : `Failed to contact Google OAuth token endpoint: ${err.message}`,
       isAuthentic: false,
     };
+  }
+}
+
+export type RedirectUriRegistrationStatus = 'registered' | 'not_registered' | 'invalid_client' | 'error' | 'unknown';
+
+export function interpretAuthorizationProbe(statusCode: number, location: string): {
+  status: RedirectUriRegistrationStatus;
+  detail: string;
+} {
+  if (!location) {
+    return statusCode === 200
+      ? { status: 'registered', detail: 'Google rendered the sign-in page.' }
+      : { status: 'unknown', detail: `Unexpected HTTP ${statusCode} without redirect.` };
+  }
+  if (!/\/signin\/oauth\/error/i.test(location)) {
+    return { status: 'registered', detail: 'Google accepted the redirect_uri and proceeds to account selection.' };
+  }
+  let decoded = '';
+  try {
+    const authError = new URL(location).searchParams.get('authError') || '';
+    decoded = Buffer.from(authError.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+      .toString('latin1')
+      .replace(/[^\x20-\x7e]/g, ' ');
+  } catch {
+    // ignore decode error
+  }
+  if (/redirect_uri_mismatch/i.test(decoded)) {
+    return { status: 'not_registered', detail: 'Google returned redirect_uri_mismatch for this OAuth client.' };
+  }
+  if (/invalid_client|deleted_client|not found/i.test(decoded)) {
+    return { status: 'invalid_client', detail: 'Google could not find this OAuth client.' };
+  }
+  return { status: 'error', detail: `Google authorization error: ${decoded.trim().slice(0, 160) || 'unknown'}` };
+}
+
+export async function checkRedirectUriRegistration(redirectUri?: string): Promise<{
+  status: RedirectUriRegistrationStatus;
+  detail: string;
+  redirectUri: string;
+  clientIdMasked: string;
+}> {
+  const { clientId } = resolveDriveOAuthCredentials();
+  const effectiveRedirectUri = resolveRedirectUri(redirectUri);
+  const clientIdMasked = clientId.length > 24 ? `${clientId.slice(0, 12)}...${clientId.slice(-20)}` : clientId;
+  if (!clientId) {
+    return { status: 'invalid_client', detail: 'Google Drive OAuth client ID is not configured.', redirectUri: effectiveRedirectUri, clientIdMasked };
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: effectiveRedirectUri,
+    response_type: 'code',
+    scope: getDriveScope(),
+    access_type: 'offline',
+    prompt: 'select_account consent',
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const res = await fetch(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: controller.signal,
+      headers: { 'Accept-Language': 'en-US' },
+    });
+    const result = interpretAuthorizationProbe(res.status, res.headers.get('location') || '');
+    return { ...result, redirectUri: effectiveRedirectUri, clientIdMasked };
+  } catch (err: any) {
+    const isTimeout = err?.name === 'AbortError';
+    return {
+      status: 'unknown',
+      detail: isTimeout ? 'Google authorization endpoint probe timed out after 8 seconds.' : `Probe failed: ${err?.message || err}`,
+      redirectUri: effectiveRedirectUri,
+      clientIdMasked,
+    };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -780,25 +1087,22 @@ export async function handleOAuthCallback(code: string, state: string, redirectU
     throw new Error('OAuth Security Error: Invalid or expired state token (possible CSRF attack).');
   }
 
-  const clientId = cleanCredential(process.env.GOOGLE_CLIENT_ID);
-  const clientSecret = cleanCredential(process.env.GOOGLE_CLIENT_SECRET);
-
-  const isPlaceholderSecret =
-    !clientSecret ||
-    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
-    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
-    clientSecret.includes('YOUR_') ||
-    clientSecret.includes('your_');
+  const { clientId, isPlaceholderSecret } = resolveDriveOAuthCredentials();
 
   if (!clientId || isPlaceholderSecret) {
     throw new Error(
-      'Google Cloud OAuth configuration missing: Valid GOOGLE_CLIENT_SECRET must be configured in backend/.env. ' +
-      'Please open backend/.env and paste your newly rotated Google Client Secret (starting with GOCSPX-).'
+      'Google Cloud OAuth configuration missing: Valid GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured in server environment variables.'
     );
   }
 
-  // Ensure redirect URI matches the exact URI recorded in state or fallback
-  const effectiveRedirectUri = resolveRedirectUri(stateCheck.redirectUri || redirectUri);
+  // Use one canonical server-side redirect URI for both authorization and token exchange
+  const canonicalRedirectUri = resolveRedirectUri(redirectUri);
+  if (stateCheck.redirectUri && stateCheck.redirectUri !== canonicalRedirectUri) {
+    throw new Error(
+      `redirect_uri_mismatch: authorization used "${stateCheck.redirectUri}" but callback resolved "${canonicalRedirectUri}".`
+    );
+  }
+  const effectiveRedirectUri = canonicalRedirectUri;
   const oauth2Client = createOAuth2Client(effectiveRedirectUri);
 
   const cleanCode = cleanCredential(code);
@@ -808,20 +1112,13 @@ export async function handleOAuthCallback(code: string, state: string, redirectU
     tokens = tokenRes.tokens;
   } catch (tokenErr: any) {
     const errorData = tokenErr.response?.data;
+    const googleErrorCode = String(errorData?.error || '');
     const googleDesc = errorData?.error_description || errorData?.error || tokenErr.message;
     console.error('[GoogleDriveService] Google OAuth token exchange failed:', {
-      error: errorData?.error,
-      errorDescription: googleDesc,
+      error: googleErrorCode,
       status: tokenErr.response?.status,
     });
-    if (googleDesc && /client secret is invalid/i.test(googleDesc)) {
-      throw new Error(
-        'Google OAuth error: The provided client secret in backend/.env is invalid. ' +
-        'Please verify that GOOGLE_CLIENT_SECRET matches the exact Client Secret generated for Client ID ' +
-        clientId + ' in Google Cloud Console (project: tnpsc-study-hub).'
-      );
-    }
-    throw new Error(`Google OAuth error: ${googleDesc}`);
+    throw new Error(formatOAuthCallbackError(`${googleErrorCode} ${googleDesc}`.trim(), effectiveRedirectUri));
   }
 
   if (!tokens.refresh_token) {
@@ -895,26 +1192,15 @@ export async function getConnectionStatus(forceRefresh = false): Promise<{
     return statusCache.payload;
   }
 
-  const rawId = process.env.GOOGLE_CLIENT_ID || '';
-  const rawSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-  const clientId = cleanCredential(rawId);
-  const clientSecret = cleanCredential(rawSecret);
-
-  const isPlaceholderSecret =
-    !clientSecret ||
-    clientSecret === 'YOUR_NEW_ROTATED_CLIENT_SECRET_HERE' ||
-    clientSecret === 'LOAD_FROM_LOCAL_BACKEND_ENV' ||
-    clientSecret.includes('YOUR_') ||
-    clientSecret.includes('your_');
+  const {
+    clientId,
+    clientSecret,
+    isPlaceholderSecret,
+    hasFormattingIssue,
+  } = resolveDriveOAuthCredentials();
 
   const configured = Boolean(clientId && !isPlaceholderSecret);
   const redirectUri = resolveRedirectUri();
-
-  const hasFormattingIssue =
-    /^["']|["']$/.test(rawId) ||
-    /^["']|["']$/.test(rawSecret) ||
-    /\s/.test(rawId) ||
-    /\s/.test(rawSecret);
 
   const clientInfo = {
     clientIdLength: clientId.length,

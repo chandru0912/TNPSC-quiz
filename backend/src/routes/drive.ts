@@ -1,1910 +1,264 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import { Router, Request, Response, NextFunction } from 'express';
-import pool from '../db';
-import { requireAdminAuth, requireStudentOrAdminAuth, AuthenticatedRequest } from '../middleware/auth';
-import { fileUploadLimiter } from '../middleware/rateLimiter';
+import { verifyAdminToken, AuthenticatedRequest } from '../middleware/auth';
 import {
-  getAuthorizationUrl,
-  handleOAuthCallback,
-  verifyOAuthState,
-  verifyGoogleClientCredentials,
-  getConnectionStatus,
-  initiateResumableUpload,
-  verifyUploadedFile,
-  deleteDriveFile,
-  getFileStream,
-  disconnectGoogleDrive,
-  resolveRedirectUri,
-  cleanCredential,
-  TARGET_FOLDER_NAME,
-  listGoogleDrivePdfs,
-  extractTextFromGoogleDrivePdf,
-} from '../services/googleDriveService';
-import { ensureDatabaseSchema } from '../migrate';
-import {
-  classifyPdf,
-  ClassifyPdfInput,
-  ClassifiedPdfMetadata,
-} from '../services/bulkClassificationService';
-import { extractAndIndexFullTextbook } from '../services/fullTextbookExtractor';
-import {
-  extractAndPersistPdf,
-  getExtractionStatus,
-  getExtractedPages,
-  extractAllPendingMaterials,
-  processAutomaticPdfExtraction,
-  ensureExtractionJobForMaterial,
-  getOverallExtractionOverview,
-  getFailedExtractionPages,
-  retryAllFailedPages,
-  hydrateExtractedPagesFromJsonb,
-} from '../services/pdfExtractionService';
-import {
-  syncGoogleDriveToDatabase,
-  getLatestDriveSyncStatus,
-  getDriveSyncDiagnostic,
-} from '../services/googleDriveSyncService';
-import {
-  reconcileTextbooksWithDrive,
-  compareTextbooks55And8,
-} from '../services/textbookReconciliationService';
+  createDriveAuthorizationUrl,
+  disconnectDriveConnection,
+  getDriveConnectionSummary,
+  getDriveSyncLogs,
+  handleDriveOAuthCallback,
+  mapGoogleOAuthErrorToDiagnostic,
+  runDriveOAuthDiagnostics,
+  resolveCanonicalRedirectUri,
+  resolveSafeFrontendOrigin,
+  syncDriveTextbooksMetadata,
+  verifySignedOAuthState,
+} from '../services/driveOAuthService';
 
 const router = Router();
 
-// Middleware: prevent stale API caching and ensure schema (never block /status or /config-check on DB quota)
-router.use(async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    const isStatusOrConfigRoute =
-      req.path === '/' || req.path === '/status' || req.path === '/config-check' || req.path.startsWith('/auth');
-    if (isStatusOrConfigRoute) {
-      await ensureDatabaseSchema().catch(() => {});
-      next();
-      return;
-    }
-    await ensureDatabaseSchema();
-    next();
-  } catch (err) {
-    next(err);
-  }
-});
-
 /**
- * GET /api/drive and GET /api/drive/status
- * Status endpoint reporting accurate Google Drive integration state and error classification.
+ * Strict Admin authentication for all Google Drive OAuth & Sync routes.
+ * Never bypasses authentication in development mode.
  */
-router.get(['/', '/status'], async (req: Request, res: Response) => {
-  try {
-    const forceRefresh = req.query.refresh === 'true';
-    const status = await getConnectionStatus(forceRefresh);
-    return res.status(200).json({
-      status: 'success',
-      data: status,
-      endpoints: {
-        status: 'GET /api/drive/status',
-        configCheck: 'GET /api/drive/config-check',
-        authUrl: 'GET /api/drive/auth/url',
-        callback: 'GET /api/drive/oauth/callback',
-        disconnect: 'POST /api/drive/disconnect',
-        uploadInitiate: 'POST /api/drive/upload/initiate',
-        uploadComplete: 'POST /api/drive/upload/complete',
-        materials: 'GET /api/drive/materials',
-        view: 'GET /api/drive/view/:id',
-      },
-    });
-  } catch (err: any) {
-    return res.status(500).json({
+export function requireDriveAdminAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  let token = '';
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (typeof req.query?.token === 'string' && req.query.token.trim()) {
+    token = req.query.token.trim();
+  }
+
+  if (!token) {
+    return res.status(401).json({
       status: 'error',
-      message: err.message || 'Failed to check Google Drive status',
+      message: 'Unauthorized: Administrator authentication is required for Google Drive management.',
     });
   }
+
+  const verified = verifyAdminToken(token);
+  if (!verified) {
+    return res.status(401).json({
+      status: 'error',
+      message: 'Unauthorized: Invalid or expired administrator session token.',
+    });
+  }
+
+  const role = String(verified.role || '').toLowerCase();
+  if (!['admin', 'super_admin', 'editor'].includes(role)) {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Forbidden: Only authorized administrators may manage Google Drive integration.',
+    });
+  }
+
+  req.adminUser = verified;
+  return next();
+}
+
+// Prevent caching of any OAuth or Drive status response
+router.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
 });
 
 /**
- * GET /api/drive/config-check (Protected)
- * Admin only: Performs an automated Google Cloud OAuth 2.0 configuration probe
- * and reports whether GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are authentic and accepted by Google.
+ * GET /api/drive/oauth/start (and alias /api/drive/auth/url)
+ * Admin-only: Generates a CSRF-protected Google OAuth 2.0 authorization URL.
  */
-router.get('/config-check', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get(['/oauth/start', '/auth/url'], requireDriveAdminAuth, (req: AuthenticatedRequest, res: Response) => {
   try {
-    const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
-    const redirectUri = resolveRedirectUri(req.query.redirectUri as string, reqHost);
-    const probe = await verifyGoogleClientCredentials(redirectUri);
+    const reqHost = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+    const originHint =
+      typeof req.query.origin === 'string' && req.query.origin.trim()
+        ? req.query.origin.trim()
+        : typeof req.headers.referer === 'string'
+        ? req.headers.referer
+        : undefined;
 
-    const rawId = process.env.GOOGLE_CLIENT_ID || '';
-    const rawSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-    const cleanId = cleanCredential(rawId);
-    const cleanSecret = cleanCredential(rawSecret);
+    const { authUrl, redirectUri } = createDriveAuthorizationUrl({
+      adminId: Number((req.adminUser as any)?.id ?? (req.adminUser as any)?.adminId) || null,
+      adminUsername: req.adminUser?.username || 'admin',
+      frontendOrigin: originHint,
+      reqHostHint: reqHost,
+    });
 
     return res.status(200).json({
       status: 'success',
       data: {
-        googleVerification: probe,
+        authUrl,
         redirectUri,
-        clientId: {
-          configured: Boolean(cleanId),
-          length: cleanId.length,
-          previewPrefix: cleanId ? cleanId.slice(0, 16) + '...' : '',
-          previewSuffix: cleanId ? '...' + cleanId.slice(-24) : '',
-          hasQuotes: /^["']|["']$/.test(rawId),
-          hasWhitespace: /\s/.test(rawId),
-        },
-        clientSecret: {
-          configured: Boolean(cleanSecret),
-          length: cleanSecret.length,
-          startsWithGocspx: cleanSecret.startsWith('GOCSPX-'),
-          hasQuotes: /^["']|["']$/.test(rawSecret),
-          hasWhitespace: /\s/.test(rawSecret),
-        },
       },
     });
   } catch (err: any) {
-    return res.status(500).json({
+    return res.status(err?.statusCode || 500).json({
       status: 'error',
-      message: err.message || 'Config check probe failed',
+      message: err?.message || 'Failed to initiate Google Drive OAuth flow.',
     });
   }
 });
 
 /**
- * GET /api/drive/auth/url (and aliases /auth, /auth-url, /connect, /oauth/url)
- * Admin only: Generates a CSRF-protected Google OAuth 2.0 authorization URL.
+ * GET /api/drive/oauth/callback
+ * Google OAuth 2.0 callback: validates CSRF state, exchanges code using canonical redirect URI,
+ * checks admin email allowlist, encrypts tokens with AES-256-GCM, and redirects to Textbook Management.
  */
-router.get(
-  ['/auth/url', '/auth', '/auth-url', '/connect', '/oauth/url'],
-  requireAdminAuth,
-  (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const adminUsername = req.adminUser?.username || 'admin';
-      const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
-      const redirectUri = resolveRedirectUri(req.query.redirectUri as string, reqHost);
-
-      // Extract frontend origin hint from query, referer, or environment
-      let frontendOrigin: string | undefined;
-      const queryOrigin = typeof req.query.origin === 'string' ? req.query.origin.trim() : '';
-      if (queryOrigin && /^https?:\/\//i.test(queryOrigin)) {
-        frontendOrigin = queryOrigin.replace(/\/+$/, '');
-      } else if (req.headers.referer) {
-        try {
-          frontendOrigin = new URL(req.headers.referer).origin;
-        } catch {
-          // ignore referer parse failure
-        }
-      }
-      if (!frontendOrigin && process.env.FRONTEND_URL) {
-        frontendOrigin = process.env.FRONTEND_URL.trim().replace(/\/+$/, '');
-      }
-
-      const clientIdHint = typeof req.query.clientId === 'string' ? req.query.clientId.trim() : undefined;
-      const authUrl = getAuthorizationUrl(adminUsername, redirectUri, frontendOrigin, clientIdHint);
-
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          authUrl,
-          redirectUri,
-          frontendOrigin: frontendOrigin || null,
-          scope: 'https://www.googleapis.com/auth/drive.file',
-        },
-      });
-    } catch (err: any) {
-      return res.status(500).json({
-        status: 'error',
-        message: err.message || 'Failed to generate Google authorization URL',
-      });
-    }
-  }
-);
-
-/**
- * GET /api/drive/oauth/callback (and alias /callback)
- * Google OAuth 2.0 redirect callback endpoint.
- * Validates CSRF state, exchanges code for tokens, and redirects back to Admin Panel.
- */
-router.get(['/oauth/callback', '/callback'], async (req: Request, res: Response) => {
+router.get('/oauth/callback', async (req: Request, res: Response) => {
   const { code, state, error: googleError } = req.query;
+  const reqHost = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+  const canonicalRedirect = resolveCanonicalRedirectUri(reqHost);
 
-  const reqHost = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
-  const isLocalHost = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
-  const configuredFrontend = process.env.FRONTEND_URL?.trim().replace(/\/+$/, '');
-
-  let defaultFrontend = 'http://localhost:5173';
-  if (configuredFrontend) {
-    defaultFrontend = configuredFrontend;
-  } else if (!isLocalHost && reqHost) {
-    const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-    defaultFrontend = `${proto}://${reqHost}`;
-  } else if (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) {
-    defaultFrontend = 'https://tnpsc-quiz-lval.vercel.app';
-  }
-
-  // Attempt to decode state to retrieve the exact frontend origin that initiated OAuth
-  let originFromState: string | undefined;
+  let safeFrontend = resolveSafeFrontendOrigin(null);
   if (typeof state === 'string' && state.trim()) {
-    const stateCheck = verifyOAuthState(state.trim());
-    if (stateCheck.isValid && stateCheck.frontendOrigin && /^https?:\/\//i.test(stateCheck.frontendOrigin)) {
-      originFromState = stateCheck.frontendOrigin;
+    const preCheck = verifySignedOAuthState(state.trim());
+    if (preCheck.valid && preCheck.payload?.frontendOrigin) {
+      safeFrontend = resolveSafeFrontendOrigin(preCheck.payload.frontendOrigin);
     }
   }
 
-  const effectiveFrontend = (originFromState || defaultFrontend).replace(/\/+$/, '');
+  const textbookMgmtUrl = `${safeFrontend}/admin/textbook-management`;
 
   if (googleError) {
-    console.error('[GoogleDriveOAuth] Google returned error:', googleError);
-    return res.redirect(`${effectiveFrontend}/admin?gdrive_error=${encodeURIComponent(String(googleError))}`);
+    const diagnostic = mapGoogleOAuthErrorToDiagnostic(String(googleError), canonicalRedirect);
+    return res.redirect(`${textbookMgmtUrl}?drive_status=error&drive_error=${encodeURIComponent(diagnostic)}`);
   }
 
-  if (!code || !state) {
+  if (typeof code !== 'string' || !code.trim() || typeof state !== 'string' || !state.trim()) {
     return res.redirect(
-      `${effectiveFrontend}/admin?gdrive_error=${encodeURIComponent('Missing authorization code or state parameter.')}`
+      `${textbookMgmtUrl}?drive_status=error&drive_error=${encodeURIComponent('Missing authorization code or OAuth state parameter.')}`
     );
   }
 
   try {
-    const redirectUri = resolveRedirectUri(undefined, reqHost);
-    const result = await handleOAuthCallback(String(code), String(state), redirectUri);
+    const result = await handleDriveOAuthCallback({
+      code: code.trim(),
+      state: state.trim(),
+      reqHostHint: reqHost,
+    });
 
+    const redirectBase = `${resolveSafeFrontendOrigin(result.frontendOrigin)}/admin/textbook-management`;
     return res.redirect(
-      `${effectiveFrontend}/admin?gdrive=connected&email=${encodeURIComponent(result.email || '')}`
+      `${redirectBase}?drive_status=connected&email=${encodeURIComponent(result.email)}`
     );
   } catch (err: any) {
-    console.error('[GoogleDriveOAuth] Callback processing failed:', err.message);
-    return res.redirect(`${effectiveFrontend}/admin?gdrive_error=${encodeURIComponent(err.message || 'OAuth failed')}`);
-  }
-});
-
-/**
- * POST /api/drive/disconnect
- * Admin only: Disconnects Google Drive account by removing stored tokens.
- */
-router.post('/disconnect', requireAdminAuth, async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    await disconnectGoogleDrive();
-    return res.status(200).json({
-      status: 'success',
-      message: 'Google Drive account disconnected successfully.',
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to disconnect Google Drive',
-    });
-  }
-});
-
-/**
- * POST /api/drive/upload/initiate
- * Admin only: Validates PDF metadata and initiates a direct Google Drive Resumable Upload session.
- */
-router.post('/upload/initiate', requireAdminAuth, fileUploadLimiter, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const {
-      fileName,
-      originalFileName,
-      fileSize,
-      mimeType = 'application/pdf',
-      group = 'group1',
-      subject,
-      standard,
-      medium = 'Tamil',
-      term = 'Term 1',
-      unit = 1,
-      lesson,
-      lessonId,
-      origin,
-    } = req.body;
-
-    if (!fileName || !fileSize) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'File name and file size are required to initiate upload.',
-      });
-    }
-
-    if (mimeType !== 'application/pdf' && !fileName.toLowerCase().endsWith('.pdf')) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Only PDF documents (.pdf) can be uploaded to Google Drive.',
-      });
-    }
-
-    const parsedSize = parseInt(String(fileSize), 10);
-    // Allow large files up to 500 MB per PDF
-    if (isNaN(parsedSize) || parsedSize <= 0 || parsedSize > 500 * 1024 * 1024) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'File size must be greater than 0 and less than 500 MB.',
-      });
-    }
-
-    const parsedStandard = standard ? parseInt(String(standard), 10) : null;
-    const parsedUnit = unit ? parseInt(String(unit), 10) : 1;
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9.\-_ ()]/g, '_');
-
-    // Resolve client origin for Google Drive CORS binding
-    let clientOrigin = typeof origin === 'string' ? origin.trim().replace(/\/+$/, '') : '';
-    if (!clientOrigin && typeof req.headers.origin === 'string') {
-      clientOrigin = req.headers.origin.trim().replace(/\/+$/, '');
-    }
-    if (!clientOrigin && typeof req.headers.referer === 'string') {
-      try {
-        clientOrigin = new URL(req.headers.referer).origin;
-      } catch {
-        // ignore invalid referer
-      }
-    }
-    if (!clientOrigin && process.env.FRONTEND_URL) {
-      clientOrigin = process.env.FRONTEND_URL.trim().replace(/\/+$/, '');
-    }
-
-    // 1. Initiate resumable upload with Google Drive API (auto-organizes into Group/Subject subfolder)
-    const { uploadUrl, folderId } = await initiateResumableUpload({
-      fileName: cleanFileName,
-      fileSize: parsedSize,
-      mimeType: 'application/pdf',
-      origin: clientOrigin || undefined,
-      group: typeof group === 'string' ? group : undefined,
-      subject: typeof subject === 'string' ? subject : undefined,
-    });
-
-    // 2. Pre-create pending record in PostgreSQL
-    const insertRes = await pool.query(
-      `INSERT INTO google_drive_materials (
-        file_name, original_file_name, mime_type, file_size,
-        google_drive_file_id, google_drive_folder_id,
-        tnpsc_group, subject, standard, medium, term, unit, lesson, lesson_id,
-        upload_status, uploaded_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'initiating', $15)
-      RETURNING id, file_name, upload_status`,
-      [
-        cleanFileName,
-        originalFileName || cleanFileName,
-        'application/pdf',
-        parsedSize,
-        `pending_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        folderId,
-        group,
-        subject || 'General Studies',
-        parsedStandard,
-        medium || 'Tamil',
-        term,
-        parsedUnit,
-        lesson || null,
-        lessonId || null,
-        req.adminUser?.username || 'admin',
-      ]
+    const diagnostic = mapGoogleOAuthErrorToDiagnostic(
+      err?.message || 'Google Drive OAuth callback failed.',
+      canonicalRedirect
     );
+    return res.redirect(`${textbookMgmtUrl}?drive_status=error&drive_error=${encodeURIComponent(diagnostic)}`);
+  }
+});
 
-    const trackingId = insertRes.rows[0].id;
-
+/**
+ * GET /api/drive/oauth/diagnose (and alias /api/drive/config-check)
+ * Admin-only: Safe, read-only diagnostics distinguishing unapproved test user (403 access_denied),
+ * incorrect OAuth client, invalid scope, and redirect URI mismatch (never exposes secrets).
+ */
+router.get(['/oauth/diagnose', '/config-check'], requireDriveAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const reqHost = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+    const diagnostics = await runDriveOAuthDiagnostics(reqHost);
     return res.status(200).json({
       status: 'success',
-      data: {
-        uploadUrl,
-        trackingId,
-        folderId,
-        folderName: TARGET_FOLDER_NAME,
-        cleanFileName,
-      },
+      data: diagnostics,
     });
   } catch (err: any) {
-    console.error('[DriveUploadInitiate] Error:', err.message);
-    return res.status(500).json({
+    return res.status(err?.statusCode || 500).json({
       status: 'error',
-      message: err.message || 'Failed to initiate Google Drive resumable upload session',
+      message: err?.message || 'Failed to run Google Drive OAuth diagnostics.',
     });
   }
 });
 
 /**
- * POST /api/drive/upload/complete
- * Admin only: Verifies that the file was successfully received by Google Drive,
- * inspects verified file metadata, and updates PostgreSQL to status 'completed'.
+ * GET /api/drive/status
+ * Admin-only: Returns connection status, connected email, sync counts, and safe diagnostics (never tokens/secrets).
  */
-router.post('/upload/complete', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/status', requireDriveAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { trackingId, googleDriveFileId, replaceId, bookName, medium, unit, lesson } = req.body;
-
-    if (!trackingId || !googleDriveFileId) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'trackingId and googleDriveFileId are required to complete upload.',
-      });
-    }
-
-    // 1. Verify existence and integrity in Google Drive
-    const verified = await verifyUploadedFile(googleDriveFileId);
-
-    // 2. Update PostgreSQL record
-    const updateRes = await pool.query(
-      `UPDATE google_drive_materials
-       SET google_drive_file_id = $1,
-           file_size = $2,
-           upload_status = 'completed',
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3
-       RETURNING *`,
-      [verified.id, verified.size, trackingId]
-    );
-
-    if (updateRes.rows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: `Upload tracking record #${trackingId} not found in database.`,
-      });
-    }
-
-    const row = updateRes.rows[0];
-
-    // 3. Synchronize with `textbooks` table immediately so Textbook Management displays it
-    let syncedTextbookId: number | null = null;
-    try {
-      const tbBookName = String(bookName || row.file_name || 'TNPSC Textbook').replace(/\.pdf$/i, '').trim();
-      const tbGroup = row.tnpsc_group || 'group1';
-      const tbStandard = Number(row.standard) || 6;
-      const tbSubject = row.subject || 'General Studies';
-      const tbMedium = medium || row.medium || 'Tamil';
-      const tbTerm = row.term || 'Full Year';
-      const tbUnit = unit != null ? parseInt(String(unit), 10) : (row.unit != null ? Number(row.unit) : null);
-      const tbLesson = lesson || row.lesson || null;
-      const gdrivePath = `gdrive://${verified.id}`;
-      const parsedReplaceId = replaceId ? parseInt(String(replaceId), 10) : null;
-
-      if (parsedReplaceId && !isNaN(parsedReplaceId)) {
-        const repRes = await pool.query(
-          `UPDATE textbooks
-           SET group_id = $1, standard = $2, subject = $3, medium = $4, term = $5,
-               book_name = $6, file_path = $7, file_size = $8, google_drive_file_id = $9,
-               unit = COALESCE($10, unit), lesson = COALESCE($11, lesson),
-               status = 'uploaded', error_message = NULL, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $12
-           RETURNING id`,
-          [tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, tbBookName, gdrivePath, verified.size, verified.id, tbUnit, tbLesson, parsedReplaceId]
-        );
-        if (repRes.rows.length > 0) {
-          syncedTextbookId = repRes.rows[0].id;
-        }
-      }
-
-      if (!syncedTextbookId) {
-        const existingTb = await pool.query(
-          `SELECT id FROM textbooks
-           WHERE google_drive_file_id = $1
-              OR file_path = $2
-              OR (group_id = $3 AND standard = $4 AND LOWER(subject) = LOWER($5) AND medium = $6 AND term = $7 AND LOWER(book_name) = LOWER($8))
-           LIMIT 1`,
-          [verified.id, gdrivePath, tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, tbBookName]
-        );
-
-        if (existingTb.rows.length > 0) {
-          const updTb = await pool.query(
-            `UPDATE textbooks
-             SET file_path = $1, file_size = $2, google_drive_file_id = $3,
-                 unit = COALESCE($4, unit), lesson = COALESCE($5, lesson),
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $6
-             RETURNING id`,
-            [gdrivePath, verified.size, verified.id, tbUnit, tbLesson, existingTb.rows[0].id]
-          );
-          syncedTextbookId = updTb.rows[0].id;
-        } else {
-          const insTb = await pool.query(
-            `INSERT INTO textbooks (
-              group_id, standard, subject, medium, term, book_name, file_path, file_size,
-              google_drive_file_id, unit, lesson, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'uploaded')
-            RETURNING id`,
-            [tbGroup, tbStandard, tbSubject, tbMedium, tbTerm, tbBookName, gdrivePath, verified.size, verified.id, tbUnit, tbLesson]
-          );
-          syncedTextbookId = insTb.rows[0].id;
-        }
-      }
-    } catch (tbSyncErr: any) {
-      console.error(`[DriveUploadComplete] Failed to sync textbooks table for Drive file ${verified.id}:`, tbSyncErr.message);
-    }
-
-    // Persist the durable job row first, then start a bounded pass. If Vercel terminates the
-    // background work, the PENDING/PROCESSING row still lets Admin resume the exact page cursor.
-    try {
-      await ensureExtractionJobForMaterial(row.id);
-    } catch (jobErr: any) {
-      console.warn(`[DriveUploadComplete] Could not create extraction job for #${row.id}:`, jobErr.message);
-    }
-
-    if (!process.env.VERCEL) {
-      extractAndPersistPdf({
-        materialId: row.id,
-        textbookId: syncedTextbookId || undefined,
-        googleDriveFileId: row.google_drive_file_id,
-        forceReExtract: true,
-        processAllPages: true,
-      }).catch((bgErr) => {
-        console.warn(`[DriveUploadComplete] Extraction notice for #${row.id}:`, bgErr.message);
-      });
-    }
-
+    const reqHost = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+    const summary = await getDriveConnectionSummary(reqHost);
     return res.status(200).json({
       status: 'success',
-      message: `PDF "${row.file_name}" successfully uploaded and verified in Google Drive!`,
-      data: {
-        id: row.id,
-        textbookId: syncedTextbookId,
-        fileName: row.file_name,
-        fileSize: row.file_size,
-        googleDriveFileId: row.google_drive_file_id,
-        group: row.tnpsc_group,
-        subject: row.subject,
-        standard: row.standard,
-        medium: row.medium,
-        term: row.term,
-        unit: row.unit,
-        lesson: row.lesson,
-        lessonId: row.lesson_id,
-        uploadStatus: row.upload_status,
-        createdAt: row.created_at,
-      },
+      data: summary,
     });
   } catch (err: any) {
-    console.error('[DriveUploadComplete] Error:', err.message);
-    return res.status(500).json({
+    return res.status(err?.statusCode || 500).json({
       status: 'error',
-      message: err.message || 'Failed to verify uploaded file in Google Drive',
+      message: err?.message || 'Failed to read Google Drive connection status.',
     });
-  }
-});
-
-/**
- * GET /api/drive/files (and aliases /library, /list)
- * Admin & AI Generators: Lists all available Google Drive textbook PDFs.
- * Supports query parameters: search, standard, subject, group, sync (syncs with Drive folder).
- */
-router.get(['/files', '/library', '/list'], requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { search, standard, subject, group, sync } = req.query;
-    const syncFromDrive = String(sync).toLowerCase() === 'true' || sync === '1';
-    const parsedStandard = standard && !isNaN(Number(standard)) ? Number(standard) : undefined;
-
-    const files = await listGoogleDrivePdfs({
-      search: search ? String(search).trim() : undefined,
-      standard: parsedStandard,
-      subject: subject ? String(subject).trim() : undefined,
-      group: group ? String(group).trim() : undefined,
-      syncFromDrive,
-    });
-
-    return res.status(200).json({
-      status: 'success',
-      total: files.length,
-      data: files,
-    });
-  } catch (err: any) {
-    console.error('[DriveListFiles] Error:', err.message);
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to list Google Drive PDF textbooks',
-    });
-  }
-});
-
-/**
- * POST /api/drive/extract-text
- * Admin & AI Generators: Diagnostic/Preview endpoint to extract text from a Google Drive PDF.
- */
-router.post('/extract-text', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { fileId, materialId, lessonTitle, unitId, standard, subject } = req.body;
-    if (!fileId && !materialId) {
-      return res.status(400).json({ status: 'error', message: 'fileId or materialId is required.' });
-    }
-
-    const extraction = await extractTextFromGoogleDrivePdf({
-      fileId: fileId ? String(fileId).trim() : '',
-      materialId: materialId ? Number(materialId) : undefined,
-      lessonTitle: lessonTitle ? String(lessonTitle).trim() : undefined,
-      unitId: unitId ? Number(unitId) : undefined,
-      standard: standard ? Number(standard) : undefined,
-      subject: subject ? String(subject).trim() : undefined,
-    });
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        fileName: extraction.fileName,
-        fileId: extraction.fileId,
-        pageCount: extraction.pageCount,
-        relevantPages: extraction.relevantPages,
-        matchedLesson: extraction.matchedLesson,
-        fromCache: extraction.fromCache,
-        totalTextLength: extraction.text.length,
-        samplePreview: extraction.text.substring(0, 1000),
-      },
-    });
-  } catch (err: any) {
-    console.error('[DriveExtractText] Error:', err.message);
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to extract text from Google Drive PDF',
-    });
-  }
-});
-
-/**
- * GET /api/drive/extraction-overview
- * Admin & Dashboard: Returns aggregate extraction statistics across all registered PDF materials.
- */
-router.get('/extraction-overview', async (_req: Request, res: Response) => {
-  try {
-    const overview = await getOverallExtractionOverview();
-    return res.status(200).json({ status: 'success', data: overview });
-  } catch (err: any) {
-    console.error('[DriveExtractionOverview] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to get extraction overview.' });
-  }
-});
-
-/**
- * POST /api/drive/extract/:id and /api/drive/materials/:id/extract
- * Admin only: Triggers full text extraction and syllabus indexing for a specific Google Drive material.
- * Supports query ?wait=true (synchronous wait up to request timeout) or ?all=true (process all pages).
- */
-router.post(['/extract/:id', '/materials/:id/extract'], requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const materialId = parseInt(req.params.id, 10);
-    if (!materialId || isNaN(materialId)) {
-      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
-    }
-
-    const processAll = req.query.all === 'true' || req.body?.processAll === true;
-    const forceReExtract = req.query.force === 'true' || req.body?.force === true;
-
-    const result = await extractAndPersistPdf({
-      materialId,
-      forceReExtract,
-      processAllPages: processAll,
-    });
-
-    return res.status(200).json({
-      status: result.success ? 'success' : 'error',
-      message: result.inProgress
-        ? `Extracting: ${result.extractedPages}/${result.totalPages} pages stored, ${result.remainingPages} remaining.`
-        : result.success
-        ? `Successfully extracted and indexed ${result.extractedPages}/${result.totalPages} pages.`
-        : result.error || 'Extraction failed',
-      data: result,
-    });
-  } catch (err: any) {
-    console.error('[DriveExtract] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Extraction initiation failed.' });
-  }
-});
-
-/**
- * GET /api/drive/extract/:id/status and /api/drive/materials/:id/extraction-status
- * Admin & AI Generators: Returns current extraction status and page metrics for a material.
- */
-router.get(['/extract/:id/status', '/materials/:id/extraction-status'], async (req: Request, res: Response) => {
-  try {
-    const materialId = parseInt(req.params.id, 10);
-    if (!materialId || isNaN(materialId)) {
-      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
-    }
-
-    const status = await getExtractionStatus({ materialId });
-    return res.status(200).json({ status: 'success', data: status });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to check status.' });
-  }
-});
-
-/**
- * GET /api/drive/extract/:id/pages and /api/drive/materials/:id/extracted-pages
- * Admin: Returns all extracted pages for inspection in the Admin Review modal.
- */
-router.get(['/extract/:id/pages', '/materials/:id/extracted-pages'], requireStudentOrAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const materialId = parseInt(req.params.id, 10);
-    if (!materialId || isNaN(materialId)) {
-      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
-    }
-
-    const pagesData = await getExtractedPages({ materialId });
-    return res.status(200).json({
-      status: 'success',
-      data: pagesData,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to retrieve extracted pages.' });
-  }
-});
-
-/**
- * POST /api/drive/extract/:id/retry-failed and /api/drive/materials/:id/retry-failed
- * Admin: Retries extraction for pages that failed on prior runs.
- */
-router.post(['/extract/:id/retry-failed', '/materials/:id/retry-failed'], requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const materialId = parseInt(req.params.id, 10);
-    if (!materialId || isNaN(materialId)) {
-      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
-    }
-
-    const result = await processAutomaticPdfExtraction({
-      materialId,
-      retryOnlyFailed: true,
-    });
-
-    return res.status(200).json({
-      status: result.success ? 'success' : 'error',
-      message: result.inProgress
-        ? `Retrying failed pages: ${result.remainingPages} page(s) still pending.`
-        : `Retry completed: ${result.nativePagesCount} native, ${result.ocrPagesCount} OCR, ${result.failedPagesCount} failed.`,
-      data: result,
-    });
-  } catch (err: any) {
-    console.error('[DriveRetryFailed] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Retry failed.' });
   }
 });
 
 /**
  * POST /api/drive/sync
- * Admin only: Synchronizes live Google Drive folder contents into PostgreSQL safely via UPSERT.
+ * Admin-only: Runs metadata-only recursive PDF discovery and syncs into PostgreSQL textbooks table.
  */
-router.post('/sync', requireAdminAuth, async (_req: Request, res: Response) => {
+router.post('/sync', requireDriveAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const summary = await syncGoogleDriveToDatabase();
+    const folderName =
+      typeof req.body?.folderName === 'string' && req.body.folderName.trim()
+        ? req.body.folderName.trim()
+        : undefined;
+
+    const result = await syncDriveTextbooksMetadata({
+      adminId: Number((req.adminUser as any)?.id ?? (req.adminUser as any)?.adminId) || null,
+      adminUsername: req.adminUser?.username || 'admin',
+      folderName,
+    });
+
     return res.status(200).json({
       status: 'success',
-      message: `Synced ${summary.totalDriveFiles} Google Drive PDFs (${summary.insertedCount} added, ${summary.updatedCount} updated, ${summary.missingCount} marked missing on Drive).`,
-      data: summary,
-    });
-  } catch (err: any) {
-    console.error('[DriveSync] Error:', err.message);
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to synchronize Google Drive with database.',
-    });
-  }
-});
-
-/**
- * GET /api/drive/sync/status
- * Admin only: Returns the latest Google Drive synchronization log.
- */
-router.get('/sync/status', requireAdminAuth, async (_req: Request, res: Response) => {
-  try {
-    const latest = await getLatestDriveSyncStatus();
-    return res.status(200).json({ status: 'success', data: latest });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to get sync status.' });
-  }
-});
-
-/**
- * GET /api/drive/sync/diagnostic
- * Admin only: Read-only audit comparing live Google Drive PDFs against PostgreSQL records.
- */
-router.get('/sync/diagnostic', requireAdminAuth, async (_req: Request, res: Response) => {
-  try {
-    const diagnostic = await getDriveSyncDiagnostic();
-    return res.status(200).json({ status: 'success', data: diagnostic });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to run Drive sync diagnostic.' });
-  }
-});
-
-/**
- * POST /api/drive/reconcile-textbooks
- * Admin only: Runs dry-run or live reconciliation linking textbooks to google_drive_file_id
- * and fixing the 27 verified English Medium PDFs.
- */
-router.post('/reconcile-textbooks', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
-    const result = await reconcileTextbooksWithDrive({ dryRun });
-    return res.status(200).json({
-      status: 'success',
-      message: dryRun
-        ? 'Dry-run reconciliation completed (no changes committed).'
-        : `Reconciliation completed: ${result.uniqueMappedTextbooks} textbooks linked by Google Drive File ID.`,
       data: result,
     });
   } catch (err: any) {
-    console.error('[ReconcileTextbooks] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to reconcile textbooks.' });
-  }
-});
-
-/**
- * GET /api/drive/reconcile-textbooks/compare-55-8
- * Admin only: Read-only comparison between Textbook #55 and Textbook #8.
- */
-router.get('/reconcile-textbooks/compare-55-8', requireAdminAuth, async (_req: Request, res: Response) => {
-  try {
-    const comparison = await compareTextbooks55And8();
-    return res.status(200).json({ status: 'success', data: comparison });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to compare textbooks.' });
-  }
-});
-
-/**
- * POST /api/drive/extract-all-pending
- * Admin only: Scans for all active textbooks/materials without completed text extraction and processes them.
- * Supports ?chunked=true&limit=1&concurrency=3&retryFailed=false for Vercel serverless & fast local execution.
- */
-router.post('/extract-all-pending', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const chunked = req.query.chunked === 'true' || req.body?.chunked === true || Boolean(process.env.VERCEL);
-    const retryFailed = req.query.retryFailed === 'true' || req.body?.retryFailed === true;
-    const limitParam = parseInt(String(req.query.limit || req.body?.limit || ''), 10);
-    const concurrencyParam = parseInt(String(req.query.concurrency || req.body?.concurrency || ''), 10);
-    const summary = await extractAllPendingMaterials({
-      chunked,
-      retryFailed,
-      limit: !isNaN(limitParam) && limitParam > 0 ? limitParam : undefined,
-      concurrency: !isNaN(concurrencyParam) && concurrencyParam > 0 ? concurrencyParam : undefined,
+    return res.status(err?.statusCode || 500).json({
+      status: 'error',
+      uiStatus: err?.uiStatus || 'SYNC_FAILED',
+      message: err?.message || 'Google Drive textbook synchronization failed.',
     });
+  }
+});
+
+/**
+ * POST /api/drive/disconnect
+ * Admin-only: Disconnects the authorized Google Drive account (removes encrypted tokens; preserves Drive files & textbooks).
+ */
+router.post('/disconnect', requireDriveAdminAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await disconnectDriveConnection();
     return res.status(200).json({
       status: 'success',
-      message: summary.hasMore
-        ? `Processed ${summary.processed} PDF slice (${summary.remaining} remaining).`
-        : `Extracted ${summary.succeeded}/${summary.processed} pending PDF materials.`,
-      data: summary,
-    });
-  } catch (err: any) {
-    console.error('[DriveExtractAllPending] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to process pending materials.' });
-  }
-});
-
-/**
- * GET /api/drive/extraction-failed-pages
- * Admin only: Lists all failed pages with textbook/material IDs, retry counts, and latest error messages.
- */
-router.get('/extraction-failed-pages', requireAdminAuth, async (_req: Request, res: Response) => {
-  try {
-    const pages = await getFailedExtractionPages();
-    return res.status(200).json({
-      status: 'success',
-      count: pages.length,
-      data: pages,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to list failed pages.' });
-  }
-});
-
-/**
- * POST /api/drive/retry-all-failed
- * Admin only: Retries all failed pages across all PDFs with bounded retries and saves any recovered text.
- */
-router.post('/retry-all-failed', requireAdminAuth, async (_req: Request, res: Response) => {
-  try {
-    const result = await retryAllFailedPages();
-    return res.status(200).json({
-      status: 'success',
-      message: `Retried failed pages across ${result.materialsRetried} PDF(s): ${result.recoveredPages} resolved, ${result.remainingFailedPages} remaining failed.`,
       data: result,
     });
   } catch (err: any) {
-    console.error('[DriveRetryAllFailed] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to retry failed pages.' });
-  }
-});
-
-/**
- * POST /api/drive/hydrate-extracted
- * Admin only: Fast DB-only sync of already-extracted JSONB pages into textbook_content & overview counters.
- */
-router.post('/hydrate-extracted', requireAdminAuth, async (_req: Request, res: Response) => {
-  try {
-    const result = await hydrateExtractedPagesFromJsonb();
-    return res.status(200).json({
-      status: 'success',
-      message: `Hydrated ${result.hydratedPages} pages across ${result.hydratedMaterials} completed PDFs.`,
-      data: result,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Hydration failed.' });
-  }
-});
-
-/**
- * POST /api/drive/bulk/classify
- * Admin only: Classifies a batch of PDF files using filename heuristics,
- * cover page metadata, and Table of Contents matching against TNPSC syllabus.
- * Configurable batch size support up to MAX_BULK_UPLOAD_LIMIT (default 1000).
- */
-const MAX_BULK_UPLOAD_LIMIT = parseInt(process.env.MAX_BULK_UPLOAD_LIMIT || '1000', 10);
-
-router.post('/bulk/classify', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { files } = req.body;
-    if (!Array.isArray(files) || files.length === 0) {
-      return res.status(400).json({ status: 'error', message: 'Array of files is required for classification.' });
-    }
-
-    if (files.length > MAX_BULK_UPLOAD_LIMIT) {
-      return res.status(400).json({
-        status: 'error',
-        message: `Maximum batch size for bulk classification is ${MAX_BULK_UPLOAD_LIMIT} files (received ${files.length}).`,
-      });
-    }
-
-    const results: ClassifiedPdfMetadata[] = files.map((f: ClassifyPdfInput) => classifyPdf(f));
-
-    return res.status(200).json({
-      status: 'success',
-      total: results.length,
-      data: results,
-    });
-  } catch (err: any) {
-    console.error('[BulkClassify] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Bulk classification failed.' });
-  }
-});
-
-/**
- * POST /api/drive/bulk/check-duplicates
- * Admin only: Verifies whether any files in the batch have already been uploaded based on checksum.
- */
-router.post('/bulk/check-duplicates', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { checksums = [] } = req.body;
-    if (!Array.isArray(checksums) || checksums.length === 0) {
-      return res.status(200).json({ status: 'success', existing: {} });
-    }
-
-    const cleanChecksums = checksums.map((c: any) => String(c).trim()).filter(Boolean);
-    if (cleanChecksums.length === 0) {
-      return res.status(200).json({ status: 'success', existing: {} });
-    }
-
-    const query = `
-      SELECT id, file_name, file_size, google_drive_file_id, file_checksum, upload_status, tnpsc_group, subject, standard
-      FROM google_drive_materials
-      WHERE file_checksum = ANY($1) AND upload_status = 'completed'
-    `;
-    const resDb = await pool.query(query, [cleanChecksums]);
-
-    const existingMap: Record<string, any> = {};
-    resDb.rows.forEach((row) => {
-      if (row.file_checksum && !existingMap[row.file_checksum]) {
-        existingMap[row.file_checksum] = {
-          id: row.id,
-          fileName: row.file_name,
-          fileSize: row.file_size,
-          googleDriveFileId: row.google_drive_file_id,
-          group: row.tnpsc_group,
-          subject: row.subject,
-          standard: row.standard,
-        };
-      }
-    });
-
-    return res.status(200).json({
-      status: 'success',
-      existing: existingMap,
-    });
-  } catch (err: any) {
-    console.error('[BulkCheckDuplicates] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Duplicate check failed.' });
-  }
-});
-
-/**
- * POST /api/drive/bulk/register
- * Admin only: Atomically registers an uploaded PDF across all applicable TNPSC groups,
- * saves syllabus mappings, and synchronizes with textbooks table.
- */
-router.post('/bulk/register', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const client = await pool.connect();
-  try {
-    const {
-      trackingId,
-      googleDriveFileId,
-      metadata,
-      batchId,
-    }: {
-      trackingId: number;
-      googleDriveFileId: string;
-      metadata: ClassifiedPdfMetadata;
-      batchId?: string;
-    } = req.body;
-
-    if (!trackingId || !googleDriveFileId || !metadata) {
-      return res.status(400).json({ status: 'error', message: 'trackingId, googleDriveFileId, and metadata are required.' });
-    }
-
-    await client.query('BEGIN');
-
-    // 1. Verify existence in Google Drive
-    const verified = await verifyUploadedFile(googleDriveFileId);
-
-    // 2. Update primary google_drive_materials record
-    const applicableGroupsJson = JSON.stringify(metadata.applicableGroups || [metadata.primaryGroup || 'group1']);
-    const unitsJson = JSON.stringify(metadata.units || []);
-    const metaJson = JSON.stringify(metadata);
-
-    const primaryUpdate = await client.query(
-      `UPDATE google_drive_materials
-       SET google_drive_file_id = $1,
-           file_size = $2,
-           upload_status = 'completed',
-           tnpsc_group = $3,
-           subject = $4,
-           standard = $5,
-           term = $6,
-           medium = $7,
-           file_checksum = $8,
-           applicable_groups = $9::jsonb,
-           extracted_toc = $10::jsonb,
-           classification_meta = $11::jsonb,
-           confidence_score = $12,
-           batch_id = $13,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $14
-       RETURNING *`,
-      [
-        verified.id,
-        verified.size,
-        metadata.primaryGroup || 'group1',
-        metadata.subject,
-        metadata.standardNumber,
-        metadata.term,
-        metadata.medium,
-        metadata.checksum || null,
-        applicableGroupsJson,
-        unitsJson,
-        metaJson,
-        metadata.confidenceScore || 100,
-        batchId || null,
-        trackingId,
-      ]
-    );
-
-    if (primaryUpdate.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ status: 'error', message: `Tracking record #${trackingId} not found.` });
-    }
-
-    const mainRow = primaryUpdate.rows[0];
-
-    // 3. Register cross-group associations if the textbook applies to multiple groups
-    const additionalGroups = (metadata.applicableGroups || []).filter((g) => g !== metadata.primaryGroup);
-    for (const group of additionalGroups) {
-      await client.query(
-        `INSERT INTO google_drive_materials (
-          file_name, original_file_name, mime_type, file_size,
-          google_drive_file_id, google_drive_folder_id,
-          tnpsc_group, subject, standard, term, unit, lesson, lesson_id,
-          upload_status, uploaded_by, medium, file_checksum, applicable_groups,
-          extracted_toc, classification_meta, confidence_score, batch_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'completed', $14, $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, $20, $21)
-        ON CONFLICT (google_drive_file_id) DO NOTHING`,
-        [
-          mainRow.file_name,
-          mainRow.original_file_name,
-          mainRow.mime_type,
-          verified.size,
-          verified.id,
-          mainRow.google_drive_folder_id,
-          group,
-          metadata.subject,
-          metadata.standardNumber,
-          metadata.term,
-          1,
-          metadata.units[0]?.lessons[0]?.title || null,
-          metadata.units[0]?.lessons[0]?.lessonId || null,
-          req.adminUser?.username || 'admin',
-          metadata.medium,
-          metadata.checksum || null,
-          applicableGroupsJson,
-          unitsJson,
-          metaJson,
-          metadata.confidenceScore || 100,
-          batchId || null,
-        ]
-      );
-    }
-
-    // 4. Ensure textbook record in textbooks table
-    await client.query(
-      `INSERT INTO textbooks (
-        group_id, standard, subject, medium, term, book_name, file_path, file_size, page_count, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'completed')
-      ON CONFLICT (group_id, standard, subject, medium, term, book_name)
-      DO UPDATE SET
-        file_path = EXCLUDED.file_path,
-        file_size = EXCLUDED.file_size,
-        status = 'completed',
-        updated_at = CURRENT_TIMESTAMP`,
-      [
-        metadata.primaryGroup || 'group1',
-        metadata.standardNumber,
-        metadata.subject,
-        metadata.medium,
-        metadata.term,
-        metadata.bookName,
-        `gdrive://${verified.id}`,
-        verified.size,
-        metadata.pageCount || 0,
-      ]
-    );
-
-    // 5. Update batch tracking if provided
-    if (batchId) {
-      await client.query(
-        `INSERT INTO bulk_upload_batches (batch_id, total_files, completed_files, status, created_by)
-         VALUES ($1, 1, 1, 'processing', $2)
-         ON CONFLICT (batch_id)
-         DO UPDATE SET
-           completed_files = bulk_upload_batches.completed_files + 1,
-           updated_at = CURRENT_TIMESTAMP`,
-        [batchId, req.adminUser?.username || 'admin']
-      );
-    }
-
-    await client.query('COMMIT');
-
-    // 6. Asynchronously trigger full text indexing in background
-    extractAndIndexFullTextbook({
-      materialId: mainRow.id,
-      googleDriveFileId: verified.id,
-      metadata,
-    }).catch((bgErr) => {
-      console.warn(`[BackgroundIndex] Non-fatal extraction notice for #${mainRow.id}:`, bgErr.message);
-    });
-
-    return res.status(200).json({
-      status: 'success',
-      message: `Successfully registered "${metadata.bookName}" across ${metadata.applicableGroups?.length || 1} TNPSC group(s).`,
-      data: {
-        id: mainRow.id,
-        googleDriveFileId: verified.id,
-        bookName: metadata.bookName,
-        applicableGroups: metadata.applicableGroups,
-        totalUnits: metadata.totalUnits,
-        totalLessons: metadata.totalLessons,
-      },
-    });
-  } catch (err: any) {
-    await client.query('ROLLBACK');
-    console.error('[BulkRegister] Error:', err.message);
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to register bulk PDF upload.' });
-  } finally {
-    client.release();
-  }
-});
-
-/**
- * GET /api/drive/bulk/batches/:batchId
- * Admin only: Retrieves batch progress summary.
- */
-router.get('/bulk/batches/:batchId', requireAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const { batchId } = req.params;
-    const resDb = await pool.query(`SELECT * FROM bulk_upload_batches WHERE batch_id = $1 LIMIT 1`, [batchId]);
-    if (resDb.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: `Batch ${batchId} not found.` });
-    }
-    return res.status(200).json({ status: 'success', data: resDb.rows[0] });
-  } catch (err: any) {
-    return res.status(500).json({ status: 'error', message: err.message || 'Failed to fetch batch status.' });
-  }
-});
-
-/**
- * GET /api/drive/materials
- * Public & Admin: Lists Google Drive PDF study materials with flexible syllabus filters.
- */
-router.get('/materials', async (req: Request, res: Response) => {
-  try {
-    const {
-      group,
-      subject,
-      standard,
-      term,
-      unit,
-      lessonId,
-      lesson,
-      search,
-      status = 'completed',
-      includeMissing = 'false',
-      limit = '500',
-      offset = '0',
-    } = req.query;
-
-    const conditions: string[] = [];
-    const values: any[] = [];
-    let idx = 1;
-
-    if (includeMissing !== 'true') {
-      conditions.push(`COALESCE(sync_status, 'ACTIVE') = 'ACTIVE'`);
-    }
-
-    if (status && status !== 'all') {
-      conditions.push(`upload_status = $${idx++}`);
-      values.push(status);
-    }
-
-    if (group && group !== 'all') {
-      const cleanGroup = String(group).toLowerCase().trim();
-      if (cleanGroup.includes('group1')) {
-        conditions.push(`(LOWER(tnpsc_group) LIKE '%group1%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group1"]'::jsonb))`);
-      } else if (cleanGroup.includes('group4')) {
-        conditions.push(`(LOWER(tnpsc_group) LIKE '%group4%' OR LOWER(tnpsc_group) LIKE '%vao%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group4"]'::jsonb))`);
-      } else {
-        conditions.push(`(LOWER(tnpsc_group) LIKE '%group2%' OR LOWER(tnpsc_group) LIKE '%2a%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group2"]'::jsonb))`);
-      }
-    }
-
-    if (subject && subject !== 'all') {
-      conditions.push(`(LOWER(subject) = LOWER($${idx}) OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%')`);
-      values.push(String(subject).replace(/-/g, ' '));
-      idx++;
-    }
-
-    if (standard && !isNaN(Number(standard))) {
-      conditions.push(`standard = $${idx++}`);
-      values.push(Number(standard));
-    }
-
-    if (term && term !== 'all') {
-      conditions.push(`(term ILIKE $${idx} OR term = 'Full Year' OR term IS NULL)`);
-      values.push(`%${term}%`);
-      idx++;
-    }
-
-    if (unit && !isNaN(Number(unit))) {
-      conditions.push(`unit = $${idx++}`);
-      values.push(Number(unit));
-    }
-
-    if (lessonId && lessonId !== 'all') {
-      conditions.push(`lesson_id = $${idx++}`);
-      values.push(String(lessonId));
-    } else if (lesson && lesson !== 'all') {
-      conditions.push(`(LOWER(lesson) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(file_name) LIKE '%' || LOWER($${idx}) || '%')`);
-      values.push(String(lesson));
-      idx++;
-    }
-
-    if (search && String(search).trim()) {
-      conditions.push(
-        `(LOWER(file_name) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(lesson) LIKE '%' || LOWER($${idx}) || '%')`
-      );
-      values.push(String(search).trim());
-      idx++;
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const safeLimit = Math.min(Math.max(1, parseInt(String(limit), 10) || 500), 1000);
-    const safeOffset = Math.max(0, parseInt(String(offset), 10) || 0);
-
-    const countRes = await pool.query(`SELECT COUNT(*) AS total FROM google_drive_materials ${whereClause}`, values);
-    const total = parseInt(countRes.rows[0].total, 10);
-
-    const dataQuery = `
-      SELECT id, file_name, original_file_name, mime_type, file_size,
-             google_drive_file_id, google_drive_folder_id,
-             tnpsc_group, subject, standard, term, unit, lesson, lesson_id,
-             upload_status, uploaded_by, created_at, updated_at,
-             applicable_groups, extracted_toc, confidence_score, medium,
-             pdf_type, total_pages, page_count, native_pages, ocr_pages,
-             failed_pages, completion_percentage, extraction_status,
-             extraction_method, extraction_error, extracted_at
-      FROM google_drive_materials
-      ${whereClause}
-      ORDER BY id DESC
-      LIMIT $${idx++} OFFSET $${idx++}
-    `;
-
-    const dataRes = await pool.query(dataQuery, [...values, safeLimit, safeOffset]);
-
-    const items = dataRes.rows.map((row) => ({
-      id: row.id,
-      fileName: row.file_name,
-      originalFileName: row.original_file_name,
-      mimeType: row.mime_type,
-      fileSize: parseInt(row.file_size, 10),
-      googleDriveFileId: row.google_drive_file_id,
-      group: row.tnpsc_group,
-      applicableGroups: row.applicable_groups || [row.tnpsc_group],
-      extractedToc: row.extracted_toc || [],
-      confidenceScore: row.confidence_score || 100,
-      medium: row.medium || 'Tamil',
-      subject: row.subject,
-      standard: row.standard,
-      term: row.term,
-      unit: row.unit,
-      lesson: row.lesson,
-      lessonId: row.lesson_id,
-      uploadStatus: row.upload_status,
-      uploadedBy: row.uploaded_by,
-      pdfType: row.pdf_type || 'UNKNOWN',
-      totalPages: row.total_pages || row.page_count || 0,
-      nativePages: row.native_pages || 0,
-      ocrPages: row.ocr_pages || 0,
-      failedPages: row.failed_pages || 0,
-      completionPercentage: row.completion_percentage !== null ? Number(row.completion_percentage) : (row.extraction_status === 'COMPLETED' ? 100 : 0),
-      extractionStatus: row.extraction_status || (row.upload_status === 'completed' && (row.total_pages > 0 || row.page_count > 0) ? 'COMPLETED' : 'PENDING'),
-      extractionMethod: row.extraction_method,
-      extractionError: row.extraction_error,
-      extractedAt: row.extracted_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      viewUrl: `/api/drive/view/${row.id}`,
-    }));
-
-    return res.status(200).json({
-      status: 'success',
-      data: items,
-      total,
-      limit: safeLimit,
-      offset: safeOffset,
-    });
-  } catch (err: any) {
-    return res.status(500).json({
+    return res.status(err?.statusCode || 500).json({
       status: 'error',
-      message: err.message || 'Failed to list PDF study materials',
+      message: err?.message || 'Failed to disconnect Google Drive.',
     });
   }
 });
 
 /**
- * GET /api/drive/materials/:id
- * Retrieves metadata for a single PDF material.
+ * GET /api/drive/sync-logs
+ * Admin-only: Returns recent Drive textbook metadata synchronization runs.
  */
-router.get('/materials/:id', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
+router.get('/sync-logs', requireDriveAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
-    }
-
-    const resDb = await pool.query(
-      `SELECT * FROM google_drive_materials WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-
-    if (resDb.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'PDF study material not found.' });
-    }
-
-    const row = resDb.rows[0];
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20;
+    const logs = await getDriveSyncLogs(limit);
     return res.status(200).json({
       status: 'success',
-      data: {
-        id: row.id,
-        fileName: row.file_name,
-        originalFileName: row.original_file_name,
-        mimeType: row.mime_type,
-        fileSize: parseInt(row.file_size, 10),
-        googleDriveFileId: row.google_drive_file_id,
-        group: row.tnpsc_group,
-        subject: row.subject,
-        standard: row.standard,
-        term: row.term,
-        unit: row.unit,
-        lesson: row.lesson,
-        lessonId: row.lesson_id,
-        uploadStatus: row.upload_status,
-        createdAt: row.created_at,
-        viewUrl: `/api/drive/view/${row.id}`,
-      },
+      data: logs,
     });
   } catch (err: any) {
-    return res.status(500).json({
+    return res.status(err?.statusCode || 500).json({
       status: 'error',
-      message: err.message || 'Failed to retrieve material metadata',
-    });
-  }
-});
-
-/**
- * GET /api/drive/view/:id
- * Secure PDF streaming and viewing endpoint for students and administrators.
- * Supports HTTP Range headers for fast chunked loading and page seeking in browser.
- */
-router.get('/view/:id', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
-    }
-
-    const resDb = await pool.query(
-      `SELECT id, file_name, mime_type, file_size, google_drive_file_id, upload_status 
-       FROM google_drive_materials 
-       WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-
-    if (resDb.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'PDF material not found.' });
-    }
-
-    const material = resDb.rows[0];
-    if (material.upload_status !== 'completed') {
-      return res.status(400).json({
-        status: 'error',
-        message: `This PDF is not ready for viewing yet (Status: ${material.upload_status}).`,
-      });
-    }
-
-    const rangeHeader = req.headers.range as string | undefined;
-    const fileResult = await getFileStream(material.google_drive_file_id, rangeHeader);
-
-    // Set streaming headers
-    res.status(fileResult.statusCode);
-    res.setHeader('Content-Type', fileResult.contentType || 'application/pdf');
-    const isDownload = req.query.download === '1' || req.query.download === 'true';
-    res.setHeader(
-      'Content-Disposition',
-      `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(material.file_name)}"`
-    );
-    res.setHeader('Accept-Ranges', 'bytes');
-
-    if (fileResult.contentLength) {
-      res.setHeader('Content-Length', String(fileResult.contentLength));
-    }
-    if (fileResult.contentRange) {
-      res.setHeader('Content-Range', fileResult.contentRange);
-    }
-
-    // Pipe the Google Drive stream directly to the response
-    fileResult.stream.on('error', (streamErr: any) => {
-      console.error('[DriveViewStream] Error during streaming:', streamErr.message);
-      if (!res.headersSent) {
-        res.status(500).json({ status: 'error', message: 'Failed to stream PDF from Google Drive' });
-      }
-    });
-
-    fileResult.stream.pipe(res);
-  } catch (err: any) {
-    console.error('[DriveView] Error:', err.message);
-    if (!res.headersSent) {
-      return res.status(500).json({
-        status: 'error',
-        message: err.message || 'Failed to open PDF document',
-      });
-    }
-  }
-});
-
-/**
- * Helper function: Handles synchronized bulk deletion across Google Drive and PostgreSQL.
- * Cascades to mirrored textbooks, textbook_content, and pdf_extractions so zero orphaned records remain.
- */
-const handleBulkDeleteMaterials = async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { ids, deleteAll, group, standard, subject, term, search } = req.body || {};
-
-    let targetRows: { id: number; file_name: string; original_file_name?: string; google_drive_file_id: string }[] = [];
-
-    if (Array.isArray(ids) && ids.length > 0) {
-      const validIds = ids.map((id: any) => Number(id)).filter((id: number) => !isNaN(id) && id > 0);
-      if (validIds.length === 0) {
-        return res.status(400).json({ status: 'error', message: 'No valid material IDs provided.' });
-      }
-      const dbRes = await pool.query(
-        `SELECT id, file_name, original_file_name, google_drive_file_id FROM google_drive_materials WHERE id = ANY($1)`,
-        [validIds]
-      );
-      targetRows = dbRes.rows;
-    } else if (deleteAll) {
-      const conditions: string[] = [];
-      const values: any[] = [];
-      let idx = 1;
-
-      if (group && group !== 'all') {
-        const cleanGroup = String(group).toLowerCase().trim();
-        if (cleanGroup.includes('group1')) {
-          conditions.push(`(LOWER(tnpsc_group) LIKE '%group1%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group1"]'::jsonb))`);
-        } else if (cleanGroup.includes('group4')) {
-          conditions.push(`(LOWER(tnpsc_group) LIKE '%group4%' OR LOWER(tnpsc_group) LIKE '%vao%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group4"]'::jsonb))`);
-        } else {
-          conditions.push(`(LOWER(tnpsc_group) LIKE '%group2%' OR LOWER(tnpsc_group) LIKE '%2a%' OR (applicable_groups IS NOT NULL AND applicable_groups @> '["group2"]'::jsonb))`);
-        }
-      }
-      if (subject && subject !== 'all') {
-        conditions.push(`(LOWER(subject) = LOWER($${idx}) OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%')`);
-        values.push(String(subject).replace(/-/g, ' '));
-        idx++;
-      }
-      if (standard && standard !== 'all' && !isNaN(Number(standard))) {
-        conditions.push(`standard = $${idx++}`);
-        values.push(Number(standard));
-      }
-      if (term && term !== 'all') {
-        conditions.push(`(term ILIKE $${idx} OR term = 'Full Year' OR term IS NULL)`);
-        values.push(`%${term}%`);
-        idx++;
-      }
-      if (search && String(search).trim()) {
-        conditions.push(
-          `(LOWER(file_name) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(subject) LIKE '%' || LOWER($${idx}) || '%' OR LOWER(lesson) LIKE '%' || LOWER($${idx}) || '%')`
-        );
-        values.push(String(search).trim());
-        idx++;
-      }
-
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      const dbRes = await pool.query(
-        `SELECT id, file_name, original_file_name, google_drive_file_id FROM google_drive_materials ${whereClause}`,
-        values
-      );
-      targetRows = dbRes.rows;
-    } else {
-      return res.status(400).json({ status: 'error', message: 'Provide either "ids" array or "deleteAll: true".' });
-    }
-
-    if (targetRows.length === 0) {
-      return res.status(200).json({
-        status: 'success',
-        message: 'No PDF materials found to delete.',
-        deletedCount: 0,
-        deletedIds: [],
-      });
-    }
-
-    // Expand target rows to include duplicate and cross-group records sharing the same Google Drive File ID or File Name
-    const initialIds = targetRows.map((r) => r.id);
-    const initialDriveFileIds = targetRows
-      .map((r) => r.google_drive_file_id)
-      .filter((id) => Boolean(id && !id.startsWith('pending_')));
-    const initialFileNames = Array.from(
-      new Set(targetRows.flatMap((r) => [r.file_name, r.original_file_name]).filter(Boolean))
-    );
-
-    const expandedRes = await pool.query(
-      `SELECT id, file_name, original_file_name, google_drive_file_id 
-       FROM google_drive_materials 
-       WHERE id = ANY($1) 
-          OR (google_drive_file_id = ANY($2) AND $2 <> '{}')
-          OR file_name = ANY($3)`,
-      [
-        initialIds,
-        initialDriveFileIds.length > 0 ? initialDriveFileIds : ['__none__'],
-        initialFileNames,
-      ]
-    );
-
-    const allMaterials = expandedRes.rows;
-    const allMaterialIds = Array.from(new Set(allMaterials.map((r) => r.id)));
-    const allDriveFileIds = Array.from(
-      new Set(
-        allMaterials
-          .map((r) => r.google_drive_file_id)
-          .filter((id) => Boolean(id && !id.startsWith('pending_')))
-      )
-    );
-    const allFileNames = Array.from(
-      new Set(allMaterials.flatMap((r) => [r.file_name, r.original_file_name]).filter(Boolean))
-    );
-
-    // 1. Permanently delete associated files from Google Drive
-    const driveErrors: string[] = [];
-    if (allDriveFileIds.length > 0) {
-      const results = await Promise.allSettled(
-        allDriveFileIds.map(async (fileId) => {
-          try {
-            await deleteDriveFile(fileId);
-          } catch (driveErr: any) {
-            if (driveErr.code !== 404 && driveErr.status !== 404) {
-              console.error(`[BulkDeleteDrive] Drive deletion error for file ID ${fileId}:`, driveErr.message);
-              throw driveErr;
-            }
-          }
-        })
-      );
-
-      results.forEach((r, idx) => {
-        if (r.status === 'rejected') {
-          driveErrors.push(`File ${allDriveFileIds[idx]}: ${r.reason?.message || 'Delete error'}`);
-        }
-      });
-
-      // If all Google Drive file deletions failed, abort database purge to prevent desynchronization
-      if (driveErrors.length > 0 && driveErrors.length === allDriveFileIds.length) {
-        return res.status(502).json({
-          status: 'error',
-          message: `Failed to delete files from Google Drive: ${driveErrors.join('; ')}. Database records and extracted text have NOT been removed to prevent state desynchronization.`,
-        });
-      }
-    }
-
-    // 2. Cascade delete from mirrored textbook_content and textbooks
-    const filePatterns = allDriveFileIds.map((id) => `gdrive://${id}`);
-    const altPatterns = allDriveFileIds.map((id) => `%${id}%`);
-    const cleanNames = allFileNames.map((fn) => fn.replace(/\.pdf$/i, ''));
-
-    const matchingTbRes = await pool.query(
-      `SELECT DISTINCT id, file_path, book_name 
-       FROM textbooks 
-       WHERE file_path = ANY($1) 
-          OR file_path LIKE ANY($2) 
-          OR book_name = ANY($3) 
-          OR book_name = ANY($4)
-          OR id IN (SELECT textbook_id FROM textbook_content WHERE material_id = ANY($5))`,
-      [
-        filePatterns.length > 0 ? filePatterns : ['__none__'],
-        altPatterns.length > 0 ? altPatterns : ['__none__'],
-        allFileNames,
-        cleanNames,
-        allMaterialIds,
-      ]
-    );
-
-    const matchingTbRows = matchingTbRes.rows;
-    const matchingTbIds = matchingTbRows.map((r) => r.id);
-
-    // 3. Remove physical files on disk if any exist
-    for (const tb of matchingTbRows) {
-      if (tb.file_path && !tb.file_path.startsWith('gdrive://') && fs.existsSync(tb.file_path)) {
-        try {
-          fs.unlinkSync(tb.file_path);
-        } catch (diskErr: any) {
-          console.warn(`[BulkDeleteDrive] Disk unlink warning for ${tb.file_path}:`, diskErr.message);
-        }
-      }
-    }
-
-    for (const fn of allFileNames) {
-      const candidatePaths = [
-        path.resolve(__dirname, '../../uploads/textbooks', fn),
-        path.join(os.tmpdir(), 'tnpsc-uploads', 'textbooks', fn),
-        path.resolve(__dirname, '../../../uploads/textbooks', fn),
-      ];
-      for (const cp of candidatePaths) {
-        if (fs.existsSync(cp)) {
-          try {
-            fs.unlinkSync(cp);
-          } catch (_) {}
-        }
-      }
-    }
-
-    // 4. Cascade delete from textbook_content (page-by-page extracted text & indexed content)
-    await pool.query(
-      `DELETE FROM textbook_content 
-       WHERE material_id = ANY($1) 
-          OR (textbook_id = ANY($2) AND $2 <> '{}') 
-          OR file_name = ANY($3)`,
-      [allMaterialIds, matchingTbIds.length > 0 ? matchingTbIds : [-1], allFileNames]
-    );
-
-    // 5. Cascade delete from pdf_extractions
-    await pool.query(
-      `DELETE FROM pdf_extractions 
-       WHERE material_id = ANY($1) 
-          OR (google_drive_file_id = ANY($2) AND $2 <> '{}')
-          OR (textbook_id = ANY($3) AND $3 <> '{}')`,
-      [
-        allMaterialIds,
-        allDriveFileIds.length > 0 ? allDriveFileIds : ['__none__'],
-        matchingTbIds.length > 0 ? matchingTbIds : [-1],
-      ]
-    );
-
-    // 6. Cascade delete from textbooks
-    if (matchingTbIds.length > 0) {
-      await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [matchingTbIds]);
-    }
-
-    // 7. Delete records from PostgreSQL google_drive_materials
-    const deleteRes = await pool.query(
-      `DELETE FROM google_drive_materials WHERE id = ANY($1) RETURNING id`,
-      [allMaterialIds]
-    );
-
-    return res.status(200).json({
-      status: 'success',
-      message: `Successfully deleted ${deleteRes.rowCount} PDF material record(s) and all extracted content from Google Drive and database.${driveErrors.length > 0 ? ` (Note: ${driveErrors.length} Drive warnings: ${driveErrors.join('; ')})` : ''}`,
-      deletedCount: deleteRes.rowCount,
-      deletedIds: allMaterialIds,
-    });
-  } catch (err: any) {
-    console.error('[BulkDriveDelete] Error:', err.message);
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to delete PDF materials',
-    });
-  }
-};
-
-/**
- * DELETE /api/drive/materials
- * Admin only: Bulk deletes PDF materials from Google Drive and PostgreSQL database.
- */
-router.delete('/materials', requireAdminAuth, handleBulkDeleteMaterials);
-
-/**
- * POST /api/drive/bulk-delete
- * Admin only: Dedicated bulk delete endpoint supporting { ids: number[] } or { deleteAll: true, ...filters }
- */
-router.post('/bulk-delete', requireAdminAuth, handleBulkDeleteMaterials);
-
-/**
- * DELETE /api/drive/materials/:id
- * Admin only: Permanently deletes the PDF from Google Drive and completely purges all related
- * database records, extracted page text, indexed content, and mirror records.
- */
-router.delete('/materials/:id', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id) || id <= 0) {
-      return res.status(400).json({ status: 'error', message: 'Valid material ID is required.' });
-    }
-
-    // 1. Fetch target material
-    const resDb = await pool.query(
-      `SELECT id, file_name, original_file_name, google_drive_file_id 
-       FROM google_drive_materials 
-       WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-
-    if (resDb.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'PDF study material not found in database.' });
-    }
-
-    const primaryMaterial = resDb.rows[0];
-
-    // 2. Expand to all related duplicate/cross-group records sharing Google Drive File ID or File Name
-    const relatedMaterialsRes = await pool.query(
-      `SELECT id, file_name, original_file_name, google_drive_file_id 
-       FROM google_drive_materials 
-       WHERE id = $1 
-          OR (google_drive_file_id IS NOT NULL AND google_drive_file_id != '' AND google_drive_file_id = $2)
-          OR file_name = $3 
-          OR (original_file_name IS NOT NULL AND original_file_name = $3)`,
-      [id, primaryMaterial.google_drive_file_id, primaryMaterial.file_name]
-    );
-
-    const targetMaterials = relatedMaterialsRes.rows;
-    const materialIds = Array.from(new Set(targetMaterials.map((m) => m.id)));
-    const driveFileIds = Array.from(
-      new Set(
-        targetMaterials
-          .map((m) => m.google_drive_file_id)
-          .filter((fileId) => Boolean(fileId && !fileId.startsWith('pending_')))
-      )
-    );
-    const fileNames = Array.from(
-      new Set(
-        targetMaterials
-          .flatMap((m) => [m.file_name, m.original_file_name])
-          .filter(Boolean)
-      )
-    );
-
-    // 3. SYNCHRONIZED GOOGLE DRIVE DELETION (Delete from Google Drive FIRST)
-    // Only proceed to purge database records if Google Drive confirms deletion
-    let driveDeleteErrors: string[] = [];
-    if (driveFileIds.length > 0) {
-      for (const fileId of driveFileIds) {
-        try {
-          await deleteDriveFile(fileId);
-        } catch (driveErr: any) {
-          if (driveErr.code !== 404 && driveErr.status !== 404) {
-            console.error(`[DriveDelete] Google Drive file deletion failed for ${fileId}:`, driveErr);
-            driveDeleteErrors.push(driveErr.message || 'Failed to delete file from Google Drive');
-          }
-        }
-      }
-
-      if (driveDeleteErrors.length > 0) {
-        return res.status(502).json({
-          status: 'error',
-          message: `Failed to delete PDF file from Google Drive: ${driveDeleteErrors.join(', ')}. Database records and extracted text have NOT been removed to prevent state desynchronization. Please check Google Drive credentials and try again.`,
-        });
-      }
-    }
-
-    // 4. Cascade delete mirrored textbooks records
-    const filePatterns = driveFileIds.map((fId) => `gdrive://${fId}`);
-    const altPatterns = driveFileIds.map((fId) => `%${fId}%`);
-    const cleanNames = fileNames.map((fn) => fn.replace(/\.pdf$/i, ''));
-
-    const tbRes = await pool.query(
-      `SELECT DISTINCT id, file_path, book_name 
-       FROM textbooks 
-       WHERE file_path = ANY($1) 
-          OR file_path LIKE ANY($2) 
-          OR book_name = ANY($3) 
-          OR book_name = ANY($4)
-          OR id IN (SELECT textbook_id FROM textbook_content WHERE material_id = ANY($5))`,
-      [
-        filePatterns.length > 0 ? filePatterns : ['__none__'],
-        altPatterns.length > 0 ? altPatterns : ['__none__'],
-        fileNames,
-        cleanNames,
-        materialIds,
-      ]
-    );
-
-    const tbRows = tbRes.rows;
-    const tbIds = tbRows.map((r) => r.id);
-
-    // 5. Clean up any physical / local files on disk
-    for (const tb of tbRows) {
-      if (tb.file_path && !tb.file_path.startsWith('gdrive://') && fs.existsSync(tb.file_path)) {
-        try {
-          fs.unlinkSync(tb.file_path);
-        } catch (diskErr: any) {
-          console.warn(`[DriveDelete] Disk unlink warning for ${tb.file_path}:`, diskErr.message);
-        }
-      }
-    }
-
-    for (const fn of fileNames) {
-      const candidatePaths = [
-        path.resolve(__dirname, '../../uploads/textbooks', fn),
-        path.join(os.tmpdir(), 'tnpsc-uploads', 'textbooks', fn),
-        path.resolve(__dirname, '../../../uploads/textbooks', fn),
-      ];
-      for (const cp of candidatePaths) {
-        if (fs.existsSync(cp)) {
-          try {
-            fs.unlinkSync(cp);
-          } catch (_) {}
-        }
-      }
-    }
-
-    // 6. Delete all extracted page-by-page text & indexed content
-    await pool.query(
-      `DELETE FROM textbook_content 
-       WHERE material_id = ANY($1) 
-          OR (textbook_id = ANY($2) AND $2 <> '{}')
-          OR file_name = ANY($3)`,
-      [materialIds, tbIds.length > 0 ? tbIds : [-1], fileNames]
-    );
-
-    // 7. Cascade delete from pdf_extractions
-    await pool.query(
-      `DELETE FROM pdf_extractions 
-       WHERE material_id = ANY($1) 
-          OR (google_drive_file_id = ANY($2) AND $2 <> '{}')
-          OR (textbook_id = ANY($3) AND $3 <> '{}')`,
-      [
-        materialIds,
-        driveFileIds.length > 0 ? driveFileIds : ['__none__'],
-        tbIds.length > 0 ? tbIds : [-1],
-      ]
-    );
-
-    // 8. Delete from textbooks
-    if (tbIds.length > 0) {
-      await pool.query(`DELETE FROM textbooks WHERE id = ANY($1)`, [tbIds]);
-    }
-
-    // 9. Delete from google_drive_materials
-    await pool.query(`DELETE FROM google_drive_materials WHERE id = ANY($1)`, [materialIds]);
-
-    return res.status(200).json({
-      status: 'success',
-      message: `PDF material "${primaryMaterial.file_name}" permanently deleted from Google Drive, database records, and extracted text index.`,
-      deletedId: id,
-      deletedMaterialIds: materialIds,
-      deletedTextbookIds: tbIds,
-      driveFilesDeleted: driveFileIds,
-    });
-  } catch (err: any) {
-    console.error('[DriveDelete] Error:', err.message);
-    return res.status(500).json({
-      status: 'error',
-      message: err.message || 'Failed to delete PDF material',
+      message: err?.message || 'Failed to load Google Drive sync logs.',
     });
   }
 });
 
 export default router;
-
