@@ -68,6 +68,31 @@ export function getGoogleOAuthPublicConfig(): { clientId: string; configured: bo
 }
 
 /**
+ * Safe startup validation for Google OAuth environment variables.
+ * Never logs secrets, tokens, keys, or passwords.
+ */
+export function validateGoogleOAuthStartupConfig(): { valid: boolean; warnings: string[] } {
+  const clientId = cleanEnvValue(process.env.GOOGLE_CLIENT_ID);
+  const viteClientId = cleanEnvValue(process.env.VITE_GOOGLE_CLIENT_ID);
+  const clientSecret = cleanEnvValue(process.env.GOOGLE_CLIENT_SECRET);
+  const warnings: string[] = [];
+
+  if (!clientId) {
+    warnings.push('GOOGLE_CLIENT_ID is missing in backend environment.');
+  } else if (!clientId.endsWith('.apps.googleusercontent.com')) {
+    warnings.push('GOOGLE_CLIENT_ID format appears invalid (expected *.apps.googleusercontent.com).');
+  }
+  if (!clientSecret) {
+    warnings.push('GOOGLE_CLIENT_SECRET is missing in backend environment (required for code exchange).');
+  }
+  if (clientId && viteClientId && clientId !== viteClientId) {
+    warnings.push('VITE_GOOGLE_CLIENT_ID differs from GOOGLE_CLIENT_ID — ensure frontend and backend use the same OAuth client.');
+  }
+
+  return { valid: warnings.length === 0, warnings };
+}
+
+/**
  * Verifies a Google OAuth 2.0 authorization code or ID token on the backend
  * using GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from server environment variables.
  */

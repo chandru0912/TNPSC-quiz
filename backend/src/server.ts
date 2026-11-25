@@ -1,12 +1,12 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Reliably load environment variables from root and backend/.env
+// Reliably load environment variables: backend/.env FIRST so server OAuth credentials are never shadowed by root .env.local
+dotenv.config({ path: path.resolve(__dirname, '../.env') }); // backend/.env when running from dist/ or src/
+dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') }); // backend/.env when started from repo root
+dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') }); // fallback
 dotenv.config(); // Root .env
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') }); // Root .env.local
-dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') }); // backend/.env from root
-dotenv.config({ path: path.resolve(__dirname, '../.env') }); // backend/.env when running from dist/
-dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') }); // fallback
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors, { CorsOptions } from 'cors';
@@ -52,6 +52,8 @@ import {
 import { cacheService } from './services/cacheService';
 import { getAllCircuitBreakerSnapshots } from './services/circuitBreakerService';
 import { requireAdminAuth } from './middleware/auth';
+import { validateGoogleOAuthStartupConfig } from './services/googleAuthService';
+import { validateDriveOAuthConfig } from './services/driveOAuthService';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -605,6 +607,18 @@ if (!process.env.VERCEL) {
     });
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    const studentOAuth = validateGoogleOAuthStartupConfig();
+    if (!studentOAuth.valid) {
+      console.warn('[OAuth Startup Validation] Warnings:', studentOAuth.warnings.join(' | '));
+    } else {
+      console.log('[OAuth Startup Validation] Student Google OAuth configured (GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET present).');
+    }
+    const driveOAuth = validateDriveOAuthConfig();
+    if (!driveOAuth.valid) {
+      console.warn('[Drive OAuth Startup Validation] Warnings:', driveOAuth.errors.join(' | '));
+    } else {
+      console.log(`[Drive OAuth Startup Validation] Google Drive OAuth configured (redirectUri=${driveOAuth.redirectUri}).`);
+    }
   });
 }
 
