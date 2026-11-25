@@ -252,7 +252,7 @@ const PreviousPapers = () => {
                   <div className="table-col actions-col">
                     <button
                       type="button"
-                      className="table-action-btn table-action-primary"
+                      className="papers-start-exam-btn"
                       disabled={paper.questions === 0}
                       onClick={() => {
                         const target = `/previous-papers/test/${paper.id}`

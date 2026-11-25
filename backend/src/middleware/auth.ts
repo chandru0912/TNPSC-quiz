@@ -63,7 +63,61 @@ export interface AuthenticatedRequest extends Request {
   adminUser?: AdminPayload;
 }
 
-export function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+const AUTHORIZED_ADMIN_ROLES = new Set(['super_admin', 'admin', 'owner']);
+
+function getConfiguredPrimaryAdminUsername(): string {
+  return (process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
+}
+
+function getConfiguredEnvAdminUsernames(): Set<string> {
+  const set = new Set<string>([getConfiguredPrimaryAdminUsername()]);
+  const raw = process.env.ADMIN_USERS || '';
+  if (raw.trim()) {
+    for (const entry of raw.split(',')) {
+      const parts = entry.trim().split(':');
+      const u = parts[0]?.trim().toLowerCase();
+      const r = (parts[3]?.trim() || 'admin').toLowerCase();
+      if (u && AUTHORIZED_ADMIN_ROLES.has(r)) {
+        set.add(u);
+      }
+    }
+  }
+  return set;
+}
+
+async function verifyAdminUserInDatabaseOrEnv(
+  username: string
+): Promise<{ valid: boolean; role?: string; name?: string }> {
+  const cleanUser = String(username || '').trim().toLowerCase();
+  if (!cleanUser) return { valid: false };
+
+  // 1. Check PostgreSQL admin_users table first (authoritative server-side role check)
+  try {
+    const dbRes = await pool.query(
+      'SELECT username, name, role FROM admin_users WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      [cleanUser]
+    );
+    if (dbRes.rows.length > 0) {
+      const row = dbRes.rows[0];
+      const role = String(row.role || '').trim().toLowerCase();
+      if (AUTHORIZED_ADMIN_ROLES.has(role)) {
+        return { valid: true, role: row.role, name: row.name };
+      }
+      return { valid: false };
+    }
+  } catch {
+    // If DB is temporarily unreachable, fall back only to explicitly configured env owner
+  }
+
+  // 2. Fallback to configured environment owner/admin accounts
+  if (getConfiguredEnvAdminUsernames().has(cleanUser)) {
+    return { valid: true, role: 'super_admin', name: 'Super Admin' };
+  }
+
+  return { valid: false };
+}
+
+export async function requireAdminAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   let token: string | undefined;
 
@@ -74,24 +128,15 @@ export function requireAdminAuth(req: AuthenticatedRequest, res: Response, next:
   }
 
   if (!token) {
-    if (process.env.NODE_ENV !== 'production') {
-      req.adminUser = { username: 'local_admin', name: 'Development Administrator', role: 'admin', exp: Date.now() + 86400000 };
-      return next();
-    }
     return res.status(401).json({
       status: 'error',
-      message: 'Unauthorized: Missing or invalid Authorization header or token parameter. Admin access required.',
+      message: 'Unauthorized: Missing admin authentication token. Owner access required.',
     });
   }
 
   const verified = verifyAdminToken(token);
   if (!verified) {
-    // In local development, permit dev token or fallback admin session
-    if (process.env.NODE_ENV !== 'production' && (token === 'demo_token' || token === 'admin_token' || token === 'dev' || token.length < 20)) {
-      req.adminUser = { username: 'local_admin', name: 'Development Administrator', role: 'admin', exp: Date.now() + 86400000 };
-      return next();
-    }
-    // Check if token belongs to a student attempting to access admin endpoints
+    // Explicitly reject student tokens attempting to access admin endpoints
     const studentVerified = verifyStudentToken(token);
     if (studentVerified) {
       return res.status(403).json({
@@ -99,13 +144,26 @@ export function requireAdminAuth(req: AuthenticatedRequest, res: Response, next:
         message: 'Forbidden: Access restricted. Student accounts are not permitted to access administrator endpoints.',
       });
     }
-    return res.status(403).json({
+    return res.status(401).json({
       status: 'error',
-      message: 'Forbidden: Invalid or expired admin session token.',
+      message: 'Unauthorized: Invalid or expired admin session token.',
     });
   }
 
-  req.adminUser = verified;
+  // Never trust token role blindly — verify authorized admin role server-side against PostgreSQL / env
+  const serverCheck = await verifyAdminUserInDatabaseOrEnv(verified.username);
+  if (!serverCheck.valid) {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Forbidden: Account does not hold authorized administrator privileges.',
+    });
+  }
+
+  req.adminUser = {
+    ...verified,
+    role: serverCheck.role || verified.role,
+    name: serverCheck.name || verified.name,
+  };
   next();
 }
 

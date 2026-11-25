@@ -59,7 +59,7 @@ export function cleanEnvValue(val?: string | null): string {
 }
 
 export function getGoogleOAuthPublicConfig(): { clientId: string; configured: boolean } {
-  const clientId = cleanEnvValue(process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID);
+  const clientId = cleanEnvValue(process.env.GOOGLE_CLIENT_ID);
   const clientSecret = cleanEnvValue(process.env.GOOGLE_CLIENT_SECRET);
   return {
     clientId,
@@ -102,7 +102,7 @@ export async function verifyGoogleCredentialOrCode(params: {
   redirectUri?: string;
   codeVerifier?: string;
 }): Promise<VerifiedGoogleProfile> {
-  const clientId = cleanEnvValue(process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID);
+  const clientId = cleanEnvValue(process.env.GOOGLE_CLIENT_ID);
   const clientSecret = cleanEnvValue(process.env.GOOGLE_CLIENT_SECRET);
 
   if (!clientId) {

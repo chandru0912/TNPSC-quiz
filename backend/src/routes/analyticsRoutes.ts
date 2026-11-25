@@ -9,6 +9,12 @@ import {
   exportSubscriptionHistoryCsv,
 } from '../services/subscriptionHistoryService';
 import { getAdminActiveStudentSessions } from '../services/studentSessionService';
+import {
+  getStudentLoginUsersRegistry,
+  getStudentLoginUserDetail,
+  exportStudentLoginUsersCsv,
+  exportIndividualStudentLoginHistoryCsv,
+} from '../services/studentLoginUsersService';
 
 const router = Router();
 
@@ -337,6 +343,92 @@ router.get('/login-history/student/:studentId', requireAdminAuth, async (req: Re
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
     console.error('[Analytics Student Login Detail Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// 10D. Unique Student Login Users Registry (Admin-Only, Paginated, Filtered, Sorted)
+router.get('/login-users', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const data = await getStudentLoginUsersRegistry({
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+      range: typeof req.query.range === 'string' ? req.query.range : 'all',
+      startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
+      endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
+      method: typeof req.query.method === 'string' ? req.query.method : 'all',
+      status: typeof req.query.status === 'string' ? req.query.status : 'all',
+      sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : 'latest_login',
+      page: req.query.page ? Number(req.query.page) : 1,
+      limit: req.query.limit ? Number(req.query.limit) : 25,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Analytics Login Users Registry Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// 10E. Export Unique Student Login Users CSV (All or Filtered, Admin-Only)
+router.get('/login-users/export', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const scope = String(req.query.scope || 'filtered').toLowerCase() === 'all' ? 'all' : 'filtered';
+    const csv = await exportStudentLoginUsersCsv({
+      scope,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+      range: typeof req.query.range === 'string' ? req.query.range : 'all',
+      startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
+      endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
+      method: typeof req.query.method === 'string' ? req.query.method : 'all',
+      status: typeof req.query.status === 'string' ? req.query.status : 'all',
+      sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy : 'latest_login',
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="student-login-users-${scope}-${stamp}.csv"`
+    );
+    return res.status(200).send(csv);
+  } catch (err: any) {
+    console.error('[Analytics Login Users Export Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// 10F. Individual Student Login User Profile & Complete History (Admin-Only)
+router.get('/login-users/:studentId', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const studentId = Number(req.params.studentId);
+    if (!Number.isInteger(studentId) || studentId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Invalid student ID.' });
+    }
+    const data = await getStudentLoginUserDetail(studentId);
+    if (!data) {
+      return res.status(404).json({ status: 'error', message: 'Student not found.' });
+    }
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Analytics Login User Detail Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// 10G. Export Individual Student Login History CSV (Admin-Only)
+router.get('/login-users/:studentId/export', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const studentId = Number(req.params.studentId);
+    if (!Number.isInteger(studentId) || studentId <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Invalid student ID.' });
+    }
+    const result = await exportIndividualStudentLoginHistoryCsv(studentId);
+    if (!result) {
+      return res.status(404).json({ status: 'error', message: 'Student not found.' });
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    return res.status(200).send(result.csv);
+  } catch (err: any) {
+    console.error('[Analytics Individual Student Export Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message });
   }
 });

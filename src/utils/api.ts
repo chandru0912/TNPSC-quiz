@@ -71,7 +71,9 @@ export function getApiUrl(path: string): string {
 
 export function getActiveAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  const isAdminPath = window.location.pathname.startsWith('/admin');
+  const isAdminPath =
+    window.location.pathname.startsWith('/admin') ||
+    window.location.pathname === '/owner-login';
   if (isAdminPath) {
     return localStorage.getItem('tnpsc_admin_token') || localStorage.getItem('tnpsc_student_token');
   }
@@ -158,6 +160,7 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
         response.status === 401 &&
         typeof window !== 'undefined' &&
         !window.location.pathname.startsWith('/admin') &&
+        window.location.pathname !== '/owner-login' &&
         localStorage.getItem('tnpsc_student_token')
       ) {
         try {

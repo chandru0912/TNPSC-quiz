@@ -115,7 +115,7 @@ function getEnvAdmins(): EnvAdmin[] {
  * Validates admin credentials against database and .env, then issues a secure token
  * Environment variables take precedence to ensure production login works reliably
  */
-router.post(['/login', '/', '/api/admin/login', '/admin/login'], adminLoginLimiter, async (req: Request, res: Response) => {
+router.post(['/login', '/owner-login', '/', '/api/admin/login', '/admin/login'], adminLoginLimiter, async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -175,6 +175,13 @@ router.post(['/login', '/', '/api/admin/login', '/admin/login'], adminLoginLimit
 
     if (dbRes.rows.length > 0) {
       const user = dbRes.rows[0];
+      const allowedRoles = new Set(['super_admin', 'admin', 'owner']);
+      if (!allowedRoles.has(String(user.role || '').trim().toLowerCase())) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Forbidden: This account is not authorized for owner admin access.',
+        });
+      }
       if (user.password === cleanPass) {
         const token = generateAdminToken(user.username, user.name, user.role);
         return res.status(200).json({

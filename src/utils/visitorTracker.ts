@@ -78,7 +78,7 @@ function dispatchTrackPayload(
   if (typeof window === 'undefined') return;
 
   const currentPath = pagePath || window.location.pathname || '/';
-  if (currentPath.startsWith('/admin')) return;
+  if (currentPath.startsWith('/admin') || currentPath === '/owner-login') return;
 
   if (eventType === 'page_view') {
     lastTrackedPath = currentPath;
@@ -143,7 +143,7 @@ export function trackAnalyticsEvent(
 ) {
   if (typeof window === 'undefined') return;
   const currentPath = window.location.pathname || '/';
-  if (currentPath.startsWith('/admin')) return;
+  if (currentPath.startsWith('/admin') || currentPath === '/owner-login') return;
 
   const visitorId = getOrGenerateId('tnpsc_visitor_id', localStorage);
   const sessionId = getOrGenerateId('tnpsc_session_id', sessionStorage);

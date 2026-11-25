@@ -1116,6 +1116,7 @@ const Admin = () => {
     localStorage.removeItem('tnpsc_admin_user')
     setToken(null)
     setAdminUser(null)
+    navigate('/owner-login', { replace: true })
   }
 
   // Fetch all admin accounts (DB + .env)

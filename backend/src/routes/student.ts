@@ -23,7 +23,12 @@ import {
   revokeStudentSessionOnLogout,
   validateActiveStudentSession,
   studentSessionEventBus,
+  parseUserAgentDeviceInfo,
 } from '../services/studentSessionService';
+import {
+  upsertStudentLoginUser,
+  ensureStudentLoginUsersSchema,
+} from '../services/studentLoginUsersService';
 import {
   studentLoginLimiter,
   otpVerificationLimiter,
@@ -323,12 +328,32 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
       // Record genuine successful Google OAuth student login event (never Admin, never failed attempts)
       const normalizedGoogleEmail = String(studentRow.email || '').trim().toLowerCase();
       const googleLoginEventId = `login_google_${studentRow.id}_${crypto.randomUUID()}`;
+      const googleDeviceInfo = parseUserAgentDeviceInfo(req.headers['user-agent'] || null);
+      await ensureStudentLoginUsersSchema().catch(() => {});
       await client.query(
         `INSERT INTO student_login_events (
-          event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp
-        ) VALUES ($1, $2, $3, 'Google OAuth', 'Successful', CURRENT_TIMESTAMP)
+          event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp,
+          device_type, browser_name, os_name
+        ) VALUES ($1, $2, $3, 'Google OAuth', 'Successful', CURRENT_TIMESTAMP, $4, $5, $6)
         ON CONFLICT (event_id) DO NOTHING`,
-        [googleLoginEventId, studentRow.id, normalizedGoogleEmail]
+        [
+          googleLoginEventId,
+          studentRow.id,
+          normalizedGoogleEmail,
+          googleDeviceInfo.deviceType,
+          googleDeviceInfo.browserName,
+          googleDeviceInfo.osName,
+        ]
+      );
+      await upsertStudentLoginUser(
+        {
+          studentUserId: Number(studentRow.id),
+          authMethod: 'Google OAuth',
+          deviceType: googleDeviceInfo.deviceType,
+          browserName: googleDeviceInfo.browserName,
+          osName: googleDeviceInfo.osName,
+        },
+        client
       );
 
       await client.query('COMMIT');
@@ -359,6 +384,10 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
     setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt);
 
     await AnalyticsService.touchStudentLiveSession(Number(studentRow.id)).catch(() => {});
+    broadcastAnalyticsEvent('student_login', {
+      studentId: studentRow.id,
+      provider: 'google',
+    });
     if (isNewUser) {
       broadcastAnalyticsEvent('student_registered', {
         studentId: studentRow.id,
@@ -548,13 +577,30 @@ router.post('/login', studentLoginLimiter, async (req: Request, res: Response) =
     // Record genuine successful Email & Password student login event (idempotent, never Admin, never failed attempts)
     const normalizedEmail = String(student.email || cleanEmail).trim().toLowerCase();
     const emailLoginEventId = `login_email_${student.id}_${crypto.randomUUID()}`;
+    const emailDeviceInfo = parseUserAgentDeviceInfo(req.headers['user-agent'] || null);
+    await ensureStudentLoginUsersSchema().catch(() => {});
     await pool.query(
       `INSERT INTO student_login_events (
-        event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp
-      ) VALUES ($1, $2, $3, 'Email & Password', 'Successful', CURRENT_TIMESTAMP)
+        event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp,
+        device_type, browser_name, os_name
+      ) VALUES ($1, $2, $3, 'Email & Password', 'Successful', CURRENT_TIMESTAMP, $4, $5, $6)
       ON CONFLICT (event_id) DO NOTHING`,
-      [emailLoginEventId, student.id, normalizedEmail]
+      [
+        emailLoginEventId,
+        student.id,
+        normalizedEmail,
+        emailDeviceInfo.deviceType,
+        emailDeviceInfo.browserName,
+        emailDeviceInfo.osName,
+      ]
     );
+    await upsertStudentLoginUser({
+      studentUserId: Number(student.id),
+      authMethod: 'Email & Password',
+      deviceType: emailDeviceInfo.deviceType,
+      browserName: emailDeviceInfo.browserName,
+      osName: emailDeviceInfo.osName,
+    });
 
     // Enforce Single Active Device Session (atomically revokes previous device & increments token_version)
     const activeSession = await createSingleActiveStudentSession({
@@ -578,6 +624,10 @@ router.post('/login', studentLoginLimiter, async (req: Request, res: Response) =
 
     await AnalyticsService.touchStudentLiveSession(Number(student.id)).catch(() => {});
     await AnalyticsService.recordGenuineLoginEvent(Number(student.id), 'email').catch(() => {});
+    broadcastAnalyticsEvent('student_login', {
+      studentId: student.id,
+      provider: 'email',
+    });
 
     return res.status(200).json({
       status: 'success',

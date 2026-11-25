@@ -9,6 +9,7 @@ import StudentPreviewBanner from './components/StudentPreviewBanner'
 import { StudentAuthProvider } from './context/StudentAuthContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RequireStudentAuthRoute from './components/RequireStudentAuthRoute'
+import RequireAdminAuthRoute from './components/RequireAdminAuthRoute'
 import LoginLocationModal from './components/LoginLocationModal'
 import { startVisitorTracking, trackPageView } from './utils/visitorTracker'
 import './App.css'
@@ -54,6 +55,7 @@ const ProgressTracker = lazyWithRetry(() => import('./pages/ProgressTracker'))
 const PerformanceAnalytics = lazyWithRetry(() => import('./pages/PerformanceAnalytics'))
 const Login = lazyWithRetry(() => import('./pages/Login'))
 const Register = lazyWithRetry(() => import('./pages/Register'))
+const OwnerLogin = lazyWithRetry(() => import('./pages/OwnerLogin'))
 const Admin = lazyWithRetry(() => import('./pages/Admin'))
 
 function RouteLoadingFallback() {
@@ -89,6 +91,8 @@ function RouteLoadingFallback() {
 function AppShell() {
   const location = useLocation()
   const isAdmin = location.pathname.startsWith('/admin')
+  const isOwnerLogin = location.pathname === '/owner-login'
+  const isPrivateOwnerRoute = isAdmin || isOwnerLogin
 
   // Real-time website visitor & route page-view tracking (non-admin routes only)
   useEffect(() => {
@@ -96,10 +100,10 @@ function AppShell() {
   }, [])
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isPrivateOwnerRoute) {
       trackPageView(location.pathname)
     }
-  }, [location.pathname, isAdmin])
+  }, [location.pathname, isPrivateOwnerRoute])
   const isDashboardRoute =
     !isAdmin &&
     [
@@ -173,9 +177,9 @@ function AppShell() {
         <div className="ambient-grid-mesh" />
       </div>
 
-      {!isAdmin && <StudentPreviewBanner />}
-      {!isAdmin && <LoginLocationModal />}
-      <Navbar />
+      {!isPrivateOwnerRoute && <StudentPreviewBanner />}
+      {!isPrivateOwnerRoute && <LoginLocationModal />}
+      {!isOwnerLogin && <Navbar />}
 
       <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''} ${isDashboardRoute ? 'student-dashboard-main-mode' : ''}`}>
         <ErrorBoundary
@@ -239,14 +243,17 @@ function AppShell() {
 
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/admin" element={<Admin />} />
-          <Route path="/admin/*" element={<Admin />} />
+          <Route path="/owner-login" element={<OwnerLogin />} />
+          <Route element={<RequireAdminAuthRoute />}>
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/admin/*" element={<Admin />} />
+          </Route>
         </Routes>
           </Suspense>
         </ErrorBoundary>
       </main>
 
-      {!isAdmin && !isDashboardRoute && (
+      {!isPrivateOwnerRoute && !isDashboardRoute && (
         <footer className="footer glass">
           <div className="footer-content">
             <div className="footer-brand">

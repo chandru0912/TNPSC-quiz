@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus, Shield, LogOut } from 'lucide-react'
+import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus, LogOut } from 'lucide-react'
 import MobileAuthSlide, { type AuthSlideType } from './MobileAuthSlide'
 import { useScrollLock } from '../hooks/useScrollLock'
 import { useStudentAuth } from '../context/StudentAuthContext'
@@ -112,7 +112,7 @@ const Navbar = () => {
         </ul>
 
         <div className="nav-actions">
-          {/* Admin Button / Preview Exit Button (Strictly hidden for logged-in students) */}
+          {/* Preview Exit Button (Only visible when owner is actively previewing a student view) */}
           {isPreviewMode ? (
             <button
               type="button"
@@ -138,16 +138,6 @@ const Navbar = () => {
               <LogOut size={15} />
               <span className="nav-auth-label">Exit Preview</span>
             </button>
-          ) : !isAuthenticated || !student ? (
-            <Link
-              to="/admin"
-              className="nav-auth-btn nav-admin-btn"
-              title="Admin Portal"
-              onClick={closeMenu}
-            >
-              <Shield size={16} />
-              <span className="nav-auth-label">Admin</span>
-            </Link>
           ) : null}
 
           {isAuthenticated && student ? (

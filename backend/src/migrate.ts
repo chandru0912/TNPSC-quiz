@@ -1419,6 +1419,95 @@ export async function runMigration() {
 
       CREATE INDEX IF NOT EXISTS idx_student_login_events_email_ts
       ON student_login_events (LOWER(student_email_snapshot), login_timestamp DESC);
+
+      ALTER TABLE student_login_events ADD COLUMN IF NOT EXISTS device_type VARCHAR(64);
+      ALTER TABLE student_login_events ADD COLUMN IF NOT EXISTS browser_name VARCHAR(64);
+      ALTER TABLE student_login_events ADD COLUMN IF NOT EXISTS os_name VARCHAR(64);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_events_method_ts
+      ON student_login_events (authentication_method, login_timestamp DESC);
+
+      CREATE TABLE IF NOT EXISTS student_login_users (
+        id SERIAL PRIMARY KEY,
+        student_user_id INT NOT NULL UNIQUE REFERENCES students(id) ON DELETE CASCADE,
+        first_login_at TIMESTAMPTZ NOT NULL,
+        last_login_at TIMESTAMPTZ NOT NULL,
+        total_login_count INT NOT NULL DEFAULT 1,
+        last_login_method VARCHAR(40),
+        last_device VARCHAR(64),
+        last_browser VARCHAR(64),
+        last_os VARCHAR(64),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_users_last_login
+      ON student_login_users (last_login_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_users_first_login
+      ON student_login_users (first_login_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_users_total_count
+      ON student_login_users (total_login_count DESC, last_login_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_login_users_method
+      ON student_login_users (last_login_method);
+
+      -- Idempotent backfill of student_login_users from existing historical login events
+      WITH unified_hist AS (
+        SELECT
+          sle.student_id,
+          sle.authentication_method,
+          sle.login_timestamp,
+          sle.device_type,
+          sle.browser_name,
+          sle.os_name
+        FROM student_login_events sle
+        JOIN students s ON s.id = sle.student_id
+        WHERE COALESCE(s.role, 'student') = 'student'
+          AND COALESCE(sle.login_status, 'Successful') = 'Successful'
+
+        UNION ALL
+
+        SELECT
+          sa.student_id,
+          CASE WHEN sa.activity_type = 'google_login' THEN 'Google OAuth' ELSE 'Email & Password' END AS authentication_method,
+          sa.created_at AS login_timestamp,
+          NULL::VARCHAR(64) AS device_type,
+          NULL::VARCHAR(64) AS browser_name,
+          NULL::VARCHAR(64) AS os_name
+        FROM student_activity sa
+        JOIN students s ON s.id = sa.student_id
+        WHERE sa.activity_type IN ('login', 'google_login')
+          AND COALESCE(s.role, 'student') = 'student'
+          AND NOT EXISTS (
+            SELECT 1 FROM student_login_events sle2
+            WHERE sle2.student_id = sa.student_id
+              AND ABS(EXTRACT(EPOCH FROM (sle2.login_timestamp - sa.created_at))) <= 10
+          )
+      ),
+      agg AS (
+        SELECT
+          student_id,
+          MIN(login_timestamp) AS first_login_at,
+          MAX(login_timestamp) AS last_login_at,
+          COUNT(*)::int AS total_login_count,
+          (ARRAY_AGG(authentication_method ORDER BY login_timestamp DESC))[1] AS last_login_method,
+          (ARRAY_AGG(device_type ORDER BY login_timestamp DESC) FILTER (WHERE device_type IS NOT NULL))[1] AS last_device,
+          (ARRAY_AGG(browser_name ORDER BY login_timestamp DESC) FILTER (WHERE browser_name IS NOT NULL))[1] AS last_browser,
+          (ARRAY_AGG(os_name ORDER BY login_timestamp DESC) FILTER (WHERE os_name IS NOT NULL))[1] AS last_os
+        FROM unified_hist
+        GROUP BY student_id
+      )
+      INSERT INTO student_login_users (
+        student_user_id, first_login_at, last_login_at, total_login_count,
+        last_login_method, last_device, last_browser, last_os
+      )
+      SELECT
+        student_id, first_login_at, last_login_at, total_login_count,
+        last_login_method, last_device, last_browser, last_os
+      FROM agg
+      ON CONFLICT (student_user_id) DO NOTHING;
     `);
 
     await client.query('COMMIT');
@@ -1505,6 +1594,7 @@ export function ensureDatabaseSchema(): Promise<void> {
               ) AS has_mta_award,
               to_regclass('public.student_login_locations') AS t_login_locations,
               to_regclass('public.student_login_events') AS t_login_events,
+              to_regclass('public.student_login_users') AS t_login_users,
               to_regclass('public.analytics_events') AS t_analytics_events,
               to_regclass('public.payment_events') AS t_payment_events,
               EXISTS (
@@ -1534,6 +1624,7 @@ export function ensureDatabaseSchema(): Promise<void> {
             row?.has_mta_award &&
             row?.t_login_locations &&
             row?.t_login_events &&
+            row?.t_login_users &&
             row?.t_analytics_events &&
             row?.t_payment_events &&
             row?.has_vs_ended_at
