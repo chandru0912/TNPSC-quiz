@@ -86,20 +86,27 @@ export function loadGoogleIdentityScript(): Promise<void> {
  * Note: Never accesses or handles Google Client Secrets in frontend code.
  */
 export async function resolveGoogleClientId(): Promise<string> {
-  const envClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim()
-  if (envClientId) {
-    cachedClientId = envClientId
-    return envClientId
-  }
   if (cachedClientId) {
     return cachedClientId
   }
 
-  const res = await apiFetch('/api/student/auth/google/config')
-  const json = await res.json().catch(() => ({}))
-  if (res.ok && json?.clientId) {
-    cachedClientId = String(json.clientId).trim()
-    return cachedClientId
+  // Prefer the active backend OAuth Client ID first so frontend GIS popup and backend
+  // token exchange ALWAYS use the exact same Google Cloud OAuth Web Client in production.
+  try {
+    const res = await apiFetch('/api/student/auth/google/config')
+    const json = await res.json().catch(() => ({}))
+    if (res.ok && json?.clientId) {
+      cachedClientId = String(json.clientId).trim()
+      return cachedClientId
+    }
+  } catch {
+    // Fallback to Vite build-time env below if backend config endpoint is transiently unreachable
+  }
+
+  const envClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim()
+  if (envClientId) {
+    cachedClientId = envClientId
+    return envClientId
   }
 
   throw new Error('Google Sign-In is not configured yet. Missing Google Client ID.')

@@ -178,7 +178,7 @@ router.post('/auth/check-email', async (req: Request, res: Response) => {
 // ====================================================
 router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Response) => {
   try {
-    const { code, idToken, redirectUri } = req.body || {};
+    const { code, idToken, redirectUri, codeVerifier } = req.body || {};
 
     if (!code && !idToken) {
       return res.status(400).json({
@@ -187,7 +187,7 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
       });
     }
 
-    const googleProfile = await verifyGoogleCredentialOrCode({ code, idToken, redirectUri });
+    const googleProfile = await verifyGoogleCredentialOrCode({ code, idToken, redirectUri, codeVerifier });
 
     if (!googleProfile.emailVerified || !googleProfile.email) {
       return res.status(403).json({

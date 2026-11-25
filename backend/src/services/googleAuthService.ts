@@ -100,6 +100,7 @@ export async function verifyGoogleCredentialOrCode(params: {
   code?: string;
   idToken?: string;
   redirectUri?: string;
+  codeVerifier?: string;
 }): Promise<VerifiedGoogleProfile> {
   const clientId = cleanEnvValue(process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID);
   const clientSecret = cleanEnvValue(process.env.GOOGLE_CLIENT_SECRET);
@@ -112,10 +113,17 @@ export async function verifyGoogleCredentialOrCode(params: {
     );
   }
 
-  const effectiveRedirect = cleanEnvValue(params.redirectUri) || 'postmessage';
+  const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  const rawRedirect = cleanEnvValue(params.redirectUri);
+  // Never allow localhost redirect_uri in Vercel/production OAuth token exchange
+  const effectiveRedirect =
+    !rawRedirect || (isProduction && /localhost|127\.0\.0\.1/i.test(rawRedirect))
+      ? 'postmessage'
+      : rawRedirect;
 
   let rawIdToken = cleanEnvValue(params.idToken);
   const authCode = cleanEnvValue(params.code);
+  const codeVerifier = cleanEnvValue(params.codeVerifier);
 
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret || undefined, effectiveRedirect);
 
@@ -130,30 +138,94 @@ export async function verifyGoogleCredentialOrCode(params: {
 
     let tokens: any;
     try {
-      const tokenResponse = await executeWithCircuitBreaker(
-        { service: 'google_oauth', maxRetries: 0 }, // Authorization codes are single-use
-        () =>
-          oauth2Client.getToken({
+      tokens = await executeWithCircuitBreaker(
+        { service: 'google_oauth', maxRetries: 0 }, // Authorization codes are single-use — never retry
+        async () => {
+          const form = new URLSearchParams({
+            client_id: clientId,
+            client_secret: clientSecret,
             code: authCode,
             redirect_uri: effectiveRedirect,
-          })
+            grant_type: 'authorization_code',
+          });
+          if (codeVerifier) {
+            form.set('code_verifier', codeVerifier);
+          }
+
+          const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              Accept: 'application/json',
+            },
+            body: form.toString(),
+          });
+
+          const tokenBody: any = await tokenRes.json().catch(() => ({}));
+          if (!tokenRes.ok) {
+            const err: any = new Error(tokenBody?.error_description || tokenBody?.error || `Google token endpoint HTTP ${tokenRes.status}`);
+            err.statusCode = tokenRes.status;
+            err.googleError = String(tokenBody?.error || '').trim().toLowerCase();
+            err.googleErrorDescription = String(tokenBody?.error_description || '').trim();
+            throw err;
+          }
+          return tokenBody;
+        }
       );
-      tokens = tokenResponse.tokens;
     } catch (err: any) {
-      const googleErrMsg = err?.response?.data?.error_description || err?.response?.data?.error || err?.message || '';
-      console.error('[Google OAuth getToken Error]:', googleErrMsg);
-      if (String(googleErrMsg).toLowerCase().includes('redirect_uri_mismatch')) {
+      const googleErrorCode = String(
+        err?.googleError || err?.response?.data?.error || ''
+      )
+        .trim()
+        .toLowerCase();
+      const googleErrorDesc = String(
+        err?.googleErrorDescription || err?.response?.data?.error_description || err?.message || ''
+      ).trim();
+      const combined = `${googleErrorCode} ${googleErrorDesc}`.toLowerCase();
+
+      // Safe structured diagnostic log (NEVER logs client_secret, auth code, or tokens)
+      console.error('[Google OAuth Token Exchange Error]:', {
+        googleError: googleErrorCode || 'unknown',
+        httpStatus: err?.statusCode || err?.status || null,
+        redirectUriMode: effectiveRedirect === 'postmessage' ? 'postmessage' : 'explicit_uri',
+        isProduction,
+        hasClientId: Boolean(clientId),
+        hasClientSecret: Boolean(clientSecret),
+      });
+
+      if (googleErrorCode === 'redirect_uri_mismatch' || combined.includes('redirect_uri_mismatch')) {
         throw new GoogleAuthError(
-          'Google OAuth configuration error: Authorized JavaScript Origin mismatch in Google Cloud Console.',
+          'Google OAuth configuration error: Authorized JavaScript Origin or Redirect URI mismatch in Google Cloud Console.',
           400,
           'REDIRECT_URI_MISMATCH'
         );
       }
-      if (String(googleErrMsg).toLowerCase().includes('invalid_grant')) {
+      if (googleErrorCode === 'invalid_client' || combined.includes('invalid_client')) {
         throw new GoogleAuthError(
-          'Google authorization code expired or already used. Please try signing in again.',
+          'Google OAuth server credentials are invalid or outdated. Please verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Vercel Environment Variables.',
+          503,
+          'INVALID_CLIENT'
+        );
+      }
+      if (googleErrorCode === 'unauthorized_client' || combined.includes('unauthorized_client')) {
+        throw new GoogleAuthError(
+          'Google OAuth client is not authorized for this sign-in flow. Please verify the OAuth Web Client settings in Google Cloud Console.',
+          403,
+          'UNAUTHORIZED_CLIENT'
+        );
+      }
+      if (googleErrorCode === 'invalid_grant' || combined.includes('invalid_grant') || combined.includes('malformed auth code')) {
+        throw new GoogleAuthError(
+          'Google authorization code expired, invalid, or already used. Please try signing in again.',
           401,
           'INVALID_GRANT'
+        );
+      }
+      if (googleErrorCode === 'invalid_request') {
+        throw new GoogleAuthError(
+          'Invalid Google OAuth token request parameters. Please refresh and try signing in again.',
+          400,
+          'INVALID_OAUTH_REQUEST'
         );
       }
       throw new GoogleAuthError(
