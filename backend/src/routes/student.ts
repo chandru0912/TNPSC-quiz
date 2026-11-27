@@ -38,6 +38,8 @@ import {
   verifyGoogleCredentialOrCode,
   normalizeGoogleAvatarUrl,
   GoogleAuthError,
+  GOOGLE_AUTH_REQUIRED_MESSAGE,
+  type VerifiedGoogleProfile,
 } from '../services/googleAuthService';
 import {
   getStudentDashboardData,
@@ -81,25 +83,50 @@ import {
 
 const router = Router();
 
-function setStudentSessionCookie(res: Response, sessionId: string, expiresAt: Date) {
-  const isProd = process.env.NODE_ENV === 'production';
+function setStudentSessionCookie(res: Response, sessionId: string, expiresAt: Date, token?: string) {
+  const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
   const maxAgeSec = Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
-  const parts = [
-    `tnpsc_student_sid=${encodeURIComponent(sessionId)}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    `Max-Age=${maxAgeSec}`,
-  ];
-  if (isProd) parts.push('Secure');
-  res.setHeader('Set-Cookie', parts.join('; '));
+  const buildCookie = (name: string, value: string) => {
+    const parts = [
+      `${name}=${encodeURIComponent(value)}`,
+      'Path=/',
+      'HttpOnly',
+      'SameSite=Lax',
+      `Max-Age=${maxAgeSec}`,
+    ];
+    if (isProd) parts.push('Secure');
+    return parts.join('; ');
+  };
+  const cookies = [buildCookie('tnpsc_student_sid', sessionId)];
+  if (token) {
+    cookies.push(buildCookie('tnpsc_student_token', token));
+  }
+  res.setHeader('Set-Cookie', cookies);
 }
 
 function clearStudentSessionCookie(res: Response) {
-  const isProd = process.env.NODE_ENV === 'production';
-  const parts = ['tnpsc_student_sid=', 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
-  if (isProd) parts.push('Secure');
-  res.setHeader('Set-Cookie', parts.join('; '));
+  const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  const buildClear = (name: string) => {
+    const parts = [`${name}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+    if (isProd) parts.push('Secure');
+    return parts.join('; ');
+  };
+  res.setHeader('Set-Cookie', [buildClear('tnpsc_student_sid'), buildClear('tnpsc_student_token')]);
+}
+
+function isTrustedAuthOrigin(req: Request): boolean {
+  const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  if (!isProd) return true;
+  const origin = String(req.headers.origin || '').trim().replace(/\/+$/, '');
+  if (!origin) return true; // Same-origin or non-browser requests
+  if (/^https:\/\/tnpsc-quiz.*\.vercel\.app$/i.test(origin) || /^https:\/\/.*-moonzoro\.vercel\.app$/i.test(origin)) {
+    return true;
+  }
+  const extra = (process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map((o) => o.trim().replace(/^["']|["']$/g, '').replace(/\/+$/, ''))
+    .filter(Boolean);
+  return extra.includes('*') || extra.includes(origin);
 }
 
 const ALLOWED_TARGET_GROUPS = new Set(['group1', 'group2', 'group2a', 'group4']);
@@ -110,10 +137,52 @@ function normalizeTargetGroup(group?: unknown): string {
   return ALLOWED_TARGET_GROUPS.has(clean) ? clean : 'group4';
 }
 
+let usernameSchemaReady = false;
+async function ensureStudentUsernameSchema(): Promise<void> {
+  if (usernameSchemaReady) return;
+  await pool.query(`
+    ALTER TABLE students ADD COLUMN IF NOT EXISTS username VARCHAR(40);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_username_lower_unique
+      ON students (LOWER(username))
+      WHERE username IS NOT NULL;
+  `);
+  usernameSchemaReady = true;
+}
+
+function validateAndNormalizeUsername(raw: unknown): { valid: boolean; value: string; error?: string } {
+  const cleaned = String(raw ?? '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase();
+
+  if (!cleaned) {
+    return { valid: false, value: '', error: 'Username is required.' };
+  }
+  if (cleaned.length < 3 || cleaned.length > 30) {
+    return { valid: false, value: cleaned, error: 'Username must be between 3 and 30 characters.' };
+  }
+  if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(cleaned)) {
+    return {
+      valid: false,
+      value: cleaned,
+      error: 'Username may only contain letters, numbers, dots, underscores, or hyphens, and must start and end with a letter or number.',
+    };
+  }
+  if (/\.\.|__|__|\.-|-\./.test(cleaned)) {
+    return { valid: false, value: cleaned, error: 'Username cannot contain consecutive special characters.' };
+  }
+  const reserved = new Set(['admin', 'administrator', 'support', 'help', 'system', 'tnpsc', 'owner', 'root', 'moderator']);
+  if (reserved.has(cleaned)) {
+    return { valid: false, value: cleaned, error: 'This username is reserved. Please choose another.' };
+  }
+  return { valid: true, value: cleaned };
+}
+
 function formatStudentResponse(row: any) {
   return {
     id: row.id,
     fullName: String(row.full_name || '').trim() || String(row.email || '').split('@')[0] || 'Student',
+    username: row.username ? String(row.username).trim() : null,
     email: row.email,
     mobile: row.mobile ?? null,
     targetGroup: row.target_group || 'group4',
@@ -122,6 +191,8 @@ function formatStudentResponse(row: any) {
     authProvider: row.auth_provider || 'email',
     emailVerified: Boolean(row.email_verified),
     onboardingCompleted: row.onboarding_completed !== false,
+    subscriptionTier: row.subscription_tier ? String(row.subscription_tier).trim() : 'free',
+    subscriptionStatus: row.subscription_status ? String(row.subscription_status).trim() : 'active',
     role: 'student' as const,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -144,226 +215,240 @@ router.get('/auth/google/config', (_req: Request, res: Response) => {
   });
 });
 
-router.post('/auth/check-email', async (req: Request, res: Response) => {
+router.post('/auth/check-email', studentLoginLimiter, (_req: Request, res: Response) => {
+  return res.status(403).json({
+    status: 'error',
+    code: 'GOOGLE_AUTH_REQUIRED',
+    message: GOOGLE_AUTH_REQUIRED_MESSAGE,
+  });
+});
+
+/**
+ * Matches or registers a student using ONLY a backend-verified Google identity.
+ * - Matches by unique google_id (sub) first.
+ * - Never auto-links an existing row whose email_verified is false.
+ * - Preserves all existing student data, progress, subscriptions, and history.
+ */
+export async function upsertVerifiedGoogleStudent(
+  googleProfile: VerifiedGoogleProfile,
+  userAgent: string | null = null
+): Promise<{
+  studentRow: any;
+  isNewUser: boolean;
+  linkedAccount: boolean;
+}> {
+  if (!googleProfile.emailVerified || !googleProfile.email || !googleProfile.googleId) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 403, 'EMAIL_NOT_VERIFIED');
+  }
+
+  const client = await pool.connect();
+  let studentRow: any;
+  let isNewUser = false;
+  let linkedAccount = false;
+
   try {
-    const { email } = req.body;
-    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      return res.status(400).json({ status: 'error', message: 'Please enter a valid email address.' });
-    }
-    const cleanEmail = email.trim().toLowerCase();
-    const existing = await pool.query(
-      `SELECT id, auth_provider, (password_hash IS NOT NULL AND password_hash <> '') AS has_password, is_active
+    await client.query('BEGIN');
+
+    // 1. Check existing user by unique verified Google Subject ID (sub)
+    const byGoogleId = await client.query(
+      `SELECT id, full_name, email, mobile, password_hash, target_group, district, google_id, auth_provider,
+              avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
        FROM students
-       WHERE LOWER(email) = $1`,
-      [cleanEmail]
+       WHERE google_id = $1`,
+      [googleProfile.googleId]
     );
 
-    if (existing.rows.length === 0) {
-      return res.status(200).json({
-        status: 'success',
-        exists: false,
-      });
+    if (byGoogleId.rows.length > 0) {
+      const existing = byGoogleId.rows[0];
+      if (existing.is_active === false) {
+        await client.query('ROLLBACK');
+        throw new GoogleAuthError(
+          'This student account has been deactivated. Please contact an administrator.',
+          403,
+          'ACCOUNT_DEACTIVATED'
+        );
+      }
+
+      const updated = await client.query(
+        `UPDATE students
+         SET email = $1,
+             avatar_url = COALESCE(NULLIF(TRIM($2), ''), avatar_url),
+             full_name = COALESCE(NULLIF(TRIM(full_name), ''), NULLIF(TRIM($3), '')),
+             auth_provider = 'google',
+             email_verified = true,
+             role = 'student',
+             last_login_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $4
+         RETURNING id, full_name, username, email, mobile, target_group, district, google_id, auth_provider,
+                   avatar_url, email_verified, onboarding_completed, subscription_tier, subscription_status,
+                   role, token_version, created_at, updated_at`,
+        [googleProfile.email, googleProfile.avatarUrl, googleProfile.fullName, existing.id]
+      );
+      studentRow = updated.rows[0];
+
+      await client.query(
+        `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+         VALUES ($1, 'google_login', $2, 'Logged In with Google', $3::jsonb)`,
+        [studentRow.id, String(studentRow.id), JSON.stringify({ provider: 'google', time: new Date().toISOString() })]
+      );
+    } else {
+      // 2. Check existing user by verified email to prevent duplicates
+      const byEmail = await client.query(
+        `SELECT id, full_name, email, mobile, password_hash, target_group, district, google_id, auth_provider,
+                avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
+         FROM students
+         WHERE LOWER(email) = $1`,
+        [googleProfile.email]
+      );
+
+      if (byEmail.rows.length > 0) {
+        const existing = byEmail.rows[0];
+        if (existing.is_active === false) {
+          await client.query('ROLLBACK');
+          throw new GoogleAuthError(
+            'This student account has been deactivated. Please contact an administrator.',
+            403,
+            'ACCOUNT_DEACTIVATED'
+          );
+        }
+
+        if (existing.google_id && existing.google_id !== googleProfile.googleId) {
+          await client.query('ROLLBACK');
+          throw new GoogleAuthError(
+            'This email address is already linked to a different Google account.',
+            409,
+            'GOOGLE_ID_CONFLICT'
+          );
+        }
+
+        // Security rule: Never automatically link an existing legacy row whose email was never verified
+        if (existing.email_verified !== true) {
+          await client.query('ROLLBACK');
+          throw new GoogleAuthError(
+            'An unverified legacy account already uses this email. Please contact support to verify and link your Google Account safely.',
+            409,
+            'UNVERIFIED_LEGACY_ACCOUNT'
+          );
+        }
+
+        const linked = await client.query(
+          `UPDATE students
+           SET google_id = $1,
+               auth_provider = 'google',
+               avatar_url = COALESCE(NULLIF(TRIM($2), ''), avatar_url),
+               full_name = COALESCE(NULLIF(TRIM(full_name), ''), NULLIF(TRIM($3), '')),
+               email_verified = true,
+               role = 'student',
+               last_login_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $4
+           RETURNING id, full_name, username, email, mobile, target_group, district, google_id, auth_provider,
+                     avatar_url, email_verified, onboarding_completed, subscription_tier, subscription_status,
+                     role, token_version, created_at, updated_at`,
+          [googleProfile.googleId, googleProfile.avatarUrl, googleProfile.fullName, existing.id]
+        );
+        studentRow = linked.rows[0];
+        linkedAccount = true;
+
+        await client.query(
+          `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+           VALUES ($1, 'google_account_linked', $2, 'Google Account Linked', $3::jsonb)`,
+          [studentRow.id, String(studentRow.id), JSON.stringify({ provider: 'google', time: new Date().toISOString() })]
+        );
+      } else {
+        // 3. Auto-register brand-new student account from verified Google profile (strictly role = 'student')
+        const inserted = await client.query(
+          `INSERT INTO students (
+             full_name, email, mobile, password_hash, target_group,
+             google_id, auth_provider, avatar_url, email_verified, onboarding_completed, role, token_version, last_login_at
+           )
+           VALUES ($1, $2, NULL, NULL, 'group4', $3, 'google', $4, true, false, 'student', 1, CURRENT_TIMESTAMP)
+           RETURNING id, full_name, email, mobile, target_group, district, google_id, auth_provider,
+                     avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
+          [googleProfile.fullName, googleProfile.email, googleProfile.googleId, googleProfile.avatarUrl]
+        );
+        studentRow = inserted.rows[0];
+        isNewUser = true;
+
+        await client.query(
+          `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
+           VALUES ($1, 'account_created', $2, 'Account Created via Google', $3::jsonb)`,
+          [studentRow.id, String(studentRow.id), JSON.stringify({ authProvider: 'google', targetGroup: 'group4' })]
+        );
+      }
     }
 
-    const row = existing.rows[0];
-    return res.status(200).json({
-      status: 'success',
-      exists: true,
-      authProvider: row.auth_provider || 'email',
-      hasPassword: Boolean(row.has_password),
-      isActive: row.is_active !== false,
-    });
-  } catch (err: any) {
-    console.error('[Check Email Error]:', err);
-    return res.status(500).json({ status: 'error', message: 'Failed to check email status.' });
+    // Record genuine successful Google OAuth student login event (never Admin, never failed attempts)
+    const normalizedGoogleEmail = String(studentRow.email || '').trim().toLowerCase();
+    const googleLoginEventId = `login_google_${studentRow.id}_${crypto.randomUUID()}`;
+    const googleDeviceInfo = parseUserAgentDeviceInfo(userAgent);
+    await ensureStudentLoginUsersSchema().catch(() => {});
+    await client.query(
+      `INSERT INTO student_login_events (
+        event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp,
+        device_type, browser_name, os_name
+      ) VALUES ($1, $2, $3, 'Google OAuth', 'Successful', CURRENT_TIMESTAMP, $4, $5, $6)
+      ON CONFLICT (event_id) DO NOTHING`,
+      [
+        googleLoginEventId,
+        studentRow.id,
+        normalizedGoogleEmail,
+        googleDeviceInfo.deviceType,
+        googleDeviceInfo.browserName,
+        googleDeviceInfo.osName,
+      ]
+    );
+    await upsertStudentLoginUser(
+      {
+        studentUserId: Number(studentRow.id),
+        authMethod: 'Google OAuth',
+        deviceType: googleDeviceInfo.deviceType,
+        browserName: googleDeviceInfo.browserName,
+        osName: googleDeviceInfo.osName,
+      },
+      client
+    );
+
+    await client.query('COMMIT');
+    return { studentRow, isNewUser, linkedAccount };
+  } catch (txErr) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw txErr;
+  } finally {
+    client.release();
   }
-});
+}
 
 // ====================================================
 // 0B. GOOGLE OAUTH LOGIN / AUTO-REGISTER / ACCOUNT LINKING
 // ====================================================
 router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Response) => {
   try {
+    if (!isTrustedAuthOrigin(req)) {
+      return res.status(403).json({
+        status: 'error',
+        code: 'CSRF_ORIGIN_MISMATCH',
+        message: 'Cross-origin authentication request rejected.',
+      });
+    }
+
+    // Never trust email, name, or emailVerified from req.body — ONLY accept Google OAuth code or ID token
     const { code, idToken, redirectUri, codeVerifier } = req.body || {};
 
     if (!code && !idToken) {
       return res.status(400).json({
         status: 'error',
-        message: 'Google authorization code or token is required.',
+        code: 'GOOGLE_AUTH_REQUIRED',
+        message: GOOGLE_AUTH_REQUIRED_MESSAGE,
       });
     }
 
     const googleProfile = await verifyGoogleCredentialOrCode({ code, idToken, redirectUri, codeVerifier });
-
-    if (!googleProfile.emailVerified || !googleProfile.email) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Your Google email address is not verified and cannot be used for sign-in or account linking.',
-      });
-    }
-
-    const client = await pool.connect();
-    let studentRow: any;
-    let isNewUser = false;
-    let linkedAccount = false;
-
-    try {
-      await client.query('BEGIN');
-
-      // 1. Check existing user by verified Google Account ID (sub)
-      const byGoogleId = await client.query(
-        `SELECT id, full_name, email, mobile, password_hash, target_group, google_id, auth_provider,
-                avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
-         FROM students
-         WHERE google_id = $1`,
-        [googleProfile.googleId]
-      );
-
-      if (byGoogleId.rows.length > 0) {
-        const existing = byGoogleId.rows[0];
-        if (existing.is_active === false) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({
-            status: 'error',
-            message: 'This student account has been deactivated. Please contact an administrator.',
-          });
-        }
-
-        const updated = await client.query(
-          `UPDATE students
-           SET avatar_url = COALESCE(NULLIF(TRIM($1), ''), avatar_url),
-               full_name = COALESCE(NULLIF(TRIM($2), ''), full_name),
-               email_verified = true,
-               role = 'student',
-               last_login_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $3
-           RETURNING id, full_name, email, mobile, target_group, google_id, auth_provider,
-                     avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
-          [googleProfile.avatarUrl, googleProfile.fullName, existing.id]
-        );
-        studentRow = updated.rows[0];
-
-        await client.query(
-          `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
-           VALUES ($1, 'google_login', $2, 'Logged In with Google', $3::jsonb)`,
-          [studentRow.id, String(studentRow.id), JSON.stringify({ provider: 'google', time: new Date().toISOString() })]
-        );
-      } else {
-        // 2. Check existing user by verified email to prevent duplicates and link securely
-        const byEmail = await client.query(
-          `SELECT id, full_name, email, mobile, password_hash, target_group, google_id, auth_provider,
-                  avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
-           FROM students
-           WHERE LOWER(email) = $1`,
-          [googleProfile.email]
-        );
-
-        if (byEmail.rows.length > 0) {
-          const existing = byEmail.rows[0];
-          if (existing.is_active === false) {
-            await client.query('ROLLBACK');
-            return res.status(403).json({
-              status: 'error',
-              message: 'This student account has been deactivated. Please contact an administrator.',
-            });
-          }
-
-          if (existing.google_id && existing.google_id !== googleProfile.googleId) {
-            await client.query('ROLLBACK');
-            return res.status(409).json({
-              status: 'error',
-              message: 'This email address is already linked to a different Google account.',
-            });
-          }
-
-          const hasPassword = Boolean(existing.password_hash && String(existing.password_hash).trim().length > 0);
-          const nextProvider = hasPassword ? 'both' : 'google';
-
-          const linked = await client.query(
-            `UPDATE students
-             SET google_id = $1,
-                 auth_provider = $2,
-                 avatar_url = COALESCE(NULLIF(TRIM($3), ''), avatar_url),
-                 full_name = COALESCE(NULLIF(TRIM($4), ''), full_name),
-                 email_verified = true,
-                 role = 'student',
-                 last_login_at = CURRENT_TIMESTAMP,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $5
-             RETURNING id, full_name, email, mobile, target_group, google_id, auth_provider,
-                       avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
-            [googleProfile.googleId, nextProvider, googleProfile.avatarUrl, googleProfile.fullName, existing.id]
-          );
-          studentRow = linked.rows[0];
-          linkedAccount = true;
-
-          await client.query(
-            `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
-             VALUES ($1, 'google_account_linked', $2, 'Google Account Linked', $3::jsonb)`,
-            [studentRow.id, String(studentRow.id), JSON.stringify({ provider: nextProvider, time: new Date().toISOString() })]
-          );
-        } else {
-          // 3. Auto-register brand-new student account from verified Google profile (strictly role = 'student')
-          const inserted = await client.query(
-            `INSERT INTO students (
-               full_name, email, mobile, password_hash, target_group,
-               google_id, auth_provider, avatar_url, email_verified, onboarding_completed, role, token_version, last_login_at
-             )
-             VALUES ($1, $2, NULL, NULL, 'group4', $3, 'google', $4, true, false, 'student', 1, CURRENT_TIMESTAMP)
-             RETURNING id, full_name, email, mobile, target_group, google_id, auth_provider,
-                       avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
-            [googleProfile.fullName, googleProfile.email, googleProfile.googleId, googleProfile.avatarUrl]
-          );
-          studentRow = inserted.rows[0];
-          isNewUser = true;
-
-          await client.query(
-            `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
-             VALUES ($1, 'account_created', $2, 'Account Created via Google', $3::jsonb)`,
-            [studentRow.id, String(studentRow.id), JSON.stringify({ authProvider: 'google', targetGroup: 'group4' })]
-          );
-        }
-      }
-
-      // Record genuine successful Google OAuth student login event (never Admin, never failed attempts)
-      const normalizedGoogleEmail = String(studentRow.email || '').trim().toLowerCase();
-      const googleLoginEventId = `login_google_${studentRow.id}_${crypto.randomUUID()}`;
-      const googleDeviceInfo = parseUserAgentDeviceInfo(req.headers['user-agent'] || null);
-      await ensureStudentLoginUsersSchema().catch(() => {});
-      await client.query(
-        `INSERT INTO student_login_events (
-          event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp,
-          device_type, browser_name, os_name
-        ) VALUES ($1, $2, $3, 'Google OAuth', 'Successful', CURRENT_TIMESTAMP, $4, $5, $6)
-        ON CONFLICT (event_id) DO NOTHING`,
-        [
-          googleLoginEventId,
-          studentRow.id,
-          normalizedGoogleEmail,
-          googleDeviceInfo.deviceType,
-          googleDeviceInfo.browserName,
-          googleDeviceInfo.osName,
-        ]
-      );
-      await upsertStudentLoginUser(
-        {
-          studentUserId: Number(studentRow.id),
-          authMethod: 'Google OAuth',
-          deviceType: googleDeviceInfo.deviceType,
-          browserName: googleDeviceInfo.browserName,
-          osName: googleDeviceInfo.osName,
-        },
-        client
-      );
-
-      await client.query('COMMIT');
-    } catch (txErr) {
-      await client.query('ROLLBACK');
-      throw txErr;
-    } finally {
-      client.release();
-    }
+    const { studentRow, isNewUser, linkedAccount } = await upsertVerifiedGoogleStudent(
+      googleProfile,
+      req.headers['user-agent'] || null
+    );
 
     // Enforce Single Active Device Session (atomically revokes any previous device)
     const activeSession = await createSingleActiveStudentSession({
@@ -382,7 +467,7 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
       activeSession.sessionId,
       activeSession.expiresAt.getTime()
     );
-    setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt);
+    setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt, token);
 
     await AnalyticsService.touchStudentLiveSession(Number(studentRow.id)).catch(() => {});
     broadcastAnalyticsEvent('student_login', {
@@ -419,238 +504,31 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
     console.error('[Student Google Auth Error]:', err);
     return res.status(500).json({
       status: 'error',
-      message: err.message || 'Google authentication failed.',
+      message: GOOGLE_AUTH_REQUIRED_MESSAGE,
     });
   }
 });
 
 // ====================================================
-// 1. STUDENT AUTHENTICATION: REGISTER
+// 1. MANUAL EMAIL REGISTRATION — DISABLED (GOOGLE-ONLY)
 // ====================================================
-router.post('/register', studentLoginLimiter, async (req: Request, res: Response) => {
-  try {
-    const { fullName, email, mobile, password, confirmPassword, targetGroup, district } = req.body;
-
-    if (!fullName || typeof fullName !== 'string' || !fullName.trim()) {
-      return res.status(400).json({ status: 'error', message: 'Full name is required.' });
-    }
-    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      return res.status(400).json({ status: 'error', message: 'A valid email address is required.' });
-    }
-    if (!district || typeof district !== 'string' || !district.trim()) {
-      return res.status(400).json({ status: 'error', message: 'Please select your Tamil Nadu district.' });
-    }
-    const normalizedDistrict = normalizeTamilNaduDistrict(district.trim());
-    if (!normalizedDistrict) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Invalid district selected. Please choose one of the 38 official districts of Tamil Nadu.',
-      });
-    }
-    if (!password || typeof password !== 'string' || password.length < 6) {
-      return res.status(400).json({ status: 'error', message: 'Password must be at least 6 characters long.' });
-    }
-    if (confirmPassword !== undefined && password !== confirmPassword) {
-      return res.status(400).json({ status: 'error', message: 'Passwords do not match.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanName = fullName.trim();
-    const cleanMobile = mobile ? String(mobile).trim() : null;
-    const cleanGroup = normalizeTargetGroup(targetGroup);
-    const cleanDistrict = normalizedDistrict.name;
-
-    // Check if email already exists
-    const existing = await pool.query('SELECT id, auth_provider FROM students WHERE LOWER(email) = $1', [cleanEmail]);
-    if (existing.rows.length > 0) {
-      const provider = existing.rows[0].auth_provider;
-      const msg =
-        provider === 'google'
-          ? 'An account with this email already exists via Google Sign-In. Please click "Continue with Google" or use Forgot Password to set a password.'
-          : 'An account with this email address already exists. Please log in.';
-      return res.status(409).json({
-        status: 'error',
-        code: 'EMAIL_EXISTS',
-        message: msg,
-      });
-    }
-
-    // Cryptographic password hash
-    const passwordHash = hashStudentPassword(password);
-
-    const insertResult = await pool.query(
-      `INSERT INTO students (
-         full_name, email, mobile, password_hash, target_group, district,
-         auth_provider, email_verified, onboarding_completed, role, token_version, last_login_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, 'email', false, true, 'student', 1, CURRENT_TIMESTAMP)
-       RETURNING id, full_name, email, mobile, target_group, district, avatar_url, auth_provider,
-                 email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
-      [cleanName, cleanEmail, cleanMobile, passwordHash, cleanGroup, cleanDistrict]
-    );
-
-    const newStudent = insertResult.rows[0];
-
-    // Log account creation activity
-    await pool.query(
-      `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
-       VALUES ($1, 'account_created', $2, 'Account Created', $3::jsonb)`,
-      [newStudent.id, String(newStudent.id), JSON.stringify({ targetGroup: cleanGroup, authProvider: 'email' })]
-    );
-
-    // Enforce Single Active Device Session
-    const activeSession = await createSingleActiveStudentSession({
-      studentId: Number(newStudent.id),
-      authMethod: 'register',
-      userAgent: req.headers['user-agent'] || null,
-    });
-
-    // Generate JWT token bound to active session
-    const token = generateStudentToken(
-      newStudent.id,
-      newStudent.email,
-      newStudent.full_name,
-      newStudent.target_group,
-      false,
-      activeSession.tokenVersion,
-      activeSession.sessionId,
-      activeSession.expiresAt.getTime()
-    );
-    setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt);
-
-    broadcastAnalyticsEvent('student_registered', { studentId: newStudent.id });
-
-    return res.status(201).json({
-      status: 'success',
-      message: 'Student account registered successfully.',
-      token,
-      student: formatStudentResponse(newStudent),
-    });
-  } catch (err: any) {
-    console.error('[Student Register Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Registration failed.' });
-  }
+router.post('/register', studentLoginLimiter, (_req: Request, res: Response) => {
+  return res.status(403).json({
+    status: 'error',
+    code: 'GOOGLE_AUTH_REQUIRED',
+    message: GOOGLE_AUTH_REQUIRED_MESSAGE,
+  });
 });
 
 // ====================================================
-// 2. STUDENT AUTHENTICATION: LOGIN
+// 2. MANUAL EMAIL/PASSWORD LOGIN — DISABLED (GOOGLE-ONLY)
 // ====================================================
-router.post('/login', studentLoginLimiter, async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ status: 'error', message: 'Email and password are required.' });
-    }
-
-    const cleanEmail = String(email).trim().toLowerCase();
-
-    const studentRes = await pool.query(
-      `SELECT id, full_name, email, mobile, password_hash, target_group, district, google_id, auth_provider,
-              avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
-       FROM students
-       WHERE LOWER(email) = $1`,
-      [cleanEmail]
-    );
-
-    if (studentRes.rows.length === 0) {
-      return res.status(401).json({ status: 'error', message: 'Invalid email address or password.' });
-    }
-
-    const student = studentRes.rows[0];
-
-    if (student.is_active === false) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'This student account has been deactivated. Please contact an administrator.',
-      });
-    }
-
-    if (!student.password_hash) {
-      return res.status(401).json({
-        status: 'error',
-        code: 'GOOGLE_ONLY_ACCOUNT',
-        message: 'This account uses Google Sign-In. Please click "Continue with Google" or use "Forgot Password?" to create a password.',
-      });
-    }
-
-    const isMatch = verifyStudentPassword(password, student.password_hash);
-    if (!isMatch) {
-      return res.status(401).json({ status: 'error', message: 'Invalid email address or password.' });
-    }
-
-    // Log login activity
-    await pool.query(
-      `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
-       VALUES ($1, 'login', $2, 'Logged In', $3::jsonb)`,
-      [student.id, String(student.id), JSON.stringify({ provider: 'email', time: new Date().toISOString() })]
-    );
-
-    // Record genuine successful Email & Password student login event (idempotent, never Admin, never failed attempts)
-    const normalizedEmail = String(student.email || cleanEmail).trim().toLowerCase();
-    const emailLoginEventId = `login_email_${student.id}_${crypto.randomUUID()}`;
-    const emailDeviceInfo = parseUserAgentDeviceInfo(req.headers['user-agent'] || null);
-    await ensureStudentLoginUsersSchema().catch(() => {});
-    await pool.query(
-      `INSERT INTO student_login_events (
-        event_id, student_id, student_email_snapshot, authentication_method, login_status, login_timestamp,
-        device_type, browser_name, os_name
-      ) VALUES ($1, $2, $3, 'Email & Password', 'Successful', CURRENT_TIMESTAMP, $4, $5, $6)
-      ON CONFLICT (event_id) DO NOTHING`,
-      [
-        emailLoginEventId,
-        student.id,
-        normalizedEmail,
-        emailDeviceInfo.deviceType,
-        emailDeviceInfo.browserName,
-        emailDeviceInfo.osName,
-      ]
-    );
-    await upsertStudentLoginUser({
-      studentUserId: Number(student.id),
-      authMethod: 'Email & Password',
-      deviceType: emailDeviceInfo.deviceType,
-      browserName: emailDeviceInfo.browserName,
-      osName: emailDeviceInfo.osName,
-    });
-
-    // Enforce Single Active Device Session (atomically revokes previous device & increments token_version)
-    const activeSession = await createSingleActiveStudentSession({
-      studentId: Number(student.id),
-      authMethod: 'email',
-      userAgent: req.headers['user-agent'] || null,
-    });
-
-    // Generate JWT token bound to the single active session
-    const token = generateStudentToken(
-      student.id,
-      student.email,
-      student.full_name,
-      student.target_group || 'group4',
-      false,
-      activeSession.tokenVersion,
-      activeSession.sessionId,
-      activeSession.expiresAt.getTime()
-    );
-    setStudentSessionCookie(res, activeSession.sessionId, activeSession.expiresAt);
-
-    await AnalyticsService.touchStudentLiveSession(Number(student.id)).catch(() => {});
-    await AnalyticsService.recordGenuineLoginEvent(Number(student.id), 'email').catch(() => {});
-    broadcastAnalyticsEvent('student_login', {
-      studentId: student.id,
-      provider: 'email',
-    });
-
-    return res.status(200).json({
-      status: 'success',
-      message: 'Login successful.',
-      token,
-      student: formatStudentResponse(student),
-    });
-  } catch (err: any) {
-    console.error('[Student Login Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message || 'Login failed.' });
-  }
+router.post('/login', studentLoginLimiter, (_req: Request, res: Response) => {
+  return res.status(403).json({
+    status: 'error',
+    code: 'GOOGLE_AUTH_REQUIRED',
+    message: GOOGLE_AUTH_REQUIRED_MESSAGE,
+  });
 });
 
 // ====================================================
@@ -861,178 +739,35 @@ router.post('/logout', optionalStudentAuth, async (req: StudentAuthenticatedRequ
 });
 
 // ====================================================
-// 2C. FORGOT PASSWORD & RESET PASSWORD
+// 2C. FORGOT PASSWORD & RESET PASSWORD — DISABLED (GOOGLE-ONLY)
 // ====================================================
-router.post('/forgot-password', otpVerificationLimiter, async (req: Request, res: Response) => {
-  try {
-    const { email } = req.body || {};
-    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      return res.status(400).json({ status: 'error', message: 'Please enter a valid email address.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const studentRes = await pool.query(
-      'SELECT id, full_name, email, is_active FROM students WHERE LOWER(email) = $1',
-      [cleanEmail]
-    );
-
-    if (studentRes.rows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'No student account found with this email address.',
-      });
-    }
-
-    const student = studentRes.rows[0];
-    if (student.is_active === false) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'This student account has been deactivated. Please contact an administrator.',
-      });
-    }
-
-    const resetCode = String(crypto.randomInt(100000, 1000000));
-    const tokenHash = hashResetToken(resetCode);
-
-    // Invalidate any prior unused reset codes
-    await pool.query(
-      'UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE student_id = $1 AND used_at IS NULL',
-      [student.id]
-    );
-
-    await pool.query(
-      `INSERT INTO password_reset_tokens (student_id, token_hash, expires_at)
-       VALUES ($1, $2, CURRENT_TIMESTAMP + INTERVAL '15 minutes')`,
-      [student.id, tokenHash]
-    );
-
-    const allowPreview =
-      process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEV_RESET_PREVIEW === 'true';
-
-    console.info(`[Password Reset] Generated 15-min reset code for ${cleanEmail}${allowPreview ? `: ${resetCode}` : ''}`);
-
-    return res.status(200).json({
-      status: 'success',
-      message: allowPreview
-        ? 'A 6-digit password reset code has been generated (valid for 15 minutes).'
-        : 'Password reset instructions have been processed for your account.',
-      expiresInMinutes: 15,
-      ...(allowPreview ? { devResetCode: resetCode } : {}),
-    });
-  } catch (err: any) {
-    console.error('[Forgot Password Error]:', err);
-    return res.status(500).json({ status: 'error', message: 'Failed to process password reset request.' });
-  }
+router.post('/forgot-password', otpVerificationLimiter, (_req: Request, res: Response) => {
+  return res.status(403).json({
+    status: 'error',
+    code: 'GOOGLE_AUTH_REQUIRED',
+    message: GOOGLE_AUTH_REQUIRED_MESSAGE,
+  });
 });
 
-router.post('/reset-password', otpVerificationLimiter, async (req: Request, res: Response) => {
-  try {
-    const { email, resetCode, token, newPassword, confirmPassword } = req.body || {};
-    const rawCode = String(resetCode || token || '').trim();
-
-    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      return res.status(400).json({ status: 'error', message: 'A valid email address is required.' });
-    }
-    if (!rawCode) {
-      return res.status(400).json({ status: 'error', message: 'Reset code is required.' });
-    }
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
-      return res.status(400).json({ status: 'error', message: 'New password must be at least 6 characters long.' });
-    }
-    if (confirmPassword !== undefined && newPassword !== confirmPassword) {
-      return res.status(400).json({ status: 'error', message: 'Passwords do not match.' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const studentRes = await pool.query(
-      'SELECT id, google_id, is_active FROM students WHERE LOWER(email) = $1',
-      [cleanEmail]
-    );
-    if (studentRes.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'Account not found.' });
-    }
-
-    const student = studentRes.rows[0];
-    if (student.is_active === false) {
-      return res.status(403).json({ status: 'error', message: 'This account has been deactivated.' });
-    }
-
-    const candidateHash = hashResetToken(rawCode);
-    const tokenRes = await pool.query(
-      `SELECT id, token_hash, expires_at
-       FROM password_reset_tokens
-       WHERE student_id = $1 AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [student.id]
-    );
-
-    if (tokenRes.rows.length === 0) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Reset code is invalid or has expired. Please request a new reset code.',
-      });
-    }
-
-    const storedRow = tokenRes.rows[0];
-    const candBuf = Buffer.from(candidateHash, 'hex');
-    const storedBuf = Buffer.from(storedRow.token_hash, 'hex');
-    if (candBuf.length !== storedBuf.length || !crypto.timingSafeEqual(candBuf, storedBuf)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Invalid reset code. Please check and try again.',
-      });
-    }
-
-    const passwordHash = hashStudentPassword(newPassword);
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `UPDATE students
-         SET password_hash = $1,
-             auth_provider = CASE WHEN google_id IS NOT NULL THEN 'both' ELSE 'email' END,
-             token_version = COALESCE(token_version, 1) + 1,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
-        [passwordHash, student.id]
-      );
-      await client.query(
-        'UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = $1',
-        [storedRow.id]
-      );
-      await client.query(
-        `INSERT INTO student_activity (student_id, activity_type, reference_id, reference_title, metadata)
-         VALUES ($1, 'password_reset', $2, 'Password Reset', $3::jsonb)`,
-        [student.id, String(student.id), JSON.stringify({ time: new Date().toISOString() })]
-      );
-      await client.query('COMMIT');
-    } catch (txErr) {
-      await client.query('ROLLBACK');
-      throw txErr;
-    } finally {
-      client.release();
-    }
-
-    return res.status(200).json({
-      status: 'success',
-      message: 'Your password has been reset successfully. You can now log in with your new password.',
-    });
-  } catch (err: any) {
-    console.error('[Reset Password Error]:', err);
-    return res.status(500).json({ status: 'error', message: 'Failed to reset password.' });
-  }
+router.post('/reset-password', otpVerificationLimiter, (_req: Request, res: Response) => {
+  return res.status(403).json({
+    status: 'error',
+    code: 'GOOGLE_AUTH_REQUIRED',
+    message: GOOGLE_AUTH_REQUIRED_MESSAGE,
+  });
 });
 
 // ====================================================
-// 3. STUDENT PROFILE (GET & UPDATE)
+// 3. STUDENT PROFILE (GET, USERNAME CHECK, UPDATE & ACCOUNT DELETE)
 // ====================================================
 router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
+    await ensureStudentUsernameSchema();
     const studentId = req.studentUser!.studentId;
     const studentRes = await pool.query(
-      `SELECT id, full_name, email, mobile, target_group, district, avatar_url, auth_provider,
-              email_verified, onboarding_completed, role, created_at, updated_at
+      `SELECT id, full_name, username, email, mobile, target_group, district, avatar_url, auth_provider,
+              email_verified, onboarding_completed, subscription_tier, subscription_status,
+              role, created_at, updated_at
        FROM students
        WHERE id = $1`,
       [studentId]
@@ -1052,10 +787,44 @@ router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
   }
 });
 
+router.get('/username/check', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    await ensureStudentUsernameSchema();
+    const studentId = req.studentUser!.studentId;
+    const raw = typeof req.query.username === 'string' ? req.query.username : '';
+    const check = validateAndNormalizeUsername(raw);
+    if (!check.valid) {
+      return res.status(200).json({
+        status: 'success',
+        available: false,
+        normalized: check.value,
+        message: check.error,
+      });
+    }
+
+    const existing = await pool.query(
+      `SELECT id FROM students WHERE LOWER(username) = LOWER($1) AND id <> $2 LIMIT 1`,
+      [check.value, studentId]
+    );
+
+    const available = existing.rows.length === 0;
+    return res.status(200).json({
+      status: 'success',
+      available,
+      normalized: check.value,
+      message: available ? 'Username is available.' : 'This username is already taken.',
+    });
+  } catch (err: any) {
+    console.error('[Student Username Check Error]:', err);
+    return res.status(500).json({ status: 'error', message: 'Failed to validate username availability.' });
+  }
+});
+
 router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
+    await ensureStudentUsernameSchema();
     const studentId = req.studentUser!.studentId;
-    const { fullName, mobile, targetGroup, onboardingCompleted } = req.body;
+    const { fullName, username, mobile, targetGroup, onboardingCompleted } = req.body;
 
     // Read-only server guard: never alter student database records during admin preview mode
     if (req.studentUser?.isPreview) {
@@ -1065,6 +834,7 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
         student: {
           id: studentId,
           fullName: fullName?.trim() || req.studentUser.fullName,
+          username: username !== undefined ? validateAndNormalizeUsername(username).value || null : null,
           email: req.studentUser.email,
           mobile: mobile !== undefined ? (mobile ? String(mobile).trim() : null) : null,
           targetGroup: targetGroup ? normalizeTargetGroup(targetGroup) : req.studentUser.targetGroup,
@@ -1079,10 +849,37 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
     const values: any[] = [];
     let pIdx = 1;
 
-    if (fullName && typeof fullName === 'string' && fullName.trim()) {
+    if (fullName !== undefined) {
+      const cleanName = typeof fullName === 'string' ? fullName.trim().replace(/\s+/g, ' ') : '';
+      if (cleanName.length < 2 || cleanName.length > 120) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Name must be between 2 and 120 characters.',
+        });
+      }
       updates.push(`full_name = $${pIdx++}`);
-      values.push(fullName.trim());
+      values.push(cleanName);
     }
+
+    if (username !== undefined) {
+      const check = validateAndNormalizeUsername(username);
+      if (!check.valid) {
+        return res.status(400).json({ status: 'error', message: check.error || 'Invalid username.' });
+      }
+      const dupRes = await pool.query(
+        `SELECT id FROM students WHERE LOWER(username) = LOWER($1) AND id <> $2 LIMIT 1`,
+        [check.value, studentId]
+      );
+      if (dupRes.rows.length > 0) {
+        return res.status(409).json({
+          status: 'error',
+          message: 'This username is already taken. Please choose another.',
+        });
+      }
+      updates.push(`username = $${pIdx++}`);
+      values.push(check.value);
+    }
+
     if (mobile !== undefined) {
       updates.push(`mobile = $${pIdx++}`);
       values.push(mobile ? String(mobile).trim() : null);
@@ -1107,12 +904,18 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
       UPDATE students
       SET ${updates.join(', ')}
       WHERE id = $${pIdx}
-      RETURNING id, full_name, email, mobile, target_group, avatar_url, auth_provider,
-                email_verified, onboarding_completed, role, created_at, updated_at
+      RETURNING id, full_name, username, email, mobile, target_group, district, avatar_url, auth_provider,
+                email_verified, onboarding_completed, subscription_tier, subscription_status,
+                role, created_at, updated_at
     `;
 
     const result = await pool.query(updateQuery, values);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Student profile not found.' });
+    }
     const updated = result.rows[0];
+
+    notifyStudentDashboardUpdate(studentId);
 
     return res.status(200).json({
       status: 'success',
@@ -1120,8 +923,83 @@ router.put('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
       student: formatStudentResponse(updated),
     });
   } catch (err: any) {
+    if (err?.code === '23505') {
+      return res.status(409).json({
+        status: 'error',
+        message: 'This username is already taken. Please choose another.',
+      });
+    }
     console.error('[Student Profile Update Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to update profile.' });
+  }
+});
+
+router.delete('/account', requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
+  try {
+    const studentId = req.studentUser!.studentId;
+    if (req.studentUser?.isPreview) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Account deletion is disabled in Student Preview Mode.',
+      });
+    }
+
+    const confirmEmail = String(req.body?.confirmEmail || '').trim().toLowerCase();
+    const confirmPhrase = String(req.body?.confirmPhrase || '').trim().toUpperCase();
+
+    if (confirmPhrase !== 'DELETE') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Please type DELETE to confirm permanent account deletion.',
+      });
+    }
+
+    const studentRes = await pool.query(
+      `SELECT id, email FROM students WHERE id = $1`,
+      [studentId]
+    );
+    if (studentRes.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Student account not found.' });
+    }
+
+    const registeredEmail = String(studentRes.rows[0].email || '').trim().toLowerCase();
+    if (!confirmEmail || confirmEmail !== registeredEmail) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Entered email does not match your registered account email.',
+      });
+    }
+
+    // Revoke active session(s) before deletion
+    await revokeStudentSessionOnLogout(studentId, req.studentUser?.sessionId).catch(() => {});
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM students WHERE id = $1`, [studentId]);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    if (req.studentUser?.sessionId) {
+      studentSessionEventBus.notifySessionsRevoked(studentId, [req.studentUser.sessionId], 'account_deleted');
+    }
+    clearStudentSessionCookie(res);
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Your account and associated personal data have been permanently deleted.',
+    });
+  } catch (err: any) {
+    console.error('[Student Account Delete Error]:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: err?.message || 'Failed to delete account. Please try again.',
+    });
   }
 });
 

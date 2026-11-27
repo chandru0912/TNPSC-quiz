@@ -12,6 +12,8 @@ export type AnalyticsEventTopic =
   | 'subscription_updated'
   | 'payment_event'
   | 'previous_paper_published'
+  | 'support_ticket_created'
+  | 'support_ticket_student_reply'
   | 'manual_sync';
 
 interface SseClient {

@@ -1193,6 +1193,8 @@ export async function runMigration() {
       ALTER TABLE students ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT TRUE;
       ALTER TABLE students ADD COLUMN IF NOT EXISTS role VARCHAR(30) NOT NULL DEFAULT 'student';
       ALTER TABLE students ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 1;
+      ALTER TABLE students ADD COLUMN IF NOT EXISTS username VARCHAR(40);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_students_username_lower_unique ON students (LOWER(username)) WHERE username IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_students_google_id_unique ON students (google_id) WHERE google_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_students_auth_provider ON students (auth_provider);
 

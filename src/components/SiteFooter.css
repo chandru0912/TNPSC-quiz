@@ -1,0 +1,235 @@
+/* Expanded Premium Multi-Column TNPSC Study Hub Footer */
+
+.site-footer {
+  margin-top: 4rem;
+  width: 100%;
+  padding: 2.75rem clamp(1.25rem, 3vw, 2.5rem) 1.75rem;
+  border-top: 1px solid rgba(255, 215, 0, 0.22);
+  background: linear-gradient(180deg, rgba(10, 15, 30, 0.84) 0%, rgba(7, 11, 22, 0.97) 100%);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  position: relative;
+  z-index: 10;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.site-footer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 6%;
+  right: 6%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 215, 0, 0.62) 50%, transparent 100%);
+}
+
+.site-footer-inner {
+  max-width: 1320px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.site-footer-brand-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-bottom: 1.35rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+/* 7-column desktop grid: EXAM FOCUS | MCQ PROVIDER | TESTS | MEDIUM | BOOKS | TEST SERIES | ABOUT US & LEGAL */
+.site-footer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 0.85fr 0.9fr 1.25fr 1fr;
+  gap: 1.5rem 1.35rem;
+  align-items: start;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.site-footer-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.site-footer-col-title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ffd700;
+}
+
+.site-footer-col-icon {
+  color: #ffd700;
+  flex-shrink: 0;
+}
+
+.site-footer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.site-footer-link {
+  color: #cbd5e1;
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.4;
+  transition: color 0.16s ease, transform 0.16s ease;
+  display: inline-block;
+}
+
+.site-footer-link:hover {
+  color: #ffd700;
+  transform: translateX(2px);
+}
+
+/* About Us & Legal subgroups */
+.site-footer-legal-groups {
+  gap: 0.95rem;
+}
+
+.site-footer-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.site-footer-subheading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+/* Copyright Bottom */
+.site-footer-bottom {
+  padding-top: 1.35rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  text-align: center;
+}
+
+.site-footer-copy {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+/* Tablet & Medium Desktop */
+@media (max-width: 1180px) {
+  .site-footer-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2rem 1.5rem;
+  }
+}
+
+/* Small Tablet */
+@media (max-width: 900px) {
+  .site-footer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.75rem 1.5rem;
+  }
+}
+
+/* Mobile Compact Horizontal Inline Layout (All links side-by-side with natural wrapping, desktop untouched) */
+@media (max-width: 768px) {
+  .site-footer {
+    padding: 1.75rem 1.1rem 1.5rem;
+  }
+
+  .site-footer-inner {
+    gap: 1.25rem;
+  }
+
+  .site-footer-brand-bar {
+    justify-content: flex-start;
+    padding-bottom: 1rem;
+  }
+
+  .site-footer-grid {
+    grid-template-columns: 1fr;
+    gap: 1.15rem;
+  }
+
+  .site-footer-col {
+    gap: 0.45rem;
+  }
+
+  .site-footer-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0;
+  }
+
+  .site-footer-list > li {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .site-footer-list > li:not(:last-child)::after {
+    content: '|';
+    margin: 0 0.5rem;
+    color: rgba(148, 163, 184, 0.42);
+    font-size: 0.78rem;
+    user-select: none;
+  }
+
+  .site-footer-legal-groups {
+    gap: 0.4rem 0;
+  }
+
+  .site-footer-subgroup {
+    display: contents;
+  }
+
+  .site-footer-subheading {
+    display: none;
+  }
+
+  .site-footer-legal-groups .site-footer-link {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .site-footer-legal-groups .site-footer-link::after {
+    content: '|';
+    margin: 0 0.5rem;
+    color: rgba(148, 163, 184, 0.42);
+    font-size: 0.78rem;
+    user-select: none;
+  }
+
+  .site-footer-legal-groups .site-footer-subgroup:last-child .site-footer-link:last-child::after {
+    display: none;
+  }
+
+  .site-footer-link {
+    padding: 0.1rem 0;
+    font-size: 0.83rem;
+    line-height: 1.45;
+  }
+
+  .site-footer-link:hover {
+    transform: none;
+  }
+}

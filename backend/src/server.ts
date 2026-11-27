@@ -34,6 +34,7 @@ import aiSyllabusImportRouter from './routes/aiSyllabusImportRoutes';
 import mcqGenerationJobsRouter from './routes/mcqGenerationJobs';
 import { adminMockTestsRouter, studentMockTestsRouter } from './routes/mockTestsRoutes';
 import subscriptionsRouter, { adminSubscriptionsRouter } from './routes/subscriptionsRoutes';
+import { studentSupportRouter, adminSupportRouter } from './routes/supportRoutes';
 import { AISyllabusJobService } from './services/aiSyllabusJobService';
 import {
   securityHeadersMiddleware,
@@ -349,6 +350,8 @@ const requireSchemaMiddleware = async (_req: Request, _res: Response, next: Next
 };
 
 app.use(['/api/admin/analytics', '/admin/analytics', '/api/api/admin/analytics', '/api/admin/overview', '/admin/overview'], requireSchemaMiddleware, analyticsRouter);
+app.use(['/api/admin/support', '/admin/support', '/api/api/admin/support'], requireSchemaMiddleware, adminSupportRouter);
+app.use(['/api/support', '/support'], requireSchemaMiddleware, generalStudentApiLimiter, studentSupportRouter);
 
 app.use('/api/admin', authRouter);
 app.use('/admin', authRouter);

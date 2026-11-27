@@ -67,6 +67,8 @@ export const AdminTopHeader: React.FC<AdminTopHeaderProps> = ({
         return { group: 'Content Management', page: 'Mock Test MCQ Generator' };
       case 'notes':
         return { group: 'Content Management', page: 'Study Notes' };
+      case 'help-center':
+        return { group: 'Support', page: 'Help Center & Complaints' };
       case 'gdrive':
         return { group: 'Integrations', page: 'Google Drive Materials' };
       case 'claude':

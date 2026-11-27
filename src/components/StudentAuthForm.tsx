@@ -1,31 +1,20 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   GraduationCap,
-  Mail,
-  ArrowRight,
-  ArrowLeft,
-  Eye,
-  EyeOff,
   Loader2,
-  KeyRound,
-  CheckCircle2,
   AlertCircle,
-  Edit3,
+  ShieldCheck,
   X,
-  MapPin,
-  Search,
-  ChevronDown,
-  Check,
 } from 'lucide-react'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { apiFetch } from '../utils/api'
 import { requestGoogleOAuthCode, GoogleSignInCancelledError } from '../utils/googleOAuth'
 import { resolvePostLoginRedirect, clearPostLoginRedirect } from '../utils/authRedirect'
-import { TAMIL_NADU_DISTRICTS } from '../data/tamilNaduDistricts'
 
 export type AuthMode = 'login' | 'register'
-type AuthStep = 'landing' | 'email-login' | 'email-register' | 'forgot-password'
+
+const GOOGLE_REQUIRED_ERROR = 'Please sign in using a verified Google Account.'
 
 interface StudentAuthFormProps {
   initialMode?: AuthMode
@@ -34,20 +23,6 @@ interface StudentAuthFormProps {
   onSuccess?: () => void
   onSwitchMode?: (mode: AuthMode) => void
 }
-
-interface EmailCheckInfo {
-  exists: boolean
-  authProvider?: 'email' | 'google' | 'both'
-  hasPassword?: boolean
-  isActive?: boolean
-}
-
-const TARGET_GROUP_OPTIONS = [
-  { value: 'group4', label: 'TNPSC Group 4 & VAO' },
-  { value: 'group2', label: 'TNPSC Group 2' },
-  { value: 'group2a', label: 'TNPSC Group 2A' },
-  { value: 'group1', label: 'TNPSC Group 1' },
-]
 
 export function OfficialGoogleLogo() {
   return (
@@ -72,8 +47,6 @@ export function OfficialGoogleLogo() {
   )
 }
 
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
 export const StudentAuthForm = ({
   initialMode = 'login',
   variant = 'page',
@@ -86,67 +59,12 @@ export const StudentAuthForm = ({
   const { login } = useStudentAuth()
 
   const [mode, setMode] = useState<AuthMode>(initialMode)
-  const [step, setStep] = useState<AuthStep>('landing')
-
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [targetGroup, setTargetGroup] = useState('group4')
-  const [district, setDistrict] = useState('')
-  const [districtSearch, setDistrictSearch] = useState('')
-  const [districtMenuOpen, setDistrictMenuOpen] = useState(false)
-  const districtDropdownRef = useRef<HTMLDivElement | null>(null)
-  const [rememberMe, setRememberMe] = useState(true)
-
-  const filteredDistricts = useMemo(() => {
-    const q = districtSearch.trim().toLowerCase()
-    if (!q) return TAMIL_NADU_DISTRICTS
-    return TAMIL_NADU_DISTRICTS.filter((d) => d.toLowerCase().includes(q))
-  }, [districtSearch])
-
-  useEffect(() => {
-    if (!districtMenuOpen) return
-    const handleClickOutside = (ev: MouseEvent) => {
-      if (districtDropdownRef.current && !districtDropdownRef.current.contains(ev.target as Node)) {
-        setDistrictMenuOpen(false)
-      }
-    }
-    const handleEsc = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') setDistrictMenuOpen(false)
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleEsc)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleEsc)
-    }
-  }, [districtMenuOpen])
-
-  // Forgot password state
-  const [resetRequested, setResetRequested] = useState(false)
-  const [resetCode, setResetCode] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmNewPassword, setConfirmNewPassword] = useState('')
-  const [devResetHint, setDevResetHint] = useState<string | null>(null)
-
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [emailInfo, setEmailInfo] = useState<EmailCheckInfo | null>(null)
-
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [serverError, setServerError] = useState<string | null>(null)
   const [infoBanner, setInfoBanner] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-
-  const [isEmailChecking, setIsEmailChecking] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
 
   useEffect(() => {
     setMode(initialMode)
-    setStep('landing')
-    setFieldErrors({})
     setInfoBanner(null)
 
     if (typeof window !== 'undefined') {
@@ -157,7 +75,7 @@ export const StudentAuthForm = ({
         sessionStorage.removeItem('tnpsc_session_revoked_msg')
       } else if (params.get('reason') === 'session_revoked') {
         setServerError(
-          'Your account has been logged in on another device. Please log in again to continue.'
+          'Your account has been logged in on another device. Please sign in again to continue.'
         )
       } else {
         setServerError(null)
@@ -167,18 +85,10 @@ export const StudentAuthForm = ({
     }
   }, [initialMode, location.search])
 
-  const clearFeedback = () => {
-    setFieldErrors({})
-    setServerError(null)
-    setInfoBanner(null)
-    setSuccessMessage(null)
-  }
-
   const handleModeChange = (nextMode: AuthMode) => {
     setMode(nextMode)
-    setStep('landing')
-    setEmailInfo(null)
-    clearFeedback()
+    setServerError(null)
+    setInfoBanner(null)
     onSwitchMode?.(nextMode)
   }
 
@@ -190,9 +100,10 @@ export const StudentAuthForm = ({
     navigate(destination, { replace: true })
   }
 
-  // 1. Continue with Google (Real OAuth Popup + Backend Token Exchange)
+  // Verified Google Account Sign-In / Auto-Registration
   const handleGoogleContinue = async () => {
-    clearFeedback()
+    setServerError(null)
+    setInfoBanner(null)
     setIsGoogleLoading(true)
     try {
       const code = await requestGoogleOAuthCode()
@@ -206,281 +117,24 @@ export const StudentAuthForm = ({
       if (res.ok && json.status === 'success' && json.token && json.student) {
         completeStudentSession(json.token, json.student)
       } else {
-        setServerError(json.message || 'Google Sign-In failed. Please try again.')
+        setServerError(json.message || GOOGLE_REQUIRED_ERROR)
       }
     } catch (err: any) {
       if (err instanceof GoogleSignInCancelledError) {
         setInfoBanner(err.message)
       } else {
-        setServerError(err?.message || 'Unable to sign in with Google right now. Please try again.')
+        setServerError(err?.message || GOOGLE_REQUIRED_ERROR)
       }
     } finally {
       setIsGoogleLoading(false)
     }
   }
 
-  // 2. Continue with Email from Landing
-  const handleEmailContinue = async (e: React.FormEvent) => {
-    e.preventDefault()
-    clearFeedback()
-
-    const cleanEmail = email.trim().toLowerCase()
-    if (!cleanEmail) {
-      setFieldErrors({ email: 'Email address is required' })
-      return
-    }
-    if (!emailRegex.test(cleanEmail)) {
-      setFieldErrors({ email: 'Please enter a valid email address' })
-      return
-    }
-
-    setEmail(cleanEmail)
-    setIsEmailChecking(true)
-    try {
-      const res = await apiFetch('/api/student/auth/check-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail }),
-      })
-      const json = await res.json().catch(() => ({}))
-
-      if (!res.ok || json.status !== 'success') {
-        setServerError(json.message || 'Could not verify email status. Please try again.')
-        return
-      }
-
-      setEmailInfo(json)
-
-      if (json.exists) {
-        if (json.isActive === false) {
-          setServerError('This account has been deactivated. Please contact an administrator.')
-          return
-        }
-        setStep('email-login')
-        setPassword('')
-        if (mode === 'register') {
-          setInfoBanner('An account already exists with this email. Sign in below to continue.')
-        } else if (json.authProvider === 'google' && !json.hasPassword) {
-          setInfoBanner('This account uses Google Sign-In. Click "Continue with Google" or use "Forgot Password?" to create an email password.')
-        }
-      } else {
-        setStep('email-register')
-        setPassword('')
-        setConfirmPassword('')
-        if (mode === 'login') {
-          setInfoBanner('No account found for this email yet. Complete your registration below.')
-        }
-      }
-    } catch (err: any) {
-      // Fallback: proceed to the step implied by active tab if offline check fails
-      setStep(mode === 'register' ? 'email-register' : 'email-login')
-      if (err?.message) {
-        setInfoBanner('Proceeding with email authentication.')
-      }
-    } finally {
-      setIsEmailChecking(false)
-    }
-  }
-
-  // 3. Existing User Email + Password Login
-  const handleEmailLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setServerError(null)
-    setSuccessMessage(null)
-
-    const errors: Record<string, string> = {}
-    const cleanEmail = email.trim().toLowerCase()
-    if (!cleanEmail) errors.email = 'Email address is required'
-    else if (!emailRegex.test(cleanEmail)) errors.email = 'Please enter a valid email address'
-
-    if (!password) errors.password = 'Password is required'
-
-    setFieldErrors(errors)
-    if (Object.keys(errors).length > 0) return
-
-    setIsSubmitting(true)
-    try {
-      const res = await apiFetch('/api/student/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password, rememberMe }),
-      })
-      const json = await res.json().catch(() => ({}))
-
-      if (res.ok && json.status === 'success' && json.token && json.student) {
-        completeStudentSession(json.token, json.student)
-      } else {
-        setServerError(json.message || 'Login failed. Please check your credentials.')
-      }
-    } catch (err: any) {
-      setServerError(err?.message || 'Unable to connect to the server. Please try again.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  // 4. New User Email Registration
-  const handleEmailRegisterSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setServerError(null)
-    setSuccessMessage(null)
-
-    const errors: Record<string, string> = {}
-    const cleanEmail = email.trim().toLowerCase()
-
-    if (!fullName.trim()) errors.fullName = 'Full name is required'
-    if (!cleanEmail) errors.email = 'Email address is required'
-    else if (!emailRegex.test(cleanEmail)) errors.email = 'Please enter a valid email address'
-
-    if (!district) errors.district = 'Please select your Tamil Nadu district'
-
-    if (!password) errors.password = 'Password is required'
-    else if (password.length < 6) errors.password = 'Password must be at least 6 characters'
-
-    if (!confirmPassword) errors.confirmPassword = 'Confirm password is required'
-    else if (password !== confirmPassword) errors.confirmPassword = 'Passwords do not match'
-
-    setFieldErrors(errors)
-    if (Object.keys(errors).length > 0) return
-
-    setIsSubmitting(true)
-    try {
-      const res = await apiFetch('/api/student/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: fullName.trim(),
-          email: cleanEmail,
-          password,
-          confirmPassword,
-          targetGroup,
-          district,
-        }),
-      })
-      const json = await res.json().catch(() => ({}))
-
-      if (res.ok && json.status === 'success' && json.token && json.student) {
-        completeStudentSession(json.token, json.student)
-      } else {
-        setServerError(json.message || 'Registration failed. Please try again.')
-      }
-    } catch (err: any) {
-      setServerError(err?.message || 'Unable to connect to the server. Please try again.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  // 5. Forgot Password Step A: Request Reset Code
-  const handleForgotPasswordRequest = async (e: React.FormEvent) => {
-    e.preventDefault()
-    clearFeedback()
-
-    const cleanEmail = email.trim().toLowerCase()
-    if (!cleanEmail) {
-      setFieldErrors({ email: 'Email address is required' })
-      return
-    }
-    if (!emailRegex.test(cleanEmail)) {
-      setFieldErrors({ email: 'Please enter a valid email address' })
-      return
-    }
-
-    setIsSubmitting(true)
-    try {
-      const res = await apiFetch('/api/student/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (res.ok && json.status === 'success') {
-        setResetRequested(true)
-        setSuccessMessage(json.message || 'Reset code generated. Enter it below with your new password.')
-        if (json.devResetCode) {
-          setDevResetHint(String(json.devResetCode))
-        } else {
-          setDevResetHint(null)
-        }
-      } else {
-        setServerError(json.message || 'Unable to request password reset.')
-      }
-    } catch (err: any) {
-      setServerError(err?.message || 'Unable to connect to the server.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  // 6. Forgot Password Step B: Submit Reset Code + New Password
-  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setServerError(null)
-    setSuccessMessage(null)
-
-    const errors: Record<string, string> = {}
-    if (!resetCode.trim()) errors.resetCode = 'Reset code is required'
-    if (!newPassword) errors.newPassword = 'New password is required'
-    else if (newPassword.length < 6) errors.newPassword = 'Password must be at least 6 characters'
-    if (!confirmNewPassword) errors.confirmNewPassword = 'Confirm password is required'
-    else if (newPassword !== confirmNewPassword) errors.confirmNewPassword = 'Passwords do not match'
-
-    setFieldErrors(errors)
-    if (Object.keys(errors).length > 0) return
-
-    setIsSubmitting(true)
-    try {
-      const res = await apiFetch('/api/student/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          resetCode: resetCode.trim(),
-          newPassword,
-          confirmPassword: confirmNewPassword,
-        }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (res.ok && json.status === 'success') {
-        setResetRequested(false)
-        setResetCode('')
-        setNewPassword('')
-        setConfirmNewPassword('')
-        setDevResetHint(null)
-        setPassword('')
-        setStep('email-login')
-        setSuccessMessage(json.message || 'Password updated successfully. You can now log in.')
-      } else {
-        setServerError(json.message || 'Invalid or expired reset code.')
-      }
-    } catch (err: any) {
-      setServerError(err?.message || 'Unable to connect to the server.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const anyBusy = isSubmitting || isEmailChecking || isGoogleLoading
-
-  const headerTitle =
-    step === 'forgot-password'
-      ? 'Reset Password'
-      : step === 'email-login'
-        ? 'Welcome Back'
-        : step === 'email-register'
-          ? 'Create Account'
-          : mode === 'register'
-            ? 'Join TNPSC Study Hub'
-            : 'Welcome Back'
-
+  const headerTitle = mode === 'register' ? 'Join TNPSC Study Hub' : 'Welcome Back'
   const headerSubtitle =
-    step === 'forgot-password'
-      ? 'Recover access or set an email password for your student account'
-      : step === 'email-login'
-        ? 'Enter your password to access your TNPSC Study Hub dashboard'
-        : step === 'email-register'
-          ? 'Complete your student profile to start preparing'
-          : 'Continue with Google or Email to access your study dashboard'
+    mode === 'register'
+      ? 'Create your student account securely using your verified Google Account'
+      : 'Sign in with your verified Google Account to access your study dashboard'
 
   return (
     <div className={`auth-card-inner ${variant === 'modal' ? 'auth-card-modal' : ''}`}>
@@ -498,7 +152,7 @@ export const StudentAuthForm = ({
       {/* Brand Medallion & Heading */}
       <div className="auth-header">
         <div className="auth-icon" aria-hidden="true">
-          {step === 'forgot-password' ? <KeyRound size={30} /> : <GraduationCap size={32} />}
+          <GraduationCap size={32} />
         </div>
         <div className="auth-brand-pill">TNPSC Study Hub</div>
         <h1 className="auth-title">{headerTitle}</h1>
@@ -506,43 +160,34 @@ export const StudentAuthForm = ({
       </div>
 
       {/* Login / Register Segmented Tabs */}
-      {step !== 'forgot-password' && (
-        <div className="auth-mode-tabs" role="tablist" aria-label="Authentication mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'login' && step !== 'email-register'}
-            className={`auth-mode-tab ${mode === 'login' && step !== 'email-register' ? 'active' : ''}`}
-            onClick={() => handleModeChange('login')}
-            disabled={anyBusy}
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'register' || step === 'email-register'}
-            className={`auth-mode-tab ${mode === 'register' || step === 'email-register' ? 'active' : ''}`}
-            onClick={() => handleModeChange('register')}
-            disabled={anyBusy}
-          >
-            Register
-          </button>
-        </div>
-      )}
+      <div className="auth-mode-tabs" role="tablist" aria-label="Authentication mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'login'}
+          className={`auth-mode-tab ${mode === 'login' ? 'active' : ''}`}
+          onClick={() => handleModeChange('login')}
+          disabled={isGoogleLoading}
+        >
+          Login
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'register'}
+          className={`auth-mode-tab ${mode === 'register' ? 'active' : ''}`}
+          onClick={() => handleModeChange('register')}
+          disabled={isGoogleLoading}
+        >
+          Register
+        </button>
+      </div>
 
       {/* Status & Error Banners */}
       {serverError && (
         <div className="auth-alert auth-alert-error" role="alert">
           <AlertCircle size={17} className="auth-alert-icon" />
           <span>{serverError}</span>
-        </div>
-      )}
-
-      {successMessage && (
-        <div className="auth-alert auth-alert-success" role="status">
-          <CheckCircle2 size={17} className="auth-alert-icon" />
-          <span>{successMessage}</span>
         </div>
       )}
 
@@ -553,675 +198,66 @@ export const StudentAuthForm = ({
         </div>
       )}
 
-      {/* STEP 1: LANDING (Continue with Email + OR + Continue with Google) */}
-      {step === 'landing' && (
-        <div className="auth-landing-stack">
-          <form className="auth-form" onSubmit={handleEmailContinue} noValidate>
-            <div className="form-group">
-              <label htmlFor="auth-landing-email" className="form-label">
-                Email Address
-              </label>
-              <div className="input-wrapper">
-                <input
-                  id="auth-landing-email"
-                  type="email"
-                  name="email"
-                  autoComplete="email"
-                  className={`form-input ${fieldErrors.email ? 'error' : ''}`}
-                  placeholder="Enter your email address"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value)
-                    if (fieldErrors.email) setFieldErrors({ ...fieldErrors, email: '' })
-                    if (serverError) setServerError(null)
-                  }}
-                  disabled={anyBusy}
-                />
-              </div>
-              {fieldErrors.email && <span className="error-text">{fieldErrors.email}</span>}
-            </div>
-
-            <button type="submit" className="btn btn-primary auth-btn" disabled={anyBusy}>
-              {isEmailChecking ? (
-                <>
-                  <Loader2 size={18} className="spinning" />
-                  <span>Checking email...</span>
-                </>
-              ) : (
-                <>
-                  <Mail size={18} />
-                  <span>Continue with Email</span>
-                  <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="auth-divider" aria-hidden="true">
-            <span>OR</span>
-          </div>
-
-          <button
-            type="button"
-            className="auth-google-btn"
-            onClick={handleGoogleContinue}
-            disabled={anyBusy}
-          >
-            {isGoogleLoading ? (
-              <>
-                <Loader2 size={18} className="spinning" />
-                <span>Connecting to Google...</span>
-              </>
-            ) : (
-              <>
-                <OfficialGoogleLogo />
-                <span>Continue with Google</span>
-              </>
-            )}
-          </button>
-
-          <div className="auth-landing-meta">
-            <button
-              type="button"
-              className="forgot-link auth-inline-btn"
-              onClick={() => {
-                clearFeedback()
-                setResetRequested(false)
-                setStep('forgot-password')
-              }}
-              disabled={anyBusy}
-            >
-              Forgot Password?
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* STEP 2A: EXISTING USER EMAIL LOGIN */}
-      {step === 'email-login' && (
-        <div className="auth-landing-stack">
-          <div className="auth-email-chip">
-            <div className="auth-email-chip-left">
-              <Mail size={15} />
-              <span title={email}>{email}</span>
-            </div>
-            <button
-              type="button"
-              className="auth-email-change-btn"
-              onClick={() => {
-                clearFeedback()
-                setStep('landing')
-              }}
-              disabled={anyBusy}
-            >
-              <Edit3 size={13} />
-              <span>Change</span>
-            </button>
-          </div>
-
-          {emailInfo?.authProvider === 'google' && !emailInfo?.hasPassword && (
-            <button
-              type="button"
-              className="auth-google-btn"
-              onClick={handleGoogleContinue}
-              disabled={anyBusy}
-            >
-              {isGoogleLoading ? (
-                <>
-                  <Loader2 size={18} className="spinning" />
-                  <span>Connecting to Google...</span>
-                </>
-              ) : (
-                <>
-                  <OfficialGoogleLogo />
-                  <span>Continue with Google</span>
-                </>
-              )}
-            </button>
-          )}
-
-          <form className="auth-form" onSubmit={handleEmailLoginSubmit} noValidate>
-            <div className="form-group">
-              <label htmlFor="auth-login-password" className="form-label">
-                Password
-              </label>
-              <div className="input-wrapper">
-                <input
-                  id="auth-login-password"
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  autoComplete="current-password"
-                  className={`form-input ${fieldErrors.password ? 'error' : ''}`}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value)
-                    if (fieldErrors.password) setFieldErrors({ ...fieldErrors, password: '' })
-                    if (serverError) setServerError(null)
-                  }}
-                  disabled={anyBusy}
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label="Toggle password visibility"
-                >
-                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
-                </button>
-              </div>
-              {fieldErrors.password && <span className="error-text">{fieldErrors.password}</span>}
-            </div>
-
-            <div className="form-row">
-              <label className="checkbox-group" htmlFor="auth-remember-me">
-                <input
-                  id="auth-remember-me"
-                  type="checkbox"
-                  className="checkbox-input"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                />
-                <span className="checkbox-label">Remember me</span>
-              </label>
-
-              <button
-                type="button"
-                className="forgot-link auth-inline-btn"
-                onClick={() => {
-                  clearFeedback()
-                  setResetRequested(false)
-                  setStep('forgot-password')
-                }}
-                disabled={anyBusy}
-              >
-                Forgot Password?
-              </button>
-            </div>
-
-            <button type="submit" className="btn btn-primary auth-btn" disabled={anyBusy}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={18} className="spinning" />
-                  <span>Logging in...</span>
-                </>
-              ) : (
-                <>
-                  <span>Login</span>
-                  <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* STEP 2B: NEW USER EMAIL REGISTRATION */}
-      {step === 'email-register' && (
-        <div className="auth-landing-stack">
-          <div className="auth-email-chip">
-            <div className="auth-email-chip-left">
-              <Mail size={15} />
-              <span title={email}>{email}</span>
-            </div>
-            <button
-              type="button"
-              className="auth-email-change-btn"
-              onClick={() => {
-                clearFeedback()
-                setStep('landing')
-              }}
-              disabled={anyBusy}
-            >
-              <Edit3 size={13} />
-              <span>Change</span>
-            </button>
-          </div>
-
-          <form className="auth-form" onSubmit={handleEmailRegisterSubmit} noValidate>
-            <div className="form-group">
-              <label htmlFor="auth-reg-fullname" className="form-label">
-                Full Name
-              </label>
-              <input
-                id="auth-reg-fullname"
-                type="text"
-                name="fullName"
-                autoComplete="name"
-                className={`form-input ${fieldErrors.fullName ? 'error' : ''}`}
-                placeholder="Enter your full name"
-                value={fullName}
-                onChange={(e) => {
-                  setFullName(e.target.value)
-                  if (fieldErrors.fullName) setFieldErrors({ ...fieldErrors, fullName: '' })
-                  if (serverError) setServerError(null)
-                }}
-                disabled={anyBusy}
-              />
-              {fieldErrors.fullName && <span className="error-text">{fieldErrors.fullName}</span>}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="auth-reg-email" className="form-label">
-                Email Address
-              </label>
-              <input
-                id="auth-reg-email"
-                type="email"
-                name="email"
-                autoComplete="email"
-                className={`form-input ${fieldErrors.email ? 'error' : ''}`}
-                placeholder="Enter your email address"
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value)
-                  if (fieldErrors.email) setFieldErrors({ ...fieldErrors, email: '' })
-                  if (serverError) setServerError(null)
-                }}
-                disabled={anyBusy}
-              />
-              {fieldErrors.email && <span className="error-text">{fieldErrors.email}</span>}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="auth-reg-target-group" className="form-label">
-                Target Exam Group
-              </label>
-              <select
-                id="auth-reg-target-group"
-                name="targetGroup"
-                className="form-input auth-select"
-                value={targetGroup}
-                onChange={(e) => setTargetGroup(e.target.value)}
-                disabled={anyBusy}
-              >
-                {TARGET_GROUP_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group" ref={districtDropdownRef}>
-              <label htmlFor="auth-reg-district-trigger" className="form-label">
-                Select Your District
-              </label>
-              <div className="district-select-wrap">
-                <button
-                  id="auth-reg-district-trigger"
-                  type="button"
-                  className={`form-input district-select-trigger ${fieldErrors.district ? 'error' : ''} ${districtMenuOpen ? 'open' : ''}`}
-                  aria-haspopup="listbox"
-                  aria-expanded={districtMenuOpen}
-                  disabled={anyBusy}
-                  onClick={() => {
-                    setDistrictMenuOpen((prev) => !prev)
-                    setDistrictSearch('')
-                  }}
-                >
-                  <span className={`district-trigger-value ${district ? '' : 'placeholder'}`}>
-                    <MapPin size={15} className="district-trigger-icon" />
-                    <span>{district || 'Select your Tamil Nadu district'}</span>
-                  </span>
-                  <ChevronDown
-                    size={16}
-                    className={`district-trigger-chevron ${districtMenuOpen ? 'rotated' : ''}`}
-                  />
-                </button>
-
-                {districtMenuOpen && (
-                  <div className="district-dropdown-menu" role="listbox" aria-label="Tamil Nadu Districts">
-                    <div className="district-search-box">
-                      <Search size={14} className="district-search-icon" />
-                      <input
-                        type="text"
-                        className="district-search-input"
-                        placeholder="Search district (38 Tamil Nadu districts)..."
-                        value={districtSearch}
-                        onChange={(e) => setDistrictSearch(e.target.value)}
-                        autoFocus
-                      />
-                      {districtSearch && (
-                        <button
-                          type="button"
-                          className="district-search-clear"
-                          aria-label="Clear district search"
-                          onClick={() => setDistrictSearch('')}
-                        >
-                          <X size={13} />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="district-options-list">
-                      {filteredDistricts.length === 0 ? (
-                        <div className="district-empty">No district found matching &ldquo;{districtSearch}&rdquo;</div>
-                      ) : (
-                        filteredDistricts.map((distName) => {
-                          const isSelected = district === distName
-                          return (
-                            <button
-                              key={distName}
-                              type="button"
-                              role="option"
-                              aria-selected={isSelected}
-                              className={`district-option ${isSelected ? 'selected' : ''}`}
-                              onClick={() => {
-                                setDistrict(distName)
-                                setDistrictMenuOpen(false)
-                                setDistrictSearch('')
-                                if (fieldErrors.district) setFieldErrors({ ...fieldErrors, district: '' })
-                                if (serverError) setServerError(null)
-                              }}
-                            >
-                              <span>{distName}</span>
-                              {isSelected && <Check size={14} className="district-option-check" />}
-                            </button>
-                          )
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              {fieldErrors.district && <span className="error-text">{fieldErrors.district}</span>}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="auth-reg-password" className="form-label">
-                Password
-              </label>
-              <div className="input-wrapper">
-                <input
-                  id="auth-reg-password"
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  autoComplete="new-password"
-                  className={`form-input ${fieldErrors.password ? 'error' : ''}`}
-                  placeholder="Create a password (min 6 characters)"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value)
-                    if (fieldErrors.password) setFieldErrors({ ...fieldErrors, password: '' })
-                    if (serverError) setServerError(null)
-                  }}
-                  disabled={anyBusy}
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label="Toggle password visibility"
-                >
-                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
-                </button>
-              </div>
-              {fieldErrors.password && <span className="error-text">{fieldErrors.password}</span>}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="auth-reg-confirm-password" className="form-label">
-                Confirm Password
-              </label>
-              <div className="input-wrapper">
-                <input
-                  id="auth-reg-confirm-password"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  name="confirmPassword"
-                  autoComplete="new-password"
-                  className={`form-input ${fieldErrors.confirmPassword ? 'error' : ''}`}
-                  placeholder="Confirm your password"
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value)
-                    if (fieldErrors.confirmPassword) setFieldErrors({ ...fieldErrors, confirmPassword: '' })
-                    if (serverError) setServerError(null)
-                  }}
-                  disabled={anyBusy}
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  aria-label="Toggle confirm password visibility"
-                >
-                  {showConfirmPassword ? <EyeOff size={19} /> : <Eye size={19} />}
-                </button>
-              </div>
-              {fieldErrors.confirmPassword && <span className="error-text">{fieldErrors.confirmPassword}</span>}
-            </div>
-
-            <button type="submit" className="btn btn-primary auth-btn" disabled={anyBusy}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={18} className="spinning" />
-                  <span>Creating Account...</span>
-                </>
-              ) : (
-                <>
-                  <span>Register</span>
-                  <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* STEP 3: FORGOT & RESET PASSWORD */}
-      {step === 'forgot-password' && (
-        <div className="auth-landing-stack">
-          {!resetRequested ? (
-            <form className="auth-form" onSubmit={handleForgotPasswordRequest} noValidate>
-              <div className="form-group">
-                <label htmlFor="auth-forgot-email" className="form-label">
-                  Account Email Address
-                </label>
-                <input
-                  id="auth-forgot-email"
-                  type="email"
-                  name="email"
-                  autoComplete="email"
-                  className={`form-input ${fieldErrors.email ? 'error' : ''}`}
-                  placeholder="Enter your registered email"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value)
-                    if (fieldErrors.email) setFieldErrors({ ...fieldErrors, email: '' })
-                    if (serverError) setServerError(null)
-                  }}
-                  disabled={anyBusy}
-                />
-                {fieldErrors.email && <span className="error-text">{fieldErrors.email}</span>}
-              </div>
-
-              <button type="submit" className="btn btn-primary auth-btn" disabled={anyBusy}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={18} className="spinning" />
-                    <span>Generating Reset Code...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Send Reset Code</span>
-                    <ArrowRight size={17} />
-                  </>
-                )}
-              </button>
-            </form>
+      {/* Google-Only Verified Authentication */}
+      <div className="auth-landing-stack">
+        <button
+          type="button"
+          className="auth-google-btn"
+          onClick={handleGoogleContinue}
+          disabled={isGoogleLoading}
+        >
+          {isGoogleLoading ? (
+            <>
+              <Loader2 size={18} className="spinning" />
+              <span>Verifying Google Account...</span>
+            </>
           ) : (
-            <form className="auth-form" onSubmit={handleResetPasswordSubmit} noValidate>
-              {devResetHint && (
-                <div className="auth-dev-code-box">
-                  <span>
-                    Verification Code: <strong>{devResetHint}</strong>
-                  </span>
-                  <button
-                    type="button"
-                    className="auth-email-change-btn"
-                    onClick={() => setResetCode(devResetHint)}
-                  >
-                    Fill
-                  </button>
-                </div>
-              )}
-
-              <div className="form-group">
-                <label htmlFor="auth-reset-code" className="form-label">
-                  Reset Code
-                </label>
-                <input
-                  id="auth-reset-code"
-                  type="text"
-                  className={`form-input ${fieldErrors.resetCode ? 'error' : ''}`}
-                  placeholder="Enter 6-digit reset code"
-                  value={resetCode}
-                  onChange={(e) => {
-                    setResetCode(e.target.value)
-                    if (fieldErrors.resetCode) setFieldErrors({ ...fieldErrors, resetCode: '' })
-                  }}
-                  disabled={anyBusy}
-                />
-                {fieldErrors.resetCode && <span className="error-text">{fieldErrors.resetCode}</span>}
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="auth-new-password" className="form-label">
-                  New Password
-                </label>
-                <div className="input-wrapper">
-                  <input
-                    id="auth-new-password"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    className={`form-input ${fieldErrors.newPassword ? 'error' : ''}`}
-                    placeholder="Enter new password (min 6 characters)"
-                    value={newPassword}
-                    onChange={(e) => {
-                      setNewPassword(e.target.value)
-                      if (fieldErrors.newPassword) setFieldErrors({ ...fieldErrors, newPassword: '' })
-                    }}
-                    disabled={anyBusy}
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle"
-                    onClick={() => setShowPassword(!showPassword)}
-                    aria-label="Toggle password visibility"
-                  >
-                    {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
-                  </button>
-                </div>
-                {fieldErrors.newPassword && <span className="error-text">{fieldErrors.newPassword}</span>}
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="auth-confirm-new-password" className="form-label">
-                  Confirm New Password
-                </label>
-                <div className="input-wrapper">
-                  <input
-                    id="auth-confirm-new-password"
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    className={`form-input ${fieldErrors.confirmNewPassword ? 'error' : ''}`}
-                    placeholder="Confirm new password"
-                    value={confirmNewPassword}
-                    onChange={(e) => {
-                      setConfirmNewPassword(e.target.value)
-                      if (fieldErrors.confirmNewPassword) setFieldErrors({ ...fieldErrors, confirmNewPassword: '' })
-                    }}
-                    disabled={anyBusy}
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    aria-label="Toggle confirm password visibility"
-                  >
-                    {showConfirmPassword ? <EyeOff size={19} /> : <Eye size={19} />}
-                  </button>
-                </div>
-                {fieldErrors.confirmNewPassword && (
-                  <span className="error-text">{fieldErrors.confirmNewPassword}</span>
-                )}
-              </div>
-
-              <button type="submit" className="btn btn-primary auth-btn" disabled={anyBusy}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={18} className="spinning" />
-                    <span>Updating Password...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Reset Password</span>
-                    <ArrowRight size={17} />
-                  </>
-                )}
-              </button>
-            </form>
+            <>
+              <OfficialGoogleLogo />
+              <span>Continue with Google</span>
+            </>
           )}
+        </button>
 
-          <button
-            type="button"
-            className="auth-back-link"
-            onClick={() => {
-              clearFeedback()
-              setResetRequested(false)
-              setStep('landing')
-            }}
-          >
-            <ArrowLeft size={15} />
-            <span>Back to Sign In options</span>
-          </button>
+        <div
+          className="auth-alert auth-alert-info"
+          style={{ marginTop: '0.25rem', alignItems: 'flex-start' }}
+        >
+          <ShieldCheck size={17} className="auth-alert-icon" style={{ flexShrink: 0, marginTop: '1px' }} />
+          <span>
+            Only verified Google Accounts are accepted for student registration and sign-in. Select your Google account to continue securely.
+          </span>
         </div>
-      )}
+      </div>
 
-      {/* Footer Navigation */}
+      {/* Footer Note */}
       <div className="auth-footer">
         {variant === 'page' ? (
-          mode === 'register' || step === 'email-register' ? (
+          mode === 'register' ? (
             <p>
-              Already have an account?{' '}
+              Already have a student account?{' '}
               <Link to="/login" className="auth-link" onClick={() => handleModeChange('login')}>
-                Login here
+                Sign in with Google
               </Link>
             </p>
           ) : (
             <p>
-              Don't have an account?{' '}
+              New to TNPSC Study Hub?{' '}
               <Link to="/register" className="auth-link" onClick={() => handleModeChange('register')}>
-                Register here
+                Register with Google
               </Link>
             </p>
           )
         ) : (
           <p>
-            {mode === 'register' || step === 'email-register' ? (
-              <>
-                Already have an account?{' '}
-                <button
-                  type="button"
-                  className="auth-link auth-inline-btn"
-                  onClick={() => handleModeChange('login')}
-                >
-                  Login here
-                </button>
-              </>
-            ) : (
-              <>
-                Don't have an account?{' '}
-                <button
-                  type="button"
-                  className="auth-link auth-inline-btn"
-                  onClick={() => handleModeChange('register')}
-                >
-                  Register here
-                </button>
-              </>
-            )}
+            {mode === 'register' ? 'Already have an account? ' : 'New to TNPSC Study Hub? '}
+            <button
+              type="button"
+              className="auth-link auth-inline-btn"
+              onClick={() => handleModeChange(mode === 'register' ? 'login' : 'register')}
+            >
+              {mode === 'register' ? 'Sign in with Google' : 'Register with Google'}
+            </button>
           </p>
         )}
       </div>

@@ -191,7 +191,10 @@
 .student-profile-info {
   display: flex;
   flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
   min-width: 0;
+  flex: 1;
   line-height: 1.3;
 }
 
@@ -207,16 +210,10 @@
 .student-profile-role {
   font-size: 0.72rem;
   color: #ffd700;
-  opacity: 0.85;
-}
-
-.student-profile-email {
-  font-size: 0.67rem;
-  color: #94a3b8;
+  opacity: 0.88;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 0.05rem;
 }
 
 /* 3. Navigation List */
@@ -443,12 +440,19 @@
 
 /* 5. Sidebar Bottom Actions */
 .student-sidebar-footer {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   padding-top: 0.75rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
+}
+
+.student-profile-trigger-wrap {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .student-footer-action {
@@ -470,22 +474,181 @@
 }
 
 .student-footer-action.login:hover,
-.student-footer-action.home:hover {
+.student-footer-action.home:hover,
+.student-footer-action.profile:hover,
+.student-footer-action.profile.active {
   background: rgba(255, 215, 0, 0.08);
   border-color: rgba(255, 215, 0, 0.3);
   color: #ffffff;
+}
+
+.student-footer-action.home:hover {
   transform: translateX(-2px);
 }
 
-.student-footer-action.logout {
+.student-profile-trigger-label {
+  flex: 1;
+  text-align: left;
+}
+
+.student-profile-trigger-chevron {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.55);
+  transition: transform 0.2s ease, color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.student-profile-trigger-chevron.open {
+  transform: rotate(180deg);
+  color: #ffd700;
+}
+
+/* Upward Profile Popup (Centered strictly inside the sidebar directly above Profile button) */
+.student-profile-popup {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-width: 100%;
+  z-index: 60;
+  padding: 0.45rem;
+  border-radius: 16px;
+  background: linear-gradient(
+    165deg,
+    rgba(22, 30, 52, 0.96) 0%,
+    rgba(11, 16, 30, 0.98) 100%
+  );
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(255, 215, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  box-sizing: border-box;
+  transform-origin: bottom center;
+}
+
+.student-profile-popup-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  min-height: 42px;
+  padding: 0.6rem 0.8rem;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 0.86rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.14s ease;
+  box-sizing: border-box;
+}
+
+.student-profile-popup-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 215, 0, 0.22);
+  color: #ffffff;
+}
+
+.student-profile-popup-item.active {
+  background: rgba(255, 215, 0, 0.14);
+  border-color: rgba(255, 215, 0, 0.38);
+  color: #fef08a;
+  font-weight: 600;
+}
+
+.student-profile-popup-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(226, 232, 240, 0.8);
+  flex-shrink: 0;
+  transition: color 0.16s ease;
+}
+
+.student-profile-popup-item:hover .student-profile-popup-icon,
+.student-profile-popup-item.active .student-profile-popup-icon {
+  color: #ffd700;
+}
+
+.student-profile-popup-divider {
+  height: 1px;
+  width: calc(100% - 0.7rem);
+  margin: 0.28rem auto;
+  background: rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.student-profile-popup-item.logout:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #fecaca;
+}
+
+.student-profile-popup-item.logout:hover .student-profile-popup-icon {
   color: #f87171;
 }
 
-.student-footer-action.logout:hover {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.35);
-  color: #fca5a5;
-  transform: translateX(-2px);
+.student-profile-popup-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.student-help-submenu-chevron {
+  margin-left: auto;
+  color: rgba(226, 232, 240, 0.6);
+  transition: transform 0.18s ease, color 0.18s ease;
+  flex-shrink: 0;
+}
+
+.student-help-submenu-chevron.open {
+  transform: translateX(2px);
+  color: #ffd700;
+}
+
+/* Right-Side Help & Support Flyout Panel */
+.student-help-flyout {
+  z-index: 2600;
+  padding: 0.45rem;
+  border-radius: 16px;
+  background: linear-gradient(
+    165deg,
+    rgba(22, 30, 52, 0.96) 0%,
+    rgba(11, 16, 30, 0.98) 100%
+  );
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.68),
+    0 0 0 1px rgba(255, 215, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  box-sizing: border-box;
+  max-width: calc(100vw - 24px);
+  transform-origin: left center;
+}
+
+/* Invisible continuous hover bridge across the horizontal gap between Profile popup and Help flyout */
+.student-help-flyout::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -14px;
+  width: 14px;
 }
 
 /* =========================================================

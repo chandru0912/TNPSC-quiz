@@ -6,6 +6,7 @@ import { normalizeStudentAvatarUrl } from '../utils/studentProfile'
 export interface StudentUser {
   id: number
   fullName: string
+  username?: string | null
   email: string
   mobile?: string | null
   targetGroup: string
@@ -14,6 +15,8 @@ export interface StudentUser {
   authProvider?: string
   emailVerified?: boolean
   onboardingCompleted?: boolean
+  subscriptionTier?: string
+  subscriptionStatus?: string
   role?: string
   createdAt?: string
   isPreview?: boolean
@@ -28,6 +31,7 @@ interface StudentAuthContextType {
   login: (token: string, student: StudentUser) => void
   logout: () => void
   refreshProfile: () => Promise<void>
+  updateStudentState: (partial: Partial<StudentUser>) => void
   startStudentPreview: (previewToken: string, previewStudent: StudentUser) => void
   exitStudentPreview: () => void
 }
@@ -93,17 +97,21 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, [])
 
-  // Standard student logout handler with server-side token revocation
+  // Standard student logout handler with server-side token & HttpOnly cookie revocation
   const logout = useCallback(() => {
     const curToken = localStorage.getItem(TOKEN_KEY)
     const isPrev = localStorage.getItem(PREVIEW_KEY) === 'true'
-    if (curToken && !isPrev) {
-      endVisitorSession()
+    if (!isPrev) {
+      if (curToken) {
+        endVisitorSession()
+      }
       apiFetch('/api/student/logout', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${curToken}`,
-        },
+        headers: curToken
+          ? {
+              Authorization: `Bearer ${curToken}`,
+            }
+          : undefined,
         keepalive: true,
       }).catch(() => {
         // Best-effort server revocation; client session is always cleared
@@ -157,6 +165,30 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     localStorage.removeItem(USER_KEY)
     // Seamlessly navigate back to Admin Portal
     window.location.href = '/admin'
+  }, [])
+
+  // Immediately synchronize student profile changes (e.g. Name, Username) across React state & localStorage
+  const updateStudentState = useCallback((partial: Partial<StudentUser>) => {
+    setStudent((prev) => {
+      if (!prev) return prev
+      const merged: StudentUser = {
+        ...prev,
+        ...partial,
+        fullName:
+          partial.fullName !== undefined
+            ? String(partial.fullName || '').trim() || prev.fullName
+            : prev.fullName,
+        avatarUrl:
+          partial.avatarUrl !== undefined
+            ? normalizeStudentAvatarUrl(partial.avatarUrl)
+            : prev.avatarUrl,
+      }
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(USER_KEY, JSON.stringify(merged))
+        window.dispatchEvent(new CustomEvent('tnpsc:student-profile-updated', { detail: merged }))
+      }
+      return merged
+    })
   }, [])
 
   // Refresh profile from server
@@ -276,6 +308,7 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
         login,
         logout,
         refreshProfile,
+        updateStudentState,
         startStudentPreview,
         exitStudentPreview,
       }}

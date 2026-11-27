@@ -27,6 +27,7 @@ import {
   X,
   Layers,
   ClipboardCheck,
+  Headphones,
 } from 'lucide-react';
 import './AdminSidebar.css';
 
@@ -41,6 +42,7 @@ export type AdminSectionType =
   | 'mock-tests'
   | 'mock-test-generator'
   | 'previous-year-papers'
+  | 'help-center'
   | 'gdrive'
   | 'claude'
   | 'dashboard-view';
@@ -68,6 +70,7 @@ interface AdminSidebarProps {
     textbooks: number;
     notes: number;
     mockTests?: number;
+    helpCenterUnread?: number;
   };
   onOpenAdminAccounts: () => void;
   onLogout: () => void;
@@ -466,6 +469,22 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           <div className="nav-tree-section">
             <div className="nav-section-title">ADDITIONAL</div>
             <ul className="nav-tree-list">
+              <li>
+                <button
+                  type="button"
+                  className={`nav-tree-btn ${isItemActive('/admin/help-center') ? 'active' : ''}`}
+                  onClick={() => handleNavClick('/admin/help-center')}
+                  title="Student Help Center & Complaint Management"
+                >
+                  <Headphones size={17} className="btn-lead-icon" />
+                  <span className="btn-label-text">Help Center</span>
+                  {(counts.helpCenterUnread ?? 0) > 0 && (
+                    <span className="item-count-badge" style={{ background: '#ef4444', color: '#ffffff' }}>
+                      {counts.helpCenterUnread}
+                    </span>
+                  )}
+                </button>
+              </li>
               <li>
                 <button
                   type="button"

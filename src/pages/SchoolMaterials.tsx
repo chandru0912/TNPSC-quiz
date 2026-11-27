@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   AlertCircle,
@@ -6,6 +6,8 @@ import {
   BookMarked,
   BookOpen,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Eye,
   FileText,
@@ -103,6 +105,49 @@ const SchoolMaterials = () => {
   const [loadingBooks, setLoadingBooks] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [viewerMaterial, setViewerMaterial] = useState<GoogleDriveMaterialItem | null>(null)
+  const standardSliderRef = useRef<HTMLDivElement | null>(null)
+  const [canScrollStdLeft, setCanScrollStdLeft] = useState(false)
+  const [canScrollStdRight, setCanScrollStdRight] = useState(false)
+
+  const syncStandardSliderArrows = useCallback(() => {
+    const el = standardSliderRef.current
+    if (!el) return
+    setCanScrollStdLeft(el.scrollLeft > 4)
+    setCanScrollStdRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
+  }, [])
+
+  const scrollStandardSlider = (direction: 'left' | 'right') => {
+    const el = standardSliderRef.current
+    if (!el) return
+    const delta = direction === 'left' ? -180 : 180
+    el.scrollBy({ left: delta, behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    syncStandardSliderArrows()
+    const el = standardSliderRef.current
+    if (!el) return
+    const onScroll = () => syncStandardSliderArrows()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [filtersMeta.standards, selectedMedium, syncStandardSliderArrows])
+
+  // Auto-scroll selected standard into view on mobile viewports
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.innerWidth > 768) return
+    const container = standardSliderRef.current
+    if (!container) return
+    const activeBtn = container.querySelector<HTMLButtonElement>(
+      `button[data-standard-value="${selectedStandard}"]`
+    )
+    if (activeBtn) {
+      activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    }
+  }, [selectedStandard, filtersMeta.standards])
 
   const loadFilters = useCallback(async () => {
     setLoadingFilters(true)
@@ -278,26 +323,55 @@ const SchoolMaterials = () => {
           </div>
         </motion.div>
 
-        {/* B. Dynamic Standard Pills (Only standards that have published textbooks for selected medium) */}
+        {/* B. Dynamic Standard Selector (Desktop Grid / Mobile Horizontal Touch Slider) */}
         {filtersMeta.standards.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.1rem' }}>
+          <div className="standard-slider-shell">
             <button
               type="button"
-              className={`medium-filter-btn ${selectedStandard === 'all' ? 'active' : ''}`}
-              onClick={() => handleStandardChange('all')}
+              className={`standard-slider-arrow left ${!canScrollStdLeft ? 'disabled' : ''}`}
+              aria-label="Scroll standards left"
+              disabled={!canScrollStdLeft}
+              onClick={() => scrollStandardSlider('left')}
             >
-              All Standards ({selectedMedium === 'Tamil' ? tamilCount : englishCount})
+              <ChevronLeft size={16} />
             </button>
-            {filtersMeta.standards.map((s) => (
+
+            <div
+              ref={standardSliderRef}
+              className="standard-filter-tabs"
+              role="group"
+              aria-label="Select Standard"
+            >
               <button
-                key={s.standard}
                 type="button"
-                className={`medium-filter-btn ${selectedStandard === String(s.standard) ? 'active' : ''}`}
-                onClick={() => handleStandardChange(String(s.standard))}
+                data-standard-value="all"
+                className={`medium-filter-btn ${selectedStandard === 'all' ? 'active' : ''}`}
+                onClick={() => handleStandardChange('all')}
               >
-                {s.standard}th Standard ({s.count})
+                All Standards ({selectedMedium === 'Tamil' ? tamilCount : englishCount})
               </button>
-            ))}
+              {filtersMeta.standards.map((s) => (
+                <button
+                  key={s.standard}
+                  type="button"
+                  data-standard-value={String(s.standard)}
+                  className={`medium-filter-btn ${selectedStandard === String(s.standard) ? 'active' : ''}`}
+                  onClick={() => handleStandardChange(String(s.standard))}
+                >
+                  {s.standard}th Standard ({s.count})
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className={`standard-slider-arrow right ${!canScrollStdRight ? 'disabled' : ''}`}
+              aria-label="Scroll standards right"
+              disabled={!canScrollStdRight}
+              onClick={() => scrollStandardSlider('right')}
+            >
+              <ChevronRight size={16} />
+            </button>
           </div>
         )}
 

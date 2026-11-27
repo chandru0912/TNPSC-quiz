@@ -60,6 +60,8 @@ import { GoogleDriveTextbooksTab } from '../components/admin/GoogleDriveTextbook
 import { BulkMcqPastePanel } from '../components/admin/BulkMcqPastePanel'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
 import { MockTestMcqGenerator } from '../components/admin/MockTestMcqGenerator'
+import { AdminHelpCenterPanel } from '../components/admin/AdminHelpCenterPanel'
+import { AdminNotificationWidget } from '../components/admin/AdminNotificationWidget'
 import { PreviousYearPapersManager } from '../components/admin/PreviousYearPapersManager'
 import { PreviousPaperAiPdfGenerator } from '../components/admin/PreviousPaperAiPdfGenerator'
 import { GradeAndProgressSettings } from '../components/admin/GradeAndProgressSettings'
@@ -220,6 +222,7 @@ const Admin = () => {
   const isMockTests = rawPath === '/admin/mock-tests'
   const isMockTestGenerator = rawPath === '/admin/mock-test-generator'
   const isPreviousYearPapers = rawPath === '/admin/previous-year-papers'
+  const isHelpCenter = rawPath === '/admin/help-center'
   const isGdrive = rawPath === '/admin/google-drive'
   const isClaude = rawPath === '/admin/ai-private-hub'
   const isDashboardView = rawPath === '/admin/dashboard-view'
@@ -227,6 +230,7 @@ const Admin = () => {
   const resolvedSection: AdminSectionType =
     isStudyMaterialsManagement ? 'study-materials-management' :
     isPreviousYearPapers ? 'previous-year-papers' :
+    isHelpCenter ? 'help-center' :
     isMockTestGenerator ? 'mock-test-generator' :
     isMockTests ? 'mock-tests' :
     isQuestions ? 'questions' :
@@ -260,6 +264,31 @@ const Admin = () => {
 
   // Auth state
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('tnpsc_admin_token'))
+  const [helpCenterUnread, setHelpCenterUnread] = useState<number>(0)
+
+  useEffect(() => {
+    if (!token) return
+    let active = true
+    const pollSupportBadge = async () => {
+      try {
+        const res = await apiFetch('/api/admin/support/stats', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const json = await res.json().catch(() => null)
+        if (active && res.ok && json?.status === 'success' && json.data) {
+          setHelpCenterUnread(Number(json.data.unreadCount || 0))
+        }
+      } catch {
+        // non-blocking
+      }
+    }
+    void pollSupportBadge()
+    const timer = window.setInterval(pollSupportBadge, 30000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [token])
 
   useEffect(() => {
     if (!token) return
@@ -4048,6 +4077,7 @@ const Admin = () => {
           textbooks: textbookMetrics.totalTextbooks,
           notes: notesMetrics.totalNotes,
           mockTests: publishedMockTestsCount,
+          helpCenterUnread,
         }}
         onOpenAdminAccounts={() => {
           setIsUsersModalOpen(true)
@@ -4069,7 +4099,7 @@ const Admin = () => {
         />
 
         <div className="admin-enterprise-body-content">
-          <div className={`admin-page ${(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isMockTestGenerator || isPreviousYearPapers || isGdrive || isClaude) ? 'is-content-page' : ''}`}>
+          <div className={`admin-page ${(isQuestions || isTextbooks || isNotes || isStudyMaterialsManagement || isMockTests || isMockTestGenerator || isPreviousYearPapers || isHelpCenter || isGdrive || isClaude) ? 'is-content-page' : ''}`}>
             <div className="admin-container">
         {/* Toast Notification */}
         {actionMessage && (
@@ -4101,6 +4131,32 @@ const Admin = () => {
               onOpenNewStudent={() => navigate('/admin/analytics/new-student')}
               onOpenRestoreStudent={() => navigate('/admin/analytics/restore-student')}
               onOpenStudentPreview={handleOpenStudentPreview}
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* Global AI Robot Support Notification Assistant (Active across ALL Admin Panel routes) */}
+        {token && (
+          <AdminNotificationWidget
+            token={token}
+            onUnreadCountChange={(cnt) => setHelpCenterUnread(cnt)}
+            onOpenTicket={(ticketId) => {
+              navigate(`/admin/help-center?ticket=${ticketId}`)
+            }}
+          />
+        )}
+
+        {/* 1B. Admin Help Center & Student Complaint Management */}
+        {isHelpCenter && token && (
+          <ErrorBoundary key="help-center" compact fallbackTitle="Admin Help Center failed to render">
+            <AdminHelpCenterPanel
+              token={token}
+              initialTicketId={(() => {
+                const raw = new URLSearchParams(location.search).get('ticket')
+                const num = raw ? Number(raw) : NaN
+                return Number.isInteger(num) && num > 0 ? num : null
+              })()}
+              onStatsUpdated={(cnt) => setHelpCenterUnread(cnt)}
             />
           </ErrorBoundary>
         )}

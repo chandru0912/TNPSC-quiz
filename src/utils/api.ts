@@ -107,6 +107,7 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
   const executeFetch = async (targetUrl: string, signal?: AbortSignal): Promise<Response> => {
     return await fetch(targetUrl, {
       ...fetchOptions,
+      credentials: fetchOptions.credentials ?? 'include',
       headers: mergedHeaders,
       cache,
       signal,

@@ -1,10 +1,16 @@
-import { google } from 'googleapis';
+import { OAuth2Client, type TokenPayload } from 'google-auth-library';
 import { executeWithCircuitBreaker } from './circuitBreakerService';
+
+export const GOOGLE_AUTH_REQUIRED_MESSAGE = 'Please sign in using a verified Google Account.';
+
+const VALID_GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
+const TRUSTED_GMAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
 
 export interface VerifiedGoogleProfile {
   googleId: string;
   email: string;
   emailVerified: boolean;
+  hostedDomain: string | null;
   fullName: string;
   avatarUrl: string | null;
 }
@@ -93,8 +99,87 @@ export function validateGoogleOAuthStartupConfig(): { valid: boolean; warnings: 
 }
 
 /**
+ * Strictly validates a decoded Google ID Token payload.
+ * Enforces:
+ * - Valid Google subject ID (sub)
+ * - Exact audience match (aud === GOOGLE_CLIENT_ID)
+ * - Valid Google issuer (accounts.google.com or https://accounts.google.com)
+ * - Non-expired token (exp > now)
+ * - email_verified === true
+ * - Email ownership assurance:
+ *   - Gmail accounts (gmail.com / googlemail.com) verified by Google
+ *   - Google Workspace accounts ONLY when verified AND hosted-domain claim (hd) matches email domain
+ *   - Rejects untrusted external email identities without verified Google Workspace hd claim
+ */
+export function validateVerifiedGoogleTokenPayload(
+  payload: TokenPayload | undefined | null,
+  expectedClientId: string
+): VerifiedGoogleProfile {
+  if (!payload || typeof payload !== 'object') {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_ID_TOKEN');
+  }
+
+  const sub = typeof payload.sub === 'string' ? payload.sub.trim() : '';
+  const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+  const iss = typeof payload.iss === 'string' ? payload.iss.trim() : '';
+  const aud = payload.aud;
+  const exp = typeof payload.exp === 'number' ? payload.exp : 0;
+
+  if (!sub) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_SUBJECT');
+  }
+
+  if (!VALID_GOOGLE_ISSUERS.has(iss)) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_ISSUER');
+  }
+
+  const audMatches = Array.isArray(aud)
+    ? aud.includes(expectedClientId)
+    : typeof aud === 'string' && aud === expectedClientId;
+  if (!expectedClientId || !audMatches) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_AUDIENCE');
+  }
+
+  if (!exp || exp * 1000 <= Date.now()) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'TOKEN_EXPIRED');
+  }
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_EMAIL');
+  }
+
+  if (payload.email_verified !== true) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 403, 'EMAIL_NOT_VERIFIED');
+  }
+
+  const domain = email.split('@')[1] || '';
+  const hostedDomain = typeof payload.hd === 'string' && payload.hd.trim() ? payload.hd.trim().toLowerCase() : null;
+
+  const isVerifiedGmail = TRUSTED_GMAIL_DOMAINS.has(domain);
+  const isVerifiedWorkspace = Boolean(hostedDomain && hostedDomain === domain);
+
+  if (!isVerifiedGmail && !isVerifiedWorkspace) {
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 403, 'UNTRUSTED_EMAIL_DOMAIN');
+  }
+
+  return {
+    googleId: sub,
+    email,
+    emailVerified: true,
+    hostedDomain,
+    fullName: resolveGoogleFullName({
+      name: payload.name,
+      given_name: payload.given_name,
+      family_name: payload.family_name,
+      email,
+    }),
+    avatarUrl: normalizeGoogleAvatarUrl(payload.picture ? String(payload.picture) : null),
+  };
+}
+
+/**
  * Verifies a Google OAuth 2.0 authorization code or ID token on the backend
- * using GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from server environment variables.
+ * using google-auth-library's OAuth2Client.verifyIdToken().
  */
 export async function verifyGoogleCredentialOrCode(params: {
   code?: string;
@@ -125,7 +210,7 @@ export async function verifyGoogleCredentialOrCode(params: {
   const authCode = cleanEnvValue(params.code);
   const codeVerifier = cleanEnvValue(params.codeVerifier);
 
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret || undefined, effectiveRedirect);
+  const oauth2Client = new OAuth2Client(clientId, clientSecret || undefined, effectiveRedirect);
 
   if (authCode) {
     if (!clientSecret) {
@@ -216,62 +301,35 @@ export async function verifyGoogleCredentialOrCode(params: {
       }
       if (googleErrorCode === 'invalid_grant' || combined.includes('invalid_grant') || combined.includes('malformed auth code')) {
         throw new GoogleAuthError(
-          'Google authorization code expired, invalid, or already used. Please try signing in again.',
+          GOOGLE_AUTH_REQUIRED_MESSAGE,
           401,
           'INVALID_GRANT'
         );
       }
       if (googleErrorCode === 'invalid_request') {
         throw new GoogleAuthError(
-          'Invalid Google OAuth token request parameters. Please refresh and try signing in again.',
+          GOOGLE_AUTH_REQUIRED_MESSAGE,
           400,
           'INVALID_OAUTH_REQUEST'
         );
       }
       throw new GoogleAuthError(
-        'Failed to exchange Google authorization code. Please try again.',
+        GOOGLE_AUTH_REQUIRED_MESSAGE,
         401,
         'TOKEN_EXCHANGE_FAILED'
       );
     }
 
     if (tokens?.id_token) {
-      rawIdToken = tokens.id_token;
-    } else if (tokens?.access_token) {
-      oauth2Client.setCredentials(tokens);
-      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-      const userInfoRes = await oauth2.userinfo.get();
-      const info = userInfoRes.data;
-      if (!info.id || !info.email) {
-        throw new GoogleAuthError('Google account did not return required email and profile details.', 401, 'INCOMPLETE_PROFILE');
-      }
-      if (info.verified_email !== true) {
-        throw new GoogleAuthError(
-          'Your Google email address must be verified before signing in or linking an account.',
-          403,
-          'EMAIL_NOT_VERIFIED'
-        );
-      }
-      return {
-        googleId: info.id,
-        email: info.email.trim().toLowerCase(),
-        emailVerified: true,
-        fullName: resolveGoogleFullName({
-          name: info.name,
-          given_name: info.given_name,
-          family_name: info.family_name,
-          email: info.email,
-        }),
-        avatarUrl: normalizeGoogleAvatarUrl(info.picture),
-      };
+      rawIdToken = String(tokens.id_token);
     }
   }
 
   if (!rawIdToken) {
-    throw new GoogleAuthError('Missing Google authorization code or ID token.', 400, 'MISSING_GOOGLE_CREDENTIAL');
+    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 400, 'MISSING_GOOGLE_CREDENTIAL');
   }
 
-  let payload: any;
+  let payload: TokenPayload | undefined;
   try {
     const ticket = await oauth2Client.verifyIdToken({
       idToken: rawIdToken,
@@ -281,34 +339,11 @@ export async function verifyGoogleCredentialOrCode(params: {
   } catch (err: any) {
     console.error('[Google verifyIdToken Error]:', err?.message || err);
     throw new GoogleAuthError(
-      'Invalid or expired Google authentication token. Please sign in again.',
+      GOOGLE_AUTH_REQUIRED_MESSAGE,
       401,
       'INVALID_ID_TOKEN'
     );
   }
 
-  if (!payload || !payload.sub || !payload.email) {
-    throw new GoogleAuthError('Google authentication token did not contain required identity claims.', 401, 'INVALID_CLAIMS');
-  }
-
-  if (payload.email_verified !== true) {
-    throw new GoogleAuthError(
-      'Your Google account email address is not verified. Account creation and linking require a verified email.',
-      403,
-      'EMAIL_NOT_VERIFIED'
-    );
-  }
-
-  return {
-    googleId: String(payload.sub),
-    email: String(payload.email).trim().toLowerCase(),
-    emailVerified: true,
-    fullName: resolveGoogleFullName({
-      name: payload.name,
-      given_name: payload.given_name,
-      family_name: payload.family_name,
-      email: String(payload.email),
-    }),
-    avatarUrl: normalizeGoogleAvatarUrl(payload.picture ? String(payload.picture) : null),
-  };
+  return validateVerifiedGoogleTokenPayload(payload, clientId);
 }

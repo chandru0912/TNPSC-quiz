@@ -37,6 +37,15 @@ export const StudentDashboardLayout: React.FC = () => {
     if (p.startsWith('/dashboard/subscription')) {
       return { title: 'Subscription Plans', category: 'Unlock Premium Access' };
     }
+    if (p.startsWith('/dashboard/profile')) {
+      return { title: 'My Profile', category: 'Student Account' };
+    }
+    if (p.startsWith('/dashboard/settings')) {
+      return { title: 'Settings', category: 'Account Preferences' };
+    }
+    if (p.startsWith('/dashboard/help')) {
+      return { title: 'Help & Support', category: 'Guides & FAQs' };
+    }
     if (p.startsWith('/materials')) {
       return { title: 'Study Materials', category: 'Syllabus & Textbooks' };
     }

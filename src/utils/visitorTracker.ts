@@ -1,4 +1,5 @@
 import { getApiUrl } from './api';
+import { hasAnalyticsConsent } from '../context/CookieConsentContext';
 
 function getOrGenerateId(key: string, storage: Storage): string {
   try {
@@ -76,6 +77,7 @@ function dispatchTrackPayload(
   pageTitle?: string
 ) {
   if (typeof window === 'undefined') return;
+  if (!hasAnalyticsConsent()) return;
 
   const currentPath = pagePath || window.location.pathname || '/';
   if (currentPath.startsWith('/admin') || currentPath === '/owner-login') return;
@@ -142,6 +144,7 @@ export function trackAnalyticsEvent(
   eventId?: string
 ) {
   if (typeof window === 'undefined') return;
+  if (!hasAnalyticsConsent()) return;
   const currentPath = window.location.pathname || '/';
   if (currentPath.startsWith('/admin') || currentPath === '/owner-login') return;
 

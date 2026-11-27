@@ -249,15 +249,32 @@ export interface StudentAuthenticatedRequest extends Request {
   studentUser?: StudentPayload;
 }
 
-export async function requireStudentAuth(req: StudentAuthenticatedRequest, res: Response, next: NextFunction) {
+export function extractStudentTokenFromRequest(req: Request): string | undefined {
   const authHeader = req.headers.authorization;
-  let token: string | undefined;
-
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (req.query.token && typeof req.query.token === 'string') {
-    token = req.query.token.trim();
+    const t = authHeader.substring(7).trim();
+    if (t) return t;
   }
+  if (req.query.token && typeof req.query.token === 'string' && req.query.token.trim()) {
+    return req.query.token.trim();
+  }
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader && typeof cookieHeader === 'string') {
+    for (const part of cookieHeader.split(';')) {
+      const idx = part.indexOf('=');
+      if (idx === -1) continue;
+      const key = part.slice(0, idx).trim();
+      if (key === 'tnpsc_student_token') {
+        const val = decodeURIComponent(part.slice(idx + 1).trim());
+        if (val) return val;
+      }
+    }
+  }
+  return undefined;
+}
+
+export async function requireStudentAuth(req: StudentAuthenticatedRequest, res: Response, next: NextFunction) {
+  const token = extractStudentTokenFromRequest(req);
 
   if (!token) {
     return res.status(401).json({
@@ -340,14 +357,7 @@ export async function requireStudentOrAdminAuth(
   res: Response,
   next: NextFunction
 ) {
-  const authHeader = req.headers.authorization;
-  let token: string | undefined;
-
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (req.query.token && typeof req.query.token === 'string') {
-    token = req.query.token.trim();
-  }
+  const token = extractStudentTokenFromRequest(req);
 
   if (!token) {
     return res.status(401).json({
@@ -442,14 +452,7 @@ export async function requireStudentOrAdminAuth(
 }
 
 export function optionalStudentAuth(req: StudentAuthenticatedRequest, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  let token: string | undefined;
-
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (req.query.token && typeof req.query.token === 'string') {
-    token = req.query.token.trim();
-  }
+  const token = extractStudentTokenFromRequest(req);
 
   if (token) {
     const verified = verifyStudentToken(token);

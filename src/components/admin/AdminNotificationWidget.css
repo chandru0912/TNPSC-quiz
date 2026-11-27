@@ -1,0 +1,582 @@
+/* Global Admin AI Robot Notification Assistant */
+
+.anotif-portal-root {
+  position: fixed;
+  top: 76px;
+  right: 20px;
+  z-index: 1250;
+  pointer-events: none;
+}
+
+/* Floating AI Robot Button */
+.anotif-robot-btn {
+  position: relative;
+  pointer-events: auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 9999px;
+  background: linear-gradient(145deg, rgba(13, 21, 42, 0.96) 0%, rgba(7, 11, 24, 0.98) 100%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(56, 189, 248, 0.48);
+  color: #38bdf8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.48),
+    0 0 18px rgba(56, 189, 248, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition: transform 0.16s ease, border-color 0.18s ease, box-shadow 0.2s ease;
+}
+
+.anotif-robot-btn:hover,
+.anotif-robot-btn.is-open {
+  transform: translateY(-1px) scale(1.03);
+  border-color: rgba(255, 215, 0, 0.78);
+  color: #ffd700;
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.56),
+    0 0 24px rgba(255, 215, 0, 0.3);
+}
+
+.anotif-robot-btn.has-unread {
+  border-color: rgba(255, 215, 0, 0.75);
+  color: #ffd700;
+  animation: anotifGentlePulse 2.8s ease-in-out infinite;
+}
+
+.anotif-robot-btn.is-pulsing {
+  animation: anotifAlertBounce 0.75s ease-in-out 3;
+}
+
+.anotif-robot-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  pointer-events: none;
+}
+
+.anotif-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #0b1120;
+  box-shadow: 0 3px 10px rgba(239, 68, 68, 0.55);
+}
+
+@keyframes anotifGentlePulse {
+  0%, 100% {
+    box-shadow:
+      0 10px 26px rgba(0, 0, 0, 0.48),
+      0 0 16px rgba(255, 215, 0, 0.24);
+  }
+  50% {
+    box-shadow:
+      0 12px 30px rgba(0, 0, 0, 0.55),
+      0 0 28px rgba(56, 189, 248, 0.42);
+  }
+}
+
+@keyframes anotifAlertBounce {
+  0%, 100% { transform: scale(1); }
+  40% { transform: scale(1.12) rotate(-6deg); }
+  70% { transform: scale(1.06) rotate(5deg); }
+}
+
+/* Live Toast */
+.anotif-toast {
+  position: absolute;
+  top: 56px;
+  right: 0;
+  width: 330px;
+  max-width: calc(100vw - 28px);
+  pointer-events: auto;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(13, 21, 42, 0.98) 0%, rgba(8, 12, 24, 0.99) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.6), 0 0 24px rgba(56, 189, 248, 0.16);
+  padding: 0.85rem 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  animation: anotifDropIn 0.2s ease-out;
+}
+
+.anotif-toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.anotif-toast-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #38bdf8;
+}
+
+.anotif-cyan-icon {
+  color: #38bdf8;
+}
+
+.anotif-toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.77rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.anotif-toast-body strong {
+  color: #f8fafc;
+}
+
+.anotif-toast-subject {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.anotif-toast-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.2rem;
+  font-size: 0.71rem;
+  color: #94a3b8;
+}
+
+.anotif-toast-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
+  color: #0b1120;
+  font-size: 0.77rem;
+  font-weight: 800;
+  border: none;
+  cursor: pointer;
+}
+
+/* Dropdown Panel */
+.anotif-dropdown {
+  position: absolute;
+  top: 56px;
+  right: 0;
+  width: 390px;
+  max-width: calc(100vw - 24px);
+  max-height: min(560px, calc(100vh - 150px));
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: linear-gradient(165deg, rgba(13, 20, 38, 0.98) 0%, rgba(7, 11, 22, 0.99) 100%);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid rgba(255, 215, 0, 0.34);
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.65), 0 0 28px rgba(56, 189, 248, 0.12);
+  overflow: hidden;
+  animation: anotifDropIn 0.16s ease-out;
+}
+
+@keyframes anotifDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.anotif-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.8rem 0.95rem;
+  background: rgba(8, 11, 20, 0.96);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  flex-shrink: 0;
+}
+
+.anotif-dropdown-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.anotif-dropdown-bot {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(255, 215, 0, 0.18));
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #ffd700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.anotif-dropdown-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.anotif-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #64748b;
+}
+
+.anotif-live-dot.is-live {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.75);
+}
+
+.anotif-dropdown-sub {
+  font-size: 0.71rem;
+  color: #94a3b8;
+}
+
+.anotif-dropdown-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.anotif-icon-mini {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(30, 41, 59, 0.72);
+  color: #cbd5e1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.anotif-icon-mini:hover,
+.anotif-icon-mini.is-active {
+  border-color: rgba(255, 215, 0, 0.55);
+  color: #ffd700;
+}
+
+/* Settings Drawer */
+.anotif-settings-box {
+  padding: 0.7rem 0.9rem;
+  background: rgba(10, 16, 32, 0.95);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.anotif-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.42rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  color: #e2e8f0;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.anotif-setting-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.anotif-setting-row strong {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.anotif-setting-row strong.is-on {
+  color: #34d399;
+}
+
+.anotif-settings-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin-top: 0.2rem;
+}
+
+.anotif-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(30, 41, 59, 0.8);
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.anotif-mini-btn:hover {
+  border-color: rgba(255, 215, 0, 0.5);
+  color: #fef08a;
+}
+
+/* Tabs */
+.anotif-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.55rem 0.75rem;
+  background: rgba(10, 15, 28, 0.9);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+
+.anotif-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.anotif-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.58rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.7);
+  color: #94a3b8;
+  font-size: 0.71rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.anotif-tab.active {
+  color: #f8fafc;
+  border-color: rgba(255, 215, 0, 0.55);
+  background: rgba(255, 215, 0, 0.14);
+}
+
+.anotif-tab.active.is-cyan {
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.16);
+}
+
+.anotif-tab.active.is-purple {
+  color: #e9d5ff;
+  border-color: rgba(168, 85, 247, 0.55);
+  background: rgba(168, 85, 247, 0.16);
+}
+
+.anotif-tab.active.is-green {
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.55);
+  background: rgba(16, 185, 129, 0.16);
+}
+
+/* List */
+.anotif-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overscroll-behavior: contain;
+}
+
+.anotif-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.anotif-item {
+  padding: 0.72rem 0.82rem;
+  border-radius: 11px;
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.anotif-item:hover {
+  border-color: rgba(255, 215, 0, 0.45);
+  background: rgba(22, 32, 58, 0.92);
+}
+
+.anotif-item.is-unread {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.anotif-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.anotif-ticket-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.71rem;
+  font-weight: 700;
+  color: #fde047;
+}
+
+.anotif-status-pill {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.12rem 0.48rem;
+  border-radius: 9999px;
+}
+
+.anotif-status--new {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #7dd3fc;
+}
+
+.anotif-status--progress {
+  background: rgba(168, 85, 247, 0.18);
+  border: 1px solid rgba(192, 132, 252, 0.42);
+  color: #e9d5ff;
+}
+
+.anotif-status--waiting {
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  color: #fcd34d;
+}
+
+.anotif-status--resolved {
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(52, 211, 153, 0.42);
+  color: #6ee7b7;
+}
+
+.anotif-item-student {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.anotif-reply-tag {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.2);
+  color: #7dd3fc;
+}
+
+.anotif-item-subject {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anotif-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.anotif-item-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.anotif-view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #ffd700;
+  font-weight: 700;
+}
+
+.anotif-history-meta {
+  margin-top: 0.28rem;
+  padding-top: 0.28rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.16);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.67rem;
+  color: #94a3b8;
+}
+
+@media (max-width: 640px) {
+  .anotif-portal-root {
+    top: 68px;
+    right: 12px;
+  }
+
+  .anotif-robot-btn {
+    width: 42px;
+    height: 42px;
+  }
+
+  .anotif-dropdown,
+  .anotif-toast {
+    width: calc(100vw - 24px);
+    max-width: 390px;
+  }
+}

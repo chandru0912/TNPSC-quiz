@@ -4,12 +4,10 @@ import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, User
 import MobileAuthSlide, { type AuthSlideType } from './MobileAuthSlide'
 import { useScrollLock } from '../hooks/useScrollLock'
 import { useStudentAuth } from '../context/StudentAuthContext'
-import { StudentAvatar } from './StudentAvatar'
-import { resolveStudentDisplayName } from '../utils/studentProfile'
 import './Navbar.css'
 
 const Navbar = () => {
-  const { student, isAuthenticated, isPreviewMode, exitStudentPreview } = useStudentAuth()
+  const { isAuthenticated, isPreviewMode, exitStudentPreview } = useStudentAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [activeAuthSlide, setActiveAuthSlide] = useState<AuthSlideType>('none')
   const location = useLocation()
@@ -107,9 +105,11 @@ const Navbar = () => {
     return p === targetPath || p.startsWith(`${targetPath}/`)
   }
 
+  const hasDesktopRightActions = isPreviewMode || (!isAdminRoute && !isAuthenticated)
+
   return (
     <nav className="navbar glass">
-      <div className="nav-container">
+      <div className={`nav-container ${!hasDesktopRightActions ? 'nav-container--centered' : ''}`}>
         <Link to="/" className="nav-logo" aria-label="TNPSC Study Hub home" onClick={closeMenu}>
           <span className="nav-logo-icon-3d">
             <GraduationCap className="nav-logo-icon" size={24} />
@@ -169,51 +169,29 @@ const Navbar = () => {
             </button>
           ) : null}
 
-          {!isAdminRoute && (
-            isAuthenticated && student ? (
-              <div className="nav-student-account-group">
-                <Link
-                  to="/dashboard"
-                  className="nav-student-profile-pill"
-                  title={`Student Profile: ${resolveStudentDisplayName(student)} (${student.email})`}
-                  onClick={closeMenu}
-                >
-                  <StudentAvatar
-                    studentId={student.id}
-                    fullName={student.fullName}
-                    email={student.email}
-                    avatarUrl={student.avatarUrl}
-                    size={26}
-                  />
-                  <span className="nav-auth-label nav-student-profile-name">
-                    {resolveStudentDisplayName(student)}
-                  </span>
-                </Link>
-              </div>
-            ) : (
-              <>
-                <Link
-                  to="/login"
-                  className={`nav-auth-btn nav-login ${activeAuthSlide === 'login' ? 'active-toggle' : ''}`}
-                  onClick={handleLoginClick}
-                  aria-expanded={activeAuthSlide === 'login'}
-                  aria-label="Toggle login slide"
-                >
-                  <User size={18} />
-                  <span className="nav-auth-label">Login</span>
-                </Link>
-                <Link
-                  to="/register"
-                  className={`nav-auth-btn nav-register ${activeAuthSlide === 'register' ? 'active-toggle' : ''}`}
-                  onClick={handleRegisterClick}
-                  aria-expanded={activeAuthSlide === 'register'}
-                  aria-label="Toggle register slide"
-                >
-                  <UserPlus size={18} />
-                  <span>Register</span>
-                </Link>
-              </>
-            )
+          {!isAdminRoute && !isAuthenticated && (
+            <>
+              <Link
+                to="/login"
+                className={`nav-auth-btn nav-login ${activeAuthSlide === 'login' ? 'active-toggle' : ''}`}
+                onClick={handleLoginClick}
+                aria-expanded={activeAuthSlide === 'login'}
+                aria-label="Toggle login slide"
+              >
+                <User size={18} />
+                <span className="nav-auth-label">Login</span>
+              </Link>
+              <Link
+                to="/register"
+                className={`nav-auth-btn nav-register ${activeAuthSlide === 'register' ? 'active-toggle' : ''}`}
+                onClick={handleRegisterClick}
+                aria-expanded={activeAuthSlide === 'register'}
+                aria-label="Toggle register slide"
+              >
+                <UserPlus size={18} />
+                <span>Register</span>
+              </Link>
+            </>
           )}
 
           <button

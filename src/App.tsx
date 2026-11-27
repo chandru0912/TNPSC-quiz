@@ -1,12 +1,13 @@
 import { useState, useEffect, lazy, Suspense, type ComponentType } from 'react'
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
-import { GraduationCap } from 'lucide-react'
 import ScrollToTop from './components/ScrollToTop'
 import Navbar from './components/Navbar'
+import SiteFooter from './components/SiteFooter'
 import { initSpatialTilt } from './utils/spatialTilt'
 import StudentDashboardLayout from './layouts/StudentDashboardLayout'
 import StudentPreviewBanner from './components/StudentPreviewBanner'
 import { StudentAuthProvider } from './context/StudentAuthContext'
+import { CookieConsentProvider } from './context/CookieConsentContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RequireStudentAuthRoute from './components/RequireStudentAuthRoute'
 import RequireAdminAuthRoute from './components/RequireAdminAuthRoute'
@@ -28,6 +29,11 @@ function lazyWithRetry<T extends ComponentType<any>>(importer: () => Promise<{ d
 const Home = lazyWithRetry(() => import('./pages/Home'))
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'))
 const StudentSubscription = lazyWithRetry(() => import('./pages/StudentSubscription'))
+const StudentAccountPage = lazyWithRetry(() => import('./pages/StudentAccountPage'))
+const HelpSupportPage = lazyWithRetry(() => import('./pages/HelpSupportPage'))
+const PrivacyPolicyPage = lazyWithRetry(() => import('./pages/PrivacyPolicyPage'))
+const AboutUsPage = lazyWithRetry(() => import('./pages/AboutUsPage'))
+const UserPolicyPage = lazyWithRetry(() => import('./pages/UserPolicyPage'))
 const StudyMaterials = lazyWithRetry(() => import('./pages/StudyMaterials'))
 const SchoolMaterials = lazyWithRetry(() => import('./pages/SchoolMaterials'))
 const Group1GeneralStudies = lazyWithRetry(() => import('./pages/Group1GeneralStudies'))
@@ -135,6 +141,7 @@ function AppShell() {
       '/progress-tracker',
       '/performance-analytics',
       '/study-notes',
+      '/privacy-policy',
     ].some((prefix) => location.pathname.startsWith(prefix))
 
   return (
@@ -206,11 +213,21 @@ function AppShell() {
           <Suspense fallback={<RouteLoadingFallback />}>
             <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/about-us" element={<AboutUsPage />} />
+          <Route path="/user-policy" element={<UserPolicyPage />} />
+          <Route path="/terms-of-service" element={<HelpSupportPage section="terms-of-service" />} />
 
           {/* Persistent Global Student Dashboard Layout with Independent Dual Scroll */}
           <Route element={<StudentDashboardLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/dashboard/subscription" element={<StudentSubscription />} />
+            <Route path="/dashboard/profile" element={<StudentAccountPage section="profile" />} />
+            <Route path="/dashboard/settings" element={<StudentAccountPage section="settings" />} />
+            <Route path="/dashboard/help" element={<HelpSupportPage section="help-center" />} />
+            <Route path="/dashboard/privacy-center" element={<HelpSupportPage section="privacy-center" />} />
+            <Route path="/dashboard/terms-of-service" element={<HelpSupportPage section="terms-of-service" />} />
+            <Route path="/dashboard/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
             <Route path="/materials" element={<StudyMaterials />} />
             <Route path="/school-materials" element={<SchoolMaterials />} />
 
@@ -269,23 +286,7 @@ function AppShell() {
         </ErrorBoundary>
       </main>
 
-      {!isPrivateOwnerRoute && !isDashboardRoute && (
-        <footer className="footer glass">
-          <div className="footer-content">
-            <div className="footer-brand">
-              <span className="footer-logo-icon-3d">
-                <GraduationCap className="footer-logo-icon" size={22} />
-              </span>
-              <div className="footer-brand-text">
-                <span className="footer-logo">TNPSC Study Hub</span>
-                <span className="footer-tag">Glassmorphic Portal</span>
-              </div>
-            </div>
-            <p className="footer-copy">© 2026 TNPSC Study Hub. Crafted with an ultra-premium Glassmorphism Dashboard UI/UX.</p>
-            <p className="footer-note">⚡ Real-time analytics, mock tests, school syllabus notes & lesson-wise practice modules</p>
-          </div>
-        </footer>
-      )}
+      {!isPrivateOwnerRoute && !isDashboardRoute && <SiteFooter />}
     </div>
   )
 }
@@ -302,10 +303,12 @@ function App() {
   return (
     <ErrorBoundary fallbackTitle="Application Error" fallbackMessage="The application encountered an unexpected error. Click Retry to restore.">
       <Router>
-        <StudentAuthProvider>
-          <ScrollToTop />
-          <AppShell />
-        </StudentAuthProvider>
+        <CookieConsentProvider>
+          <StudentAuthProvider>
+            <ScrollToTop />
+            <AppShell />
+          </StudentAuthProvider>
+        </CookieConsentProvider>
       </Router>
     </ErrorBoundary>
   )

@@ -70,7 +70,7 @@
   --transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Layout Dimensions */
-  --navbar-height: 80px;
+  --navbar-height: 60px;
 
   /* Mobile Safe Areas */
   --safe-top: env(safe-area-inset-top, 0px);
@@ -106,10 +106,10 @@ html {
   background-color: #060913;
   color-scheme: dark;
   scroll-behavior: auto;
-  overflow-y: scroll;
+  overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-gutter: stable;
-  scroll-padding-top: var(--navbar-height, 80px);
+  scrollbar-gutter: auto;
+  scroll-padding-top: var(--navbar-height, 60px);
 }
 
 body {
