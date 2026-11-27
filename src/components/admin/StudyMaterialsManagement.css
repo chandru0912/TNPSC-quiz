@@ -1521,23 +1521,48 @@
 }
 
 @media (max-width: 768px) {
+  .smm-wrapper {
+    gap: 14px;
+  }
+
+  .smm-kpi-row .admin-metric-card {
+    padding: 12px 14px;
+    gap: 10px;
+    min-height: auto;
+  }
+
+  .smm-kpi-row .metric-value {
+    font-size: 1.4rem;
+  }
+
+  .smm-filter-card {
+    padding: 12px;
+    gap: 12px;
+  }
+
   .smm-selectors-grid {
     grid-template-columns: 1fr;
-    gap: 14px;
+    gap: 10px;
   }
 
   .smm-toolbar-row {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
+    padding-top: 10px;
   }
 
+  /* Fix flex: 1 1 320px turning into 320px vertical blank void when toolbar stacks to column */
   .smm-search-wrap {
+    flex: 0 0 auto;
+    width: 100%;
     max-width: 100%;
   }
 
   .smm-toolbar-actions {
+    width: 100%;
     justify-content: flex-start;
-    gap: 10px;
+    gap: 8px;
   }
 
   .smm-unit-row {

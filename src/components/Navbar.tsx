@@ -13,6 +13,7 @@ const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false)
   const [activeAuthSlide, setActiveAuthSlide] = useState<AuthSlideType>('none')
   const location = useLocation()
+  const isAdminRoute = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
 
   // Lock background scroll when mobile hamburger navigation menu is open
   useScrollLock(isOpen)
@@ -78,6 +79,34 @@ const Navbar = () => {
     setActiveAuthSlide('none')
   }
 
+  const isNavLinkActive = (targetPath: string): boolean => {
+    const p = location.pathname.toLowerCase()
+    if (targetPath === '/') {
+      return p === '/' || p === ''
+    }
+    if (targetPath === '/dashboard') {
+      return (
+        p === '/dashboard' ||
+        p.startsWith('/dashboard/') ||
+        p.startsWith('/performance-analytics') ||
+        p.startsWith('/mark-list') ||
+        p.startsWith('/progress-tracker')
+      )
+    }
+    if (targetPath === '/materials') {
+      return (
+        (p.startsWith('/materials') && !p.startsWith('/materials/practice')) ||
+        p.startsWith('/school-materials') ||
+        p.startsWith('/study-notes') ||
+        p.startsWith('/study-materials')
+      )
+    }
+    if (targetPath === '/practice') {
+      return p.startsWith('/practice') || p.startsWith('/materials/practice')
+    }
+    return p === targetPath || p.startsWith(`${targetPath}/`)
+  }
+
   return (
     <nav className="navbar glass">
       <div className="nav-container">
@@ -94,7 +123,7 @@ const Navbar = () => {
         <ul id="primary-navigation" className={`nav-menu ${isOpen ? 'active' : ''}`}>
           {navLinks.map((link) => {
             const Icon = link.icon
-            const isActive = location.pathname === link.path
+            const isActive = isNavLinkActive(link.path)
             return (
               <li key={link.path} className="nav-item">
                 <Link
@@ -140,49 +169,51 @@ const Navbar = () => {
             </button>
           ) : null}
 
-          {isAuthenticated && student ? (
-            <div className="nav-student-account-group">
-              <Link
-                to="/dashboard"
-                className="nav-student-profile-pill"
-                title={`Student Profile: ${resolveStudentDisplayName(student)} (${student.email})`}
-                onClick={closeMenu}
-              >
-                <StudentAvatar
-                  studentId={student.id}
-                  fullName={student.fullName}
-                  email={student.email}
-                  avatarUrl={student.avatarUrl}
-                  size={26}
-                />
-                <span className="nav-auth-label nav-student-profile-name">
-                  {resolveStudentDisplayName(student)}
-                </span>
-              </Link>
-            </div>
-          ) : (
-            <>
-              <Link
-                to="/login"
-                className={`nav-auth-btn nav-login ${activeAuthSlide === 'login' ? 'active-toggle' : ''}`}
-                onClick={handleLoginClick}
-                aria-expanded={activeAuthSlide === 'login'}
-                aria-label="Toggle login slide"
-              >
-                <User size={18} />
-                <span className="nav-auth-label">Login</span>
-              </Link>
-              <Link
-                to="/register"
-                className={`nav-auth-btn nav-register ${activeAuthSlide === 'register' ? 'active-toggle' : ''}`}
-                onClick={handleRegisterClick}
-                aria-expanded={activeAuthSlide === 'register'}
-                aria-label="Toggle register slide"
-              >
-                <UserPlus size={18} />
-                <span>Register</span>
-              </Link>
-            </>
+          {!isAdminRoute && (
+            isAuthenticated && student ? (
+              <div className="nav-student-account-group">
+                <Link
+                  to="/dashboard"
+                  className="nav-student-profile-pill"
+                  title={`Student Profile: ${resolveStudentDisplayName(student)} (${student.email})`}
+                  onClick={closeMenu}
+                >
+                  <StudentAvatar
+                    studentId={student.id}
+                    fullName={student.fullName}
+                    email={student.email}
+                    avatarUrl={student.avatarUrl}
+                    size={26}
+                  />
+                  <span className="nav-auth-label nav-student-profile-name">
+                    {resolveStudentDisplayName(student)}
+                  </span>
+                </Link>
+              </div>
+            ) : (
+              <>
+                <Link
+                  to="/login"
+                  className={`nav-auth-btn nav-login ${activeAuthSlide === 'login' ? 'active-toggle' : ''}`}
+                  onClick={handleLoginClick}
+                  aria-expanded={activeAuthSlide === 'login'}
+                  aria-label="Toggle login slide"
+                >
+                  <User size={18} />
+                  <span className="nav-auth-label">Login</span>
+                </Link>
+                <Link
+                  to="/register"
+                  className={`nav-auth-btn nav-register ${activeAuthSlide === 'register' ? 'active-toggle' : ''}`}
+                  onClick={handleRegisterClick}
+                  aria-expanded={activeAuthSlide === 'register'}
+                  aria-label="Toggle register slide"
+                >
+                  <UserPlus size={18} />
+                  <span>Register</span>
+                </Link>
+              </>
+            )
           )}
 
           <button
@@ -198,13 +229,15 @@ const Navbar = () => {
         </div>
       </div>
 
-      {/* Mobile Login and Register Slide Drawer */}
-      <MobileAuthSlide
-        activeSlide={activeAuthSlide}
-        onClose={() => setActiveAuthSlide('none')}
-        onSwitchToLogin={() => setActiveAuthSlide('login')}
-        onSwitchToRegister={() => setActiveAuthSlide('register')}
-      />
+      {/* Mobile Login and Register Slide Drawer (Student Website Only) */}
+      {!isAdminRoute && (
+        <MobileAuthSlide
+          activeSlide={activeAuthSlide}
+          onClose={() => setActiveAuthSlide('none')}
+          onSwitchToLogin={() => setActiveAuthSlide('login')}
+          onSwitchToRegister={() => setActiveAuthSlide('register')}
+        />
+      )}
     </nav>
   )
 }

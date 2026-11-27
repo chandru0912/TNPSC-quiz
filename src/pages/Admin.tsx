@@ -4320,31 +4320,6 @@ const Admin = () => {
                 {isClaude && 'Configure Anthropic Claude AI and Google Gemini AI as two completely independent providers with separate keys, models, prompts, and generation logs.'}
               </p>
             </div>
-
-            <div className="admin-profile-group">
-              <span className="admin-user-pill">
-                <Shield size={14} style={{ color: 'var(--gold-primary)' }} />
-                <span>{adminUser?.name || adminUser?.username || 'Admin'}</span>
-                {adminUser?.role && (
-                  <span className="admin-pill-role-tag">{adminUser.role.replace('_', ' ')}</span>
-                )}
-              </span>
-              <button
-                className="admin-users-mgmt-btn"
-                onClick={() => {
-                  setIsUsersModalOpen(true)
-                  fetchAdminUsers()
-                }}
-                title="Manage Multiple Admin Accounts"
-              >
-                <Users size={14} />
-                <span>Admin Accounts</span>
-              </button>
-              <button className="admin-logout-btn" onClick={handleLogout} title="Log out of Admin Portal">
-                <LogOut size={14} />
-                <span>Sign Out</span>
-              </button>
-            </div>
           </div>
         )}
 

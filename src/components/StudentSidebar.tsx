@@ -126,6 +126,11 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
             {userName}
           </span>
           <span className="student-profile-role">{userGroup}</span>
+          {activeStudent?.district && (
+            <span className="student-profile-email" title={`District: ${activeStudent.district}`}>
+              {activeStudent.district}
+            </span>
+          )}
           {userEmail && (
             <span className="student-profile-email" title={userEmail}>
               {userEmail}

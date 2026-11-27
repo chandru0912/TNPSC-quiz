@@ -1,6 +1,6 @@
 import { Pool, PoolConfig } from 'pg';
 import dotenv from 'dotenv';
-
+import dns from 'dns';
 import path from 'path';
 
 if (!process.env.VERCEL) {
@@ -9,6 +9,60 @@ if (!process.env.VERCEL) {
   dotenv.config({ path: path.resolve(process.cwd(), '.env') });
   dotenv.config({ path: path.resolve(__dirname, '../.env') });
   dotenv.config({ path: path.resolve(__dirname, '../../backend/.env') });
+
+  // Resilient DNS fallback for local Windows/ISP resolvers that intermittently return ENOTFOUND
+  // for cloud PostgreSQL hostnames (e.g. *.aws.neon.tech) while public DNS resolves them cleanly.
+  const globalKey = '__tnpscDnsFallbackInstalled';
+  if (!(globalThis as any)[globalKey]) {
+    (globalThis as any)[globalKey] = true;
+    const fallbackResolver = new dns.Resolver();
+    fallbackResolver.setServers(['8.8.8.8', '1.1.1.1']);
+    const dnsCache = new Map<string, { addresses: string[]; expiresAt: number }>();
+    const origLookup = dns.lookup.bind(dns);
+
+    (dns as any).lookup = function patchedLookup(
+      hostname: string,
+      options: any,
+      callback?: any
+    ) {
+      if (typeof options === 'function') {
+        callback = options;
+        options = {};
+      }
+      const opts = typeof options === 'number' ? { family: options } : options || {};
+
+      origLookup(hostname, opts, (err: NodeJS.ErrnoException | null, address: any, family?: number) => {
+        if (!err || err.code !== 'ENOTFOUND' || !hostname || hostname === 'localhost') {
+          return callback(err, address, family);
+        }
+
+        const cached = dnsCache.get(hostname);
+        if (cached && cached.expiresAt > Date.now() && cached.addresses.length > 0) {
+          if (opts.all) {
+            return callback(
+              null,
+              cached.addresses.map((a) => ({ address: a, family: 4 }))
+            );
+          }
+          return callback(null, cached.addresses[0], 4);
+        }
+
+        fallbackResolver.resolve4(hostname, (rErr, addrs) => {
+          if (rErr || !addrs || addrs.length === 0) {
+            return callback(err);
+          }
+          dnsCache.set(hostname, { addresses: addrs, expiresAt: Date.now() + 60_000 });
+          if (opts.all) {
+            return callback(
+              null,
+              addrs.map((a) => ({ address: a, family: 4 }))
+            );
+          }
+          return callback(null, addrs[0], 4);
+        });
+      });
+    };
+  }
 }
 
 export const isProductionOrCloud =
@@ -34,8 +88,8 @@ export function getDirectDatabaseUrl(): string {
 }
 
 const poolSettings = {
-  max: isServerless ? 2 : 10,
-  connectionTimeoutMillis: 10000,
+  max: isServerless ? 3 : 10,
+  connectionTimeoutMillis: 15000,
   idleTimeoutMillis: isServerless ? 5000 : 15000,
   allowExitOnIdle: isServerless,
 };

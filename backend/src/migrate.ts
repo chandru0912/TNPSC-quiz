@@ -1054,7 +1054,26 @@ export async function runMigration() {
       ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS include_incorrect_on_retake BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS question_language VARCHAR(20) NOT NULL DEFAULT 'both';
       ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS randomize_options BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) NOT NULL DEFAULT 'draft';
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS approved_by VARCHAR(100);
+      ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE mock_tests DROP CONSTRAINT IF EXISTS mock_tests_approval_status_check;
+      ALTER TABLE mock_tests
+        ADD CONSTRAINT mock_tests_approval_status_check
+        CHECK (approval_status IN ('draft', 'generated', 'under_review', 'approved', 'rejected'));
+      UPDATE mock_tests
+      SET approval_status = CASE
+            WHEN status IN ('published', 'scheduled') THEN 'approved'
+            WHEN status = 'staging' THEN 'under_review'
+            ELSE 'draft'
+          END,
+          approved_at = CASE
+            WHEN status IN ('published', 'scheduled') THEN COALESCE(approved_at, published_at, created_at)
+            ELSE approved_at
+          END
+      WHERE approval_status = 'draft' AND status IN ('published', 'scheduled', 'staging');
       CREATE INDEX IF NOT EXISTS idx_mock_tests_group_category ON mock_tests (category, test_category, status);
+      CREATE INDEX IF NOT EXISTS idx_mock_tests_approval_status ON mock_tests (approval_status, status);
 
       ALTER TABLE mock_test_sessions ADD COLUMN IF NOT EXISTS question_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE mock_test_sessions ADD COLUMN IF NOT EXISTS option_orders JSONB NOT NULL DEFAULT '{}'::jsonb;

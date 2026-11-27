@@ -144,6 +144,86 @@ const GENUINE_SUB_SQL = (subAlias: string = 'sub', stuAlias: string = 's') => `(
 
 let cachedLiveActivationIso: string | null = null;
 
+const FATAL_DB_ERROR_CODES = new Set([
+  'ENOTFOUND',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  '08000',
+  '08001',
+  '08003',
+  '08004',
+  '08006',
+  '57P01',
+  '57P02',
+  '57P03',
+]);
+
+function isConnectivityError(err: any): boolean {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || '');
+  return (
+    FATAL_DB_ERROR_CODES.has(code) ||
+    /getaddrinfo|connection terminated|cannot connect|ECONNREFUSED|ENOTFOUND/i.test(msg)
+  );
+}
+
+function isTransientConnectTimeout(err: any): boolean {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || '');
+  return (
+    code === 'ECONNRESET' ||
+    /timeout exceeded when trying to connect|connection terminated unexpectedly/i.test(msg)
+  );
+}
+
+function toInt(val: unknown): number {
+  const n = parseInt(String(val ?? '0'), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toFloat(val: unknown): number {
+  const n = parseFloat(String(val ?? '0'));
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function safeQuery<T = any>(
+  label: string,
+  sql: string,
+  params?: any[]
+): Promise<{ rows: T[]; failed?: boolean }> {
+  const execute = async () => {
+    const res = await pool.query(sql, params);
+    return { rows: (res.rows || []) as T[] };
+  };
+
+  try {
+    return await execute();
+  } catch (err: any) {
+    if (isTransientConnectTimeout(err)) {
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        return await execute();
+      } catch (retryErr: any) {
+        if (isConnectivityError(retryErr) || isTransientConnectTimeout(retryErr)) {
+          console.error(`[AnalyticsService] DB connectivity error in "${label}" after retry:`, retryErr?.code, retryErr?.message);
+          throw retryErr;
+        }
+        console.error(`[AnalyticsService] Isolated query failure in "${label}" after retry:`, retryErr?.code, retryErr?.message);
+        return { rows: [], failed: true };
+      }
+    }
+
+    if (isConnectivityError(err)) {
+      console.error(`[AnalyticsService] DB connectivity error in "${label}":`, err?.code, err?.message);
+      throw err;
+    }
+
+    console.error(`[AnalyticsService] Isolated query failure in "${label}":`, err?.code, err?.message);
+    return { rows: [], failed: true };
+  }
+}
+
 export class AnalyticsService {
   // Ensure clean Live Analytics Activation Timestamp exists once in PostgreSQL
   static async ensureLiveAnalyticsBaseline(): Promise<string> {
@@ -543,487 +623,542 @@ export class AnalyticsService {
       };
     };
 
-    const qStudents = await pool.query(
-      `SELECT
-        COUNT(DISTINCT LOWER(TRIM(s.email)))::int as total,
-        COUNT(DISTINCT CASE WHEN s.email_verified = true THEN LOWER(TRIM(s.email)) END)::int as verified_students,
-        MAX(s.last_login_at) as last_active_at,
-        COUNT(DISTINCT CASE WHEN ${getRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as new_in_range,
-        COUNT(DISTINCT CASE WHEN ${getPrevRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as prev_new_in_range,
-        COUNT(DISTINCT CASE WHEN s.created_at >= $2::timestamptz THEN LOWER(TRIM(s.email)) END)::int as new_since_activation,
-        COUNT(DISTINCT CASE WHEN s.created_at >= ${IST_TODAY_START} THEN LOWER(TRIM(s.email)) END)::int as new_today,
-        COUNT(DISTINCT CASE WHEN s.created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN LOWER(TRIM(s.email)) END)::int as new_7d,
-        COUNT(DISTINCT CASE WHEN s.created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN LOWER(TRIM(s.email)) END)::int as new_30d,
-        COUNT(DISTINCT CASE WHEN s.subscription_tier != 'free' AND s.subscription_status = 'active' THEN LOWER(TRIM(s.email)) END)::int as paid_subscribers,
-        COUNT(DISTINCT CASE WHEN s.subscription_tier = 'free' OR s.subscription_tier IS NULL THEN LOWER(TRIM(s.email)) END)::int as free_students
-       FROM students s
-       WHERE ${GENUINE_STUDENT_SQL('s')}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam, liveTrackingActivatedAt]
-    );
+    // Batch 1: Core student, traffic, login, revenue, and MCQ metrics (parallelized for ~10x speedup)
+    const [
+      qStudents,
+      qOnlineStudents,
+      qMockAttemptsAgg,
+      qActiveToday,
+      qTraffic,
+      qPageViews,
+      qLogins,
+      qRevenue,
+      qMcq,
+      qAllTimeMcq,
+    ] = await Promise.all([
+      safeQuery(
+        'overview.students',
+        `SELECT
+          COUNT(DISTINCT LOWER(TRIM(s.email)))::int as total,
+          COUNT(DISTINCT CASE WHEN NOT (${getRangeCondition('s.created_at', range)}) THEN LOWER(TRIM(s.email)) END)::int as prev_total,
+          COUNT(DISTINCT CASE WHEN s.email_verified = true THEN LOWER(TRIM(s.email)) END)::int as verified_students,
+          MAX(s.last_login_at) as last_active_at,
+          COUNT(DISTINCT CASE WHEN ${getRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as new_in_range,
+          COUNT(DISTINCT CASE WHEN ${getPrevRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as prev_new_in_range,
+          COUNT(DISTINCT CASE WHEN s.created_at >= $2::timestamptz THEN LOWER(TRIM(s.email)) END)::int as new_since_activation,
+          COUNT(DISTINCT CASE WHEN s.created_at >= ${IST_TODAY_START} THEN LOWER(TRIM(s.email)) END)::int as new_today,
+          COUNT(DISTINCT CASE WHEN s.created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN LOWER(TRIM(s.email)) END)::int as new_7d,
+          COUNT(DISTINCT CASE WHEN s.created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN LOWER(TRIM(s.email)) END)::int as new_30d,
+          COUNT(DISTINCT CASE WHEN s.subscription_tier != 'free' AND s.subscription_status = 'active' THEN LOWER(TRIM(s.email)) END)::int as paid_subscribers,
+          COUNT(DISTINCT CASE WHEN s.subscription_tier = 'free' OR s.subscription_tier IS NULL THEN LOWER(TRIM(s.email)) END)::int as free_students
+         FROM students s
+         WHERE ${GENUINE_STUDENT_SQL('s')}
+           AND ($1::text IS NULL OR s.district = $1)`,
+        [distParam, liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.online_students',
+        `SELECT COUNT(DISTINCT vs.student_id)::int as online_students
+         FROM visitor_sessions vs
+         JOIN students s ON s.id = vs.student_id
+         WHERE vs.student_id IS NOT NULL
+           AND vs.is_active = true
+           AND vs.ended_at IS NULL
+           AND vs.last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+           AND ${GENUINE_STUDENT_SQL('s')}`
+      ),
+      safeQuery(
+        'overview.mock_attempts_agg',
+        `SELECT
+          COUNT(*)::int as all_time_attempts,
+          COUNT(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN 1 END)::int as attempts_in_range,
+          COUNT(CASE WHEN ${getPrevRangeCondition('a.completed_at', range)} THEN 1 END)::int as prev_attempts_in_range,
+          COUNT(CASE WHEN a.completed_at >= ${IST_TODAY_START} THEN 1 END)::int as attempts_today,
+          COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '3 days' THEN 1 END)::int as attempts_3d,
+          COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as attempts_7d,
+          COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' THEN 1 END)::int as attempts_14d,
+          COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END)::int as attempts_30d,
+          COALESCE(SUM(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN a.correct_answers ELSE 0 END), 0)::int as correct_in_range,
+          COALESCE(SUM(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN a.incorrect_answers ELSE 0 END), 0)::int as incorrect_in_range,
+          COALESCE(SUM(a.correct_answers), 0)::int as all_time_correct,
+          COALESCE(SUM(a.incorrect_answers), 0)::int as all_time_incorrect,
+          COUNT(DISTINCT a.student_id)::int as participating_students,
+          COALESCE(ROUND(
+            100.0 * SUM(CASE WHEN a.assessment_type IN ('lesson_quiz', 'study_material_quiz', 'subject_drill') OR COALESCE(a.mock_test_format, '') = 'mcq_practice' THEN a.correct_answers ELSE 0 END)
+            / NULLIF(SUM(CASE WHEN a.assessment_type IN ('lesson_quiz', 'study_material_quiz', 'subject_drill') OR COALESCE(a.mock_test_format, '') = 'mcq_practice' THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
+          , 1), 0) as mcq_practice_accuracy,
+          COALESCE(ROUND(
+            100.0 * SUM(CASE WHEN a.assessment_type = 'mock_test' OR COALESCE(a.mock_test_format, '') IN ('lesson_wise', 'unit_wise', 'full_length') THEN a.correct_answers ELSE 0 END)
+            / NULLIF(SUM(CASE WHEN a.assessment_type = 'mock_test' OR COALESCE(a.mock_test_format, '') IN ('lesson_wise', 'unit_wise', 'full_length') THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
+          , 1), 0) as mock_test_accuracy,
+          COALESCE(ROUND(
+            100.0 * SUM(CASE WHEN a.assessment_type = 'previous_paper' THEN a.correct_answers ELSE 0 END)
+            / NULLIF(SUM(CASE WHEN a.assessment_type = 'previous_paper' THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
+          , 1), 0) as previous_paper_accuracy
+         FROM mock_test_attempts a
+         JOIN students s ON s.id = a.student_id
+         WHERE COALESCE(a.status, 'completed') = 'completed'
+           AND a.attempted_questions > 0
+           AND ${GENUINE_STUDENT_SQL('s')}`
+      ),
+      safeQuery(
+        'overview.active_today',
+        `SELECT
+          COUNT(DISTINCT CASE WHEN (s.last_login_at >= ${IST_TODAY_START} OR EXISTS (
+            SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= ${IST_TODAY_START}
+          )) THEN s.id END)::int as active_today,
+          COUNT(DISTINCT CASE WHEN (
+            (s.last_login_at >= (${IST_TODAY_START} - INTERVAL '1 day') AND s.last_login_at < ${IST_TODAY_START})
+            OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= (${IST_TODAY_START} - INTERVAL '1 day') AND ss.started_at < ${IST_TODAY_START})
+          ) THEN s.id END)::int as active_yesterday
+         FROM students s
+         WHERE ${GENUINE_STUDENT_SQL('s')}
+           AND ($1::text IS NULL OR s.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'overview.traffic',
+        `SELECT
+          COUNT(DISTINCT visitor_id)::int as total_visitors,
+          COUNT(DISTINCT visitor_id)::int as unique_visitors,
+          COUNT(DISTINCT CASE WHEN student_id IS NOT NULL THEN visitor_id END)::int as authenticated_visits,
+          COUNT(DISTINCT CASE WHEN student_id IS NULL THEN visitor_id END)::int as anonymous_visits
+         FROM visitor_sessions
+         WHERE started_at >= $2::timestamptz
+           AND ${getRangeCondition('started_at', range)}
+           AND ($1::text IS NULL OR district = $1)`,
+        [distParam, liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.page_views',
+        `SELECT COUNT(*)::int as total_page_views
+         FROM page_views
+         WHERE viewed_at >= $2::timestamptz
+           AND ${getRangeCondition('viewed_at', range)}
+           AND page_path NOT LIKE '/admin%'
+           AND ($1::text IS NULL OR district = $1)`,
+        [distParam, liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.logins',
+        `SELECT
+          COUNT(CASE WHEN ${getRangeCondition('sa.created_at', range)} THEN 1 END)::int as total_logins,
+          COUNT(CASE WHEN ${getPrevRangeCondition('sa.created_at', range)} THEN 1 END)::int as prev_logins,
+          COUNT(CASE WHEN sa.created_at >= $2::timestamptz THEN 1 END)::int as login_events_since_activation,
+          COUNT(DISTINCT CASE WHEN sa.created_at >= $2::timestamptz THEN sa.student_id END)::int as unique_students_logged_in
+         FROM student_activity sa
+         JOIN students s ON sa.student_id = s.id
+         WHERE sa.activity_type IN ('login', 'google_login')
+           AND ${GENUINE_STUDENT_SQL('s')}
+           AND ($1::text IS NULL OR s.district = $1)`,
+        [distParam, liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.revenue',
+        `SELECT COALESCE(SUM(sub.amount), 0) as total_revenue
+         FROM student_subscriptions sub
+         JOIN students s ON s.id = sub.student_id
+         WHERE sub.status = 'active'
+           AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP)
+           AND ${GENUINE_SUB_SQL('sub', 's')}
+           AND ${getRangeCondition('sub.transaction_date', range)}
+           AND ($1::text IS NULL OR sub.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'overview.mcq',
+        `SELECT
+          COUNT(*)::int as total_attempts,
+          COUNT(CASE WHEN qa.attempted_at >= ${IST_TODAY_START} THEN 1 END)::int as attempts_today,
+          COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '3 days' THEN 1 END)::int as attempts_3d,
+          COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as attempts_7d,
+          COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' THEN 1 END)::int as attempts_14d,
+          COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END)::int as attempts_30d,
+          COUNT(CASE WHEN qa.is_correct = true THEN 1 END)::int as correct_count,
+          COUNT(CASE WHEN qa.is_correct = false THEN 1 END)::int as incorrect_count,
+          COUNT(DISTINCT qa.student_id)::int as participating_students,
+          COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
+         FROM question_attempts qa
+         JOIN students s ON qa.student_id = s.id
+         WHERE ${GENUINE_STUDENT_SQL('s')}
+           AND ${getRangeCondition('qa.attempted_at', range)}
+           AND ($1::text IS NULL OR s.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'overview.all_time_mcq',
+        `SELECT
+          COUNT(*)::int as all_time_attempts,
+          COUNT(CASE WHEN qa.is_correct = true THEN 1 END)::int as all_time_correct,
+          COUNT(CASE WHEN qa.is_correct = false THEN 1 END)::int as all_time_incorrect,
+          COUNT(DISTINCT qa.student_id)::int as all_time_participating_students,
+          COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as all_time_accuracy
+         FROM question_attempts qa
+         JOIN students s ON qa.student_id = s.id
+         WHERE ${GENUINE_STUDENT_SQL('s')}`
+      ),
+    ]);
 
-    const qOnlineStudents = await pool.query(
-      `SELECT COUNT(DISTINCT vs.student_id)::int as online_students
-       FROM visitor_sessions vs
-       JOIN students s ON s.id = vs.student_id
-       WHERE vs.student_id IS NOT NULL
-         AND vs.is_active = true
-         AND vs.ended_at IS NULL
-         AND vs.last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
-         AND ${GENUINE_STUDENT_SQL('s')}`
-    );
+    // Batch 2: Previous period comparisons, sparkline, active/subscription periods, and question bank
+    const [
+      qPrevTraffic,
+      qPrevPageViews,
+      qPrevRevenue,
+      qPrevMcq,
+      qVisitorSparkline,
+      qPeriodActive,
+      qPeriodSubs,
+      qQuestions,
+      qQuestionsBySubj,
+      qQuestionsByGrp,
+    ] = await Promise.all([
+      safeQuery(
+        'overview.prev_traffic',
+        `SELECT
+          COUNT(DISTINCT visitor_id)::int as total_visitors,
+          COUNT(DISTINCT visitor_id)::int as unique_visitors
+         FROM visitor_sessions
+         WHERE started_at >= $2::timestamptz
+           AND ${getPrevRangeCondition('started_at', range)}
+           AND ($1::text IS NULL OR district = $1)`,
+        [distParam, liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.prev_page_views',
+        `SELECT COUNT(*)::int as total_page_views
+         FROM page_views
+         WHERE viewed_at >= $2::timestamptz
+           AND ${getPrevRangeCondition('viewed_at', range)}
+           AND page_path NOT LIKE '/admin%'
+           AND ($1::text IS NULL OR district = $1)`,
+        [distParam, liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.prev_revenue',
+        `SELECT COALESCE(SUM(sub.amount), 0) as total_revenue
+         FROM student_subscriptions sub
+         JOIN students s ON s.id = sub.student_id
+         WHERE sub.status = 'active'
+           AND ${GENUINE_SUB_SQL('sub', 's')}
+           AND ${getPrevRangeCondition('sub.transaction_date', range)}
+           AND ($1::text IS NULL OR sub.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'overview.prev_mcq',
+        `SELECT
+          COUNT(*)::int as total_attempts,
+          COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
+         FROM question_attempts qa
+         JOIN students s ON qa.student_id = s.id
+         WHERE ${GENUINE_STUDENT_SQL('s')}
+           AND ${getPrevRangeCondition('qa.attempted_at', range)}
+           AND ($1::text IS NULL OR s.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'overview.visitor_sparkline',
+        `SELECT
+          d.day,
+          COUNT(DISTINCT vs.visitor_id)::int as visitors
+         FROM (
+           SELECT generate_series(
+             ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days')::date,
+             (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date,
+             '1 day'::interval
+           )::date as day
+         ) d
+         LEFT JOIN visitor_sessions vs
+           ON (vs.started_at AT TIME ZONE 'Asia/Kolkata')::date = d.day
+           AND vs.started_at >= $2::timestamptz
+           AND ($1::text IS NULL OR vs.district = $1)
+         GROUP BY d.day
+         ORDER BY d.day ASC`,
+        [distParam, liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.period_active',
+        `SELECT
+          COUNT(DISTINCT CASE WHEN (${getRangeCondition('s.last_login_at', range)} OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ${getRangeCondition('ss.started_at', range)})) THEN s.id END)::int as active_cur,
+          COUNT(DISTINCT CASE WHEN (${getPrevRangeCondition('s.last_login_at', range)} OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ${getPrevRangeCondition('ss.started_at', range)})) THEN s.id END)::int as active_prev
+         FROM students s
+         WHERE ${GENUINE_STUDENT_SQL('s')}
+           AND ($1::text IS NULL OR s.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'overview.period_subs',
+        `SELECT
+          COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as active_subs,
+          COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) AND NOT (${getRangeCondition('sub.transaction_date', range)}) THEN 1 END)::int as prev_active_subs
+         FROM student_subscriptions sub
+         JOIN students s ON s.id = sub.student_id
+         WHERE ${GENUINE_SUB_SQL('sub', 's')}
+           AND ($1::text IS NULL OR sub.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'overview.questions',
+        `SELECT
+          COUNT(*)::int as total,
+          COUNT(CASE WHEN status='published' THEN 1 END)::int as published,
+          COUNT(CASE WHEN status='staging' THEN 1 END)::int as staging,
+          COUNT(CASE WHEN ${getRangeCondition('created_at', range)} THEN 1 END)::int as new_in_range,
+          COUNT(CASE WHEN ${getPrevRangeCondition('created_at', range)} THEN 1 END)::int as prev_new_in_range
+        FROM questions`
+      ),
+      safeQuery(
+        'overview.questions_by_subject',
+        `SELECT COALESCE(subject, 'General Studies') as subject, COUNT(*)::int as count
+        FROM questions
+        GROUP BY subject
+        ORDER BY count DESC
+        LIMIT 8`
+      ),
+      safeQuery(
+        'overview.questions_by_group',
+        `SELECT COALESCE(category, 'General') as group_name, COUNT(*)::int as count
+        FROM questions
+        GROUP BY category
+        ORDER BY count DESC`
+      ),
+    ]);
 
-    const qMockAttemptsAgg = await pool.query(
-      `SELECT
-        COUNT(*)::int as all_time_attempts,
-        COUNT(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN 1 END)::int as attempts_in_range,
-        COUNT(CASE WHEN ${getPrevRangeCondition('a.completed_at', range)} THEN 1 END)::int as prev_attempts_in_range,
-        COUNT(CASE WHEN a.completed_at >= ${IST_TODAY_START} THEN 1 END)::int as attempts_today,
-        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '3 days' THEN 1 END)::int as attempts_3d,
-        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as attempts_7d,
-        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' THEN 1 END)::int as attempts_14d,
-        COUNT(CASE WHEN a.completed_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END)::int as attempts_30d,
-        COALESCE(SUM(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN a.correct_answers ELSE 0 END), 0)::int as correct_in_range,
-        COALESCE(SUM(CASE WHEN ${getRangeCondition('a.completed_at', range)} THEN a.incorrect_answers ELSE 0 END), 0)::int as incorrect_in_range,
-        COALESCE(SUM(a.correct_answers), 0)::int as all_time_correct,
-        COALESCE(SUM(a.incorrect_answers), 0)::int as all_time_incorrect,
-        COUNT(DISTINCT a.student_id)::int as participating_students,
-        COALESCE(ROUND(
-          100.0 * SUM(CASE WHEN a.assessment_type IN ('lesson_quiz', 'study_material_quiz', 'subject_drill') OR COALESCE(a.mock_test_format, '') = 'mcq_practice' THEN a.correct_answers ELSE 0 END)
-          / NULLIF(SUM(CASE WHEN a.assessment_type IN ('lesson_quiz', 'study_material_quiz', 'subject_drill') OR COALESCE(a.mock_test_format, '') = 'mcq_practice' THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
-        , 1), 0) as mcq_practice_accuracy,
-        COALESCE(ROUND(
-          100.0 * SUM(CASE WHEN a.assessment_type = 'mock_test' OR COALESCE(a.mock_test_format, '') IN ('lesson_wise', 'unit_wise', 'full_length') THEN a.correct_answers ELSE 0 END)
-          / NULLIF(SUM(CASE WHEN a.assessment_type = 'mock_test' OR COALESCE(a.mock_test_format, '') IN ('lesson_wise', 'unit_wise', 'full_length') THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
-        , 1), 0) as mock_test_accuracy,
-        COALESCE(ROUND(
-          100.0 * SUM(CASE WHEN a.assessment_type = 'previous_paper' THEN a.correct_answers ELSE 0 END)
-          / NULLIF(SUM(CASE WHEN a.assessment_type = 'previous_paper' THEN (a.correct_answers + a.incorrect_answers) ELSE 0 END), 0)
-        , 1), 0) as previous_paper_accuracy
-       FROM mock_test_attempts a
-       JOIN students s ON s.id = a.student_id
-       WHERE COALESCE(a.status, 'completed') = 'completed'
-         AND a.attempted_questions > 0
-         AND ${GENUINE_STUDENT_SQL('s')}`
-    );
-
-    const qActiveToday = await pool.query(
-      `SELECT
-        COUNT(DISTINCT CASE WHEN (s.last_login_at >= ${IST_TODAY_START} OR EXISTS (
-          SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= ${IST_TODAY_START}
-        )) THEN s.id END)::int as active_today,
-        COUNT(DISTINCT CASE WHEN (
-          (s.last_login_at >= (${IST_TODAY_START} - INTERVAL '1 day') AND s.last_login_at < ${IST_TODAY_START})
-          OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ss.started_at >= (${IST_TODAY_START} - INTERVAL '1 day') AND ss.started_at < ${IST_TODAY_START})
-        ) THEN s.id END)::int as active_yesterday
-       FROM students s
-       WHERE ${GENUINE_STUDENT_SQL('s')}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam]
-    );
-
-    const qTraffic = await pool.query(
-      `SELECT
-        COUNT(DISTINCT visitor_id)::int as total_visitors,
-        COUNT(DISTINCT visitor_id)::int as unique_visitors,
-        COUNT(DISTINCT CASE WHEN student_id IS NOT NULL THEN visitor_id END)::int as authenticated_visits,
-        COUNT(DISTINCT CASE WHEN student_id IS NULL THEN visitor_id END)::int as anonymous_visits
-       FROM visitor_sessions
-       WHERE started_at >= $2::timestamptz
-         AND ${getRangeCondition('started_at', range)}
-         AND ($1::text IS NULL OR district = $1)`,
-      [distParam, liveTrackingActivatedAt]
-    );
-
-    const qPageViews = await pool.query(
-      `SELECT COUNT(*)::int as total_page_views
-       FROM page_views
-       WHERE viewed_at >= $2::timestamptz
-         AND ${getRangeCondition('viewed_at', range)}
-         AND page_path NOT LIKE '/admin%'
-         AND ($1::text IS NULL OR district = $1)`,
-      [distParam, liveTrackingActivatedAt]
-    );
-
-    const qLogins = await pool.query(
-      `SELECT
-        COUNT(CASE WHEN ${getRangeCondition('sa.created_at', range)} THEN 1 END)::int as total_logins,
-        COUNT(CASE WHEN ${getPrevRangeCondition('sa.created_at', range)} THEN 1 END)::int as prev_logins,
-        COUNT(CASE WHEN sa.created_at >= $2::timestamptz THEN 1 END)::int as login_events_since_activation,
-        COUNT(DISTINCT CASE WHEN sa.created_at >= $2::timestamptz THEN sa.student_id END)::int as unique_students_logged_in
-       FROM student_activity sa
-       JOIN students s ON sa.student_id = s.id
-       WHERE sa.activity_type IN ('login', 'google_login')
-         AND ${GENUINE_STUDENT_SQL('s')}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam, liveTrackingActivatedAt]
-    );
-
-    const qRevenue = await pool.query(
-      `SELECT COALESCE(SUM(sub.amount), 0) as total_revenue
-       FROM student_subscriptions sub
-       JOIN students s ON s.id = sub.student_id
-       WHERE sub.status = 'active'
-         AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP)
-         AND ${GENUINE_SUB_SQL('sub', 's')}
-         AND ${getRangeCondition('sub.transaction_date', range)}
-         AND ($1::text IS NULL OR sub.district = $1)`,
-      [distParam]
-    );
-
-    const qMcq = await pool.query(
-      `SELECT
-        COUNT(*)::int as total_attempts,
-        COUNT(CASE WHEN qa.attempted_at >= ${IST_TODAY_START} THEN 1 END)::int as attempts_today,
-        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '3 days' THEN 1 END)::int as attempts_3d,
-        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '7 days' THEN 1 END)::int as attempts_7d,
-        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '14 days' THEN 1 END)::int as attempts_14d,
-        COUNT(CASE WHEN qa.attempted_at >= CURRENT_TIMESTAMP - INTERVAL '30 days' THEN 1 END)::int as attempts_30d,
-        COUNT(CASE WHEN qa.is_correct = true THEN 1 END)::int as correct_count,
-        COUNT(CASE WHEN qa.is_correct = false THEN 1 END)::int as incorrect_count,
-        COUNT(DISTINCT qa.student_id)::int as participating_students,
-        COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
-       FROM question_attempts qa
-       JOIN students s ON qa.student_id = s.id
-       WHERE ${GENUINE_STUDENT_SQL('s')}
-         AND ${getRangeCondition('qa.attempted_at', range)}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam]
-    );
-
-    const qAllTimeMcq = await pool.query(
-      `SELECT
-        COUNT(*)::int as all_time_attempts,
-        COUNT(CASE WHEN qa.is_correct = true THEN 1 END)::int as all_time_correct,
-        COUNT(CASE WHEN qa.is_correct = false THEN 1 END)::int as all_time_incorrect,
-        COUNT(DISTINCT qa.student_id)::int as all_time_participating_students,
-        COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as all_time_accuracy
-       FROM question_attempts qa
-       JOIN students s ON qa.student_id = s.id
-       WHERE ${GENUINE_STUDENT_SQL('s')}`
-    );
-
-    // Previous period queries for calculating genuine trends (no fabricated multipliers)
-    const qPrevTraffic = await pool.query(
-      `SELECT
-        COUNT(DISTINCT visitor_id)::int as total_visitors,
-        COUNT(DISTINCT visitor_id)::int as unique_visitors
-       FROM visitor_sessions
-       WHERE started_at >= $2::timestamptz
-         AND ${getPrevRangeCondition('started_at', range)}
-         AND ($1::text IS NULL OR district = $1)`,
-      [distParam, liveTrackingActivatedAt]
-    );
-
-    const qPrevPageViews = await pool.query(
-      `SELECT COUNT(*)::int as total_page_views
-       FROM page_views
-       WHERE viewed_at >= $2::timestamptz
-         AND ${getPrevRangeCondition('viewed_at', range)}
-         AND page_path NOT LIKE '/admin%'
-         AND ($1::text IS NULL OR district = $1)`,
-      [distParam, liveTrackingActivatedAt]
-    );
-
-    const qPrevRevenue = await pool.query(
-      `SELECT COALESCE(SUM(sub.amount), 0) as total_revenue
-       FROM student_subscriptions sub
-       JOIN students s ON s.id = sub.student_id
-       WHERE sub.status = 'active'
-         AND ${GENUINE_SUB_SQL('sub', 's')}
-         AND ${getPrevRangeCondition('sub.transaction_date', range)}
-         AND ($1::text IS NULL OR sub.district = $1)`,
-      [distParam]
-    );
-
-    const qPrevMcq = await pool.query(
-      `SELECT
-        COUNT(*)::int as total_attempts,
-        COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as avg_accuracy
-       FROM question_attempts qa
-       JOIN students s ON qa.student_id = s.id
-       WHERE ${GENUINE_STUDENT_SQL('s')}
-         AND ${getPrevRangeCondition('qa.attempted_at', range)}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam]
-    );
-
-    // Real 7-day unique visitor sparkline from PostgreSQL (IST days, post-activation only)
-    const qVisitorSparkline = await pool.query(
-      `SELECT
-        d.day,
-        COUNT(DISTINCT vs.visitor_id)::int as visitors
-       FROM (
-         SELECT generate_series(
-           ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '6 days')::date,
-           (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date,
-           '1 day'::interval
-         )::date as day
-       ) d
-       LEFT JOIN visitor_sessions vs
-         ON (vs.started_at AT TIME ZONE 'Asia/Kolkata')::date = d.day
-         AND vs.started_at >= $2::timestamptz
-         AND ($1::text IS NULL OR vs.district = $1)
-       GROUP BY d.day
-       ORDER BY d.day ASC`,
-      [distParam, liveTrackingActivatedAt]
-    );
-    const realVisitorSparkline = qVisitorSparkline.rows.map((r) => Number(r.visitors || 0));
-
-    const totalStudents = parseInt(qStudents.rows[0].total, 10);
-    const activeStudentsToday = parseInt(qActiveToday.rows[0].active_today, 10);
-    const activeStudentsYesterday = parseInt(qActiveToday.rows[0].active_yesterday, 10);
-    const newRegistrations = parseInt(qStudents.rows[0].new_in_range, 10);
-    const totalVisitors = parseInt(qTraffic.rows[0].total_visitors, 10);
-    const uniqueVisitors = parseInt(qTraffic.rows[0].unique_visitors, 10);
-    const totalPageViews = parseInt(qPageViews.rows[0].total_page_views, 10);
-    const totalLogins = parseInt(qLogins.rows[0].total_logins, 10);
-    const prevLogins = parseInt(qLogins.rows[0].prev_logins, 10);
-    const paidSubscribers = parseInt(qStudents.rows[0].paid_subscribers, 10);
-    const freeStudents = parseInt(qStudents.rows[0].free_students, 10);
-    const revenue = parseFloat(qRevenue.rows[0].total_revenue);
-    const totalMcq = parseInt(qMcq.rows[0].total_attempts, 10);
-    const avgAccuracy = parseFloat(qMcq.rows[0].avg_accuracy);
-
-    const prevVisitors = parseInt(qPrevTraffic.rows[0].total_visitors, 10);
-    const prevUnique = parseInt(qPrevTraffic.rows[0].unique_visitors, 10);
-    const prevPageViews = parseInt(qPrevPageViews.rows[0].total_page_views, 10);
-    const prevRevenue = parseFloat(qPrevRevenue.rows[0].total_revenue);
-    const prevMcq = parseInt(qPrevMcq.rows[0].total_attempts, 10);
-    const prevAccuracy = parseFloat(qPrevMcq.rows[0].avg_accuracy);
-
-    // Exact period comparison queries for Core KPI cards (genuine students only)
-    const q7dStudents = await pool.query(
-      `SELECT
-        COUNT(DISTINCT LOWER(TRIM(s.email)))::int as total,
-        COUNT(DISTINCT CASE WHEN NOT (${getRangeCondition('s.created_at', range)}) THEN LOWER(TRIM(s.email)) END)::int as prev_total,
-        COUNT(DISTINCT CASE WHEN ${getRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as new_in_period,
-        COUNT(DISTINCT CASE WHEN ${getPrevRangeCondition('s.created_at', range)} THEN LOWER(TRIM(s.email)) END)::int as prev_new_in_period
-       FROM students s
-       WHERE ${GENUINE_STUDENT_SQL('s')}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam]
-    );
-
-    const qPeriodActive = await pool.query(
-      `SELECT
-        COUNT(DISTINCT CASE WHEN (${getRangeCondition('s.last_login_at', range)} OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ${getRangeCondition('ss.started_at', range)})) THEN s.id END)::int as active_cur,
-        COUNT(DISTINCT CASE WHEN (${getPrevRangeCondition('s.last_login_at', range)} OR EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.student_id = s.id AND ${getPrevRangeCondition('ss.started_at', range)})) THEN s.id END)::int as active_prev
-       FROM students s
-       WHERE ${GENUINE_STUDENT_SQL('s')}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam]
-    );
-
-    const qPeriodSubs = await pool.query(
-      `SELECT
-        COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as active_subs,
-        COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) AND NOT (${getRangeCondition('sub.transaction_date', range)}) THEN 1 END)::int as prev_active_subs
-       FROM student_subscriptions sub
-       JOIN students s ON s.id = sub.student_id
-       WHERE ${GENUINE_SUB_SQL('sub', 's')}
-         AND ($1::text IS NULL OR sub.district = $1)`,
-      [distParam]
-    );
-
-    const curTotalStudents = q7dStudents.rows[0].total;
-    const prevTotalStudents = isAllTime ? 0 : q7dStudents.rows[0].prev_total;
-    const curActiveInRange = Math.max(activeStudentsToday, qPeriodActive.rows[0].active_cur);
-    const prevActiveInRange = qPeriodActive.rows[0].active_prev;
-    const curActiveSubs = qPeriodSubs.rows[0].active_subs;
-    const prevActiveSubs = isAllTime ? 0 : qPeriodSubs.rows[0].prev_active_subs;
-
-    // 1. Question Bank Aggregates
-    const qQuestions = await pool.query(`
-      SELECT
-        COUNT(*)::int as total,
-        COUNT(CASE WHEN status='published' THEN 1 END)::int as published,
-        COUNT(CASE WHEN status='staging' THEN 1 END)::int as staging,
-        COUNT(CASE WHEN ${getRangeCondition('created_at', range)} THEN 1 END)::int as new_in_range,
-        COUNT(CASE WHEN ${getPrevRangeCondition('created_at', range)} THEN 1 END)::int as prev_new_in_range
-      FROM questions
-    `);
-    const totalQuestions = qQuestions.rows[0]?.total || 0;
-    const publishedQuestions = qQuestions.rows[0]?.published || 0;
-    const stagingQuestions = qQuestions.rows[0]?.staging || 0;
-    const newQuestionsInRange = qQuestions.rows[0]?.new_in_range || 0;
-    const prevNewQuestionsInRange = qQuestions.rows[0]?.prev_new_in_range || 0;
-
-    const qQuestionsBySubj = await pool.query(`
-      SELECT COALESCE(subject, 'General Studies') as subject, COUNT(*)::int as count
-      FROM questions
-      GROUP BY subject
-      ORDER BY count DESC
-      LIMIT 8
-    `);
-    const qQuestionsByGrp = await pool.query(`
-      SELECT COALESCE(category, 'General') as group_name, COUNT(*)::int as count
-      FROM questions
-      GROUP BY category
-      ORDER BY count DESC
-    `);
-
-    // 2. Study Materials Aggregates
-    const qTextbooks = await pool.query(`
-      SELECT
-        COUNT(*)::int as total,
-        COUNT(CASE WHEN status='completed' OR status='published' THEN 1 END)::int as completed,
-        COUNT(CASE WHEN status='processing' OR status='uploaded' THEN 1 END)::int as in_review
-      FROM textbooks
-    `);
-    const qDrive = await pool.query(`SELECT COUNT(*)::int as total FROM google_drive_materials`);
-    const qNotes = await pool.query(`
-      SELECT
-        COUNT(*)::int as total,
-        COUNT(CASE WHEN status='published' THEN 1 END)::int as published,
-        COUNT(CASE WHEN status='staging' THEN 1 END)::int as staging
-      FROM study_notes
-    `);
-    const qTbStandard = await pool.query(`
-      SELECT standard::text, COUNT(*)::int as count
-      FROM textbooks
-      WHERE standard IS NOT NULL
-      GROUP BY standard
-      ORDER BY standard
-    `);
-    const qTbSubject = await pool.query(`
-      SELECT subject, COUNT(*)::int as count
-      FROM textbooks
-      WHERE subject IS NOT NULL
-      GROUP BY subject
-      ORDER BY count DESC
-      LIMIT 8
-    `);
-
-    // 3. Restored Students & Deactivated Status (genuine accounts only)
-    const qRestored = await pool.query(`
-      SELECT
-        (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')}) as restored_total,
-        (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')} AND ${getRangeCondition('sa.created_at', range)}) as restored_in_range,
-        (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')} AND ${getPrevRangeCondition('sa.created_at', range)}) as prev_restored_in_range,
-        COUNT(CASE WHEN (s.is_active = false OR s.deleted_at IS NOT NULL) AND LOWER(TRIM(COALESCE(s.email, ''))) NOT LIKE '%@example.com' THEN 1 END)::int as deactivated_count
-      FROM students s
-    `);
-    const restoredTotal = qRestored.rows[0]?.restored_total || 0;
-    const restored7d = qRestored.rows[0]?.restored_in_range || 0;
-    const prevRestored7d = qRestored.rows[0]?.prev_restored_in_range || 0;
-    const deactivatedCount = qRestored.rows[0]?.deactivated_count || 0;
-
-    // 4. Registration Trends (Dynamic range, IST date, genuine students only)
+    // Batch 3: Study materials, restored accounts, trends, traffic sources, performance cohorts, subscription tiers, recent activity
     const trendDays = range === 'today' ? 1 : range === '7d' ? 6 : range === '90d' ? 89 : 29;
-    const qRegTrends = await pool.query(`
-      SELECT
-        TO_CHAR(d.day, 'YYYY-MM-DD') as date,
-        TO_CHAR(d.day, 'Mon DD') as label,
-        COUNT(DISTINCT LOWER(TRIM(s.email)))::int as count
-      FROM (
-        SELECT generate_series(
-          ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '${trendDays} days')::date,
-          (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date,
-          '1 day'::interval
-        )::date as day
-      ) d
-      LEFT JOIN students s
-        ON (s.created_at AT TIME ZONE 'Asia/Kolkata')::date = d.day
-        AND ${GENUINE_STUDENT_SQL('s')}
-      GROUP BY d.day
-      ORDER BY d.day ASC
-    `);
-
-    // 5. Traffic Stats (Post-activation unique visitors only — Asia/Kolkata aligned)
-    const qTrafficOverview = await pool.query(
-      `SELECT
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, ${IST_TODAY_START})) as daily_visitors,
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, CURRENT_TIMESTAMP - INTERVAL '7 days')) as weekly_visitors,
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, CURRENT_TIMESTAMP - INTERVAL '30 days')) as monthly_visitors,
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= $1::timestamptz AND is_active = true AND ended_at IS NULL AND last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes') as current_visitors,
-        (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= $1::timestamptz) as total_visitors`,
-      [liveTrackingActivatedAt]
-    );
-    const trafficSourcesRes = await pool.query(
-      `SELECT
-        COALESCE(CASE
-          WHEN referrer ILIKE '%google%' THEN 'Google Search'
-          WHEN referrer ILIKE '%facebook%' OR referrer ILIKE '%instagram%' OR referrer ILIKE '%twitter%' OR referrer ILIKE '%t.co%' THEN 'Social Media'
-          WHEN referrer IS NULL OR referrer = '' THEN 'Direct Traffic'
-          ELSE 'Referral / Others'
-        END, 'Direct Traffic') as source,
-        COUNT(DISTINCT visitor_id)::int as count
-       FROM visitor_sessions
-       WHERE started_at >= $1::timestamptz
-         AND ${getRangeCondition('started_at', range)}
-       GROUP BY source
-       ORDER BY count DESC`,
-      [liveTrackingActivatedAt]
-    );
-    const totalSourceCount = trafficSourcesRes.rows.reduce((acc, r) => acc + parseInt(r.count, 10), 0);
-    const trafficSources = trafficSourcesRes.rows.map((r) => ({
-      source: r.source,
-      count: parseInt(r.count, 10),
-      percentage: totalSourceCount > 0 ? Math.round((parseInt(r.count, 10) / totalSourceCount) * 100) : 0,
-    }));
-
-    // 6. Academic Performance & Mock Tests (genuine students only)
-    const qMockPerf = await pool.query(`
-      SELECT
-        COUNT(*)::int as total_mocks,
-        COALESCE(ROUND(AVG(a.percentage), 1), 0) as avg_score,
-        COUNT(CASE WHEN a.percentage >= 50 THEN 1 END)::int as passed_count
-      FROM mock_test_attempts a
-      JOIN students s ON s.id = a.student_id
-      WHERE COALESCE(a.status, 'completed') = 'completed'
-        AND a.attempted_questions > 0
-        AND ${GENUINE_STUDENT_SQL('s')}
-    `);
-    const qPerfCohorts = await pool.query(`
-      WITH student_acc AS (
-        SELECT
-          s.id,
-          COUNT(a.id) as attempts,
-          COALESCE(AVG(a.percentage), 0) as accuracy
-        FROM students s
-        JOIN mock_test_attempts a ON s.id = a.student_id
+    const [
+      qTextbooks,
+      qDrive,
+      qNotes,
+      qTbStandard,
+      qTbSubject,
+      qRestored,
+      qRegTrends,
+      qTrafficOverview,
+      trafficSourcesRes,
+      qMockPerf,
+      qPerfCohorts,
+      qSubTiers,
+      qRecentActs,
+    ] = await Promise.all([
+      safeQuery(
+        'overview.textbooks',
+        `SELECT
+          COUNT(*)::int as total,
+          COUNT(CASE WHEN status='completed' OR status='published' THEN 1 END)::int as completed,
+          COUNT(CASE WHEN status='processing' OR status='uploaded' THEN 1 END)::int as in_review
+        FROM textbooks`
+      ),
+      safeQuery('overview.drive_materials', `SELECT COUNT(*)::int as total FROM google_drive_materials`),
+      safeQuery(
+        'overview.study_notes',
+        `SELECT
+          COUNT(*)::int as total,
+          COUNT(CASE WHEN status='published' THEN 1 END)::int as published,
+          COUNT(CASE WHEN status='staging' THEN 1 END)::int as staging
+        FROM study_notes`
+      ),
+      safeQuery(
+        'overview.textbooks_by_standard',
+        `SELECT standard::text, COUNT(*)::int as count
+        FROM textbooks
+        WHERE standard IS NOT NULL
+        GROUP BY standard
+        ORDER BY standard`
+      ),
+      safeQuery(
+        'overview.textbooks_by_subject',
+        `SELECT subject, COUNT(*)::int as count
+        FROM textbooks
+        WHERE subject IS NOT NULL
+        GROUP BY subject
+        ORDER BY count DESC
+        LIMIT 8`
+      ),
+      safeQuery(
+        'overview.restored_students',
+        `SELECT
+          (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')}) as restored_total,
+          (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')} AND ${getRangeCondition('sa.created_at', range)}) as restored_in_range,
+          (SELECT COUNT(*)::int FROM student_activity sa JOIN students s ON s.id = sa.student_id WHERE sa.activity_type = 'account_restored' AND ${GENUINE_STUDENT_SQL('s')} AND ${getPrevRangeCondition('sa.created_at', range)}) as prev_restored_in_range,
+          COUNT(CASE WHEN (s.is_active = false OR s.deleted_at IS NOT NULL) AND LOWER(TRIM(COALESCE(s.email, ''))) NOT LIKE '%@example.com' THEN 1 END)::int as deactivated_count
+        FROM students s`
+      ),
+      safeQuery(
+        'overview.reg_trends',
+        `SELECT
+          TO_CHAR(d.day, 'YYYY-MM-DD') as date,
+          TO_CHAR(d.day, 'Mon DD') as label,
+          COUNT(DISTINCT LOWER(TRIM(s.email)))::int as count
+        FROM (
+          SELECT generate_series(
+            ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date - INTERVAL '${trendDays} days')::date,
+            (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date,
+            '1 day'::interval
+          )::date as day
+        ) d
+        LEFT JOIN students s
+          ON (s.created_at AT TIME ZONE 'Asia/Kolkata')::date = d.day
+          AND ${GENUINE_STUDENT_SQL('s')}
+        GROUP BY d.day
+        ORDER BY d.day ASC`
+      ),
+      safeQuery(
+        'overview.traffic_overview',
+        `SELECT
+          (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, ${IST_TODAY_START})) as daily_visitors,
+          (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, CURRENT_TIMESTAMP - INTERVAL '7 days')) as weekly_visitors,
+          (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= GREATEST($1::timestamptz, CURRENT_TIMESTAMP - INTERVAL '30 days')) as monthly_visitors,
+          (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= $1::timestamptz AND is_active = true AND ended_at IS NULL AND last_heartbeat >= CURRENT_TIMESTAMP - INTERVAL '5 minutes') as current_visitors,
+          (SELECT COUNT(DISTINCT visitor_id)::int FROM visitor_sessions WHERE started_at >= $1::timestamptz) as total_visitors`,
+        [liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.traffic_sources',
+        `SELECT
+          COALESCE(CASE
+            WHEN referrer ILIKE '%google%' THEN 'Google Search'
+            WHEN referrer ILIKE '%facebook%' OR referrer ILIKE '%instagram%' OR referrer ILIKE '%twitter%' OR referrer ILIKE '%t.co%' THEN 'Social Media'
+            WHEN referrer IS NULL OR referrer = '' THEN 'Direct Traffic'
+            ELSE 'Referral / Others'
+          END, 'Direct Traffic') as source,
+          COUNT(DISTINCT visitor_id)::int as count
+         FROM visitor_sessions
+         WHERE started_at >= $1::timestamptz
+           AND ${getRangeCondition('started_at', range)}
+         GROUP BY source
+         ORDER BY count DESC`,
+        [liveTrackingActivatedAt]
+      ),
+      safeQuery(
+        'overview.mock_perf',
+        `SELECT
+          COUNT(*)::int as total_mocks,
+          COALESCE(ROUND(AVG(a.percentage), 1), 0) as avg_score,
+          COUNT(CASE WHEN a.percentage >= 50 THEN 1 END)::int as passed_count
+        FROM mock_test_attempts a
+        JOIN students s ON s.id = a.student_id
         WHERE COALESCE(a.status, 'completed') = 'completed'
           AND a.attempted_questions > 0
-          AND ${GENUINE_STUDENT_SQL('s')}
-        GROUP BY s.id
-      )
-      SELECT
-        COUNT(CASE WHEN accuracy >= 75 THEN 1 END)::int as high_performers,
-        COUNT(CASE WHEN accuracy >= 50 AND accuracy < 75 THEN 1 END)::int as avg_performers,
-        COUNT(CASE WHEN accuracy < 50 THEN 1 END)::int as need_support
-      FROM student_acc
-    `);
-    const totalMocks = qMockPerf.rows[0]?.total_mocks || 0;
-    const avgMockScore = parseFloat(qMockPerf.rows[0]?.avg_score || '0');
-    const passedMocks = qMockPerf.rows[0]?.passed_count || 0;
-    const mockPassRate = totalMocks > 0 ? Math.round((passedMocks / totalMocks) * 100) : 0;
-    const highPerfCount = qPerfCohorts.rows[0]?.high_performers || 0;
-    const avgPerfCount = qPerfCohorts.rows[0]?.avg_performers || 0;
-    const supportCount = qPerfCohorts.rows[0]?.need_support || 0;
+          AND ${GENUINE_STUDENT_SQL('s')}`
+      ),
+      safeQuery(
+        'overview.perf_cohorts',
+        `WITH student_acc AS (
+          SELECT
+            s.id,
+            COUNT(a.id) as attempts,
+            COALESCE(AVG(a.percentage), 0) as accuracy
+          FROM students s
+          JOIN mock_test_attempts a ON s.id = a.student_id
+          WHERE COALESCE(a.status, 'completed') = 'completed'
+            AND a.attempted_questions > 0
+            AND ${GENUINE_STUDENT_SQL('s')}
+          GROUP BY s.id
+        )
+        SELECT
+          COUNT(CASE WHEN accuracy >= 75 THEN 1 END)::int as high_performers,
+          COUNT(CASE WHEN accuracy >= 50 AND accuracy < 75 THEN 1 END)::int as avg_performers,
+          COUNT(CASE WHEN accuracy < 50 THEN 1 END)::int as need_support
+        FROM student_acc`
+      ),
+      safeQuery(
+        'overview.sub_tiers',
+        `SELECT
+          COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as total_active,
+          COUNT(CASE WHEN (sub.plan_name ILIKE '%month%' OR sub.plan_id ILIKE '%month%') AND sub.plan_name NOT ILIKE '%half%' AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as monthly,
+          COUNT(CASE WHEN (sub.plan_name ILIKE '%quarter%' OR sub.plan_id ILIKE '%quarter%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as quarterly,
+          COUNT(CASE WHEN (sub.plan_name ILIKE '%half%' OR sub.plan_id ILIKE '%half%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as half_yearly,
+          COUNT(CASE WHEN (sub.plan_name ILIKE '%year%' OR sub.plan_name ILIKE '%annual%' OR sub.plan_id ILIKE '%year%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as yearly,
+          COUNT(CASE WHEN sub.status = 'expired' OR (sub.expires_at IS NOT NULL AND sub.expires_at <= CURRENT_TIMESTAMP) THEN 1 END)::int as expired,
+          COUNT(CASE WHEN ${getRangeCondition('sub.transaction_date', range)} THEN 1 END)::int as new_subscriptions
+        FROM student_subscriptions sub
+        JOIN students s ON s.id = sub.student_id
+        WHERE ${GENUINE_SUB_SQL('sub', 's')}`
+      ),
+      safeQuery(
+        'overview.recent_activity',
+        `SELECT
+          sa.id,
+          sa.student_id,
+          sa.activity_type,
+          sa.reference_title,
+          sa.metadata,
+          sa.created_at,
+          s.full_name as student_name,
+          s.target_group
+        FROM student_activity sa
+        LEFT JOIN students s ON sa.student_id = s.id
+        ORDER BY sa.created_at DESC
+        LIMIT 12`
+      ),
+    ]);
 
-    // 7. Subscription Tier Breakdown & Donut Distribution (genuine student subscriptions only)
-    const qSubTiers = await pool.query(`
-      SELECT
-        COUNT(CASE WHEN sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as total_active,
-        COUNT(CASE WHEN (sub.plan_name ILIKE '%month%' OR sub.plan_id ILIKE '%month%') AND sub.plan_name NOT ILIKE '%half%' AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as monthly,
-        COUNT(CASE WHEN (sub.plan_name ILIKE '%quarter%' OR sub.plan_id ILIKE '%quarter%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as quarterly,
-        COUNT(CASE WHEN (sub.plan_name ILIKE '%half%' OR sub.plan_id ILIKE '%half%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as half_yearly,
-        COUNT(CASE WHEN (sub.plan_name ILIKE '%year%' OR sub.plan_name ILIKE '%annual%' OR sub.plan_id ILIKE '%year%') AND sub.status = 'active' AND (sub.expires_at IS NULL OR sub.expires_at > CURRENT_TIMESTAMP) THEN 1 END)::int as yearly,
-        COUNT(CASE WHEN sub.status = 'expired' OR (sub.expires_at IS NOT NULL AND sub.expires_at <= CURRENT_TIMESTAMP) THEN 1 END)::int as expired,
-        COUNT(CASE WHEN ${getRangeCondition('sub.transaction_date', range)} THEN 1 END)::int as new_subscriptions
-      FROM student_subscriptions sub
-      JOIN students s ON s.id = sub.student_id
-      WHERE ${GENUINE_SUB_SQL('sub', 's')}
-    `);
+    const realVisitorSparkline = qVisitorSparkline.rows.map((r) => Number(r.visitors || 0));
+
+    const totalStudents = toInt(qStudents.rows[0]?.total);
+    const activeStudentsToday = toInt(qActiveToday.rows[0]?.active_today);
+    const activeStudentsYesterday = toInt(qActiveToday.rows[0]?.active_yesterday);
+    const newRegistrations = toInt(qStudents.rows[0]?.new_in_range);
+    const totalVisitors = toInt(qTraffic.rows[0]?.total_visitors);
+    const uniqueVisitors = toInt(qTraffic.rows[0]?.unique_visitors);
+    const totalPageViews = toInt(qPageViews.rows[0]?.total_page_views);
+    const totalLogins = toInt(qLogins.rows[0]?.total_logins);
+    const prevLogins = toInt(qLogins.rows[0]?.prev_logins);
+    const paidSubscribers = toInt(qStudents.rows[0]?.paid_subscribers);
+    const freeStudents = toInt(qStudents.rows[0]?.free_students);
+    const revenue = toFloat(qRevenue.rows[0]?.total_revenue);
+    const totalMcq = toInt(qMcq.rows[0]?.total_attempts);
+    const avgAccuracy = toFloat(qMcq.rows[0]?.avg_accuracy);
+
+    const prevVisitors = toInt(qPrevTraffic.rows[0]?.total_visitors);
+    const prevUnique = toInt(qPrevTraffic.rows[0]?.unique_visitors);
+    const prevPageViews = toInt(qPrevPageViews.rows[0]?.total_page_views);
+    const prevRevenue = toFloat(qPrevRevenue.rows[0]?.total_revenue);
+    const prevMcq = toInt(qPrevMcq.rows[0]?.total_attempts);
+    const prevAccuracy = toFloat(qPrevMcq.rows[0]?.avg_accuracy);
+
+    const curTotalStudents = totalStudents;
+    const prevTotalStudents = isAllTime ? 0 : toInt(qStudents.rows[0]?.prev_total);
+    const curActiveInRange = Math.max(activeStudentsToday, toInt(qPeriodActive.rows[0]?.active_cur));
+    const prevActiveInRange = toInt(qPeriodActive.rows[0]?.active_prev);
+    const curActiveSubs = toInt(qPeriodSubs.rows[0]?.active_subs);
+    const prevActiveSubs = isAllTime ? 0 : toInt(qPeriodSubs.rows[0]?.prev_active_subs);
+
+    const totalQuestions = toInt(qQuestions.rows[0]?.total);
+    const publishedQuestions = toInt(qQuestions.rows[0]?.published);
+    const stagingQuestions = toInt(qQuestions.rows[0]?.staging);
+    const newQuestionsInRange = toInt(qQuestions.rows[0]?.new_in_range);
+    const prevNewQuestionsInRange = toInt(qQuestions.rows[0]?.prev_new_in_range);
+
+    const restoredTotal = toInt(qRestored.rows[0]?.restored_total);
+    const restored7d = toInt(qRestored.rows[0]?.restored_in_range);
+    const prevRestored7d = toInt(qRestored.rows[0]?.prev_restored_in_range);
+    const deactivatedCount = toInt(qRestored.rows[0]?.deactivated_count);
+
+    const totalSourceCount = trafficSourcesRes.rows.reduce((acc, r) => acc + toInt(r.count), 0);
+    const trafficSources = trafficSourcesRes.rows.map((r) => ({
+      source: r.source,
+      count: toInt(r.count),
+      percentage: totalSourceCount > 0 ? Math.round((toInt(r.count) / totalSourceCount) * 100) : 0,
+    }));
+
+    const totalMocks = toInt(qMockPerf.rows[0]?.total_mocks);
+    const avgMockScore = toFloat(qMockPerf.rows[0]?.avg_score);
+    const passedMocks = toInt(qMockPerf.rows[0]?.passed_count);
+    const mockPassRate = totalMocks > 0 ? Math.round((passedMocks / totalMocks) * 100) : 0;
+    const highPerfCount = toInt(qPerfCohorts.rows[0]?.high_performers);
+    const avgPerfCount = toInt(qPerfCohorts.rows[0]?.avg_performers);
+    const supportCount = toInt(qPerfCohorts.rows[0]?.need_support);
+
     const subRow = qSubTiers.rows[0] || {};
-    const subActive = subRow.total_active || 0;
-    const subMonthly = subRow.monthly || 0;
-    const subQuarterly = subRow.quarterly || 0;
-    const subHalfYearly = subRow.half_yearly || 0;
-    const subYearly = subRow.yearly || 0;
-    const subExpired = subRow.expired || 0;
-    const subNew = subRow.new_subscriptions || 0;
+    const subActive = toInt(subRow.total_active);
+    const subMonthly = toInt(subRow.monthly);
+    const subQuarterly = toInt(subRow.quarterly);
+    const subHalfYearly = toInt(subRow.half_yearly);
+    const subYearly = toInt(subRow.yearly);
+    const subExpired = toInt(subRow.expired);
+    const subNew = toInt(subRow.new_subscriptions);
 
     const donutDistribution = [
       { name: 'Monthly Pass', count: subMonthly, percentage: subActive > 0 ? Math.round((subMonthly / subActive) * 100) : 0, color: '#3b82f6' },
@@ -1032,23 +1167,6 @@ export class AnalyticsService {
       { name: 'Yearly Pass', count: subYearly, percentage: subActive > 0 ? Math.round((subYearly / subActive) * 100) : 0, color: '#10b981' },
       { name: 'Expired', count: subExpired, percentage: (subActive + subExpired) > 0 ? Math.round((subExpired / (subActive + subExpired)) * 100) : 0, color: '#64748b' },
     ];
-
-    // 8. Recent Platform Activity
-    const qRecentActs = await pool.query(`
-      SELECT
-        sa.id,
-        sa.student_id,
-        sa.activity_type,
-        sa.reference_title,
-        sa.metadata,
-        sa.created_at,
-        s.full_name as student_name,
-        s.target_group
-      FROM student_activity sa
-      LEFT JOIN students s ON sa.student_id = s.id
-      ORDER BY sa.created_at DESC
-      LIMIT 12
-    `);
 
     const mockAgg = qMockAttemptsAgg.rows[0] || {};
     const mockAllTimeAttempts = parseInt(mockAgg.all_time_attempts || '0', 10);
@@ -1740,113 +1858,110 @@ export class AnalyticsService {
   static async getLiveMonitor() {
     const liveThreshold = "CURRENT_TIMESTAMP - INTERVAL '5 minutes'";
 
-    const qLiveVisitors = await pool.query(
-      `SELECT
-        COUNT(DISTINCT session_id)::int as active_sessions,
-        COUNT(DISTINCT visitor_id)::int as active_visitors,
-        COUNT(DISTINCT CASE WHEN student_id IS NOT NULL THEN student_id END)::int as active_students,
-        COUNT(DISTINCT CASE WHEN student_id IS NULL THEN visitor_id END)::int as anonymous_visitors,
-        COUNT(DISTINCT CASE WHEN device_category = 'desktop' THEN session_id END)::int as desktop_count,
-        COUNT(DISTINCT CASE WHEN device_category = 'mobile' THEN session_id END)::int as mobile_count,
-        COUNT(DISTINCT CASE WHEN device_category = 'tablet' THEN session_id END)::int as tablet_count
-       FROM visitor_sessions
-       WHERE is_active = true
-         AND last_heartbeat >= ${liveThreshold}`
-    );
+    const [qLiveVisitors, streamRes, recentEventsRes, qToday, topPagesRes, sourcesRes, trendsRes] = await Promise.all([
+      safeQuery(
+        'live.visitors',
+        `SELECT
+          COUNT(DISTINCT session_id)::int as active_sessions,
+          COUNT(DISTINCT visitor_id)::int as active_visitors,
+          COUNT(DISTINCT CASE WHEN student_id IS NOT NULL THEN student_id END)::int as active_students,
+          COUNT(DISTINCT CASE WHEN student_id IS NULL THEN visitor_id END)::int as anonymous_visitors,
+          COUNT(DISTINCT CASE WHEN device_category = 'desktop' THEN session_id END)::int as desktop_count,
+          COUNT(DISTINCT CASE WHEN device_category = 'mobile' THEN session_id END)::int as mobile_count,
+          COUNT(DISTINCT CASE WHEN device_category = 'tablet' THEN session_id END)::int as tablet_count
+         FROM visitor_sessions
+         WHERE is_active = true
+           AND last_heartbeat >= ${liveThreshold}`
+      ),
+      safeQuery(
+        'live.stream',
+        `SELECT
+          pv.id,
+          pv.session_id,
+          pv.page_path,
+          pv.page_title,
+          pv.district,
+          pv.city,
+          pv.device_category,
+          pv.viewed_at,
+          vs.is_returning,
+          vs.browser,
+          s.full_name as student_name
+         FROM page_views pv
+         LEFT JOIN visitor_sessions vs ON pv.session_id = vs.session_id
+         LEFT JOIN students s ON pv.student_id = s.id
+         ORDER BY pv.viewed_at DESC
+         LIMIT 25`
+      ),
+      safeQuery(
+        'live.recent_events',
+        `SELECT
+          sa.id,
+          sa.activity_type as event_type,
+          sa.reference_title as title,
+          sa.created_at as timestamp,
+          s.full_name as student_name,
+          s.district as district
+         FROM student_activity sa
+         LEFT JOIN students s ON sa.student_id = s.id
+         ORDER BY sa.created_at DESC
+         LIMIT 20`
+      ),
+      safeQuery(
+        'live.today',
+        `SELECT
+          (SELECT COUNT(*)::int FROM page_views WHERE viewed_at >= ${IST_TODAY_START}) as page_views_today,
+          (SELECT COUNT(*)::int FROM visitor_sessions WHERE started_at >= ${IST_TODAY_START}) as sessions_today`
+      ),
+      safeQuery(
+        'live.top_pages',
+        `SELECT
+          page_path,
+          COUNT(*)::int as views,
+          COUNT(DISTINCT visitor_id)::int as visitors
+         FROM page_views
+         WHERE viewed_at >= ${IST_TODAY_START}
+         GROUP BY page_path
+         ORDER BY views DESC
+         LIMIT 5`
+      ),
+      safeQuery(
+        'live.sources',
+        `SELECT
+          COALESCE(CASE
+            WHEN referrer ILIKE '%google%' THEN 'Google Search'
+            WHEN referrer ILIKE '%facebook%' OR referrer ILIKE '%instagram%' OR referrer ILIKE '%twitter%' OR referrer ILIKE '%t.co%' THEN 'Social Media'
+            WHEN referrer IS NULL OR referrer = '' THEN 'Direct Traffic'
+            ELSE 'Referral / Others'
+          END, 'Direct Traffic') as source,
+          COUNT(*)::int as count
+         FROM visitor_sessions
+         WHERE started_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+         GROUP BY source
+         ORDER BY count DESC`
+      ),
+      safeQuery(
+        'live.trends',
+        `SELECT
+          TO_CHAR(DATE_TRUNC('hour', viewed_at AT TIME ZONE 'Asia/Kolkata'), 'HH24:00') as time,
+          COUNT(*)::int as page_views,
+          COUNT(DISTINCT visitor_id)::int as visitors
+         FROM page_views
+         WHERE viewed_at >= ${IST_TODAY_START}
+         GROUP BY DATE_TRUNC('hour', viewed_at AT TIME ZONE 'Asia/Kolkata')
+         ORDER BY time ASC`
+      ),
+    ]);
 
-    const activeVisitors = parseInt(qLiveVisitors.rows[0].active_visitors, 10);
-    const activeSessions = parseInt(qLiveVisitors.rows[0].active_sessions, 10);
-    const activeStudents = parseInt(qLiveVisitors.rows[0].active_students, 10);
-    const anonymousVisitors = parseInt(qLiveVisitors.rows[0].anonymous_visitors, 10);
-    const desktopCount = parseInt(qLiveVisitors.rows[0].desktop_count, 10);
-    const mobileCount = parseInt(qLiveVisitors.rows[0].mobile_count, 10);
-    const tabletCount = parseInt(qLiveVisitors.rows[0].tablet_count, 10);
-
-    // Live page view stream (recent 25 real page views, no fake default districts)
-    const streamRes = await pool.query(
-      `SELECT
-        pv.id,
-        pv.session_id,
-        pv.page_path,
-        pv.page_title,
-        pv.district,
-        pv.city,
-        pv.device_category,
-        pv.viewed_at,
-        vs.is_returning,
-        vs.browser,
-        s.full_name as student_name
-       FROM page_views pv
-       LEFT JOIN visitor_sessions vs ON pv.session_id = vs.session_id
-       LEFT JOIN students s ON pv.student_id = s.id
-       ORDER BY pv.viewed_at DESC
-       LIMIT 25`
-    );
-
-    // Real-time platform activity feed (logins, registrations, assessments, subscriptions)
-    const recentEventsRes = await pool.query(
-      `SELECT
-        sa.id,
-        sa.activity_type as event_type,
-        sa.reference_title as title,
-        sa.created_at as timestamp,
-        s.full_name as student_name,
-        s.district as district
-       FROM student_activity sa
-       LEFT JOIN students s ON sa.student_id = s.id
-       ORDER BY sa.created_at DESC
-       LIMIT 20`
-    );
-
-    // Today's traffic metrics (Asia/Kolkata)
-    const qToday = await pool.query(
-      `SELECT
-        (SELECT COUNT(*)::int FROM page_views WHERE viewed_at >= ${IST_TODAY_START}) as page_views_today,
-        (SELECT COUNT(*)::int FROM visitor_sessions WHERE started_at >= ${IST_TODAY_START}) as sessions_today`
-    );
-    const pageViewsToday = qToday.rows[0]?.page_views_today || 0;
-    const sessionsToday = qToday.rows[0]?.sessions_today || 0;
-
-    // Top visited pages today (IST)
-    const topPagesRes = await pool.query(
-      `SELECT
-        page_path,
-        COUNT(*)::int as views,
-        COUNT(DISTINCT visitor_id)::int as visitors
-       FROM page_views
-       WHERE viewed_at >= ${IST_TODAY_START}
-       GROUP BY page_path
-       ORDER BY views DESC
-       LIMIT 5`
-    );
-
-    // Traffic sources (last 7 days)
-    const sourcesRes = await pool.query(
-      `SELECT
-        COALESCE(CASE
-          WHEN referrer ILIKE '%google%' THEN 'Google Search'
-          WHEN referrer ILIKE '%facebook%' OR referrer ILIKE '%instagram%' OR referrer ILIKE '%twitter%' OR referrer ILIKE '%t.co%' THEN 'Social Media'
-          WHEN referrer IS NULL OR referrer = '' THEN 'Direct Traffic'
-          ELSE 'Referral / Others'
-        END, 'Direct Traffic') as source,
-        COUNT(*)::int as count
-       FROM visitor_sessions
-       WHERE started_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
-       GROUP BY source
-       ORDER BY count DESC`
-    );
-
-    // Hourly visitor trends today (IST)
-    const trendsRes = await pool.query(
-      `SELECT
-        TO_CHAR(DATE_TRUNC('hour', viewed_at AT TIME ZONE 'Asia/Kolkata'), 'HH24:00') as time,
-        COUNT(*)::int as page_views,
-        COUNT(DISTINCT visitor_id)::int as visitors
-       FROM page_views
-       WHERE viewed_at >= ${IST_TODAY_START}
-       GROUP BY DATE_TRUNC('hour', viewed_at AT TIME ZONE 'Asia/Kolkata')
-       ORDER BY time ASC`
-    );
+    const activeVisitors = toInt(qLiveVisitors.rows[0]?.active_visitors);
+    const activeSessions = toInt(qLiveVisitors.rows[0]?.active_sessions);
+    const activeStudents = toInt(qLiveVisitors.rows[0]?.active_students);
+    const anonymousVisitors = toInt(qLiveVisitors.rows[0]?.anonymous_visitors);
+    const desktopCount = toInt(qLiveVisitors.rows[0]?.desktop_count);
+    const mobileCount = toInt(qLiveVisitors.rows[0]?.mobile_count);
+    const tabletCount = toInt(qLiveVisitors.rows[0]?.tablet_count);
+    const pageViewsToday = toInt(qToday.rows[0]?.page_views_today);
+    const sessionsToday = toInt(qToday.rows[0]?.sessions_today);
 
     return {
       activeVisitors,
@@ -2270,67 +2385,70 @@ export class AnalyticsService {
   static async getPerformance(range: string = '30d', districtFilter?: string) {
     const distParam = districtFilter && districtFilter !== 'all' ? districtFilter : null;
 
-    const subjRes = await pool.query(
-      `SELECT
-        qa.subject,
-        COUNT(*)::int as total_attempts,
-        COUNT(CASE WHEN qa.is_correct THEN 1 END)::int as correct_count,
-        COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as accuracy
-       FROM question_attempts qa
-       JOIN students s ON qa.student_id = s.id
-       WHERE ${getRangeCondition('qa.attempted_at', range)}
-         AND qa.subject IS NOT NULL
-         AND ($1::text IS NULL OR s.district = $1)
-       GROUP BY qa.subject
-       ORDER BY total_attempts DESC`,
-      [distParam]
-    );
-
-    const mockRes = await pool.query(
-      `SELECT
-        COUNT(*)::int as total_mock_tests,
-        COALESCE(ROUND(AVG(percentage), 1), 0) as avg_percentage,
-        COUNT(CASE WHEN percentage >= 50 THEN 1 END)::int as passed_count
-       FROM mock_test_attempts mta
-       JOIN students s ON mta.student_id = s.id
-       WHERE COALESCE(mta.status, 'completed') = 'completed'
-         AND mta.attempted_questions > 0
-         AND ${getRangeCondition('mta.completed_at', range)}
-         AND ($1::text IS NULL OR s.district = $1)`,
-      [distParam]
-    );
-
-    const perfRes = await pool.query(
-      `WITH student_acc AS (
+    const [subjRes, mockRes, perfRes] = await Promise.all([
+      safeQuery(
+        'performance.subjects',
+        `SELECT
+          qa.subject,
+          COUNT(*)::int as total_attempts,
+          COUNT(CASE WHEN qa.is_correct THEN 1 END)::int as correct_count,
+          COALESCE(ROUND(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 1), 0) as accuracy
+         FROM question_attempts qa
+         JOIN students s ON qa.student_id = s.id
+         WHERE ${getRangeCondition('qa.attempted_at', range)}
+           AND qa.subject IS NOT NULL
+           AND ($1::text IS NULL OR s.district = $1)
+         GROUP BY qa.subject
+         ORDER BY total_attempts DESC`,
+        [distParam]
+      ),
+      safeQuery(
+        'performance.mock_tests',
+        `SELECT
+          COUNT(*)::int as total_mock_tests,
+          COALESCE(ROUND(AVG(percentage), 1), 0) as avg_percentage,
+          COUNT(CASE WHEN percentage >= 50 THEN 1 END)::int as passed_count
+         FROM mock_test_attempts mta
+         JOIN students s ON mta.student_id = s.id
+         WHERE COALESCE(mta.status, 'completed') = 'completed'
+           AND mta.attempted_questions > 0
+           AND ${getRangeCondition('mta.completed_at', range)}
+           AND ($1::text IS NULL OR s.district = $1)`,
+        [distParam]
+      ),
+      safeQuery(
+        'performance.cohorts',
+        `WITH student_acc AS (
+          SELECT
+            s.id,
+            COUNT(qa.id) as attempts,
+            COALESCE(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 0) as accuracy
+          FROM students s
+          JOIN question_attempts qa ON s.id = qa.student_id
+          WHERE ${getRangeCondition('qa.attempted_at', range)}
+            AND ($1::text IS NULL OR s.district = $1)
+          GROUP BY s.id
+        )
         SELECT
-          s.id,
-          COUNT(qa.id) as attempts,
-          COALESCE(AVG(CASE WHEN qa.is_correct THEN 100.0 ELSE 0.0 END), 0) as accuracy
-        FROM students s
-        JOIN question_attempts qa ON s.id = qa.student_id
-        WHERE ${getRangeCondition('qa.attempted_at', range)}
-          AND ($1::text IS NULL OR s.district = $1)
-        GROUP BY s.id
-      )
-      SELECT
-        COUNT(CASE WHEN accuracy >= 75 THEN 1 END)::int as high_performers,
-        COUNT(CASE WHEN accuracy >= 50 AND accuracy < 75 THEN 1 END)::int as avg_performers,
-        COUNT(CASE WHEN accuracy < 50 THEN 1 END)::int as need_support,
-        COALESCE(ROUND(AVG(accuracy), 1), 0) as overall_accuracy,
-        COALESCE(SUM(attempts), 0)::int as total_attempts
-      FROM student_acc`,
-      [distParam]
-    );
+          COUNT(CASE WHEN accuracy >= 75 THEN 1 END)::int as high_performers,
+          COUNT(CASE WHEN accuracy >= 50 AND accuracy < 75 THEN 1 END)::int as avg_performers,
+          COUNT(CASE WHEN accuracy < 50 THEN 1 END)::int as need_support,
+          COALESCE(ROUND(AVG(accuracy), 1), 0) as overall_accuracy,
+          COALESCE(SUM(attempts), 0)::int as total_attempts
+        FROM student_acc`,
+        [distParam]
+      ),
+    ]);
 
     const perfRow = perfRes.rows[0] || {};
-    const highPerformers = perfRow.high_performers || 0;
-    const avgPerformers = perfRow.avg_performers || 0;
-    const needSupport = perfRow.need_support || 0;
-    const overallAccuracy = parseFloat(perfRow.overall_accuracy || '0');
-    const totalMcqAttempts = perfRow.total_attempts || 0;
-    const totalMockTests = parseInt(mockRes.rows[0].total_mock_tests, 10);
-    const avgMockScore = parseFloat(mockRes.rows[0].avg_percentage);
-    const passedMockTests = parseInt(mockRes.rows[0].passed_count, 10);
+    const highPerformers = toInt(perfRow.high_performers);
+    const avgPerformers = toInt(perfRow.avg_performers);
+    const needSupport = toInt(perfRow.need_support);
+    const overallAccuracy = toFloat(perfRow.overall_accuracy);
+    const totalMcqAttempts = toInt(perfRow.total_attempts);
+    const totalMockTests = toInt(mockRes.rows[0]?.total_mock_tests);
+    const avgMockScore = toFloat(mockRes.rows[0]?.avg_percentage);
+    const passedMockTests = toInt(mockRes.rows[0]?.passed_count);
 
     return {
       subjects: subjRes.rows.map((r) => ({

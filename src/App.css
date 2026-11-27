@@ -108,6 +108,12 @@
   }
 }
 
+/* Remove reserved global navbar offset on all non-Home routes */
+.main-content.no-global-header {
+  padding-top: 0;
+  margin-top: 0;
+}
+
 /* =========================================================
    Glass Footer
    ========================================================= */
@@ -286,9 +292,9 @@
 }
 
 .main-content.admin-main-mode {
-  margin-top: var(--navbar-height, 56px);
-  height: calc(100dvh - var(--navbar-height, 56px));
-  max-height: calc(100dvh - var(--navbar-height, 56px));
+  margin-top: 0;
+  height: 100dvh;
+  max-height: 100dvh;
   min-height: 0;
   padding-top: 0;
   flex: 1;
@@ -319,4 +325,12 @@
   flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+/* When global navbar is not rendered (Admin / Owner Login / Mobile non-Home routes), reclaim full viewport height */
+.main-content.no-global-header.student-dashboard-main-mode {
+  margin-top: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding-top: 0;
 }

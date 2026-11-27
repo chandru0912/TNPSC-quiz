@@ -96,9 +96,28 @@ function mapRow(r: any): DriveTextbookRow & { deletedAt: string | null; deletedB
   };
 }
 
+export interface FacetOption {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface DriveTextbookFacets {
+  standards: FacetOption[];
+  termsOrVolumes: FacetOption[];
+  mediums: FacetOption[];
+  subjects: FacetOption[];
+  statuses: FacetOption[];
+  /** @deprecated Kept for backwards compatibility with older clients */
+  subjectNames: string[];
+  /** @deprecated Kept for backwards compatibility with older clients */
+  termVolumeNames: string[];
+}
+
 function buildFilterWhere(
   filters: DriveTextbookFilters | undefined,
-  startIdx = 1
+  startIdx = 1,
+  excludeField?: 'standard' | 'termOrVolume' | 'medium' | 'subject' | 'publicationStatus'
 ): { clauses: string[]; params: any[]; nextIdx: number } {
   const clauses: string[] = ['google_drive_file_id IS NOT NULL'];
   const params: any[] = [];
@@ -110,39 +129,63 @@ function buildFilterWhere(
     clauses.push('deleted_at IS NULL');
   }
 
-  if (filters?.standard && filters.standard !== 'all') {
-    clauses.push(`standard = $${idx++}`);
-    params.push(Number(filters.standard));
+  if (excludeField !== 'standard' && filters?.standard && filters.standard !== 'all') {
+    const parsedStd = Number(String(filters.standard).replace(/[^0-9]/g, ''));
+    if (Number.isInteger(parsedStd) && parsedStd >= 6 && parsedStd <= 12) {
+      clauses.push(`standard = $${idx++}`);
+      params.push(parsedStd);
+    }
   }
-  if (filters?.medium && filters.medium !== 'all') {
-    clauses.push(`LOWER(medium) = LOWER($${idx++})`);
-    params.push(filters.medium);
+  if (excludeField !== 'medium' && filters?.medium && filters.medium !== 'all') {
+    const cleanMed = filters.medium.trim();
+    if (cleanMed) {
+      clauses.push(`LOWER(TRIM(COALESCE(medium, ''))) = LOWER($${idx++})`);
+      params.push(cleanMed);
+    }
   }
-  if (filters?.subject && filters.subject !== 'all') {
-    clauses.push(`LOWER(subject) = LOWER($${idx++})`);
-    params.push(filters.subject);
+  if (excludeField !== 'subject' && filters?.subject && filters.subject !== 'all') {
+    const cleanSub = filters.subject.trim();
+    if (cleanSub) {
+      clauses.push(`LOWER(TRIM(COALESCE(subject, ''))) = LOWER($${idx++})`);
+      params.push(cleanSub);
+    }
   }
-  if (filters?.termOrVolume && filters.termOrVolume !== 'all') {
-    clauses.push(
-      `(LOWER(COALESCE(term, '')) = LOWER($${idx}) OR LOWER(COALESCE(volume, '')) = LOWER($${idx}))`
-    );
-    params.push(filters.termOrVolume);
-    idx += 1;
+  if (excludeField !== 'termOrVolume' && filters?.termOrVolume && filters.termOrVolume !== 'all') {
+    const cleanTv = filters.termOrVolume.trim();
+    if (cleanTv) {
+      clauses.push(
+        `(LOWER(TRIM(COALESCE(term, ''))) = LOWER($${idx}) OR LOWER(TRIM(COALESCE(volume, ''))) = LOWER($${idx}))`
+      );
+      params.push(cleanTv);
+      idx += 1;
+    }
   }
-  if (filters?.publicationStatus && filters.publicationStatus !== 'all') {
-    const st = filters.publicationStatus.toUpperCase();
+  if (excludeField !== 'publicationStatus' && filters?.publicationStatus && filters.publicationStatus !== 'all') {
+    const st = filters.publicationStatus.trim().toUpperCase();
     if (st === 'UNAVAILABLE') {
       clauses.push(`(drive_available = false OR UPPER(COALESCE(publication_status, '')) = 'UNAVAILABLE')`);
     } else if (st === 'FAILED_SYNC') {
       clauses.push(`UPPER(COALESCE(review_status, '')) = 'NEEDS_REVIEW'`);
-    } else {
+    } else if (st === 'APPROVED') {
+      clauses.push(`UPPER(COALESCE(review_status, '')) = 'APPROVED'`);
+    } else if (st) {
       clauses.push(`UPPER(COALESCE(publication_status, 'PENDING_REVIEW')) = UPPER($${idx++})`);
       params.push(st);
     }
   }
   if (filters?.search && filters.search.trim()) {
     clauses.push(
-      `(book_name ILIKE $${idx} OR file_name ILIKE $${idx} OR subject ILIKE $${idx} OR google_drive_file_id ILIKE $${idx} OR COALESCE(drive_folder_path, '') ILIKE $${idx})`
+      `(
+        book_name ILIKE $${idx}
+        OR COALESCE(file_name, '') ILIKE $${idx}
+        OR COALESCE(subject, '') ILIKE $${idx}
+        OR COALESCE(medium, '') ILIKE $${idx}
+        OR COALESCE(term, '') ILIKE $${idx}
+        OR COALESCE(volume, '') ILIKE $${idx}
+        OR (CAST(standard AS TEXT) || 'th Standard') ILIKE $${idx}
+        OR COALESCE(google_drive_file_id, '') ILIKE $${idx}
+        OR COALESCE(drive_folder_path, '') ILIKE $${idx}
+      )`
     );
     params.push(`%${filters.search.trim()}%`);
     idx += 1;
@@ -230,6 +273,154 @@ export async function getDriveTextbookCounts(): Promise<DriveTextbookCounts> {
   };
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  PENDING_REVIEW: 'Pending Review',
+  APPROVED: 'Approved',
+  PUBLISHED: 'Published',
+  UNPUBLISHED: 'Unpublished',
+  REJECTED: 'Rejected',
+  UNAVAILABLE: 'Unavailable',
+  FAILED_SYNC: 'Needs Review / Failed Sync',
+};
+
+const TERM_VOLUME_ORDER: Record<string, number> = {
+  'term 1': 1,
+  'term 2': 2,
+  'term 3': 3,
+  'volume 1': 4,
+  'volume 2': 5,
+  'volume 3': 6,
+  'full year': 7,
+  'full book': 8,
+};
+
+async function computeCascadingFacets(filters?: DriveTextbookFilters): Promise<DriveTextbookFacets> {
+  const stdW = buildFilterWhere(filters, 1, 'standard');
+  const tvW = buildFilterWhere(filters, 1, 'termOrVolume');
+  const medW = buildFilterWhere(filters, 1, 'medium');
+  const subW = buildFilterWhere(filters, 1, 'subject');
+  const stW = buildFilterWhere(filters, 1, 'publicationStatus');
+
+  const [stdRes, tvRes, medRes, subRes, stRes] = await Promise.all([
+    pool.query(
+      `SELECT standard AS val, COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${stdW.clauses.join(' AND ')} AND standard IS NOT NULL
+       GROUP BY standard
+       ORDER BY standard ASC`,
+      stdW.params
+    ),
+    pool.query(
+      `SELECT val, COUNT(*)::int AS cnt
+       FROM (
+         SELECT NULLIF(TRIM(COALESCE(NULLIF(TRIM(volume), ''), NULLIF(TRIM(term), ''))), '') AS val
+         FROM textbooks
+         WHERE ${tvW.clauses.join(' AND ')}
+       ) t
+       WHERE val IS NOT NULL
+       GROUP BY val
+       ORDER BY val ASC`,
+      tvW.params
+    ),
+    pool.query(
+      `SELECT
+         CASE WHEN LOWER(TRIM(COALESCE(medium, ''))) LIKE '%tamil%' THEN 'Tamil' ELSE 'English' END AS val,
+         COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${medW.clauses.join(' AND ')}
+       GROUP BY 1
+       ORDER BY 1 ASC`,
+      medW.params
+    ),
+    pool.query(
+      `SELECT TRIM(subject) AS val, COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${subW.clauses.join(' AND ')} AND subject IS NOT NULL AND TRIM(subject) <> ''
+       GROUP BY TRIM(subject)
+       ORDER BY TRIM(subject) ASC`,
+      subW.params
+    ),
+    pool.query(
+      `SELECT
+         CASE
+           WHEN drive_available = false OR UPPER(COALESCE(publication_status, '')) = 'UNAVAILABLE' THEN 'UNAVAILABLE'
+           ELSE UPPER(COALESCE(publication_status, 'PENDING_REVIEW'))
+         END AS val,
+         COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${stW.clauses.join(' AND ')}
+       GROUP BY 1
+       ORDER BY 1 ASC`,
+      stW.params
+    ),
+  ]);
+
+  const standards: FacetOption[] = stdRes.rows
+    .map((r) => ({
+      value: String(r.val),
+      label: `${r.val}th Standard`,
+      count: Number(r.cnt || 0),
+    }))
+    .filter((o) => o.count > 0);
+
+  const termsOrVolumes: FacetOption[] = tvRes.rows
+    .map((r) => ({
+      value: String(r.val),
+      label: String(r.val),
+      count: Number(r.cnt || 0),
+    }))
+    .filter((o) => o.count > 0)
+    .sort((a, b) => {
+      const oa = TERM_VOLUME_ORDER[a.value.toLowerCase()] ?? 99;
+      const ob = TERM_VOLUME_ORDER[b.value.toLowerCase()] ?? 99;
+      return oa !== ob ? oa - ob : a.label.localeCompare(b.label);
+    });
+
+  const mediums: FacetOption[] = medRes.rows
+    .map((r) => ({
+      value: String(r.val),
+      label: r.val === 'Tamil' ? 'Tamil Medium' : 'English Medium',
+      count: Number(r.cnt || 0),
+    }))
+    .filter((o) => o.count > 0)
+    .sort((a, b) => (a.value === 'Tamil' ? -1 : b.value === 'Tamil' ? 1 : a.label.localeCompare(b.label)));
+
+  const subjects: FacetOption[] = subRes.rows
+    .map((r) => ({
+      value: String(r.val),
+      label: String(r.val),
+      count: Number(r.cnt || 0),
+    }))
+    .filter((o) => o.count > 0);
+
+  const statusOrder = ['PENDING_REVIEW', 'APPROVED', 'PUBLISHED', 'UNPUBLISHED', 'REJECTED', 'UNAVAILABLE'];
+  const statuses: FacetOption[] = stRes.rows
+    .map((r) => {
+      const val = String(r.val || 'PENDING_REVIEW').toUpperCase();
+      return {
+        value: val,
+        label: STATUS_LABELS[val] || val.replace(/_/g, ' '),
+        count: Number(r.cnt || 0),
+      };
+    })
+    .filter((o) => o.count > 0)
+    .sort((a, b) => {
+      const ia = statusOrder.indexOf(a.value);
+      const ib = statusOrder.indexOf(b.value);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+
+  return {
+    standards,
+    termsOrVolumes,
+    mediums,
+    subjects,
+    statuses,
+    subjectNames: subjects.map((s) => s.value),
+    termVolumeNames: termsOrVolumes.map((t) => t.value),
+  };
+}
+
 export async function queryDriveTextbooksPaginated(params: {
   filters?: DriveTextbookFilters;
   page?: number;
@@ -259,7 +450,7 @@ export async function queryDriveTextbooksPaginated(params: {
   const { clauses, params: whereParams, nextIdx } = buildFilterWhere(params.filters, 1);
   const whereSql = clauses.join(' AND ');
 
-  const [countRes, rowsRes, facetsRes, liveCounts] = await Promise.all([
+  const [countRes, rowsRes, cascadingFacets, liveCounts] = await Promise.all([
     pool.query(`SELECT COUNT(*)::int AS total FROM textbooks WHERE ${whereSql}`, whereParams),
     pool.query(
       `SELECT * FROM textbooks
@@ -268,13 +459,7 @@ export async function queryDriveTextbooksPaginated(params: {
        LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
       [...whereParams, pageSize, offset]
     ),
-    pool.query(`
-      SELECT
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT subject ORDER BY subject), NULL) AS subjects,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(volume, term) ORDER BY COALESCE(volume, term)), NULL) AS terms
-      FROM textbooks
-      WHERE google_drive_file_id IS NOT NULL AND deleted_at IS NULL
-    `),
+    computeCascadingFacets(params.filters),
     getDriveTextbookCounts(),
   ]);
 
@@ -290,8 +475,11 @@ export async function queryDriveTextbooksPaginated(params: {
       totalPages,
     },
     facets: {
-      subjects: (facetsRes.rows[0]?.subjects || []) as string[],
-      termsOrVolumes: (facetsRes.rows[0]?.terms || []) as string[],
+      standards: cascadingFacets.standards,
+      termsOrVolumes: cascadingFacets.termsOrVolumes,
+      mediums: cascadingFacets.mediums,
+      subjects: cascadingFacets.subjects,
+      statuses: cascadingFacets.statuses,
     },
     counts: liveCounts,
   };

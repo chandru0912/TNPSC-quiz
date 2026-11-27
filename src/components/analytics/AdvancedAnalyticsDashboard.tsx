@@ -140,6 +140,11 @@ export const AdvancedAnalyticsDashboard: React.FC<AdvancedAnalyticsDashboardProp
         resPerf.json().catch(() => ({})),
       ]);
 
+      if (!resOverview.ok) {
+        const msg = dOver?.message ? ` — ${dOver.message}` : '';
+        throw new Error(`Failed to load analytics: HTTP ${resOverview.status}${msg}`);
+      }
+
       if (dOver.data?.cards) setOverviewData(dOver.data.cards);
       if (dOver.data?.kpiSummary) setKpiSummary(dOver.data.kpiSummary);
       if (dGeo.data?.districts) {

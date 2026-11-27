@@ -117,6 +117,7 @@ function formatStudentResponse(row: any) {
     email: row.email,
     mobile: row.mobile ?? null,
     targetGroup: row.target_group || 'group4',
+    district: row.district ? String(row.district).trim() : null,
     avatarUrl: normalizeGoogleAvatarUrl(row.avatar_url),
     authProvider: row.auth_provider || 'email',
     emailVerified: Boolean(row.email_verified),
@@ -428,13 +429,23 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
 // ====================================================
 router.post('/register', studentLoginLimiter, async (req: Request, res: Response) => {
   try {
-    const { fullName, email, mobile, password, confirmPassword, targetGroup } = req.body;
+    const { fullName, email, mobile, password, confirmPassword, targetGroup, district } = req.body;
 
     if (!fullName || typeof fullName !== 'string' || !fullName.trim()) {
       return res.status(400).json({ status: 'error', message: 'Full name is required.' });
     }
     if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return res.status(400).json({ status: 'error', message: 'A valid email address is required.' });
+    }
+    if (!district || typeof district !== 'string' || !district.trim()) {
+      return res.status(400).json({ status: 'error', message: 'Please select your Tamil Nadu district.' });
+    }
+    const normalizedDistrict = normalizeTamilNaduDistrict(district.trim());
+    if (!normalizedDistrict) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid district selected. Please choose one of the 38 official districts of Tamil Nadu.',
+      });
     }
     if (!password || typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ status: 'error', message: 'Password must be at least 6 characters long.' });
@@ -447,6 +458,7 @@ router.post('/register', studentLoginLimiter, async (req: Request, res: Response
     const cleanName = fullName.trim();
     const cleanMobile = mobile ? String(mobile).trim() : null;
     const cleanGroup = normalizeTargetGroup(targetGroup);
+    const cleanDistrict = normalizedDistrict.name;
 
     // Check if email already exists
     const existing = await pool.query('SELECT id, auth_provider FROM students WHERE LOWER(email) = $1', [cleanEmail]);
@@ -468,13 +480,13 @@ router.post('/register', studentLoginLimiter, async (req: Request, res: Response
 
     const insertResult = await pool.query(
       `INSERT INTO students (
-         full_name, email, mobile, password_hash, target_group,
+         full_name, email, mobile, password_hash, target_group, district,
          auth_provider, email_verified, onboarding_completed, role, token_version, last_login_at
        )
-       VALUES ($1, $2, $3, $4, $5, 'email', false, true, 'student', 1, CURRENT_TIMESTAMP)
-       RETURNING id, full_name, email, mobile, target_group, avatar_url, auth_provider,
+       VALUES ($1, $2, $3, $4, $5, $6, 'email', false, true, 'student', 1, CURRENT_TIMESTAMP)
+       RETURNING id, full_name, email, mobile, target_group, district, avatar_url, auth_provider,
                  email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
-      [cleanName, cleanEmail, cleanMobile, passwordHash, cleanGroup]
+      [cleanName, cleanEmail, cleanMobile, passwordHash, cleanGroup, cleanDistrict]
     );
 
     const newStudent = insertResult.rows[0];
@@ -534,7 +546,7 @@ router.post('/login', studentLoginLimiter, async (req: Request, res: Response) =
     const cleanEmail = String(email).trim().toLowerCase();
 
     const studentRes = await pool.query(
-      `SELECT id, full_name, email, mobile, password_hash, target_group, google_id, auth_provider,
+      `SELECT id, full_name, email, mobile, password_hash, target_group, district, google_id, auth_provider,
               avatar_url, email_verified, onboarding_completed, role, is_active, token_version, created_at, updated_at
        FROM students
        WHERE LOWER(email) = $1`,
@@ -1019,7 +1031,7 @@ router.get('/profile', requireStudentAuth, async (req: StudentAuthenticatedReque
   try {
     const studentId = req.studentUser!.studentId;
     const studentRes = await pool.query(
-      `SELECT id, full_name, email, mobile, target_group, avatar_url, auth_provider,
+      `SELECT id, full_name, email, mobile, target_group, district, avatar_url, auth_provider,
               email_verified, onboarding_completed, role, created_at, updated_at
        FROM students
        WHERE id = $1`,

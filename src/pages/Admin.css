@@ -17,7 +17,7 @@
 /* Page Container */
 .admin-page {
   width: 100%;
-  min-height: calc(100vh - 80px);
+  min-height: 100dvh;
   padding: var(--admin-space-page-y) var(--admin-space-page-x) 48px;
   box-sizing: border-box;
   color-scheme: dark !important;
@@ -4451,5 +4451,199 @@
   .admin-profile-group .admin-users-mgmt-btn,
   .admin-profile-group .admin-logout-btn {
     justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   MOBILE-ONLY CONTENT MANAGEMENT SPACING & ALIGNMENT FIX (<= 768px)
+   Strictly scoped to .admin-page.is-content-page — zero desktop/tablet impact
+   ========================================================================== */
+@media (max-width: 768px) {
+  .admin-enterprise-body-content .admin-page.is-content-page {
+    padding: 12px 12px 28px;
+    min-height: auto;
+    overflow-x: clip;
+  }
+
+  .admin-enterprise-body-content .admin-page.is-content-page .admin-container {
+    gap: 14px;
+    min-height: auto;
+    overflow-x: clip;
+  }
+
+  /* Fix flex: 1 1 500px turning into 500px vertical blank void when header stacks to column */
+  .admin-page.is-content-page .admin-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 2px 0 14px 0;
+    margin: 0;
+  }
+
+  .admin-page.is-content-page .admin-header-main {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .admin-page.is-content-page .admin-badge-row {
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .admin-page.is-content-page .admin-title {
+    font-size: 1.45rem;
+    line-height: 1.22;
+    margin: 0 0 6px 0;
+  }
+
+  .admin-page.is-content-page .admin-subtitle {
+    font-size: 0.86rem;
+    line-height: 1.45;
+  }
+
+  .admin-page.is-content-page .admin-profile-group {
+    width: 100%;
+    gap: 8px;
+    justify-content: flex-start;
+  }
+
+  /* Compact, uniform 2-column stats grid instead of oversized tall cards */
+  .admin-page.is-content-page .admin-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0;
+  }
+
+  .admin-page.is-content-page .admin-metric-card {
+    min-height: auto;
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .admin-page.is-content-page .metric-icon-box {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .admin-page.is-content-page .metric-value {
+    font-size: 1.4rem;
+  }
+
+  .admin-page.is-content-page .metric-label {
+    font-size: 0.7rem;
+    margin-top: 0.15rem;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  /* Fix flex-basis vertical gap in toolbars & search wrappers */
+  .admin-page.is-content-page .admin-toolbar,
+  .admin-page.is-content-page .admin-filter-bar,
+  .admin-page.is-content-page .admin-pdf-extraction-panel {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .admin-page.is-content-page .admin-toolbar-row {
+    gap: 10px;
+  }
+
+  .admin-page.is-content-page .admin-search-wrapper {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .admin-page.is-content-page .admin-action-buttons {
+    width: 100%;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .admin-page.is-content-page .admin-action-buttons .admin-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 40px;
+    padding: 0 12px;
+    font-size: 0.82rem;
+  }
+
+  .admin-page.is-content-page .admin-action-buttons .admin-btn[title='Refresh table data'] {
+    flex: 0 0 40px;
+    width: 40px;
+    padding: 0;
+  }
+
+  .admin-page.is-content-page .admin-filter-bar .admin-filter-pills,
+  .admin-page.is-content-page .admin-filter-pills {
+    gap: 10px;
+  }
+
+  .admin-page.is-content-page .admin-filter-bar .admin-filter-group,
+  .admin-page.is-content-page .admin-filter-group {
+    gap: 8px;
+  }
+
+  .admin-page.is-content-page .admin-target-system-bar {
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+
+  /* Textbook Management & Section Headers */
+  .admin-page.is-content-page .admin-textbooks-section {
+    gap: 14px;
+  }
+
+  .admin-page.is-content-page .admin-section-header {
+    gap: 10px;
+  }
+
+  .admin-page.is-content-page .admin-section-title {
+    font-size: 1.1rem;
+    margin: 0 0 4px 0;
+  }
+
+  .admin-page.is-content-page .admin-section-subtitle {
+    font-size: 0.84rem;
+    line-height: 1.45;
+  }
+
+  .admin-page.is-content-page .admin-section-actions {
+    gap: 8px;
+  }
+
+  .admin-page.is-content-page .admin-delete-section {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .admin-page.is-content-page .admin-gdrive-section .admin-pdf-extraction-panel {
+    margin-bottom: 14px;
+  }
+
+  .admin-page.is-content-page .ai-field-compact {
+    flex: 0 0 auto;
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
+@media (max-width: 540px) {
+  .admin-page.is-content-page .admin-action-buttons .admin-btn,
+  .admin-page.is-content-page .admin-action-buttons .admin-btn[title='Refresh table data'] {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+}
+
+@media (max-width: 359px) {
+  .admin-enterprise-body-content .admin-page.is-content-page {
+    padding: 10px 8px 24px;
+  }
+
+  .admin-page.is-content-page .admin-metrics-grid {
+    grid-template-columns: 1fr;
   }
 }

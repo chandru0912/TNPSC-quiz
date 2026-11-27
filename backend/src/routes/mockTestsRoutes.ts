@@ -19,6 +19,8 @@ import {
   updateAdminMockTest,
   duplicateAdminMockTest,
   updateAdminMockTestStatus,
+  approveAdminMockTest,
+  rejectAdminMockTest,
   deleteAdminMockTest,
   getPublishedMockTestsForStudent,
   startStudentMockTestSession,
@@ -288,7 +290,35 @@ adminMockTestsRouter.post('/:id/duplicate', async (req: AuthenticatedRequest, re
   }
 });
 
-adminMockTestsRouter.patch('/:id/status', async (req: Request, res: Response) => {
+adminMockTestsRouter.patch('/:id/approve', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const adminUsername = req.adminUser?.username || 'admin';
+    const updated = await approveAdminMockTest(id, adminUsername);
+    return res.status(200).json({ status: 'success', data: updated });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to approve mock test.' });
+  }
+});
+
+adminMockTestsRouter.patch('/:id/reject', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Valid mock test ID is required.' });
+    }
+    const adminUsername = req.adminUser?.username || 'admin';
+    const updated = await rejectAdminMockTest(id, adminUsername);
+    return res.status(200).json({ status: 'success', data: updated });
+  } catch (err: any) {
+    return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to reject mock test.' });
+  }
+});
+
+adminMockTestsRouter.patch('/:id/status', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -299,7 +329,8 @@ adminMockTestsRouter.patch('/:id/status', async (req: Request, res: Response) =>
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ status: 'error', message: 'Invalid status. Use draft, staging, published, scheduled, or archived.' });
     }
-    const updated = await updateAdminMockTestStatus(id, status, startAt, endAt);
+    const adminUsername = req.adminUser?.username || 'admin';
+    const updated = await updateAdminMockTestStatus(id, status, startAt, endAt, adminUsername);
     return res.status(200).json({ status: 'success', data: updated });
   } catch (err: any) {
     return res.status(err.statusCode || 500).json({ status: 'error', message: err.message || 'Failed to update mock test status.' });
@@ -347,11 +378,32 @@ studentMockTestsRouter.get('/', async (req: Request, res: Response) => {
       testCategory: req.query.testCategory as string | undefined,
       subject: req.query.subject as string | undefined,
       standard: req.query.standard as string | undefined,
+      unit: req.query.unit as string | undefined,
     });
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
     console.error('[Student MockTests List Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to load published mock tests.' });
+  }
+});
+
+studentMockTestsRouter.get('/unit-tests', async (req: Request, res: Response) => {
+  try {
+    const unit = req.query.unit as string | undefined;
+    if (!unit || !String(unit).trim()) {
+      return res.status(400).json({ status: 'error', message: 'unit query parameter is required.' });
+    }
+    const data = await getPublishedMockTestsForStudent({
+      group: req.query.group as string | undefined,
+      testCategory: 'unit_wise',
+      subject: req.query.subject as string | undefined,
+      standard: req.query.standard as string | undefined,
+      unit,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (err: any) {
+    console.error('[Student Unit Tests List Error]:', err);
+    return res.status(500).json({ status: 'error', message: err.message || 'Failed to load tests for this unit.' });
   }
 });
 

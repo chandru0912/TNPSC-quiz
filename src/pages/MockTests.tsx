@@ -169,6 +169,12 @@ const parseStdNum = (std?: string | null): number | null => {
   return m ? Number(m[0]) : null
 }
 
+function calculateSafeProgress(completed: number, available: number): number {
+  if (!Number.isFinite(available) || available <= 0) return 0
+  const safeCompleted = Math.max(0, Math.min(completed, available))
+  return Math.round((safeCompleted / available) * 100)
+}
+
 const MockTests = () => {
   useStudyTimeTracker()
   const isMobile = useIsMobileViewport(767)
@@ -248,7 +254,7 @@ const MockTests = () => {
       subject?: string
       standard?: number
       unit?: number | null
-      step?: 'units' | 'full_length_tests' | null
+      step?: 'units' | 'unit_tests' | 'full_length_tests' | null
       activeTestId?: number | null
     },
     options?: { replace?: boolean }
@@ -262,10 +268,10 @@ const MockTests = () => {
     const nextStep =
       overrides.step !== undefined
         ? overrides.step
-        : curStep === 'units' || curStep === 'full_length_tests'
+        : curStep === 'units' || curStep === 'unit_tests' || curStep === 'full_length_tests'
           ? curStep
           : null
-    if (nextStep === 'units' || nextStep === 'full_length_tests') {
+    if (nextStep === 'units' || nextStep === 'unit_tests' || nextStep === 'full_length_tests') {
       next.set('step', nextStep)
     }
     const nextUnit = overrides.unit !== undefined ? overrides.unit : selectedUnitId
@@ -295,6 +301,8 @@ const MockTests = () => {
   }>({ subjects: [], standards: [], units: [], lessons: [] })
 
   const [tests, setTests] = useState<PublishedMockTest[]>([])
+  const [unitTestsList, setUnitTestsList] = useState<PublishedMockTest[]>([])
+  const [unitTestsLoading, setUnitTestsLoading] = useState<boolean>(false)
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -366,7 +374,6 @@ const MockTests = () => {
   const [dynamicUnits, setDynamicUnits] = useState<DynamicUnit[]>([])
   const [isUnitsLoading, setIsUnitsLoading] = useState<boolean>(true)
   const [unitsCountByStandard, setUnitsCountByStandard] = useState<Record<number, number>>({})
-  const [startingSyllabusKey, setStartingSyllabusKey] = useState<string | null>(null)
   const [mockSummary, setMockSummary] = useState<{
     totalMockTestsCompleted: number
     totalAttempts: number
@@ -474,6 +481,38 @@ const MockTests = () => {
       mounted = false
     }
   }, [registryGroup, effectiveSubjectId, syllabusSyncTick])
+
+  useEffect(() => {
+    if (selectedTestCategory !== 'unit_wise' || searchParams.get('step') !== 'unit_tests' || !selectedUnitId) {
+      return
+    }
+    let mounted = true
+    setUnitTestsLoading(true)
+    const q = new URLSearchParams({
+      group: selectedGroup,
+      subject: effectiveSubjectId,
+      standard: String(selectedStandardId),
+      unit: String(selectedUnitId),
+    })
+    apiFetch(`/api/mock-tests/unit-tests?${q.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (mounted && json?.status === 'success') {
+          setUnitTestsList(Array.isArray(json.data) ? json.data : [])
+        } else if (mounted) {
+          setUnitTestsList([])
+        }
+      })
+      .catch(() => {
+        if (mounted) setUnitTestsList([])
+      })
+      .finally(() => {
+        if (mounted) setUnitTestsLoading(false)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [selectedGroup, selectedTestCategory, effectiveSubjectId, selectedStandardId, selectedUnitId, searchParams, syllabusSyncTick])
 
   useEffect(() => {
     if (authLoading) return
@@ -607,20 +646,6 @@ const MockTests = () => {
   )
   const { translations } = useMcqTranslations(translatableQuestions, questionLang)
   const activeSubjectObj = registrySubjects.find((s) => s.id === effectiveSubjectId) || null
-  const getUnitSyllabusProgress = (unitNum: number) => {
-    const groupKey = selectedGroup === 'group2_2a' ? 'group2_2a' : selectedGroup === 'group4' ? 'group4' : 'group1'
-    const exactId = `syllabus-unit-${groupKey}-${effectiveSubjectId.toLowerCase()}-${selectedStandardId}-${unitNum}`
-    const unitMap = mockSummary?.unitWiseByTestId || mockSummary?.allByTestId || {}
-    if (unitMap[exactId]) return unitMap[exactId]
-    // Fallback match by suffix `-${selectedStandardId}-${unitNum}` for group/subject aliases
-    const suffix = `-${selectedStandardId}-${unitNum}`
-    for (const [k, v] of Object.entries(unitMap)) {
-      if (k.startsWith('syllabus-unit-') && k.endsWith(suffix)) {
-        return v
-      }
-    }
-    return null
-  }
 
   const matchesSubjectSlug = (testSubj: string | undefined | null, slug: string): boolean => {
     const t = String(testSubj || '').toLowerCase().trim()
@@ -654,75 +679,6 @@ const MockTests = () => {
       return true
     })
   }, [tests, selectedGroup, selectedTestCategory, effectiveSubjectId, selectedStandardId, selectedUnitId])
-
-  const handleStartSyllabusTest = async (opts: {
-    key: string
-    testCategory: 'unit_wise' | 'lesson_wise'
-    unitId: number
-    lessonId?: string | null
-    lessonTitle?: string | null
-    title: string
-  }) => {
-    if (startingSyllabusKey !== null || startingTestId !== null) return
-    const studentToken = localStorage.getItem('tnpsc_student_token')
-    if (!isAuthenticated || !studentToken) {
-      const params = new URLSearchParams(searchParams)
-      params.set('group', selectedGroup)
-      params.set('category', 'unit_wise')
-      params.set('subject', effectiveSubjectId)
-      params.set('standard', String(selectedStandardId))
-      params.set('unit', String(opts.unitId))
-      const target = `/mock-tests?${params.toString()}`
-      savePostLoginRedirect(target)
-      navigate(buildAuthRedirectUrl('login', target), { state: { from: target } })
-      return
-    }
-
-    try {
-      setStartingSyllabusKey(opts.key)
-      setErrorMsg(null)
-      const res = await apiFetch('/api/mock-tests/syllabus/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${studentToken}`,
-        },
-        body: JSON.stringify({
-          group: selectedGroup,
-          testCategory: opts.testCategory,
-          subject: effectiveSubjectId,
-          standard: selectedStandardId,
-          unitId: opts.unitId,
-          lessonId: opts.lessonId || null,
-          lessonTitle: opts.lessonTitle || null,
-          title: opts.title,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.status !== 'success') {
-        setErrorMsg(data.message || 'No published questions are available for this unit yet.')
-        return
-      }
-
-      const { test: liveTest, questions: liveQuestions } = data.data
-      resetExamState()
-      setIsSyllabusMode(true)
-      setPendingStartTest(null)
-      setActiveTest({
-        ...liveTest,
-        subjectId: effectiveSubjectId,
-        lessonId: opts.lessonId || '',
-      })
-      setSessionId(0)
-      setQuestions(liveQuestions || [])
-      setSecondsLeft((liveTest?.durationMinutes || Math.max(15, (liveQuestions || []).length)) * 60)
-      submissionTokenRef.current = `syl-${opts.testCategory}-${selectedGroup}-${selectedStandardId}-${opts.unitId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to start Unit Wise Test.')
-    } finally {
-      setStartingSyllabusKey(null)
-    }
-  }
 
   const resetExamState = () => {
     setCurrentIndex(0)
@@ -976,7 +932,11 @@ const MockTests = () => {
           <div className="pyp-topbar-left">
             <button type="button" className="pyp-leave-btn" onClick={handleExitExam}>
               <ArrowLeft size={16} />
-              <span>Back to Mock Tests</span>
+              <span>
+                {selectedTestCategory === 'unit_wise' && selectedUnitId
+                  ? 'Back to Unit Tests'
+                  : 'Back to Mock Tests'}
+              </span>
             </button>
             <div>
               <div className="pyp-brand-line">
@@ -1278,7 +1238,13 @@ const MockTests = () => {
   // ====================================================
   const isFullLengthTestsView =
     selectedTestCategory === 'full_length' && searchParams.get('step') === 'full_length_tests'
-  const isSubListingView = isFullLengthTestsView
+  const isUnitTestsView =
+    selectedTestCategory === 'unit_wise' && searchParams.get('step') === 'unit_tests' && Boolean(selectedUnitId)
+  const isSubListingView = isFullLengthTestsView || isUnitTestsView
+  const activeUnitObj = useMemo(
+    () => registryUnits.find((u) => u.id === selectedUnitId) || null,
+    [registryUnits, selectedUnitId]
+  )
   const isMobileUnitsPage =
     isMobile &&
     selectedTestCategory !== 'full_length' &&
@@ -1446,7 +1412,11 @@ const MockTests = () => {
                 <>
                   <ChevronRight size={14} className="breadcrumb-sep" />
                   <span className="breadcrumb-crumb current">
-                    Full-length Mock Tests
+                    {isUnitTestsView
+                      ? activeUnitObj
+                        ? `${activeUnitObj.unitNumber} – ${activeUnitObj.title}`
+                        : `Unit ${selectedUnitId}`
+                      : 'Full-length Mock Tests'}
                   </span>
                 </>
               )}
@@ -1484,6 +1454,12 @@ const MockTests = () => {
                 <div className="compact-subject-grid">
                   {registrySubjects.map((sub) => {
                     const isActiveSub = selectedSubjectId === sub.id
+                    const subPublishedTestsCount = tests.filter((t) => {
+                      if (t.status && t.status.toLowerCase() !== 'published') return false
+                      if (!matchesGroup(t, selectedGroup)) return false
+                      if ((t.testCategory || 'full_length') !== selectedTestCategory) return false
+                      return matchesSubjectSlug(t.subject, sub.id)
+                    }).length
                     return (
                       <button
                         key={sub.id}
@@ -1495,8 +1471,8 @@ const MockTests = () => {
                           <BookOpen size={15} className="compact-subject-icon" />
                           <span className="compact-subject-title">{sub.name}</span>
                         </div>
-                        <span className={`compact-count-badge ${sub.questionCount > 0 ? 'has-qs' : ''}`}>
-                          {sub.questionCount} Qs
+                        <span className={`compact-count-badge ${subPublishedTestsCount > 0 ? 'has-qs' : ''}`}>
+                          {subPublishedTestsCount} {subPublishedTestsCount === 1 ? 'Test' : 'Tests'}
                         </span>
                       </button>
                     )
@@ -1525,6 +1501,20 @@ const MockTests = () => {
                   {registryStandards.map((cls) => {
                     const unitCount = unitsCountByStandard[cls.id] ?? 0
                     const isActiveStd = selectedStandardId === cls.id
+                    const stdPublishedTests = tests.filter((t) => {
+                      if (t.status && t.status.toLowerCase() !== 'published') return false
+                      if (!matchesGroup(t, selectedGroup)) return false
+                      if ((t.testCategory || 'full_length') !== selectedTestCategory) return false
+                      if (!matchesSubjectSlug(t.subject, effectiveSubjectId)) return false
+                      const tStd = parseStdNum(t.standard)
+                      return selectedTestCategory === 'full_length'
+                        ? tStd === null || tStd === cls.id
+                        : tStd === cls.id
+                    })
+                    const stdPublishedQuestionsCount = stdPublishedTests.reduce(
+                      (sum, t) => sum + Number(t.questionsCount || 0),
+                      0
+                    )
                     const handlePickStandard = () => {
                       setSelectedStandardId(cls.id)
                       setSelectedUnitId(null)
@@ -1563,7 +1553,9 @@ const MockTests = () => {
                           </div>
                           <h3 className="class-card-title">{cls.label}</h3>
                           <p className="class-card-desc">
-                            {unitCount} {unitCount === 1 ? 'Unit' : 'Units'} • {cls.questionCount} Questions
+                            {selectedTestCategory === 'full_length'
+                              ? `${stdPublishedTests.length} ${stdPublishedTests.length === 1 ? 'Test' : 'Tests'}${stdPublishedQuestionsCount > 0 ? ` • ${stdPublishedQuestionsCount} Questions` : ''}`
+                              : `${unitCount} ${unitCount === 1 ? 'Unit' : 'Units'} • ${stdPublishedTests.length} ${stdPublishedTests.length === 1 ? 'Test' : 'Tests'}`}
                           </p>
                         </div>
 
@@ -1593,43 +1585,31 @@ const MockTests = () => {
                   <div className="hierarchy-card-grid">
                     {registryUnits.map((u) => {
                       const unitAdminTests = tests.filter((t) => {
+                        if (t.status && t.status.toLowerCase() !== 'published') return false
                         if (!matchesGroup(t, selectedGroup)) return false
                         const backendCat = t.testCategory || 'full_length'
                         if (backendCat !== 'unit_wise') return false
                         if (!matchesSubjectSlug(t.subject, effectiveSubjectId)) return false
                         const tStd = parseStdNum(t.standard)
-                        if (tStd !== null && tStd !== selectedStandardId) return false
+                        if (tStd === null || tStd !== selectedStandardId) return false
                         return parseStdNum(t.unit) === u.id
                       })
-                      const uSylProg = getUnitSyllabusProgress(u.id)
-                      const completedAdmin = unitAdminTests.filter(
-                        (t) => (getTestProgress(t)?.totalAttempts ?? 0) > 0
-                      ).length
-                      const hasDirectUnitTest = u.questionCount > 0
-                      const availableTestsCount = hasDirectUnitTest ? 1 : unitAdminTests.length > 0 ? 1 : 0
-                      const isUnitCompleted =
-                        (uSylProg?.totalAttempts ?? 0) > 0 || completedAdmin > 0
-                      const completedTestsCount = isUnitCompleted && availableTestsCount > 0 ? 1 : 0
-                      const pct = isUnitCompleted
-                        ? Math.round(Number(uSylProg?.bestPercentage ?? 100))
-                        : 0
-                      const unitKey = `unit-${u.id}`
-                      const isStartingThis = startingSyllabusKey === unitKey
-                      const canStart = hasDirectUnitTest || unitAdminTests.length > 0
+                      const availableTestsCount = unitAdminTests.length
+                      const publishedUnitQuestionsCount = unitAdminTests.reduce(
+                        (sum, t) => sum + Number(t.questionsCount || 0),
+                        0
+                      )
+                      const completedTestsCount =
+                        availableTestsCount > 0
+                          ? unitAdminTests.filter((t) => (getTestProgress(t)?.totalAttempts ?? 0) > 0).length
+                          : 0
+                      const pct = calculateSafeProgress(completedTestsCount, availableTestsCount)
 
-                      const handleLaunchUnitTest = () => {
-                        if (!canStart || startingSyllabusKey !== null || startingTestId !== null) return
+                      const handleOpenUnitTests = () => {
+                        setErrorMsg(null)
                         setSelectedUnitId(u.id)
-                        if (hasDirectUnitTest) {
-                          void handleStartSyllabusTest({
-                            key: unitKey,
-                            testCategory: 'unit_wise',
-                            unitId: u.id,
-                            title: `${u.unitNumber} — ${u.title} (${selectedStandardId}th Standard)`,
-                          })
-                        } else if (unitAdminTests[0]) {
-                          void handleStartAdminTest(unitAdminTests[0])
-                        }
+                        pushMockRoute({ unit: u.id, step: 'unit_tests', activeTestId: null })
+                        window.scrollTo({ top: 0, behavior: 'auto' })
                       }
 
                       return (
@@ -1637,20 +1617,22 @@ const MockTests = () => {
                           key={u.id}
                           role="button"
                           tabIndex={0}
-                          className="hierarchy-card"
-                          style={{ cursor: canStart ? 'pointer' : 'default' }}
-                          onClick={handleLaunchUnitTest}
+                          className="hierarchy-card unit-clickable-card"
+                          aria-label={`Open ${u.unitNumber} – ${u.title} individual tests`}
+                          onClick={handleOpenUnitTests}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault()
-                              handleLaunchUnitTest()
+                              handleOpenUnitTests()
                             }
                           }}
                         >
                           <div className="hierarchy-card-top">
                             <span className="hierarchy-unit-num">{u.unitNumber}</span>
-                            <span className={`hierarchy-count-pill ${u.questionCount > 0 ? 'has-qs' : ''}`}>
-                              {u.questionCount} Questions Available
+                            <span className={`hierarchy-count-pill ${publishedUnitQuestionsCount > 0 ? 'has-qs' : ''}`}>
+                              {availableTestsCount > 0
+                                ? `${publishedUnitQuestionsCount} ${publishedUnitQuestionsCount === 1 ? 'Question' : 'Questions'}`
+                                : '0 Tests'}
                             </span>
                           </div>
                           <span className="hierarchy-card-title">{u.title}</span>
@@ -1663,30 +1645,17 @@ const MockTests = () => {
                             <div className="unit-progress-track" aria-label={`Unit progress ${pct}%`}>
                               <div
                                 className="unit-progress-fill"
-                                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                                style={{ width: `${pct}%` }}
                               />
                             </div>
                           </div>
-                          <div style={{ marginTop: '0.65rem', display: 'flex', justifyContent: 'flex-end' }}>
-                            <button
-                              type="button"
-                              className="table-action-btn table-action-primary hierarchy-start-btn"
-                              disabled={!canStart || startingSyllabusKey !== null || startingTestId !== null}
-                              title={canStart ? `Start ${u.unitNumber} Mock Test` : 'No published questions available for this unit yet'}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleLaunchUnitTest()
-                              }}
-                            >
-                              <Play size={14} fill="currentColor" />
-                              <span>
-                                {isStartingThis
-                                  ? 'Starting Unit Test...'
-                                  : isUnitCompleted
-                                    ? 'Retake Unit Test'
-                                    : 'Start Unit Test'}
-                              </span>
-                            </button>
+                          <div className="unit-card-open-cue">
+                            <span>
+                              {availableTestsCount > 0
+                                ? `View ${availableTestsCount} ${availableTestsCount === 1 ? 'Test' : 'Tests'}`
+                                : 'No published mock tests available for this unit yet.'}
+                            </span>
+                            <ChevronRight size={15} />
                           </div>
                         </div>
                       )
@@ -1699,6 +1668,174 @@ const MockTests = () => {
                 )}
               </section>
             )}
+          </div>
+        ) : isUnitTestsView ? (
+          /* DEDICATED UNIT TEST SELECTION PAGE (Individual Tests One-by-One) */
+          <div className="hierarchy-navigator">
+            <div className="page-step-back-row">
+              <button
+                type="button"
+                className="back-btn glass"
+                onClick={() => {
+                  setSelectedUnitId(null)
+                  pushMockRoute({
+                    step: isMobile ? 'units' : null,
+                    unit: null,
+                    activeTestId: null,
+                  })
+                }}
+              >
+                <ArrowLeft size={16} />
+                <span>Back to Units</span>
+              </button>
+            </div>
+
+            <section className="hierarchy-section glass">
+              <div className="hierarchy-section-header" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                  <span className="hierarchy-step-badge">
+                    {activeUnitObj?.unitNumber || `Unit ${selectedUnitId}`} • {selectedStandardId}th Standard
+                  </span>
+                  <h3>
+                    {activeUnitObj
+                      ? `${activeUnitObj.unitNumber} – ${activeUnitObj.title}`
+                      : `Unit ${selectedUnitId}`}{' '}
+                    ({activeSubjectObj?.name || 'General Studies'})
+                  </h3>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span className={`hierarchy-count-pill ${unitTestsList.length > 0 ? 'has-qs' : ''}`}>
+                    {unitTestsList.length} {unitTestsList.length === 1 ? 'Test' : 'Tests'} Available
+                  </span>
+                  {unitTestsList.length > 0 && (
+                    <span className="hierarchy-count-pill">
+                      {unitTestsList.reduce((sum, t) => sum + Number(t.questionsCount || 0), 0)} Questions
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {unitTestsLoading ? (
+                <p className="hierarchy-empty-note">Loading individual tests for this unit...</p>
+              ) : unitTestsList.length === 0 ? (
+                <div className="unit-tests-empty-state">
+                  <Layers size={28} style={{ color: '#f59e0b', marginBottom: '0.5rem' }} />
+                  <h4>No published mock tests available for this unit yet.</h4>
+                  <p>
+                    Published Unit Wise Mock Tests created in the Admin Panel will appear here automatically.
+                  </p>
+                </div>
+              ) : (
+                <div className="unit-tests-grid">
+                  {unitTestsList.map((test, idx) => {
+                    const tProg = getTestProgress(test)
+                    const isInProg = Boolean(mockSummary?.inProgressTestIds?.includes(test.id))
+                    const attempts = Number(tProg?.totalAttempts ?? 0)
+                    const latestScore = tProg?.latestAttemptScore ?? tProg?.latestPercentage ?? null
+                    const bestScore = tProg?.bestAttemptScore ?? tProg?.bestPercentage ?? null
+                    const accuracy = tProg?.averageAttemptScore ?? bestScore ?? null
+                    const isStatusLoading = isAuthenticated && (authLoading || (progressLoading && !mockSummary))
+                    const status: 'completed' | 'in_progress' | 'not_started' =
+                      attempts > 0 ? 'completed' : isInProg ? 'in_progress' : 'not_started'
+                    const statusLabel = isStatusLoading
+                      ? 'Loading...'
+                      : status === 'completed'
+                        ? 'Completed'
+                        : status === 'in_progress'
+                          ? 'In Progress'
+                          : 'Not Started'
+                    const isStartingThis = startingTestId === test.id
+                    const ctaLabel = isStartingThis
+                      ? 'Starting...'
+                      : status === 'in_progress'
+                        ? 'Continue Test'
+                        : status === 'completed'
+                          ? 'Retake Test'
+                          : 'Start Test'
+                    const cleanTitle = formatStudentTestTitle(test) || `Test ${idx + 1}`
+
+                    return (
+                      <div key={test.id} className={`unit-test-card glass lesson-status-${status}`}>
+                        <div className="unit-test-card-head">
+                          <span className="hierarchy-unit-num">Test {idx + 1}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            <span className={`lesson-status-badge status-${isStatusLoading ? 'loading' : status}`}>
+                              {statusLabel}
+                            </span>
+                            {status === 'completed' && (
+                              <span className="retake-available-badge">Retake Available</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <h4 className="unit-test-card-title">{cleanTitle}</h4>
+
+                        <div className="unit-test-metrics-row">
+                          <span>
+                            <strong>{test.questionsCount}</strong> Questions
+                          </span>
+                          <span>
+                            <strong>{test.totalMarks}</strong> Marks
+                          </span>
+                          <span>
+                            <strong>{test.durationMinutes}</strong> Mins
+                          </span>
+                          {test.difficulty && (
+                            <span>
+                              Difficulty: <strong>{test.difficulty}</strong>
+                            </span>
+                          )}
+                        </div>
+
+                        {attempts > 0 && (
+                          <div className="unit-test-progress-strip">
+                            <span>Attempts: <strong>{attempts}</strong></span>
+                            {latestScore !== null && (
+                              <span>Latest: <strong>{Math.round(Number(latestScore))}%</strong></span>
+                            )}
+                            {bestScore !== null && (
+                              <span>Best: <strong style={{ color: '#34d399' }}>{Math.round(Number(bestScore))}%</strong></span>
+                            )}
+                            {accuracy !== null && (
+                              <span>Accuracy: <strong>{Math.round(Number(accuracy))}%</strong></span>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="unit-test-card-footer">
+                          <LessonAwardSummaryBar
+                            goldCount={tProg?.goldCount ?? 0}
+                            platinumCount={tProg?.platinumCount ?? 0}
+                            silverCount={tProg?.silverCount ?? 0}
+                            compact
+                            showTotal={false}
+                            hideZero
+                          />
+                          <button
+                            type="button"
+                            className="table-action-btn table-action-primary hierarchy-start-btn"
+                            disabled={test.questionsCount === 0 || startingTestId !== null}
+                            title={test.questionsCount === 0 ? 'No questions assigned to this test yet' : `${ctaLabel} — ${cleanTitle}`}
+                            onClick={() => {
+                              if (startingTestId !== null) return
+                              const studentToken = localStorage.getItem('tnpsc_student_token')
+                              if (!isAuthenticated || !studentToken) {
+                                redirectToLoginForTest(test)
+                                return
+                              }
+                              setPendingStartTest(test)
+                            }}
+                          >
+                            <Play size={14} fill="currentColor" />
+                            <span>{ctaLabel}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
           </div>
         ) : isFullLengthTestsView ? (
           /* DEDICATED FULL-LENGTH MOCK TEST LISTING VIEW (Separate Page After Standard Selection) */

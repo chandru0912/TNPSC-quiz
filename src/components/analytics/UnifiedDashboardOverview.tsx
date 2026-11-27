@@ -168,6 +168,8 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
   const sseRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef<number>(0);
+  const inFlightControllerRef = useRef<AbortController | null>(null);
+  const sseDebounceTimerRef = useRef<number | null>(null);
 
   // Active hover states for charts
   const [hoveredTrendIdx, setHoveredTrendIdx] = useState<number | null>(null);
@@ -175,6 +177,13 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
 
   const fetchDashboardData = useCallback(
     async (manual: boolean = false, range: RangeFilterType = selectedRange) => {
+      // Cancel any prior in-flight overview request so Sync / Retry / range switches never overlap
+      if (inFlightControllerRef.current) {
+        inFlightControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      inFlightControllerRef.current = controller;
+
       if (manual) setIsRefreshing(true);
       setError(null);
 
@@ -199,20 +208,29 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
 
         for (const endpoint of candidateEndpoints) {
           try {
-            const candidateRes = await apiFetch(endpoint, { headers: authHeader });
+            const candidateRes = await apiFetch(endpoint, {
+              headers: authHeader,
+              signal: controller.signal,
+            });
             if (candidateRes.ok) {
               res = candidateRes;
               break;
             }
             lastStatus = candidateRes.status;
-            if (candidateRes.status === 401 || candidateRes.status === 403) {
+            // Only fall back to alias paths on 404; never amplify 500/503/401/403 across duplicate aliases
+            if (candidateRes.status !== 404) {
               res = candidateRes;
               break;
             }
-          } catch {
-            // continue fallback candidate
+          } catch (fetchErr: any) {
+            if (fetchErr?.name === 'AbortError' || controller.signal.aborted) {
+              return;
+            }
+            // continue fallback candidate only on network failure
           }
         }
+
+        if (controller.signal.aborted) return;
 
         if (!res) {
           throw new Error(`Failed to load analytics: HTTP ${lastStatus || 404}`);
@@ -223,7 +241,14 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
         }
 
         if (!res.ok) {
-          throw new Error(`Failed to load analytics: HTTP ${res.status}`);
+          let backendMsg = '';
+          try {
+            const errJson = await res.json();
+            backendMsg = errJson?.message ? ` — ${errJson.message}` : '';
+          } catch {
+            // ignore non-JSON error body
+          }
+          throw new Error(`Failed to load analytics: HTTP ${res.status}${backendMsg}`);
         }
 
         const json = await res.json();
@@ -242,11 +267,15 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
           })
         );
       } catch (err: any) {
+        if (err?.name === 'AbortError' || controller.signal.aborted) return;
         console.error('[Unified Dashboard] Error:', err);
         setError(err.message || 'Unable to connect to analytics database.');
       } finally {
-        setLoading(false);
-        setIsRefreshing(false);
+        if (inFlightControllerRef.current === controller) {
+          inFlightControllerRef.current = null;
+          setLoading(false);
+          setIsRefreshing(false);
+        }
       }
     },
     [token, selectedRange]
@@ -259,6 +288,10 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
   // Real-Time Server-Sent Events (SSE) synchronization with automatic reconnect & polling fallback
   useEffect(() => {
     const cleanupSse = () => {
+      if (sseDebounceTimerRef.current !== null) {
+        window.clearTimeout(sseDebounceTimerRef.current);
+        sseDebounceTimerRef.current = null;
+      }
       if (reconnectTimerRef.current !== null) {
         window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -328,7 +361,15 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
 
       es.addEventListener('metrics_updated', () => {
         if (cancelled) return;
-        void fetchDashboardData(false, selectedRange);
+        if (sseDebounceTimerRef.current !== null) {
+          window.clearTimeout(sseDebounceTimerRef.current);
+        }
+        sseDebounceTimerRef.current = window.setTimeout(() => {
+          sseDebounceTimerRef.current = null;
+          if (!cancelled) {
+            void fetchDashboardData(false, selectedRange);
+          }
+        }, 1500);
       });
 
       es.onerror = () => {

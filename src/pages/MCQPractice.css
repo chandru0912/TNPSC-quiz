@@ -2262,30 +2262,387 @@
   }
 }
 
+/* Desktop/Tablet passthrough helpers so new semantic wrappers keep desktop layout 100% identical */
+.mcq-exam-submeta {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-top: 0.15rem;
+}
+
+.mcq-stats-timer-row,
+.mcq-stats-group,
+.mcq-header-controls-row {
+  display: contents;
+}
+
 /* =========================================================
-   Mobile-Only Natural Scrolling for MCQ Practice Exam (320px–767px)
+   Mobile-Only Natural Scrolling & Full-Screen Test Attempt UI (320px–767px)
+   Strictly scoped to MCQ Practice mobile — zero desktop/tablet impact
    ========================================================= */
 @media (max-width: 767px) {
-  .pyp-exam-page.mcq-pyp-exam-page {
-    min-height: auto;
-    height: auto;
-    overflow: visible;
-    padding: 0.75rem 0.25rem 2rem;
+  /* Full-Screen Mobile Test Attempt Container */
+  .practice.is-mcq-test-active {
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    overflow-x: clip;
   }
 
+  .practice.is-mcq-test-active .practice-container {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    gap: 0;
+  }
+
+  .pyp-exam-page.mcq-pyp-exam-page {
+    width: 100%;
+    max-width: 100%;
+    min-height: 100dvh;
+    height: auto;
+    margin: 0;
+    padding: 8px 8px calc(18px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+    box-sizing: border-box;
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+
+  /* Compact Reorganized Test Header */
   .mcq-pyp-exam-page .pyp-exam-topbar {
     position: static;
     top: auto;
     z-index: auto;
-    overflow: visible;
     width: 100%;
+    padding: 10px 10px;
+    border-radius: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
     box-sizing: border-box;
+    overflow: visible;
   }
 
-  .mcq-pyp-exam-page .pyp-exam-workspace,
-  .mcq-pyp-exam-page .pyp-question-panel {
+  /* Top-left compact Back to Lessons + Title block stacked cleanly */
+  .mcq-pyp-exam-page .pyp-topbar-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mcq-pyp-exam-page .pyp-leave-btn {
+    align-self: flex-start;
+    padding: 4px 10px;
+    font-size: 0.74rem;
+    gap: 4px;
+    line-height: 1.2;
+    flex-shrink: 0;
+  }
+
+  .mcq-pyp-exam-page .mcq-exam-title-block {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mcq-pyp-exam-page .pyp-brand-line {
+    gap: 0.45rem;
+    font-size: 0.68rem;
+    flex-wrap: wrap;
+    line-height: 1.2;
+  }
+
+  /* Line 1: TNPSC Group 1 – General Studies (single line wherever width permits) */
+  .mcq-pyp-exam-page .pyp-exam-heading {
+    margin: 2px 0 0;
+    font-size: clamp(0.86rem, 4.1vw, 1.06rem);
+    line-height: 1.24;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Line 2: 6th Standard | Unit 1  |  Line 3: Lesson Name */
+  .mcq-pyp-exam-page .mcq-exam-submeta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 2px;
+    font-size: 0.76rem;
+    line-height: 1.3;
+  }
+
+  .mcq-pyp-exam-page .mcq-exam-submeta-sep {
+    display: none;
+  }
+
+  .mcq-pyp-exam-page .mcq-exam-std-unit {
+    color: #cbd5e1;
+    font-weight: 600;
+  }
+
+  .mcq-pyp-exam-page .mcq-exam-lesson-name {
+    color: #94a3b8;
+    font-weight: 500;
+    word-break: break-word;
+  }
+
+  /* Compact Statistics (left) + Timer (right) + Controls row */
+  .mcq-pyp-exam-page .pyp-topbar-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+    width: 100%;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .mcq-pyp-exam-page .mcq-stats-timer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mcq-pyp-exam-page .mcq-stats-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+  }
+
+  .mcq-pyp-exam-page .pyp-meta-pill {
+    padding: 3px 7px;
+    gap: 4px;
+    font-size: 0.68rem;
+    line-height: 1.15;
+    border-radius: 9999px;
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .mcq-pyp-exam-page .pyp-meta-pill strong {
+    font-size: 0.74rem;
+  }
+
+  .mcq-pyp-exam-page .pyp-timer-pill {
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 4px 9px;
+    gap: 4px;
+    font-size: 0.76rem;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .mcq-pyp-exam-page .mcq-header-controls-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .mcq-pyp-exam-page .mcq-lang-switch {
+    padding: 2px 4px;
+    gap: 3px;
+  }
+
+  .mcq-pyp-exam-page .mcq-lang-btn {
+    padding: 3px 8px;
+    font-size: 0.72rem;
+  }
+
+  .mcq-pyp-exam-page .pyp-mobile-palette-toggle {
+    padding: 5px 11px;
+    font-size: 0.76rem;
+    gap: 5px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  /* Full-Width Question Card Optimization */
+  .mcq-pyp-exam-page .pyp-exam-workspace {
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
     overflow: visible;
     height: auto;
     max-height: none;
+  }
+
+  .mcq-pyp-exam-page .pyp-question-panel {
+    width: 100%;
+    min-width: 0;
+    padding: 12px 12px 14px;
+    border-radius: 14px;
+    gap: 10px;
+    box-sizing: border-box;
+    overflow: visible;
+    height: auto;
+    max-height: none;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-header {
+    gap: 6px;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-num-badge,
+  .mcq-pyp-exam-page .pyp-q-subject-tag,
+  .mcq-pyp-exam-page .pyp-q-review-tag {
+    padding: 4px 9px;
+    font-size: 0.72rem;
+    line-height: 1.2;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-text {
+    font-size: 0.96rem;
+    line-height: 1.52;
+    word-break: break-word;
+  }
+
+  .mcq-pyp-exam-page .pyp-options-list {
+    gap: 8px;
+  }
+
+  .mcq-pyp-exam-page .pyp-option-card {
+    padding: 10px 11px;
+    gap: 10px;
+    border-radius: 11px;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .mcq-pyp-exam-page .pyp-opt-letter {
+    width: 26px;
+    height: 26px;
+    font-size: 0.78rem;
+  }
+
+  .mcq-pyp-exam-page .pyp-opt-text {
+    font-size: 0.9rem;
+    line-height: 1.42;
+    min-width: 0;
+    word-break: break-word;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-controls {
+    padding-top: 10px;
+    gap: 8px;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-controls-left,
+  .mcq-pyp-exam-page .pyp-q-controls-right {
+    gap: 6px;
+  }
+
+  /* Mobile-Only Badge Alignment Fixes (MCQ Practice & Quizzes, <= 767px) */
+  /* 1. Standard badge (e.g. "6th Standard") in Select Unit section */
+  .practice .unified-units-section .hierarchy-section-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .practice .unified-units-section .hierarchy-section-header .hierarchy-step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 6px 14px;
+    width: auto;
+    min-width: unset;
+    height: auto;
+    line-height: 1.2;
+    font-size: 0.72rem;
+  }
+
+  .practice .unified-units-section .hierarchy-section-header h3 {
+    width: 100%;
+    text-align: center;
+    font-size: 1.02rem;
+    line-height: 1.32;
+  }
+
+  /* 2. Unit badge (e.g. "UNIT I") beside heading on Individual Lesson Listing page */
+  .practice .hierarchy-section:not(.unified-units-section):not(.compact-subjects-section) .hierarchy-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 1rem;
+  }
+
+  .practice .hierarchy-section:not(.unified-units-section):not(.compact-subjects-section) .hierarchy-section-header .hierarchy-step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    width: auto;
+    min-width: unset;
+    height: auto;
+    font-size: 0.68rem;
+    line-height: 1.2;
+    letter-spacing: 0.04em;
+  }
+
+  .practice .hierarchy-section:not(.unified-units-section):not(.compact-subjects-section) .hierarchy-section-header h3 {
+    flex: 1;
+    min-width: 0;
+    font-size: 1rem;
+    line-height: 1.3;
+  }
+}
+
+/* Ultra-narrow mobile guard (320px–374px) for MCQ Test Attempt stats + timer */
+@media (max-width: 374px) {
+  .mcq-pyp-exam-page .pyp-exam-heading {
+    font-size: 0.84rem;
+    white-space: normal;
+  }
+
+  .mcq-pyp-exam-page .mcq-stats-group {
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+
+  .mcq-pyp-exam-page .pyp-meta-pill {
+    padding: 2px 5px;
+    font-size: 0.63rem;
+    gap: 3px;
+  }
+
+  .mcq-pyp-exam-page .pyp-meta-pill strong {
+    font-size: 0.68rem;
+  }
+
+  .mcq-pyp-exam-page .pyp-timer-pill {
+    padding: 3px 7px;
+    font-size: 0.72rem;
+    gap: 3px;
   }
 }

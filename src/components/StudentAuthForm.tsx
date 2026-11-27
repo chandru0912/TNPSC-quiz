@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   GraduationCap,
@@ -13,11 +13,16 @@ import {
   AlertCircle,
   Edit3,
   X,
+  MapPin,
+  Search,
+  ChevronDown,
+  Check,
 } from 'lucide-react'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { apiFetch } from '../utils/api'
 import { requestGoogleOAuthCode, GoogleSignInCancelledError } from '../utils/googleOAuth'
 import { resolvePostLoginRedirect, clearPostLoginRedirect } from '../utils/authRedirect'
+import { TAMIL_NADU_DISTRICTS } from '../data/tamilNaduDistricts'
 
 export type AuthMode = 'login' | 'register'
 type AuthStep = 'landing' | 'email-login' | 'email-register' | 'forgot-password'
@@ -88,7 +93,35 @@ export const StudentAuthForm = ({
   const [fullName, setFullName] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [targetGroup, setTargetGroup] = useState('group4')
+  const [district, setDistrict] = useState('')
+  const [districtSearch, setDistrictSearch] = useState('')
+  const [districtMenuOpen, setDistrictMenuOpen] = useState(false)
+  const districtDropdownRef = useRef<HTMLDivElement | null>(null)
   const [rememberMe, setRememberMe] = useState(true)
+
+  const filteredDistricts = useMemo(() => {
+    const q = districtSearch.trim().toLowerCase()
+    if (!q) return TAMIL_NADU_DISTRICTS
+    return TAMIL_NADU_DISTRICTS.filter((d) => d.toLowerCase().includes(q))
+  }, [districtSearch])
+
+  useEffect(() => {
+    if (!districtMenuOpen) return
+    const handleClickOutside = (ev: MouseEvent) => {
+      if (districtDropdownRef.current && !districtDropdownRef.current.contains(ev.target as Node)) {
+        setDistrictMenuOpen(false)
+      }
+    }
+    const handleEsc = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setDistrictMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEsc)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEsc)
+    }
+  }, [districtMenuOpen])
 
   // Forgot password state
   const [resetRequested, setResetRequested] = useState(false)
@@ -299,6 +332,8 @@ export const StudentAuthForm = ({
     if (!cleanEmail) errors.email = 'Email address is required'
     else if (!emailRegex.test(cleanEmail)) errors.email = 'Please enter a valid email address'
 
+    if (!district) errors.district = 'Please select your Tamil Nadu district'
+
     if (!password) errors.password = 'Password is required'
     else if (password.length < 6) errors.password = 'Password must be at least 6 characters'
 
@@ -319,6 +354,7 @@ export const StudentAuthForm = ({
           password,
           confirmPassword,
           targetGroup,
+          district,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -805,6 +841,91 @@ export const StudentAuthForm = ({
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="form-group" ref={districtDropdownRef}>
+              <label htmlFor="auth-reg-district-trigger" className="form-label">
+                Select Your District
+              </label>
+              <div className="district-select-wrap">
+                <button
+                  id="auth-reg-district-trigger"
+                  type="button"
+                  className={`form-input district-select-trigger ${fieldErrors.district ? 'error' : ''} ${districtMenuOpen ? 'open' : ''}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={districtMenuOpen}
+                  disabled={anyBusy}
+                  onClick={() => {
+                    setDistrictMenuOpen((prev) => !prev)
+                    setDistrictSearch('')
+                  }}
+                >
+                  <span className={`district-trigger-value ${district ? '' : 'placeholder'}`}>
+                    <MapPin size={15} className="district-trigger-icon" />
+                    <span>{district || 'Select your Tamil Nadu district'}</span>
+                  </span>
+                  <ChevronDown
+                    size={16}
+                    className={`district-trigger-chevron ${districtMenuOpen ? 'rotated' : ''}`}
+                  />
+                </button>
+
+                {districtMenuOpen && (
+                  <div className="district-dropdown-menu" role="listbox" aria-label="Tamil Nadu Districts">
+                    <div className="district-search-box">
+                      <Search size={14} className="district-search-icon" />
+                      <input
+                        type="text"
+                        className="district-search-input"
+                        placeholder="Search district (38 Tamil Nadu districts)..."
+                        value={districtSearch}
+                        onChange={(e) => setDistrictSearch(e.target.value)}
+                        autoFocus
+                      />
+                      {districtSearch && (
+                        <button
+                          type="button"
+                          className="district-search-clear"
+                          aria-label="Clear district search"
+                          onClick={() => setDistrictSearch('')}
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="district-options-list">
+                      {filteredDistricts.length === 0 ? (
+                        <div className="district-empty">No district found matching &ldquo;{districtSearch}&rdquo;</div>
+                      ) : (
+                        filteredDistricts.map((distName) => {
+                          const isSelected = district === distName
+                          return (
+                            <button
+                              key={distName}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelected}
+                              className={`district-option ${isSelected ? 'selected' : ''}`}
+                              onClick={() => {
+                                setDistrict(distName)
+                                setDistrictMenuOpen(false)
+                                setDistrictSearch('')
+                                if (fieldErrors.district) setFieldErrors({ ...fieldErrors, district: '' })
+                                if (serverError) setServerError(null)
+                              }}
+                            >
+                              <span>{distName}</span>
+                              {isSelected && <Check size={14} className="district-option-check" />}
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {fieldErrors.district && <span className="error-text">{fieldErrors.district}</span>}
             </div>
 
             <div className="form-group">

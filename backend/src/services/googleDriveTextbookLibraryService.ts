@@ -110,6 +110,15 @@ export async function ensureDriveTextbookLibrarySchema(): Promise<void> {
 }
 
 function mapTextbookRow(r: any): DriveTextbookRecord {
+  const rawPub = String(r.publication_status || 'pending_review').trim().toLowerCase();
+  const normalizedPub: TextbookPublicationStatus =
+    r.drive_available === false || rawPub === 'unavailable'
+      ? 'unavailable'
+      : rawPub === 'published'
+        ? 'published'
+        : rawPub === 'unpublished'
+          ? 'unpublished'
+          : 'pending_review';
   return {
     id: Number(r.id),
     googleDriveFileId: String(r.google_drive_file_id || ''),
@@ -126,7 +135,7 @@ function mapTextbookRow(r: any): DriveTextbookRecord {
     driveModifiedTime: r.drive_modified_time ? new Date(r.drive_modified_time).toISOString() : null,
     driveFolderPath: r.drive_folder_path || null,
     driveAvailable: r.drive_available !== false,
-    publicationStatus: (r.publication_status || 'pending_review') as TextbookPublicationStatus,
+    publicationStatus: normalizedPub,
     createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
     updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
     lastSyncedAt: r.last_synced_at ? new Date(r.last_synced_at).toISOString() : null,
@@ -613,10 +622,10 @@ export async function getAdminDriveTextbooksOverview() {
   const [countsRes, logsRes, driveStatus] = await Promise.all([
     pool.query(`
       SELECT
-        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL)::int AS total_synchronized,
-        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND publication_status = 'pending_review')::int AS pending_review,
-        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND publication_status = 'published' AND COALESCE(drive_available, true) = true)::int AS published_count,
-        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND (COALESCE(drive_available, true) = false OR publication_status = 'unavailable'))::int AS unavailable_count
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND deleted_at IS NULL)::int AS total_synchronized,
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND deleted_at IS NULL AND LOWER(COALESCE(publication_status, 'pending_review')) = 'pending_review')::int AS pending_review,
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND deleted_at IS NULL AND LOWER(COALESCE(publication_status, '')) = 'published' AND COALESCE(drive_available, true) = true)::int AS published_count,
+        COUNT(*) FILTER (WHERE google_drive_file_id IS NOT NULL AND deleted_at IS NULL AND (COALESCE(drive_available, true) = false OR LOWER(COALESCE(publication_status, '')) = 'unavailable'))::int AS unavailable_count
       FROM textbooks
     `),
     pool.query(`
@@ -655,6 +664,229 @@ export async function getAdminDriveTextbooksOverview() {
   };
 }
 
+export interface LibraryFacetOption {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface LibraryFacets {
+  standards: LibraryFacetOption[];
+  termsOrVolumes: LibraryFacetOption[];
+  mediums: LibraryFacetOption[];
+  subjects: LibraryFacetOption[];
+  statuses: LibraryFacetOption[];
+}
+
+function buildLibraryWhere(
+  filters: {
+    standard?: string;
+    termOrVolume?: string;
+    medium?: string;
+    subject?: string;
+    publicationStatus?: string;
+    search?: string;
+  },
+  excludeField?: 'standard' | 'termOrVolume' | 'medium' | 'subject' | 'publicationStatus'
+): { whereSql: string; params: any[] } {
+  const conditions: string[] = ['google_drive_file_id IS NOT NULL', 'deleted_at IS NULL'];
+  const params: any[] = [];
+
+  if (excludeField !== 'standard' && filters.standard && filters.standard !== 'all') {
+    const parsedStd = Number(String(filters.standard).replace(/[^0-9]/g, ''));
+    if (Number.isInteger(parsedStd) && parsedStd >= 6 && parsedStd <= 12) {
+      params.push(parsedStd);
+      conditions.push(`standard = $${params.length}`);
+    }
+  }
+  if (excludeField !== 'termOrVolume' && filters.termOrVolume && filters.termOrVolume !== 'all') {
+    const cleanTv = filters.termOrVolume.trim();
+    if (cleanTv) {
+      params.push(cleanTv);
+      conditions.push(
+        `(LOWER(TRIM(COALESCE(term, ''))) = LOWER($${params.length}) OR LOWER(TRIM(COALESCE(volume, ''))) = LOWER($${params.length}))`
+      );
+    }
+  }
+  if (excludeField !== 'medium' && filters.medium && filters.medium !== 'all') {
+    const cleanMed = filters.medium.trim();
+    if (cleanMed) {
+      params.push(cleanMed);
+      conditions.push(`LOWER(TRIM(COALESCE(medium, ''))) = LOWER($${params.length})`);
+    }
+  }
+  if (excludeField !== 'subject' && filters.subject && filters.subject !== 'all' && filters.subject.trim()) {
+    params.push(filters.subject.trim());
+    conditions.push(`LOWER(TRIM(COALESCE(subject, ''))) = LOWER($${params.length})`);
+  }
+  if (excludeField !== 'publicationStatus' && filters.publicationStatus && filters.publicationStatus !== 'all') {
+    const cleanStatus = filters.publicationStatus.trim().toLowerCase();
+    if (cleanStatus === 'unavailable') {
+      conditions.push(`(COALESCE(drive_available, true) = false OR LOWER(COALESCE(publication_status, '')) = 'unavailable')`);
+    } else if (cleanStatus === 'approved') {
+      conditions.push(`LOWER(COALESCE(review_status, '')) = 'approved'`);
+    } else if (cleanStatus) {
+      params.push(cleanStatus);
+      conditions.push(`LOWER(COALESCE(publication_status, 'pending_review')) = $${params.length}`);
+    }
+  }
+  if (filters.search && filters.search.trim()) {
+    params.push(`%${filters.search.trim()}%`);
+    const p = `$${params.length}`;
+    conditions.push(
+      `(
+        book_name ILIKE ${p}
+        OR COALESCE(file_name, '') ILIKE ${p}
+        OR COALESCE(subject, '') ILIKE ${p}
+        OR COALESCE(medium, '') ILIKE ${p}
+        OR COALESCE(term, '') ILIKE ${p}
+        OR COALESCE(volume, '') ILIKE ${p}
+        OR (CAST(standard AS TEXT) || 'th Standard') ILIKE ${p}
+        OR COALESCE(google_drive_file_id, '') ILIKE ${p}
+        OR COALESCE(drive_folder_path, '') ILIKE ${p}
+      )`
+    );
+  }
+
+  return { whereSql: conditions.join(' AND '), params };
+}
+
+const LIB_TERM_VOL_ORDER: Record<string, number> = {
+  'term 1': 1,
+  'term 2': 2,
+  'term 3': 3,
+  'volume 1': 4,
+  'volume 2': 5,
+  'volume 3': 6,
+  'full year': 7,
+  'full book': 8,
+};
+
+const LIB_STATUS_LABELS: Record<string, string> = {
+  pending_review: 'Pending Review',
+  approved: 'Approved',
+  published: 'Published',
+  unpublished: 'Unpublished',
+  rejected: 'Rejected',
+  unavailable: 'Unavailable',
+};
+
+export async function getAdminDriveTextbookFacets(filters: {
+  standard?: string;
+  termOrVolume?: string;
+  medium?: string;
+  subject?: string;
+  publicationStatus?: string;
+  search?: string;
+} = {}): Promise<LibraryFacets> {
+  await ensureDriveTextbookLibrarySchema();
+
+  const stdW = buildLibraryWhere(filters, 'standard');
+  const tvW = buildLibraryWhere(filters, 'termOrVolume');
+  const medW = buildLibraryWhere(filters, 'medium');
+  const subW = buildLibraryWhere(filters, 'subject');
+  const stW = buildLibraryWhere(filters, 'publicationStatus');
+
+  const [stdRes, tvRes, medRes, subRes, stRes] = await Promise.all([
+    pool.query(
+      `SELECT standard AS val, COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${stdW.whereSql} AND standard IS NOT NULL
+       GROUP BY standard
+       ORDER BY standard ASC`,
+      stdW.params
+    ),
+    pool.query(
+      `SELECT val, COUNT(*)::int AS cnt
+       FROM (
+         SELECT NULLIF(TRIM(COALESCE(NULLIF(TRIM(volume), ''), NULLIF(TRIM(term), ''))), '') AS val
+         FROM textbooks
+         WHERE ${tvW.whereSql}
+       ) t
+       WHERE val IS NOT NULL
+       GROUP BY val
+       ORDER BY val ASC`,
+      tvW.params
+    ),
+    pool.query(
+      `SELECT
+         CASE WHEN LOWER(TRIM(COALESCE(medium, ''))) LIKE '%tamil%' THEN 'Tamil' ELSE 'English' END AS val,
+         COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${medW.whereSql}
+       GROUP BY 1
+       ORDER BY 1 ASC`,
+      medW.params
+    ),
+    pool.query(
+      `SELECT TRIM(subject) AS val, COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${subW.whereSql} AND subject IS NOT NULL AND TRIM(subject) <> ''
+       GROUP BY TRIM(subject)
+       ORDER BY TRIM(subject) ASC`,
+      subW.params
+    ),
+    pool.query(
+      `SELECT
+         CASE
+           WHEN COALESCE(drive_available, true) = false OR LOWER(COALESCE(publication_status, '')) = 'unavailable' THEN 'unavailable'
+           ELSE LOWER(COALESCE(publication_status, 'pending_review'))
+         END AS val,
+         COUNT(*)::int AS cnt
+       FROM textbooks
+       WHERE ${stW.whereSql}
+       GROUP BY 1
+       ORDER BY 1 ASC`,
+      stW.params
+    ),
+  ]);
+
+  const standards: LibraryFacetOption[] = stdRes.rows
+    .map((r) => ({ value: String(r.val), label: `${r.val}th Standard`, count: Number(r.cnt || 0) }))
+    .filter((o) => o.count > 0);
+
+  const termsOrVolumes: LibraryFacetOption[] = tvRes.rows
+    .map((r) => ({ value: String(r.val), label: String(r.val), count: Number(r.cnt || 0) }))
+    .filter((o) => o.count > 0)
+    .sort((a, b) => {
+      const oa = LIB_TERM_VOL_ORDER[a.value.toLowerCase()] ?? 99;
+      const ob = LIB_TERM_VOL_ORDER[b.value.toLowerCase()] ?? 99;
+      return oa !== ob ? oa - ob : a.label.localeCompare(b.label);
+    });
+
+  const mediums: LibraryFacetOption[] = medRes.rows
+    .map((r) => ({
+      value: String(r.val),
+      label: r.val === 'Tamil' ? 'Tamil Medium' : 'English Medium',
+      count: Number(r.cnt || 0),
+    }))
+    .filter((o) => o.count > 0)
+    .sort((a, b) => (a.value === 'Tamil' ? -1 : b.value === 'Tamil' ? 1 : a.label.localeCompare(b.label)));
+
+  const subjects: LibraryFacetOption[] = subRes.rows
+    .map((r) => ({ value: String(r.val), label: String(r.val), count: Number(r.cnt || 0) }))
+    .filter((o) => o.count > 0);
+
+  const statusOrder = ['pending_review', 'approved', 'published', 'unpublished', 'rejected', 'unavailable'];
+  const statuses: LibraryFacetOption[] = stRes.rows
+    .map((r) => {
+      const val = String(r.val || 'pending_review').toLowerCase();
+      return {
+        value: val,
+        label: LIB_STATUS_LABELS[val] || val.replace(/_/g, ' '),
+        count: Number(r.cnt || 0),
+      };
+    })
+    .filter((o) => o.count > 0)
+    .sort((a, b) => {
+      const ia = statusOrder.indexOf(a.value);
+      const ib = statusOrder.indexOf(b.value);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+
+  return { standards, termsOrVolumes, mediums, subjects, statuses };
+}
+
 export async function listAdminDriveTextbooks(filters: {
   standard?: string;
   termOrVolume?: string;
@@ -664,39 +896,11 @@ export async function listAdminDriveTextbooks(filters: {
   search?: string;
 } = {}): Promise<DriveTextbookRecord[]> {
   await ensureDriveTextbookLibrarySchema();
-  const conditions: string[] = ['google_drive_file_id IS NOT NULL'];
-  const params: any[] = [];
-
-  if (filters.standard && filters.standard !== 'all' && !Number.isNaN(Number(filters.standard))) {
-    params.push(Number(filters.standard));
-    conditions.push(`standard = $${params.length}`);
-  }
-  if (filters.termOrVolume && filters.termOrVolume !== 'all') {
-    params.push(filters.termOrVolume.trim());
-    conditions.push(`(LOWER(COALESCE(term, '')) = LOWER($${params.length}) OR LOWER(COALESCE(volume, '')) = LOWER($${params.length}))`);
-  }
-  if (filters.medium && filters.medium !== 'all') {
-    params.push(filters.medium.trim());
-    conditions.push(`LOWER(medium) = LOWER($${params.length})`);
-  }
-  if (filters.subject && filters.subject !== 'all') {
-    params.push(`%${filters.subject.trim()}%`);
-    conditions.push(`LOWER(subject) LIKE LOWER($${params.length})`);
-  }
-  if (filters.publicationStatus && filters.publicationStatus !== 'all') {
-    params.push(filters.publicationStatus.trim().toLowerCase());
-    conditions.push(`LOWER(COALESCE(publication_status, 'pending_review')) = $${params.length}`);
-  }
-  if (filters.search && filters.search.trim()) {
-    params.push(`%${filters.search.trim()}%`);
-    conditions.push(
-      `(LOWER(book_name) LIKE LOWER($${params.length}) OR LOWER(COALESCE(file_name, '')) LIKE LOWER($${params.length}) OR LOWER(subject) LIKE LOWER($${params.length}))`
-    );
-  }
+  const { whereSql, params } = buildLibraryWhere(filters);
 
   const res = await pool.query(
     `SELECT * FROM textbooks
-     WHERE ${conditions.join(' AND ')}
+     WHERE ${whereSql}
      ORDER BY standard ASC, medium ASC, subject ASC, term ASC NULLS LAST, volume ASC NULLS LAST, book_name ASC`,
     params
   );

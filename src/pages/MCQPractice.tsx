@@ -1064,7 +1064,7 @@ const MCQPractice = () => {
   }
 
   return (
-    <div className="practice">
+    <div className={`practice ${currentView === 'test' && isAuthenticated ? 'is-mcq-test-active' : ''}`}>
       <div className="practice-container">
         {/* Top Navigation Bar with Back buttons (shown only on initial landing page, hidden on subject-specific pages) */}
         {!urlSubjectId && (
@@ -1602,10 +1602,10 @@ const MCQPractice = () => {
                   }
                   title="Return to Lessons"
                 >
-                  <ArrowLeft size={16} />
+                  <ArrowLeft size={15} />
                   <span>Back to Lessons</span>
                 </button>
-                <div>
+                <div className="mcq-exam-title-block">
                   <div className="pyp-brand-line">
                     <span className="pyp-hub-tag">TNPSC Study Hub</span>
                     <span className="pyp-status-dot">
@@ -1621,66 +1621,87 @@ const MCQPractice = () => {
                     {' – '}
                     {activeSubjectObj?.name || 'General Studies'}
                   </h1>
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.15rem' }}>
-                    {[
-                      urlClassId ? `${urlClassId}th Standard` : null,
-                      activeUnitFilter ? `Unit ${activeUnitFilter}` : null,
-                      urlLesson ? decodeURIComponent(urlLesson) : searchParams.get('title') ? decodeURIComponent(searchParams.get('title')!) : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' | ')}
+                  <div className="mcq-exam-submeta">
+                    {(urlClassId || activeUnitFilter) && (
+                      <span className="mcq-exam-std-unit">
+                        {[
+                          urlClassId ? `${urlClassId}th Standard` : null,
+                          activeUnitFilter ? `Unit ${activeUnitFilter}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' | ')}
+                      </span>
+                    )}
+                    {(urlLesson || searchParams.get('title')) && (
+                      <>
+                        {(urlClassId || activeUnitFilter) && (
+                          <span className="mcq-exam-submeta-sep" aria-hidden="true"> | </span>
+                        )}
+                        <span className="mcq-exam-lesson-name">
+                          {urlLesson
+                            ? decodeURIComponent(urlLesson)
+                            : decodeURIComponent(searchParams.get('title')!)}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
 
               <div className="pyp-topbar-meta">
-                <div className="pyp-meta-pill">
-                  <span>Total</span>
-                  <strong>{filteredQuestions.length}</strong>
-                </div>
-                <div className="pyp-meta-pill">
-                  <span>Answered</span>
-                  <strong style={{ color: '#34d399' }}>{Object.keys(userAnswers).length}</strong>
-                </div>
-                <div className="pyp-meta-pill">
-                  <span>Remaining</span>
-                  <strong>{Math.max(0, filteredQuestions.length - Object.keys(userAnswers).length)}</strong>
-                </div>
-                <div className="pyp-timer-pill" title="Elapsed Practice Time">
-                  <Clock size={16} />
-                  <span>{formatElapsedClock(elapsedSeconds)}</span>
-                </div>
-
-                {filteredQuestions.length > 0 && (
-                  <div className="mcq-lang-switch glass" role="group" aria-label="Question language">
-                    <Languages size={14} className="mcq-lang-icon" />
-                    <button
-                      type="button"
-                      className={`mcq-lang-btn ${questionLang === 'en' ? 'active' : ''}`}
-                      onClick={() => setQuestionLang('en')}
-                    >
-                      EN
-                    </button>
-                    <button
-                      type="button"
-                      className={`mcq-lang-btn ${questionLang === 'ta' ? 'active' : ''}`}
-                      onClick={() => setQuestionLang('ta')}
-                    >
-                      {isTranslating && questionLang === 'ta' ? 'தமிழ்…' : 'தமிழ்'}
-                    </button>
+                <div className="mcq-stats-timer-row">
+                  <div className="mcq-stats-group">
+                    <div className="pyp-meta-pill">
+                      <span>Total</span>
+                      <strong>{filteredQuestions.length}</strong>
+                    </div>
+                    <div className="pyp-meta-pill">
+                      <span>Answered</span>
+                      <strong style={{ color: '#34d399' }}>{Object.keys(userAnswers).length}</strong>
+                    </div>
+                    <div className="pyp-meta-pill">
+                      <span>Remaining</span>
+                      <strong>{Math.max(0, filteredQuestions.length - Object.keys(userAnswers).length)}</strong>
+                    </div>
                   </div>
-                )}
+                  <div className="pyp-timer-pill" title="Elapsed Practice Time">
+                    <Clock size={15} />
+                    <span>{formatElapsedClock(elapsedSeconds)}</span>
+                  </div>
+                </div>
 
-                {!isQuizCompleted && filteredQuestions.length > 0 && (
-                  <button
-                    type="button"
-                    className="pyp-mobile-palette-toggle"
-                    onClick={() => setIsPaletteOpenMobile((v) => !v)}
-                  >
-                    <Grid size={16} />
-                    <span>Palette</span>
-                  </button>
-                )}
+                <div className="mcq-header-controls-row">
+                  {filteredQuestions.length > 0 && (
+                    <div className="mcq-lang-switch glass" role="group" aria-label="Question language">
+                      <Languages size={14} className="mcq-lang-icon" />
+                      <button
+                        type="button"
+                        className={`mcq-lang-btn ${questionLang === 'en' ? 'active' : ''}`}
+                        onClick={() => setQuestionLang('en')}
+                      >
+                        EN
+                      </button>
+                      <button
+                        type="button"
+                        className={`mcq-lang-btn ${questionLang === 'ta' ? 'active' : ''}`}
+                        onClick={() => setQuestionLang('ta')}
+                      >
+                        {isTranslating && questionLang === 'ta' ? 'தமிழ்…' : 'தமிழ்'}
+                      </button>
+                    </div>
+                  )}
+
+                  {!isQuizCompleted && filteredQuestions.length > 0 && (
+                    <button
+                      type="button"
+                      className="pyp-mobile-palette-toggle"
+                      onClick={() => setIsPaletteOpenMobile((v) => !v)}
+                    >
+                      <Grid size={15} />
+                      <span>Palette</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </header>
 

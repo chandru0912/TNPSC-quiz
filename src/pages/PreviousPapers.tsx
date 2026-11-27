@@ -29,7 +29,28 @@ const PreviousPapers = () => {
   useStudyTimeTracker()
   const navigate = useNavigate()
   const { isAuthenticated } = useStudentAuth()
-  const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all')
+  const [isMobileView, setIsMobileView] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
+  )
+  const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+      ? 'group1'
+      : 'all'
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 768px)')
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobileView(e.matches)
+      if (e.matches) {
+        setSelectedCategory((prev) => (prev === 'all' ? 'group1' : prev))
+      }
+    }
+    setIsMobileView(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
   const [selectedYear, setSelectedYear] = useState<string>('all')
   const [selectedMedium, setSelectedMedium] = useState<string>('all')
   const [subjectSearch, setSubjectSearch] = useState<string>('')
@@ -65,9 +86,13 @@ const PreviousPapers = () => {
   const categories: { id: CategoryFilter; name: string }[] = [
     { id: 'all', name: 'All Papers' },
     { id: 'group1', name: 'TNPSC Group 1' },
-    { id: 'group2_2a', name: 'TNPSC Group 2 and 2A' },
+    { id: 'group2_2a', name: isMobileView ? 'TNPSC Group 2 & 2A' : 'TNPSC Group 2 and 2A' },
     { id: 'group4', name: 'TNPSC Group 4' },
   ]
+
+  const visibleCategories = isMobileView
+    ? categories.filter((c) => c.id !== 'all')
+    : categories
 
   const availableYears = useMemo(
     () => Array.from(new Set(papers.map((p) => p.year))).sort((a, b) => b - a),
@@ -121,10 +146,11 @@ const PreviousPapers = () => {
 
         {/* Category Filter Tabs */}
         <div className="papers-categories glass">
-          {categories.map((cat) => (
+          {visibleCategories.map((cat) => (
             <button
               key={cat.id}
-              className={`papers-tab ${selectedCategory === cat.id ? 'active' : ''}`}
+              type="button"
+              className={`papers-tab ${cat.id === 'all' ? 'papers-tab-all' : ''} ${selectedCategory === cat.id ? 'active' : ''}`}
               onClick={() => setSelectedCategory(cat.id)}
             >
               {cat.name}

@@ -527,3 +527,38 @@
   flex-direction: column;
 }
 
+/* Mobile-Only Sidebar Navigation Item Consistency (<= 767px)
+   Removes the heavy rectangular box border/background on active/selected mobile drawer links
+   (such as Textbook Library) while preserving the gold icon, label, active dot, and desktop/tablet styles. */
+@media screen and (max-width: 767px) {
+  .student-sidebar-drawer .student-sidebar-link {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .student-sidebar-drawer .student-sidebar-link.active,
+  .student-sidebar-drawer .student-sidebar-link[href="/school-materials"],
+  .student-sidebar-drawer .student-sidebar-link[href="/school-materials"].active {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    border-radius: 12px;
+    padding: 0.68rem 0.85rem;
+    padding-right: 1.25rem;
+    margin: 0;
+  }
+
+  .student-sidebar-drawer .student-sidebar-link:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  .student-sidebar-drawer .student-sidebar-link.active .student-link-icon-wrap {
+    color: #ffd700;
+    filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.5));
+  }
+
+  .student-sidebar-drawer .student-sidebar-link.active {
+    color: #ffffff;
+    font-weight: 600;
+  }
+}
+

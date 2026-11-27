@@ -648,3 +648,167 @@
 }
 
 
+
+/* =========================================================
+   Unit Wise Test — Clickable Unit Cards & Individual Test Selection
+   ========================================================= */
+.unit-clickable-card {
+  cursor: pointer;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.22s ease,
+              box-shadow 0.22s ease,
+              background 0.22s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.unit-clickable-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 215, 0, 0.45);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4), 0 0 18px rgba(255, 215, 0, 0.14);
+}
+
+.unit-clickable-card:active {
+  transform: scale(0.985);
+}
+
+.unit-clickable-card:focus-visible {
+  outline: 2px solid #ffd700;
+  outline-offset: 2px;
+}
+
+.unit-card-open-cue {
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fde047;
+  opacity: 0.9;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.unit-clickable-card:hover .unit-card-open-cue {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+.unit-tests-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.unit-test-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.15rem 1.2rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.55);
+  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.unit-test-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(167, 139, 250, 0.45);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+
+.unit-test-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.unit-test-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f8fafc;
+  line-height: 1.35;
+}
+
+.unit-test-metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.unit-test-metrics-row strong {
+  color: #f8fafc;
+}
+
+.unit-test-progress-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.unit-test-progress-strip strong {
+  color: #e2e8f0;
+}
+
+.unit-test-card-footer {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.retake-available-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.16rem 0.55rem;
+  border-radius: 9999px;
+  background: rgba(139, 92, 246, 0.18);
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  color: #c4b5fd;
+}
+
+.unit-tests-empty-state {
+  text-align: center;
+  padding: 2.25rem 1.5rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px dashed rgba(255, 215, 0, 0.25);
+  color: #cbd5e1;
+}
+
+.unit-tests-empty-state h4 {
+  margin: 0 0 0.4rem;
+  color: #f8fafc;
+  font-size: 1.05rem;
+}
+
+.unit-tests-empty-state p {
+  margin: 0 auto;
+  max-width: 560px;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #94a3b8;
+}
+
+@media (max-width: 640px) {
+  .unit-tests-grid {
+    grid-template-columns: 1fr;
+  }
+}

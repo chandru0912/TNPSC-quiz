@@ -265,7 +265,7 @@ const SchoolMaterials = () => {
                 className={`medium-filter-btn ${selectedMedium === 'Tamil' ? 'active' : ''}`}
                 onClick={() => handleMediumChange('Tamil')}
               >
-                தமிழ் வழி (Tamil Medium) {tamilCount > 0 ? `(${tamilCount})` : ''}
+                Tamil Medium {tamilCount > 0 ? `(${tamilCount})` : ''}
               </button>
               <button
                 type="button"

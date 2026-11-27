@@ -35,6 +35,7 @@ import {
 } from '../services/googleDriveService';
 import {
   bulkUpdateDriveTextbookPublication,
+  getAdminDriveTextbookFacets,
   getAdminDriveTextbooksOverview,
   getDriveStreamForTextbook,
   getPublishedStudentLibraryForStandard,
@@ -1551,15 +1552,19 @@ router.get('/drive-library/admin/overview', requireAdminAuth, async (_req: Reque
 
 router.get('/drive-library/admin/list', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const books = await listAdminDriveTextbooks({
+    const filterParams = {
       standard: typeof req.query.standard === 'string' ? req.query.standard : undefined,
       termOrVolume: typeof req.query.termOrVolume === 'string' ? req.query.termOrVolume : undefined,
       medium: typeof req.query.medium === 'string' ? req.query.medium : undefined,
       subject: typeof req.query.subject === 'string' ? req.query.subject : undefined,
       publicationStatus: typeof req.query.publicationStatus === 'string' ? req.query.publicationStatus : undefined,
       search: typeof req.query.search === 'string' ? req.query.search : undefined,
-    });
-    return res.status(200).json({ status: 'success', data: books });
+    };
+    const [books, facets] = await Promise.all([
+      listAdminDriveTextbooks(filterParams),
+      getAdminDriveTextbookFacets(filterParams),
+    ]);
+    return res.status(200).json({ status: 'success', total: books.length, facets, data: books });
   } catch (err: any) {
     return res.status(err?.statusCode || 500).json({
       status: 'error',

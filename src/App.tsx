@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense, type ComponentType } from 'react'
+import { useState, useEffect, lazy, Suspense, type ComponentType } from 'react'
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
 import { GraduationCap } from 'lucide-react'
 import ScrollToTop from './components/ScrollToTop'
@@ -10,7 +10,6 @@ import { StudentAuthProvider } from './context/StudentAuthContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RequireStudentAuthRoute from './components/RequireStudentAuthRoute'
 import RequireAdminAuthRoute from './components/RequireAdminAuthRoute'
-import LoginLocationModal from './components/LoginLocationModal'
 import { startVisitorTracking, trackPageView } from './utils/visitorTracker'
 import './App.css'
 
@@ -90,9 +89,27 @@ function RouteLoadingFallback() {
 
 function AppShell() {
   const location = useLocation()
-  const isAdmin = location.pathname.startsWith('/admin')
+  const isHomePage = location.pathname === '/' || location.pathname === ''
+  const isAdmin = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
   const isOwnerLogin = location.pathname === '/owner-login'
   const isPrivateOwnerRoute = isAdmin || isOwnerLogin
+
+  const [isMobileViewport, setIsMobileViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 767px)')
+    const onChange = (e: MediaQueryListEvent) => setIsMobileViewport(e.matches)
+    setIsMobileViewport(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  // Desktop & Tablet (>= 768px): show global Navbar on all student-facing routes.
+  // Mobile (<= 767px): show global Navbar ONLY on the Home Page ('/').
+  const shouldShowGlobalNavbar = !isPrivateOwnerRoute && (!isMobileViewport || isHomePage)
 
   // Real-time website visitor & route page-view tracking (non-admin routes only)
   useEffect(() => {
@@ -178,10 +195,9 @@ function AppShell() {
       </div>
 
       {!isPrivateOwnerRoute && <StudentPreviewBanner />}
-      {!isPrivateOwnerRoute && <LoginLocationModal />}
-      {!isOwnerLogin && <Navbar />}
+      {shouldShowGlobalNavbar && <Navbar />}
 
-      <main className={`main-content ${isAdmin ? 'admin-main-mode' : ''} ${isDashboardRoute ? 'student-dashboard-main-mode' : ''}`}>
+      <main className={`main-content ${!shouldShowGlobalNavbar ? 'no-global-header' : ''} ${isAdmin ? 'admin-main-mode' : ''} ${isDashboardRoute ? 'student-dashboard-main-mode' : ''}`}>
         <ErrorBoundary
           resetKey={location.pathname}
           fallbackTitle="Page failed to render"

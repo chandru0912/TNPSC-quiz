@@ -11,6 +11,12 @@ import {
 
 export type ProgressMode = 'mcq_practice' | 'lesson_wise' | 'all';
 
+export function calculateSafeProgress(completed: number, available: number): number {
+  if (!Number.isFinite(available) || available <= 0) return 0;
+  const safeCompleted = Math.max(0, Math.min(Number(completed) || 0, available));
+  return Math.round((safeCompleted / available) * 100);
+}
+
 export interface LessonProgressSummary extends AwardCounters {
   lessonId: string;
   lessonNumber: string;
@@ -441,7 +447,7 @@ export async function getMockTestProgressSummary(
   studentId: number,
   params?: { groupId?: string }
 ) {
-  const [boundaries, awardSettings, res, inProgRes] = await Promise.all([
+  const [boundaries, awardSettings, res, inProgRes, publishedUnitTestsRes] = await Promise.all([
     getGradeBoundaries(),
     getAwardSettings(),
     pool.query(
@@ -449,8 +455,7 @@ export async function getMockTestProgressSummary(
               percentage, score, max_score, grade, award_type, time_spent_seconds, completed_at, attempt_number
        FROM mock_test_attempts
        WHERE student_id = $1
-         AND COALESCE(status, 'completed') = 'completed'
-         AND attempted_questions > 0
+         AND status = 'completed'
          AND (
            COALESCE(assessment_type, '') = 'mock_test'
            OR COALESCE(mock_test_format, '') IN ('lesson_wise', 'unit_wise', 'full_length')
@@ -464,9 +469,29 @@ export async function getMockTestProgressSummary(
        WHERE student_id = $1 AND status = 'in_progress'`,
       [studentId]
     ),
+    pool.query(
+      `SELECT mt.id, mt.category, mt.tnpsc_group, mt.subject, mt.standard, mt.unit
+       FROM mock_tests mt
+       INNER JOIN (
+         SELECT mock_test_id, COUNT(*)::int AS cnt
+         FROM mock_test_questions
+         GROUP BY mock_test_id
+       ) q_cnt ON q_cnt.mock_test_id = mt.id AND q_cnt.cnt > 0
+       WHERE COALESCE(mt.test_category, 'full_length') = 'unit_wise'
+         AND COALESCE(mt.approval_status, 'approved') = 'approved'
+         AND (
+           (mt.status = 'published' AND (mt.end_at IS NULL OR mt.end_at >= NOW()))
+           OR (
+             mt.status = 'scheduled'
+             AND (mt.start_at IS NULL OR mt.start_at <= NOW())
+             AND (mt.end_at IS NULL OR mt.end_at >= NOW())
+           )
+         )`
+    ),
   ]);
 
   let rows = res.rows;
+  let publishedUnitTests = publishedUnitTestsRes.rows;
   if (params?.groupId) {
     const g = normalizeGroupId(params.groupId);
     const cands = groupCategoryCandidates(g);
@@ -475,6 +500,40 @@ export async function getMockTestProgressSummary(
         String(r.group_id || '').toLowerCase() === g ||
         cands.includes(String(r.category || '').toLowerCase())
     );
+    publishedUnitTests = publishedUnitTests.filter(
+      (t) =>
+        cands.includes(String(t.category || '').toLowerCase()) ||
+        normalizeGroupId(t.tnpsc_group) === g
+    );
+  }
+
+  // Distinct published Unit Wise test IDs that the student has completed (status = 'completed')
+  const completedPublishedTestIds = new Set<string>(
+    rows.map((r) => String(r.test_id || '').trim()).filter(Boolean)
+  );
+
+  // Per-unit backend progress summary keyed by `${subjectSlug}::${standardNum}::${unitNum}`
+  const unitProgressMap: Record<
+    string,
+    { availableTests: number; completedTests: number; progressPercentage: number }
+  > = {};
+  for (const t of publishedUnitTests) {
+    const subjSlug = normalizeSubjectId(t.subject);
+    const stdMatch = String(t.standard || '').match(/\d+/);
+    const unitMatch = String(t.unit || '').match(/\d+/);
+    if (!stdMatch || !unitMatch) continue;
+    const key = `${subjSlug}::${Number(stdMatch[0])}::${Number(unitMatch[0])}`;
+    if (!unitProgressMap[key]) {
+      unitProgressMap[key] = { availableTests: 0, completedTests: 0, progressPercentage: 0 };
+    }
+    unitProgressMap[key].availableTests += 1;
+    if (completedPublishedTestIds.has(String(t.id))) {
+      unitProgressMap[key].completedTests += 1;
+    }
+  }
+  for (const key of Object.keys(unitProgressMap)) {
+    const entry = unitProgressMap[key];
+    entry.progressPercentage = calculateSafeProgress(entry.completedTests, entry.availableTests);
   }
 
   const fullLengthRows = rows.filter((r) => resolveModeForAttempt(r) === 'full_length');
@@ -553,6 +612,7 @@ export async function getMockTestProgressSummary(
     unitWiseByTestId,
     lessonWiseByTestId,
     allByTestId,
+    unitProgressMap,
     inProgressTestIds,
     gradeBoundaries: boundaries,
     awardSettings,

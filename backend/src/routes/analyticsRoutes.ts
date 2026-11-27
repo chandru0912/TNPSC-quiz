@@ -25,6 +25,52 @@ function normalizeRange(raw: unknown): AnalyticsRange {
   return VALID_RANGES.has(s) ? s : '30d';
 }
 
+const DB_CONNECTIVITY_CODES = new Set([
+  'ENOTFOUND',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  '08000',
+  '08001',
+  '08003',
+  '08004',
+  '08006',
+  '57P01',
+  '57P02',
+  '57P03',
+]);
+
+function handleAnalyticsRouteError(res: Response, label: string, req: Request, err: any) {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || 'Unexpected analytics error');
+  const isDbOutage =
+    DB_CONNECTIVITY_CODES.has(code) ||
+    /getaddrinfo|timeout exceeded when trying to connect|connection terminated|cannot connect/i.test(msg);
+
+  console.error(`[Analytics ${label} Error]`, {
+    range: req.query?.range || null,
+    district: req.query?.district || null,
+    code: code || 'UNKNOWN',
+    message: msg,
+  });
+
+  if (isDbOutage) {
+    return res.status(503).json({
+      status: 'error',
+      code: 'DATABASE_UNAVAILABLE',
+      message: 'Analytics database is temporarily unreachable. Please retry in a moment.',
+      detail: process.env.NODE_ENV === 'production' ? undefined : msg,
+    });
+  }
+
+  return res.status(500).json({
+    status: 'error',
+    code: code || 'ANALYTICS_ERROR',
+    message: msg || 'Failed to load analytics data.',
+  });
+}
+
 // Lightweight sliding-window rate limiter for public tracking endpoints (max 90 req/min per IP)
 const trackRateMap = new Map<string, { count: number; resetAt: number }>();
 function isRateLimited(ip: string, maxPerMin = 90): boolean {
@@ -208,8 +254,7 @@ router.get(['/overview', '/', ''], requireAdminAuth, async (req: Request, res: R
     const data = await AnalyticsService.getOverview(range, district);
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Analytics Overview Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return handleAnalyticsRouteError(res, 'Overview', req, err);
   }
 });
 
@@ -220,19 +265,17 @@ router.get('/geographic', requireAdminAuth, async (req: Request, res: Response) 
     const data = await AnalyticsService.getGeographic(range);
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Analytics Geographic Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return handleAnalyticsRouteError(res, 'Geographic', req, err);
   }
 });
 
 // 5. Live Website Visitor Monitor
-router.get('/live', requireAdminAuth, async (_req: Request, res: Response) => {
+router.get('/live', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     const data = await AnalyticsService.getLiveMonitor();
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Analytics Live Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return handleAnalyticsRouteError(res, 'Live', req, err);
   }
 });
 
@@ -244,8 +287,7 @@ router.get('/traffic', requireAdminAuth, async (req: Request, res: Response) => 
     const data = await AnalyticsService.getTraffic(range, district);
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Analytics Traffic Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return handleAnalyticsRouteError(res, 'Traffic', req, err);
   }
 });
 
@@ -257,8 +299,7 @@ router.get('/subscriptions', requireAdminAuth, async (req: Request, res: Respons
     const data = await AnalyticsService.getSubscriptions(range, district);
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Analytics Subscriptions Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return handleAnalyticsRouteError(res, 'Subscriptions', req, err);
   }
 });
 
@@ -270,8 +311,7 @@ router.get('/students', requireAdminAuth, async (req: Request, res: Response) =>
     const data = await AnalyticsService.getStudents(range, district);
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Analytics Students Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return handleAnalyticsRouteError(res, 'Students', req, err);
   }
 });
 
@@ -283,8 +323,7 @@ router.get('/performance', requireAdminAuth, async (req: Request, res: Response)
     const data = await AnalyticsService.getPerformance(range, district);
     return res.status(200).json({ status: 'success', data });
   } catch (err: any) {
-    console.error('[Analytics Performance Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return handleAnalyticsRouteError(res, 'Performance', req, err);
   }
 });
 

@@ -4,7 +4,39 @@ import { submitAssessmentAttempt } from './markListService';
 import { notifyPlatformContentUpdate } from './studentDashboardService';
 
 export type MockTestStatus = 'draft' | 'published' | 'scheduled' | 'staging' | 'archived';
+export type MockTestApprovalStatus = 'draft' | 'generated' | 'under_review' | 'approved' | 'rejected';
 export type MockTestCategory = 'lesson_wise' | 'unit_wise' | 'full_length';
+
+let approvalColumnsReadyPromise: Promise<void> | null = null;
+
+async function ensureMockTestApprovalColumns(): Promise<void> {
+  if (!approvalColumnsReadyPromise) {
+    approvalColumnsReadyPromise = (async () => {
+      await pool.query(`
+        ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) NOT NULL DEFAULT 'draft';
+        ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS approved_by VARCHAR(100);
+        ALTER TABLE mock_tests ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE;
+      `);
+      await pool.query(`
+        UPDATE mock_tests
+        SET approval_status = CASE
+              WHEN status IN ('published', 'scheduled') THEN 'approved'
+              WHEN status = 'staging' THEN 'under_review'
+              ELSE 'draft'
+            END,
+            approved_at = CASE
+              WHEN status IN ('published', 'scheduled') THEN COALESCE(approved_at, published_at, created_at)
+              ELSE approved_at
+            END
+        WHERE approval_status = 'draft' AND status IN ('published', 'scheduled', 'staging');
+      `);
+    })().catch((err) => {
+      approvalColumnsReadyPromise = null;
+      throw err;
+    });
+  }
+  await approvalColumnsReadyPromise;
+}
 
 export interface MockTestConfigInput {
   title: string;
@@ -22,6 +54,7 @@ export interface MockTestConfigInput {
   negativeMarking: number;
   difficulty?: 'Easy' | 'Medium' | 'Hard';
   status?: MockTestStatus;
+  approvalStatus?: MockTestApprovalStatus;
   startAt?: string | null;
   endAt?: string | null;
   randomizePerAttempt?: boolean;
@@ -147,6 +180,16 @@ function slugifyTitle(title: string): string {
   return `${base || 'mock-test'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function normalizeApprovalStatus(row: any): MockTestApprovalStatus {
+  const raw = String(row.approval_status || '').trim().toLowerCase();
+  if (raw === 'draft' || raw === 'generated' || raw === 'under_review' || raw === 'approved' || raw === 'rejected') {
+    return raw;
+  }
+  if (row.status === 'published' || row.status === 'scheduled') return 'approved';
+  if (row.status === 'staging') return 'under_review';
+  return 'draft';
+}
+
 function mapAdminMockTestRow(row: any) {
   const assignedCount = Number(row.assigned_questions_count || 0);
   return {
@@ -162,7 +205,7 @@ function mapAdminMockTestRow(row: any) {
     standard: row.standard || null,
     unit: row.unit || null,
     lesson: row.lesson || null,
-    questionsCount: Number(row.questions_count || 0),
+    questionsCount: assignedCount > 0 ? assignedCount : Number(row.questions_count || 0),
     assignedQuestionsCount: assignedCount,
     durationMinutes: Number(row.duration_minutes || 90),
     totalMarks: Number(row.total_marks || 0),
@@ -171,6 +214,9 @@ function mapAdminMockTestRow(row: any) {
     difficulty: row.difficulty || 'Medium',
     status: row.status === 'staging' ? 'draft' : row.status,
     rawStatus: row.status,
+    approvalStatus: normalizeApprovalStatus(row),
+    approvedBy: row.approved_by || null,
+    approvedAt: row.approved_at || null,
     randomizePerAttempt: Boolean(row.randomize_per_attempt),
     avoidRepeatedQuestions: row.avoid_repeated_questions !== false,
     includeIncorrectOnRetake: Boolean(row.include_incorrect_on_retake),
@@ -193,6 +239,7 @@ export async function getAdminMockTestsOverview(filters?: {
   subject?: string;
   testCategory?: string;
 }) {
+  await ensureMockTestApprovalColumns();
   const where: string[] = [];
   const params: any[] = [];
   let idx = 1;
@@ -580,39 +627,14 @@ async function validateForPublish(
     err.statusCode = 400;
     throw err;
   }
-  const isDynamicFullLength =
-    config.testCategory === 'full_length' && Boolean(config.randomizePerAttempt) && questionIds.length === 0;
-
-  if (isDynamicFullLength) {
-    const groupMatches = normalizeQuestionCategoryMatch(config.tnpscGroup);
-    const stdNum = parseStandardNumber(config.standard);
-    const bankCheck = await client.query(
-      `SELECT COUNT(*)::int AS cnt
-       FROM questions
-       WHERE status = 'published'
-         AND COALESCE(verification_status, 'verified') <> 'rejected'
-         AND correct_answer BETWEEN 0 AND 3
-         AND ($1::text[] IS NULL OR LOWER(COALESCE(category, '')) = ANY($1::text[]))
-         AND ($2::int IS NULL OR class_id = $2 OR standard_id = $2)`,
-      [groupMatches, stdNum]
-    );
-    const eligible = Number(bankCheck.rows[0]?.cnt || 0);
-    if (eligible < config.questionsCount) {
-      const err: any = new Error(
-        `Insufficient published questions for ${config.tnpscGroup}${config.standard ? ` (${config.standard})` : ''}: ${eligible} eligible found, but ${config.questionsCount} required.`
-      );
-      err.statusCode = 400;
-      throw err;
-    }
-    return;
-  }
-
+  // Strict Mock Test Isolation: Every published Mock Test (Unit Wise or Full-Length)
+  // MUST have explicitly generated and assigned questions in mock_test_questions.
   if (questionIds.length === 0) {
-    const err: any = new Error('Please select questions from the Question Bank before publishing.');
+    const err: any = new Error('Please generate and assign questions in the Mock Test MCQ Generator before publishing.');
     err.statusCode = 400;
     throw err;
   }
-  if (questionIds.length !== config.questionsCount) {
+  if (config.questionsCount > 0 && questionIds.length !== config.questionsCount) {
     const err: any = new Error(
       `Selected questions (${questionIds.length}) must match Total Questions (${config.questionsCount}) before publishing.`
     );
@@ -647,6 +669,7 @@ async function validateForPublish(
 }
 
 export async function getAdminMockTestDetail(id: number) {
+  await ensureMockTestApprovalColumns();
   const [testRes, questionsRes] = await Promise.all([
     pool.query(
       `SELECT mt.*,
@@ -691,12 +714,22 @@ export async function getAdminMockTestDetail(id: number) {
 }
 
 export async function createAdminMockTest(input: MockTestConfigInput, adminUsername: string) {
+  await ensureMockTestApprovalColumns();
   const dedupedIds = Array.from(new Set((input.questionIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)));
   const groupInfo = normalizeGroupToCategory(input.tnpscGroup);
   const testCategory = normalizeTestCategory(input.testCategory);
-  const status = input.status || 'draft';
+  const status = input.status || 'staging';
+  const approvalStatus: MockTestApprovalStatus =
+    input.approvalStatus ||
+    (status === 'published' || status === 'scheduled'
+      ? 'approved'
+      : status === 'staging'
+      ? 'under_review'
+      : dedupedIds.length > 0
+      ? 'generated'
+      : 'draft');
   const marksPerQ = Number(input.marksPerQuestion) || 1.5;
-  const totalQ = Number(input.questionsCount) || dedupedIds.length || (testCategory === 'full_length' ? 200 : 25);
+  const totalQ = dedupedIds.length > 0 ? dedupedIds.length : Number(input.questionsCount) || (testCategory === 'full_length' ? 200 : 25);
   const totalMarks = Number(input.totalMarks) || Number((totalQ * marksPerQ).toFixed(2));
   const negativeMarking = Number(input.negativeMarking) || 0;
   const durationMinutes = Number(input.durationMinutes) || (testCategory === 'full_length' ? 180 : 30);
@@ -746,7 +779,8 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
          slug, title, description, category, category_name, tnpsc_group, test_category,
          subject, standard, unit, lesson,
          questions_count, duration_minutes, total_marks, marks_per_question, negative_marking,
-         difficulty, status, randomize_per_attempt, avoid_repeated_questions, include_incorrect_on_retake,
+         difficulty, status, approval_status, approved_by, approved_at,
+         randomize_per_attempt, avoid_repeated_questions, include_incorrect_on_retake,
          question_language, randomize_options,
          start_at, end_at, published_at, created_by, updated_at
        ) VALUES (
@@ -754,8 +788,9 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
          $8, $9, $10, $11,
          $12, $13, $14, $15, $16,
          $17, $18, $19, $20, $21,
-         $22, $23,
-         $24, $25, $26, $27, CURRENT_TIMESTAMP
+         $22, $23, $24,
+         $25, $26,
+         $27, $28, $29, $30, CURRENT_TIMESTAMP
        ) RETURNING *`,
       [
         slug,
@@ -776,6 +811,9 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
         negativeMarking,
         input.difficulty || 'Medium',
         status,
+        approvalStatus,
+        approvalStatus === 'approved' ? adminUsername : null,
+        approvalStatus === 'approved' ? new Date() : null,
         randomizePerAttempt,
         avoidRepeatedQuestions,
         includeIncorrectOnRetake,
@@ -812,12 +850,13 @@ export async function createAdminMockTest(input: MockTestConfigInput, adminUsern
 }
 
 export async function updateAdminMockTest(id: number, input: MockTestConfigInput) {
+  await ensureMockTestApprovalColumns();
   const dedupedIds = Array.from(new Set((input.questionIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)));
   const groupInfo = normalizeGroupToCategory(input.tnpscGroup);
   const testCategory = normalizeTestCategory(input.testCategory);
-  const status = input.status || 'draft';
+  const status = input.status || 'staging';
   const marksPerQ = Number(input.marksPerQuestion) || 1.5;
-  const totalQ = Number(input.questionsCount) || dedupedIds.length || 25;
+  const totalQ = dedupedIds.length > 0 ? dedupedIds.length : Number(input.questionsCount) || 25;
   const totalMarks = Number(input.totalMarks) || Number((totalQ * marksPerQ).toFixed(2));
   const negativeMarking = Number(input.negativeMarking) || 0;
   const durationMinutes = Number(input.durationMinutes) || 30;
@@ -830,7 +869,7 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const existing = await client.query(`SELECT id, published_at FROM mock_tests WHERE id = $1`, [id]);
+    const existing = await client.query(`SELECT id, published_at, approval_status FROM mock_tests WHERE id = $1`, [id]);
     if (existing.rows.length === 0) {
       const err: any = new Error('Mock test not found.');
       err.statusCode = 404;
@@ -861,6 +900,16 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
       );
     }
 
+    const nextApprovalStatus: MockTestApprovalStatus =
+      input.approvalStatus ||
+      (status === 'published' || status === 'scheduled'
+        ? 'approved'
+        : existing.rows[0].approval_status === 'approved'
+        ? 'approved'
+        : status === 'staging'
+        ? 'under_review'
+        : 'draft');
+
     const publishedAt =
       status === 'published' ? existing.rows[0].published_at || new Date() : existing.rows[0].published_at;
 
@@ -883,16 +932,17 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
            negative_marking = $15,
            difficulty = $16,
            status = $17,
-           randomize_per_attempt = $18,
-           avoid_repeated_questions = $19,
-           include_incorrect_on_retake = $20,
-           question_language = $21,
-           randomize_options = $22,
-           start_at = $23,
-           end_at = $24,
-           published_at = $25,
+           approval_status = $18,
+           randomize_per_attempt = $19,
+           avoid_repeated_questions = $20,
+           include_incorrect_on_retake = $21,
+           question_language = $22,
+           randomize_options = $23,
+           start_at = $24,
+           end_at = $25,
+           published_at = $26,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $26`,
+       WHERE id = $27`,
       [
         input.title.trim(),
         input.description?.trim() || '',
@@ -911,6 +961,7 @@ export async function updateAdminMockTest(id: number, input: MockTestConfigInput
         negativeMarking,
         input.difficulty || 'Medium',
         status,
+        nextApprovalStatus,
         randomizePerAttempt,
         avoidRepeatedQuestions,
         includeIncorrectOnRetake,
@@ -1014,12 +1065,98 @@ export async function duplicateAdminMockTest(id: number, adminUsername: string) 
   }
 }
 
+export async function approveAdminMockTest(id: number, adminUsername = 'admin') {
+  await ensureMockTestApprovalColumns();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const testRes = await client.query(`SELECT * FROM mock_tests WHERE id = $1`, [id]);
+    if (testRes.rows.length === 0) {
+      const err: any = new Error('Mock test not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+    const qRows = await client.query(
+      `SELECT question_id FROM mock_test_questions WHERE mock_test_id = $1 ORDER BY question_order ASC`,
+      [id]
+    );
+    const qIds = qRows.rows.map((r) => Number(r.question_id));
+    if (qIds.length === 0) {
+      const err: any = new Error('Cannot approve a mock test with 0 assigned questions. Generate and save questions first.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const updated = await client.query(
+      `UPDATE mock_tests
+       SET approval_status = 'approved',
+           approved_by = $1,
+           approved_at = CURRENT_TIMESTAMP,
+           questions_count = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+       RETURNING *`,
+      [adminUsername, qIds.length, id]
+    );
+
+    await client.query('COMMIT');
+    return mapAdminMockTestRow({ ...updated.rows[0], assigned_questions_count: qIds.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function rejectAdminMockTest(id: number, adminUsername = 'admin') {
+  await ensureMockTestApprovalColumns();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const testRes = await client.query(`SELECT * FROM mock_tests WHERE id = $1`, [id]);
+    if (testRes.rows.length === 0) {
+      const err: any = new Error('Mock test not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+    const qCountRes = await client.query(
+      `SELECT COUNT(*)::int AS cnt FROM mock_test_questions WHERE mock_test_id = $1`,
+      [id]
+    );
+    const assignedCount = Number(qCountRes.rows[0]?.cnt || 0);
+
+    const updated = await client.query(
+      `UPDATE mock_tests
+       SET approval_status = 'rejected',
+           status = CASE WHEN status IN ('published', 'scheduled') THEN 'staging' ELSE status END,
+           approved_by = $1,
+           approved_at = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING *`,
+      [adminUsername, id]
+    );
+
+    await client.query('COMMIT');
+    notifyPlatformContentUpdate();
+    return mapAdminMockTestRow({ ...updated.rows[0], assigned_questions_count: assignedCount });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function updateAdminMockTestStatus(
   id: number,
   nextStatus: MockTestStatus,
   startAt?: string | null,
-  endAt?: string | null
+  endAt?: string | null,
+  adminUsername = 'admin'
 ) {
+  await ensureMockTestApprovalColumns();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1037,6 +1174,11 @@ export async function updateAdminMockTestStatus(
     const qIds = qRows.rows.map((r) => Number(r.question_id));
 
     if (nextStatus === 'published' || nextStatus === 'scheduled') {
+      if (row.approval_status === 'rejected') {
+        const err: any = new Error('Cannot publish a rejected mock test. Please review and approve it first.');
+        err.statusCode = 400;
+        throw err;
+      }
       await validateForPublish(
         client,
         {
@@ -1045,7 +1187,7 @@ export async function updateAdminMockTestStatus(
           testCategory: normalizeTestCategory(row.test_category),
           standard: row.standard || null,
           randomizePerAttempt: Boolean(row.randomize_per_attempt),
-          questionsCount: Number(row.questions_count),
+          questionsCount: qIds.length > 0 ? qIds.length : Number(row.questions_count),
           durationMinutes: Number(row.duration_minutes),
           totalMarks: Number(row.total_marks),
           marksPerQuestion: Number(row.marks_per_question),
@@ -1061,18 +1203,34 @@ export async function updateAdminMockTestStatus(
     const updated = await client.query(
       `UPDATE mock_tests
        SET status = $1::varchar,
+           approval_status = CASE
+             WHEN $1::text IN ('published', 'scheduled') THEN 'approved'
+             ELSE COALESCE(approval_status, 'under_review')
+           END,
+           approved_by = CASE
+             WHEN $1::text IN ('published', 'scheduled') THEN COALESCE(approved_by, $5)
+             ELSE approved_by
+           END,
+           approved_at = CASE
+             WHEN $1::text IN ('published', 'scheduled') THEN COALESCE(approved_at, CURRENT_TIMESTAMP)
+             ELSE approved_at
+           END,
+           questions_count = CASE
+             WHEN $6::int > 0 THEN $6::int
+             ELSE questions_count
+           END,
            start_at = COALESCE($2, start_at),
            end_at = COALESCE($3, end_at),
            published_at = CASE WHEN $1::text = 'published' THEN COALESCE(published_at, CURRENT_TIMESTAMP) ELSE published_at END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $4
        RETURNING *`,
-      [nextStatus, startAt ? new Date(startAt) : null, endAt ? new Date(endAt) : null, id]
+      [nextStatus, startAt ? new Date(startAt) : null, endAt ? new Date(endAt) : null, id, adminUsername, qIds.length]
     );
 
     await client.query('COMMIT');
     notifyPlatformContentUpdate();
-    return mapAdminMockTestRow(updated.rows[0]);
+    return mapAdminMockTestRow({ ...updated.rows[0], assigned_questions_count: qIds.length });
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -1167,7 +1325,9 @@ export async function getPublishedMockTestsForStudent(filters?: {
   testCategory?: string;
   subject?: string;
   standard?: string;
+  unit?: string;
 }) {
+  await ensureMockTestApprovalColumns();
   const where: string[] = [
     `(
       (mt.status = 'published' AND (mt.end_at IS NULL OR mt.end_at >= NOW()))
@@ -1177,6 +1337,8 @@ export async function getPublishedMockTestsForStudent(filters?: {
         AND (mt.end_at IS NULL OR mt.end_at >= NOW())
       )
     )`,
+    `COALESCE(mt.approval_status, 'approved') = 'approved'`,
+    `COALESCE(q_cnt.cnt, 0) > 0`,
   ];
   const params: any[] = [];
   let idx = 1;
@@ -1214,8 +1376,22 @@ export async function getPublishedMockTestsForStudent(filters?: {
   if (filters?.standard && filters.standard !== 'all') {
     const stdNum = parseStandardNumber(filters.standard);
     if (stdNum !== null) {
-      where.push(`(mt.standard IS NULL OR mt.standard ~ ('(^|[^0-9])' || $${idx}::text || '([^0-9]|$)'))`);
+      const strictStd = filters?.testCategory === 'unit_wise' || Boolean(filters?.unit);
+      where.push(
+        strictStd
+          ? `mt.standard ~ ('(^|[^0-9])' || $${idx}::text || '([^0-9]|$)')`
+          : `(mt.standard IS NULL OR mt.standard ~ ('(^|[^0-9])' || $${idx}::text || '([^0-9]|$)'))`
+      );
       params.push(String(stdNum));
+      idx++;
+    }
+  }
+
+  if (filters?.unit && filters.unit !== 'all') {
+    const unitNum = parseStandardNumber(filters.unit);
+    if (unitNum !== null) {
+      where.push(`mt.unit ~ ('(^|[^0-9])' || $${idx}::text || '([^0-9]|$)')`);
+      params.push(String(unitNum));
       idx++;
     }
   }
@@ -1255,16 +1431,17 @@ export async function getPublishedMockTestsForStudent(filters?: {
     standard: row.standard || null,
     unit: row.unit || null,
     lesson: row.lesson || null,
-    questionsCount:
-      Number(row.assigned_questions_count || 0) > 0 && !row.randomize_per_attempt
-        ? Number(row.assigned_questions_count)
-        : Number(row.questions_count || 0),
+    questionsCount: Number(row.assigned_questions_count || 0),
     durationMinutes: Number(row.duration_minutes || 90),
-    totalMarks: Number(row.total_marks || Number(row.questions_count || 100) * Number(row.marks_per_question || 1.5)),
+    totalMarks: Number(
+      row.total_marks ||
+        Number(row.assigned_questions_count || 0) * Number(row.marks_per_question || 1.5)
+    ),
     marksPerQuestion: Number(row.marks_per_question || 1.5),
     negativeMarking: Number(row.negative_marking || 0),
     difficulty: row.difficulty || 'Medium',
     status: row.status,
+    approvalStatus: normalizeApprovalStatus(row),
     randomizePerAttempt: Boolean(row.randomize_per_attempt),
     questionLanguage: (row.question_language as 'en' | 'ta' | 'both') || 'both',
     randomizeOptions: Boolean(row.randomize_options),
@@ -1408,30 +1585,20 @@ async function fetchLiveTestQuestionsForStudent(mockTest: any, studentId: number
     }
   }
 
-  const testCategory = normalizeTestCategory(mockTest.test_category);
-  let rows: any[] = [];
-
-  if (testCategory === 'full_length' && Boolean(mockTest.randomize_per_attempt)) {
-    rows = await selectFullLengthSyllabusQuestions(mockTest, studentId);
-  } else {
-    // 1. Prefer explicitly assigned questions from mock_test_questions
-    const assignedRes = await pool.query(
-      `SELECT
-         q.id, q.category, q.unit_id, q.class_id, q.subject, q.lesson_title, q.topic,
-         q.difficulty, q.question_text, q.options
-       FROM mock_test_questions mtq
-       JOIN questions q ON q.id = mtq.question_id
-       WHERE mtq.mock_test_id = $1
-       ORDER BY mtq.question_order ASC, mtq.id ASC`,
-      [mockTest.id]
-    );
-    rows = assignedRes.rows;
-
-    // 2. Fallback ONLY for legacy seeded mock tests that predate mock_test_questions
-    if (rows.length === 0) {
-      rows = await selectFullLengthSyllabusQuestions(mockTest, studentId);
-    }
-  }
+  // Strict Mock Test Isolation: Load ONLY questions explicitly assigned to this Mock Test
+  // via the Admin Panel Mock Test MCQ Generator (mock_test_questions).
+  // Never fall back to general Study Materials / MCQ Practice Question Bank.
+  const assignedRes = await pool.query(
+    `SELECT
+       q.id, q.category, q.unit_id, q.class_id, q.subject, q.lesson_title, q.topic,
+       q.difficulty, q.question_text, q.options
+     FROM mock_test_questions mtq
+     JOIN questions q ON q.id = mtq.question_id
+     WHERE mtq.mock_test_id = $1
+     ORDER BY mtq.question_order ASC, mtq.id ASC`,
+    [mockTest.id]
+  );
+  const rows: any[] = assignedRes.rows;
 
   // Never include correct_answer or explanation in the live test payload!
   return rows.map((r, idx) => ({
@@ -1450,10 +1617,12 @@ async function fetchLiveTestQuestionsForStudent(mockTest: any, studentId: number
 }
 
 export async function startStudentMockTestSession(mockTestId: number, studentId: number, isPreview = false) {
+  await ensureMockTestApprovalColumns();
   const testRes = await pool.query(
     `SELECT *
      FROM mock_tests
      WHERE id = $1
+       AND COALESCE(approval_status, 'approved') = 'approved'
        AND (
          (status = 'published' AND (end_at IS NULL OR end_at >= NOW()))
          OR (
@@ -1590,6 +1759,7 @@ export async function submitStudentMockTest(
   },
   isPreview = false
 ) {
+  await ensureMockTestApprovalColumns();
   const testRes = await pool.query(`SELECT * FROM mock_tests WHERE id = $1`, [mockTestId]);
   if (testRes.rows.length === 0) {
     const err: any = new Error('Mock test not found.');
@@ -1599,12 +1769,13 @@ export async function submitStudentMockTest(
   const testRow = testRes.rows[0];
   if (
     !isPreview &&
-    !(
-      (testRow.status === 'published' && (!testRow.end_at || new Date(testRow.end_at) >= new Date())) ||
-      (testRow.status === 'scheduled' &&
-        (!testRow.start_at || new Date(testRow.start_at) <= new Date()) &&
-        (!testRow.end_at || new Date(testRow.end_at) >= new Date()))
-    )
+    (normalizeApprovalStatus(testRow) !== 'approved' ||
+      !(
+        (testRow.status === 'published' && (!testRow.end_at || new Date(testRow.end_at) >= new Date())) ||
+        (testRow.status === 'scheduled' &&
+          (!testRow.start_at || new Date(testRow.start_at) <= new Date()) &&
+          (!testRow.end_at || new Date(testRow.end_at) >= new Date()))
+      ))
   ) {
     const err: any = new Error('This mock test is not currently published or available for submission.');
     err.statusCode = 403;
@@ -1615,7 +1786,7 @@ export async function submitStudentMockTest(
   const negativeMarking = Number(testRow.negative_marking || 0);
 
   // Load authoritative questions + answer keys from DB
-  // 1. If sessionId has stored question_ids (e.g. randomized Full-length test), grade those exact questions
+  // 1. If sessionId has stored question_ids, grade those exact assigned questions
   let qRes: any = { rows: [] };
   if (payload.sessionId) {
     const sessRes = await pool.query(
@@ -1636,7 +1807,7 @@ export async function submitStudentMockTest(
     }
   }
 
-  // 2. Otherwise use mock_test_questions
+  // 2. Otherwise use mock_test_questions (STRICT: never fall back to general Study Materials question bank)
   if (qRes.rows.length === 0) {
     qRes = await pool.query(
       `SELECT
@@ -1649,20 +1820,10 @@ export async function submitStudentMockTest(
     );
   }
 
-  // 3. Fallback for legacy seeded mock tests without mock_test_questions
   if (qRes.rows.length === 0) {
-    const groupMatches = normalizeQuestionCategoryMatch(testRow.tnpsc_group || testRow.category);
-    const limit = Math.max(1, Math.min(200, Number(testRow.questions_count) || 25));
-    qRes = await pool.query(
-      `SELECT id, subject, topic, lesson_title, question_text, options, correct_answer, explanation
-       FROM questions
-       WHERE status = 'published'
-         AND COALESCE(verification_status, 'verified') <> 'rejected'
-         AND ($1::text[] IS NULL OR LOWER(COALESCE(category, '')) = ANY($1::text[]))
-       ORDER BY id ASC
-       LIMIT $2`,
-      [groupMatches, limit]
-    );
+    const err: any = new Error('No assigned questions were found for this mock test.');
+    err.statusCode = 400;
+    throw err;
   }
 
   const questions: any[] = qRes.rows;

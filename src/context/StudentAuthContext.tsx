@@ -9,6 +9,7 @@ export interface StudentUser {
   email: string
   mobile?: string | null
   targetGroup: string
+  district?: string | null
   avatarUrl?: string | null
   authProvider?: string
   emailVerified?: boolean
@@ -24,8 +25,6 @@ interface StudentAuthContextType {
   isAuthenticated: boolean
   isLoading: boolean
   isPreviewMode: boolean
-  pendingLoginLocationEventId: string | null
-  clearPendingLoginLocation: () => void
   login: (token: string, student: StudentUser) => void
   logout: () => void
   refreshProfile: () => Promise<void>
@@ -38,7 +37,6 @@ const StudentAuthContext = createContext<StudentAuthContextType | undefined>(und
 const TOKEN_KEY = 'tnpsc_student_token'
 const USER_KEY = 'tnpsc_student_user'
 const PREVIEW_KEY = 'tnpsc_admin_preview_active'
-const PENDING_LOGIN_LOCATION_KEY = 'tnpsc_pending_login_location_event'
 const SESSION_REVOKED_MSG_KEY = 'tnpsc_session_revoked_msg'
 const DEFAULT_REVOKED_MESSAGE =
   'Your account has been logged in on another device. Please log in again to continue.'
@@ -73,19 +71,6 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
   })
 
   const [isLoading, setIsLoading] = useState<boolean>(true)
-  const [pendingLoginLocationEventId, setPendingLoginLocationEventId] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem(PENDING_LOGIN_LOCATION_KEY)
-    }
-    return null
-  })
-
-  const clearPendingLoginLocation = useCallback(() => {
-    setPendingLoginLocationEventId(null)
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem(PENDING_LOGIN_LOCATION_KEY)
-    }
-  }, [])
 
   // Standard student login handler (clears any previous account state to prevent cross-account leakage)
   const login = useCallback((newToken: string, newStudent: StudentUser) => {
@@ -102,10 +87,7 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setStudent(normalizedStudent)
     localStorage.setItem(TOKEN_KEY, newToken)
     localStorage.setItem(USER_KEY, JSON.stringify(normalizedStudent))
-    const eventId = `login_${normalizedStudent.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    setPendingLoginLocationEventId(eventId)
     if (typeof window !== 'undefined') {
-      sessionStorage.setItem(PENDING_LOGIN_LOCATION_KEY, eventId)
       // Associate active visitor session with newly logged-in student immediately
       sendSessionHeartbeat()
     }
@@ -132,12 +114,8 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsPreviewMode(false)
     setToken(null)
     setStudent(null)
-    setPendingLoginLocationEventId(null)
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem(PENDING_LOGIN_LOCATION_KEY)
-    }
   }, [])
 
   // Force immediate local logout & redirect to Login when backend revokes this device's session
@@ -150,9 +128,7 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsPreviewMode(false)
     setToken(null)
     setStudent(null)
-    setPendingLoginLocationEventId(null)
     if (typeof window !== 'undefined') {
-      sessionStorage.removeItem(PENDING_LOGIN_LOCATION_KEY)
       sessionStorage.setItem(SESSION_REVOKED_MSG_KEY, notice)
       if (!window.location.pathname.startsWith('/login')) {
         window.location.replace('/login?reason=session_revoked')
@@ -297,8 +273,6 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
         isAuthenticated: Boolean(token && student),
         isLoading,
         isPreviewMode,
-        pendingLoginLocationEventId,
-        clearPendingLoginLocation,
         login,
         logout,
         refreshProfile,

@@ -431,19 +431,51 @@ select.pypm-input option {
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 768px) {
+  .pypm-root {
+    gap: 14px;
+  }
+
   .pypm-form-grid,
   .pypm-dropzones-grid {
     grid-template-columns: 1fr;
+    gap: 10px;
   }
+
   .pypm-field-span-2 {
     grid-column: span 1;
   }
+
   .pypm-card {
-    padding: 1.1rem;
+    padding: 14px;
+    gap: 12px;
   }
+
   .pypm-header-card {
-    padding: 1rem;
+    padding: 12px 14px;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .pypm-header-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .pypm-dropzone {
+    min-height: 124px;
+    padding: 14px 12px;
+    gap: 6px;
+  }
+
+  .pypm-form-footer {
+    gap: 10px;
+    padding-top: 10px;
+  }
+
+  .pypm-bulk-toolbar {
+    padding: 10px 12px;
+    gap: 8px;
   }
 }
 

@@ -134,6 +134,47 @@ function formatBytes(bytes: number): string {
 
 const SYNC_STAGES = ['Scanning folders', 'Discovering PDFs', 'Processing metadata', 'Updating database']
 
+interface FacetOption {
+  value: string
+  label: string
+  count: number
+}
+
+interface TextbookFacets {
+  standards: FacetOption[]
+  termsOrVolumes: FacetOption[]
+  mediums: FacetOption[]
+  subjects: FacetOption[]
+  statuses: FacetOption[]
+}
+
+const EMPTY_FACETS: TextbookFacets = {
+  standards: [],
+  termsOrVolumes: [],
+  mediums: [],
+  subjects: [],
+  statuses: [],
+}
+
+function normalizeFacetOptions(raw: unknown, formatLabel?: (v: string) => string): FacetOption[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item: any) => {
+      if (typeof item === 'string') {
+        return { value: item, label: formatLabel ? formatLabel(item) : item, count: 0 }
+      }
+      if (item && typeof item === 'object' && item.value !== undefined) {
+        return {
+          value: String(item.value),
+          label: String(item.label ?? (formatLabel ? formatLabel(String(item.value)) : item.value)),
+          count: Number(item.count ?? 0),
+        }
+      }
+      return null
+    })
+    .filter((o): o is FacetOption => Boolean(o && o.value))
+}
+
 export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncCompleted }) => {
   const [statusData, setStatusData] = useState<DriveStatusData | null>(null)
   const [counts, setCounts] = useState<TextbookCounts>({
@@ -150,8 +191,7 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
   const [books, setBooks] = useState<DriveTextbookItem[]>([])
   const [syncLogs, setSyncLogs] = useState<SyncLogRow[]>([])
   const [folders, setFolders] = useState<DriveFolderItem[]>([])
-  const [availableSubjects, setAvailableSubjects] = useState<string[]>([])
-  const [availableTerms, setAvailableTerms] = useState<string[]>([])
+  const [facets, setFacets] = useState<TextbookFacets>(EMPTY_FACETS)
 
   // Pagination & Sorting
   const [page, setPage] = useState(1)
@@ -289,8 +329,28 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
           setBooks(tbJson.data.items || [])
           setTotalFiltered(Number(tbJson.data.pagination?.total || 0))
           setTotalPages(Number(tbJson.data.pagination?.totalPages || 1))
-          if (Array.isArray(tbJson.data.facets?.subjects)) setAvailableSubjects(tbJson.data.facets.subjects)
-          if (Array.isArray(tbJson.data.facets?.termsOrVolumes)) setAvailableTerms(tbJson.data.facets.termsOrVolumes)
+          const nextFacets: TextbookFacets = {
+            standards: normalizeFacetOptions(tbJson.data.facets?.standards, (v) => `${v}th Standard`),
+            termsOrVolumes: normalizeFacetOptions(tbJson.data.facets?.termsOrVolumes),
+            mediums: normalizeFacetOptions(tbJson.data.facets?.mediums, (v) => `${v} Medium`),
+            subjects: normalizeFacetOptions(tbJson.data.facets?.subjects),
+            statuses: normalizeFacetOptions(tbJson.data.facets?.statuses),
+          }
+          setFacets(nextFacets)
+
+          // Auto-reset invalid dependent selections when parent filters narrow options
+          if (termFilter !== 'all' && !nextFacets.termsOrVolumes.some((o) => o.value.toLowerCase() === termFilter.toLowerCase())) {
+            setTermFilter('all')
+          }
+          if (subjectFilter !== 'all' && !nextFacets.subjects.some((o) => o.value.toLowerCase() === subjectFilter.toLowerCase())) {
+            setSubjectFilter('all')
+          }
+          if (mediumFilter !== 'all' && !nextFacets.mediums.some((o) => o.value.toLowerCase() === mediumFilter.toLowerCase())) {
+            setMediumFilter('all')
+          }
+          if (pubFilter !== 'all' && !nextFacets.statuses.some((o) => o.value.toUpperCase() === pubFilter.toUpperCase())) {
+            setPubFilter('all')
+          }
           if (tbJson.data.counts) setCounts(tbJson.data.counts)
         }
         if (logsRes.ok && logsJson.status === 'success' && Array.isArray(logsJson.data)) {
@@ -1036,8 +1096,8 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
               loading={loading}
               onChange={(v) => { setStandardFilter(v); setPage(1) }}
               options={[
-                { value: 'all', label: 'All Standards (6–12)' },
-                ...[6, 7, 8, 9, 10, 11, 12].map((s) => ({ value: String(s), label: `${s}th Standard` })),
+                { value: 'all', label: 'All Standards (6th–12th)', count: facets.standards.reduce((s, o) => s + o.count, 0) },
+                ...facets.standards,
               ]}
             />
 
@@ -1048,16 +1108,8 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
               loading={loading}
               onChange={(v) => { setTermFilter(v); setPage(1) }}
               options={[
-                { value: 'all', label: 'All Terms / Volumes' },
-                { value: 'Term 1', label: 'Term 1' },
-                { value: 'Term 2', label: 'Term 2' },
-                { value: 'Term 3', label: 'Term 3' },
-                { value: 'Volume 1', label: 'Volume 1' },
-                { value: 'Volume 2', label: 'Volume 2' },
-                { value: 'Volume 3', label: 'Volume 3' },
-                ...availableTerms
-                  .filter((t) => !['Term 1', 'Term 2', 'Term 3', 'Volume 1', 'Volume 2', 'Volume 3'].includes(t))
-                  .map((t) => ({ value: t, label: t })),
+                { value: 'all', label: 'All Terms / Volumes', count: facets.termsOrVolumes.reduce((s, o) => s + o.count, 0) },
+                ...facets.termsOrVolumes,
               ]}
             />
 
@@ -1068,9 +1120,8 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
               loading={loading}
               onChange={(v) => { setMediumFilter(v); setPage(1) }}
               options={[
-                { value: 'all', label: 'All Mediums' },
-                { value: 'Tamil', label: 'Tamil Medium' },
-                { value: 'English', label: 'English Medium' },
+                { value: 'all', label: 'All Mediums', count: facets.mediums.reduce((s, o) => s + o.count, 0) },
+                ...facets.mediums,
               ]}
             />
 
@@ -1081,8 +1132,8 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
               loading={loading}
               onChange={(v) => { setSubjectFilter(v); setPage(1) }}
               options={[
-                { value: 'all', label: 'All Subjects' },
-                ...availableSubjects.map((sub) => ({ value: sub, label: sub })),
+                { value: 'all', label: 'All Available Subjects', count: facets.subjects.reduce((s, o) => s + o.count, 0) },
+                ...facets.subjects,
               ]}
             />
 
@@ -1093,13 +1144,8 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
               loading={loading}
               onChange={(v) => { setPubFilter(v); setPage(1) }}
               options={[
-                { value: 'all', label: 'All Statuses' },
-                { value: 'PENDING_REVIEW', label: 'Pending Review' },
-                { value: 'PUBLISHED', label: 'Published' },
-                { value: 'UNPUBLISHED', label: 'Unpublished' },
-                { value: 'REJECTED', label: 'Rejected' },
-                { value: 'FAILED_SYNC', label: 'Needs Review / Failed Sync' },
-                { value: 'UNAVAILABLE', label: 'Unavailable' },
+                { value: 'all', label: 'All Statuses', count: facets.statuses.reduce((s, o) => s + o.count, 0) },
+                ...facets.statuses,
               ]}
             />
           </div>
@@ -1141,15 +1187,25 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
                 <th className="sortable" onClick={() => handleSort('bookName')}>Textbook Name <ArrowUpDown size={11} /></th>
                 <th>Google Drive File ID</th>
                 <th className="sortable" onClick={() => handleSort('fileSize')}>File Size <ArrowUpDown size={11} /></th>
-                <th className="sortable" onClick={() => handleSort('publicationStatus')}>Status <ArrowUpDown size={11} /></th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
+                <th className="sortable drive-col-status" onClick={() => handleSort('publicationStatus')}>Status <ArrowUpDown size={11} /></th>
+                <th className="drive-col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>
               {books.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>
-                    {viewTrash ? 'Trash is empty.' : 'No textbooks match the current filters.'}
+                  <td colSpan={10} style={{ padding: '2.25rem', textAlign: 'center', color: '#94a3b8' }}>
+                    <div>{viewTrash ? 'Trash is empty.' : 'No textbooks match the current filters.'}</div>
+                    {!viewTrash && hasActiveFilters && (
+                      <button
+                        type="button"
+                        className="drive-btn drive-btn-neutral"
+                        style={{ height: '32px', fontSize: '0.76rem', marginTop: '0.75rem' }}
+                        onClick={clearAllFilters}
+                      >
+                        Clear All Filters
+                      </button>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -1173,51 +1229,50 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
                         )}
                       </td>
                       <td><span className="drive-std-badge">{b.standard}th</span></td>
-                      <td>{b.standard >= 11 ? b.volume || 'Full Book' : b.term || 'Full Year'}</td>
-                      <td>{b.medium}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{b.standard >= 11 ? b.volume || b.term || 'Full Book' : b.term || b.volume || 'Full Year'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{b.medium}</td>
                       <td><span className="drive-subject-badge">{b.subject}</span></td>
-                      <td style={{ maxWidth: '280px' }}>
+                      <td className="drive-col-bookname">
                         <div style={{ fontWeight: 600, color: '#f8fafc', lineHeight: 1.35 }}>{b.bookName}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: '0.7rem', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.driveFolderPath || b.fileName}>
                           {b.driveFolderPath || b.fileName}
                         </div>
                       </td>
                       <td><span className="drive-file-id" title={b.googleDriveFileId}>{b.googleDriveFileId}</span></td>
                       <td style={{ whiteSpace: 'nowrap' }}>{formatBytes(b.fileSize)}</td>
-                      <td>
+                      <td className="drive-col-status">
                         <span className={`drive-status-pill ${stClass}`}>
-                          {!b.driveAvailable ? 'UNAVAILABLE' : b.publicationStatus}
+                          {!b.driveAvailable ? 'UNAVAILABLE' : b.publicationStatus.replace(/_/g, ' ')}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <td className="drive-col-actions">
                         {viewTrash ? (
-                          <button type="button" className="drive-btn drive-btn-publish" style={{ height: '30px', fontSize: '0.73rem', padding: '0 0.65rem' }} onClick={() => void handleRestoreFromTrash([b.id], false)}>
-                            <RotateCcw size={12} /> Restore
+                          <button type="button" className="drive-act-btn drive-act-btn--publish" onClick={() => void handleRestoreFromTrash([b.id], false)}>
+                            <RotateCcw size={13} /> Restore
                           </button>
                         ) : (
-                          <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
-                            <button type="button" className="table-action-btn" title="Preview PDF" onClick={() => { setPreviewZoom(100); setPreviewBook(b) }}>
-                              <Eye size={13} />
+                          <div className="drive-row-actions">
+                            <button type="button" className="drive-act-btn drive-act-btn--view" title="Preview PDF" onClick={() => { setPreviewZoom(100); setPreviewBook(b) }}>
+                              <Eye size={13} /> View
                             </button>
-                            <button type="button" className="table-action-btn" title="Edit Metadata" onClick={() => setEditingBook({ ...b })}>
-                              <Edit3 size={13} />
+                            <button type="button" className="drive-act-btn drive-act-btn--edit" title="Edit Metadata" onClick={() => setEditingBook({ ...b })}>
+                              <Edit3 size={13} /> Edit
                             </button>
-                            <button type="button" className="table-action-btn" title="Sync from Drive" disabled={busyId === b.id} onClick={() => void handleResyncSingle(b.id)}>
-                              <RefreshCw size={13} />
+                            <button type="button" className="drive-act-btn drive-act-btn--edit drive-act-btn--icon" title="Sync from Drive" disabled={busyId === b.id} onClick={() => void handleResyncSingle(b.id)}>
+                              <RefreshCw size={13} className={busyId === b.id ? 'spin-icon' : undefined} />
                             </button>
                             {b.publicationStatus === 'PUBLISHED' ? (
-                              <button type="button" className="drive-btn drive-btn-neutral" style={{ height: '28px', fontSize: '0.72rem', padding: '0 0.55rem' }} disabled={busyId === b.id} onClick={() => void handleRowAction(b.id, 'unpublish')}>
+                              <button type="button" className="drive-act-btn drive-act-btn--unpublish" disabled={busyId === b.id} onClick={() => void handleRowAction(b.id, 'unpublish')}>
                                 Unpublish
                               </button>
                             ) : (
-                              <button type="button" className="drive-btn drive-btn-publish" style={{ height: '28px', fontSize: '0.72rem', padding: '0 0.55rem' }} disabled={busyId === b.id} onClick={() => void handleRowAction(b.id, 'publish')}>
+                              <button type="button" className="drive-act-btn drive-act-btn--publish" disabled={busyId === b.id} onClick={() => void handleRowAction(b.id, 'publish')}>
                                 Publish
                               </button>
                             )}
                             <button
                               type="button"
-                              className="table-action-btn"
-                              style={{ color: '#fca5a5', borderColor: 'rgba(248,113,113,0.35)' }}
+                              className="drive-act-btn drive-act-btn--delete drive-act-btn--icon"
                               title="Delete (Move to Trash)"
                               onClick={() => {
                                 setSelectionMode('manual')

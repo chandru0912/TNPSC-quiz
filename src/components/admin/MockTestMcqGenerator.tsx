@@ -85,6 +85,7 @@ interface MockTestQueueRow {
   negativeMarking: number
   difficulty: 'Easy' | 'Medium' | 'Hard'
   status: 'draft' | 'staging' | 'published' | 'scheduled' | 'archived'
+  approvalStatus?: 'draft' | 'generated' | 'under_review' | 'approved' | 'rejected'
   createdAt: string
 }
 
@@ -635,14 +636,36 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
         type: 'success',
         text:
           targetStatus === 'staging'
-            ? `Saved "${finalTitle}" to Staging! Review and click Approve & Publish below to publish live on Website & Android App.`
+            ? `Saved "${finalTitle}" to Staging (Under Review). Approve and Publish below to make it live for students.`
             : `Saved "${finalTitle}" as Draft.`,
       })
+      notifyStudentSync()
       fetchQueue()
     } catch (err: any) {
       setFeedback({ type: 'error', text: err?.message || 'Network error saving mock test.' })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleApproveTest = async (row: MockTestQueueRow) => {
+    try {
+      const res = await apiFetch(`/api/admin/mock-tests/${row.id}/approve`, {
+        method: 'PATCH',
+        headers: authHeaders,
+      })
+      const json = await res.json()
+      if (!res.ok || json.status !== 'success') {
+        setFeedback({ type: 'error', text: json.message || 'Failed to approve mock test.' })
+        return
+      }
+      setFeedback({
+        type: 'success',
+        text: `"${row.title}" approved! Click Publish to make it visible in Student Mock Tests.`,
+      })
+      fetchQueue()
+    } catch {
+      setFeedback({ type: 'error', text: 'Failed to approve mock test.' })
     }
   }
 
@@ -662,7 +685,7 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
         type: 'success',
         text:
           nextStatus === 'published'
-            ? `"${row.title}" approved and published live to Website & Android App!`
+            ? `"${row.title}" approved and published live to Student Mock Tests!`
             : `"${row.title}" unpublished and moved back to Staging.`,
       })
       notifyStudentSync()
@@ -1525,29 +1548,56 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem 0.5rem' }}>
-                      <span
-                        style={{
-                          fontSize: '0.71rem',
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          padding: '0.18rem 0.55rem',
-                          borderRadius: '9999px',
-                          background:
-                            row.status === 'published'
-                              ? 'rgba(16, 185, 129, 0.16)'
-                              : row.status === 'staging'
-                                ? 'rgba(251, 191, 36, 0.16)'
-                                : 'rgba(148, 163, 184, 0.16)',
-                          color:
-                            row.status === 'published'
-                              ? '#34d399'
-                              : row.status === 'staging'
-                                ? '#fbbf24'
-                                : '#cbd5e1',
-                        }}
-                      >
-                        {row.status}
-                      </span>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            fontSize: '0.71rem',
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                            padding: '0.18rem 0.55rem',
+                            borderRadius: '9999px',
+                            background:
+                              row.status === 'published'
+                                ? 'rgba(16, 185, 129, 0.16)'
+                                : row.status === 'staging'
+                                  ? 'rgba(251, 191, 36, 0.16)'
+                                  : 'rgba(148, 163, 184, 0.16)',
+                            color:
+                              row.status === 'published'
+                                ? '#34d399'
+                                : row.status === 'staging'
+                                  ? '#fbbf24'
+                                  : '#cbd5e1',
+                          }}
+                        >
+                          {row.status}
+                        </span>
+                        {row.status !== 'published' && (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              padding: '0.16rem 0.5rem',
+                              borderRadius: '9999px',
+                              background:
+                                row.approvalStatus === 'approved'
+                                  ? 'rgba(59, 130, 246, 0.18)'
+                                  : row.approvalStatus === 'rejected'
+                                    ? 'rgba(239, 68, 68, 0.16)'
+                                    : 'rgba(168, 85, 247, 0.16)',
+                              color:
+                                row.approvalStatus === 'approved'
+                                  ? '#60a5fa'
+                                  : row.approvalStatus === 'rejected'
+                                    ? '#f87171'
+                                    : '#c084fc',
+                            }}
+                          >
+                            {(row.approvalStatus || 'under_review').replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'inline-flex', gap: '0.35rem' }}>
@@ -1556,10 +1606,18 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
                           Edit
                         </button>
                         {row.status !== 'published' ? (
-                          <button type="button" className="btn btn-primary" style={{ padding: '0.28rem 0.6rem', fontSize: '0.74rem' }} onClick={() => handleStatusTransition(row, 'published')}>
-                            <Globe size={12} style={{ marginRight: '0.25rem' }} />
-                            Approve &amp; Publish
-                          </button>
+                          <>
+                            {row.approvalStatus !== 'approved' && (
+                              <button type="button" className="btn btn-secondary" style={{ padding: '0.28rem 0.55rem', fontSize: '0.74rem', borderColor: 'rgba(96, 165, 250, 0.45)', color: '#93c5fd' }} onClick={() => handleApproveTest(row)}>
+                                <CheckCircle2 size={12} style={{ marginRight: '0.25rem' }} />
+                                Approve
+                              </button>
+                            )}
+                            <button type="button" className="btn btn-primary" style={{ padding: '0.28rem 0.6rem', fontSize: '0.74rem' }} onClick={() => handleStatusTransition(row, 'published')}>
+                              <Globe size={12} style={{ marginRight: '0.25rem' }} />
+                              {row.approvalStatus === 'approved' ? 'Publish' : 'Approve & Publish'}
+                            </button>
+                          </>
                         ) : (
                           <button type="button" className="btn btn-secondary" style={{ padding: '0.28rem 0.55rem', fontSize: '0.74rem' }} onClick={() => handleStatusTransition(row, 'staging')}>
                             <FileX size={12} style={{ marginRight: '0.25rem' }} />
