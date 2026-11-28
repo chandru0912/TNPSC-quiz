@@ -20,9 +20,20 @@ import {
   normalizeQuestionIds,
   translateStudyMaterialQuestions,
   scheduleBackgroundPreTranslation,
+  getAdminTranslationStats,
+  triggerAdminTranslateMissing,
+  triggerAdminRetryFailed,
+  revalidateStoredTranslations,
 } from '../services/mcqTranslationService';
 import { getCached, setCached, invalidateCachePrefix } from '../utils/cache';
 import { platformContentSyncMiddleware } from '../services/studentDashboardService';
+import {
+  createPasteImportSession,
+  stageSessionQuestionsSequentially,
+  getPasteImportSession,
+  updatePasteImportExpectedCount,
+  updatePasteImportItemAnswer,
+} from '../services/pasteImportSessionService';
 
 const router = Router();
 router.use(platformContentSyncMiddleware);
@@ -532,7 +543,8 @@ router.post('/translate', requireStudentOrAdminAuth, async (req: Request, res: R
     }
 
     const cacheOnly = Boolean(req.body?.cacheOnly);
-    const result = await translateStudyMaterialQuestions(questionIds, { cacheOnly });
+    const pretranslate = Boolean(req.body?.pretranslate ?? req.body?.background);
+    const result = await translateStudyMaterialQuestions(questionIds, { cacheOnly, pretranslate });
     return res.status(200).json({
       status: 'success',
       language: 'ta',
@@ -2233,5 +2245,211 @@ export function getGroupDetails(category: string) {
       return { name: 'TNPSC Examination', code: 'TNPSC', standard: 'Degree/SSLC Standard' };
   }
 }
+
+// ============================================================================
+// ADMIN TRANSLATION CONTROL CENTER ROUTES
+// ============================================================================
+router.get('/admin/translations/stats', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const data = await getAdminTranslationStats({
+      group: typeof req.query.group === 'string' ? req.query.group : undefined,
+      subject: typeof req.query.subject === 'string' ? req.query.subject : undefined,
+      standard: typeof req.query.standard === 'string' ? req.query.standard : undefined,
+      unit: typeof req.query.unit === 'string' ? req.query.unit : undefined,
+      lesson: typeof req.query.lesson === 'string' ? req.query.lesson : undefined,
+      status: typeof req.query.status === 'string' ? req.query.status : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+    });
+    return res.status(200).json({ status: 'success', data });
+  } catch (error: any) {
+    console.error('[Admin Translation Stats Error]:', error?.message || error);
+    return res.status(500).json({ status: 'error', message: 'Failed to load translation statistics.' });
+  }
+});
+
+router.post('/admin/translations/translate-missing', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const result = await triggerAdminTranslateMissing({
+      group: typeof req.body?.group === 'string' ? req.body.group : undefined,
+      subject: typeof req.body?.subject === 'string' ? req.body.subject : undefined,
+      standard: typeof req.body?.standard === 'string' ? req.body.standard : undefined,
+      unit: typeof req.body?.unit === 'string' ? req.body.unit : undefined,
+      lesson: typeof req.body?.lesson === 'string' ? req.body.lesson : undefined,
+    });
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (error: any) {
+    console.error('[Admin Translate Missing Error]:', error?.message || error);
+    return res.status(500).json({ status: 'error', message: 'Failed to queue missing translations.' });
+  }
+});
+
+router.post('/admin/translations/retry-failed', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const questionIds = Array.isArray(req.body?.questionIds) ? req.body.questionIds : undefined;
+    const result = await triggerAdminRetryFailed(questionIds);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (error: any) {
+    console.error('[Admin Retry Failed Translations Error]:', error?.message || error);
+    return res.status(500).json({ status: 'error', message: 'Failed to retry failed translations.' });
+  }
+});
+
+router.post('/admin/translations/revalidate', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const limit = req.body?.limit ? Number(req.body.limit) : 500;
+    const result = await revalidateStoredTranslations(limit);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (error: any) {
+    console.error('[Admin Revalidate Translations Error]:', error?.message || error);
+    return res.status(500).json({ status: 'error', message: 'Failed to revalidate stored translations.' });
+  }
+});
+
+// ============================================================================
+// ISOLATED PASTE TEXT -> EXACT JSON -> SEQUENTIAL STAGING UPLOAD ENDPOINTS
+// (Strictly isolated from Upload JSON and Manual Single MCQ workflows)
+// ============================================================================
+
+/**
+ * POST /api/questions/paste-import/convert (Protected - Admin Only)
+ * Losslessly parses pasted MCQ text into canonical JSON, validates count & structure,
+ * freezes the validated JSON + source text snapshot into a recoverable upload session.
+ */
+router.post('/paste-import/convert', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const sourceText = typeof req.body?.sourceText === 'string' ? req.body.sourceText : '';
+    const expectedQuestions = Number(req.body?.expectedQuestions || 0);
+    const metadata = req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
+
+    if (!sourceText.trim()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Paste Text input is empty. Please paste MCQ source text first.',
+      });
+    }
+    if (sourceText.length > 5_000_000) {
+      return res.status(413).json({
+        status: 'error',
+        message: 'Pasted text exceeds the 5 MB safety limit.',
+      });
+    }
+
+    const adminUserId = (req as any).admin?.id ?? (req as any).user?.id ?? null;
+    const result = await createPasteImportSession(sourceText, expectedQuestions, metadata, adminUserId);
+
+    return res.status(200).json({
+      status: 'success',
+      data: result,
+    });
+  } catch (error: any) {
+    console.error('[Paste Import Convert Error]:', error?.message || error);
+    return res.status(500).json({
+      status: 'error',
+      message: error?.message || 'Failed to convert pasted text to JSON.',
+    });
+  }
+});
+
+/**
+ * POST /api/questions/paste-import/sessions/:sessionId/stage-next (Protected - Admin Only)
+ * Stages questions from a frozen Paste Import session strictly in ascending source_order.
+ * Fully idempotent on (sessionId, sourceOrder) — retries never create duplicate staging rows.
+ * Always inserts with status = 'staging' (never auto-published).
+ */
+router.post('/paste-import/sessions/:sessionId/stage-next', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    if (!sessionId || !/^paste_[a-z0-9_]+$/i.test(sessionId)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid upload session ID.',
+      });
+    }
+
+    const sourceOrders = Array.isArray(req.body?.sourceOrders)
+      ? req.body.sourceOrders.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n) && n > 0)
+      : undefined;
+
+    if (sourceOrders && sourceOrders.length > 100) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Maximum 100 questions per sequential staging batch request.',
+      });
+    }
+
+    const allowValidOnly = Boolean(req.body?.allowValidOnly);
+    const result = await stageSessionQuestionsSequentially(sessionId, sourceOrders, allowValidOnly);
+    return res.status(200).json({
+      status: 'success',
+      data: result,
+    });
+  } catch (error: any) {
+    const msg = error?.message || 'Sequential staging upload failed.';
+    const isClientErr = /not found|mismatch|invalid/i.test(msg);
+    console.error('[Paste Import Stage Error]:', msg);
+    return res.status(isClientErr ? 400 : 500).json({
+      status: 'error',
+      message: msg,
+    });
+  }
+});
+
+/**
+ * GET /api/questions/paste-import/sessions/:sessionId (Protected - Admin Only)
+ * Retrieves an existing Paste Import session and per-item staging statuses for Resume/Audit.
+ */
+router.get('/paste-import/sessions/:sessionId', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    if (!sessionId || !/^paste_[a-z0-9_]+$/i.test(sessionId)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid upload session ID.' });
+    }
+    const session = await getPasteImportSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ status: 'error', message: 'Upload session not found.' });
+    }
+    return res.status(200).json({ status: 'success', data: session });
+  } catch (error: any) {
+    console.error('[Paste Import Get Session Error]:', error?.message || error);
+    return res.status(500).json({ status: 'error', message: 'Failed to load upload session.' });
+  }
+});
+
+/**
+ * PATCH /api/questions/paste-import/sessions/:sessionId/expected-count (Protected - Admin Only)
+ * Reconciles Expected Questions Count after explicit admin confirmation without altering frozen questions.
+ */
+router.patch('/paste-import/sessions/:sessionId/expected-count', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    const expectedQuestions = Number(req.body?.expectedQuestions);
+    if (!sessionId || !/^paste_[a-z0-9_]+$/i.test(sessionId)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid upload session ID.' });
+    }
+    const result = await updatePasteImportExpectedCount(sessionId, expectedQuestions);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (error: any) {
+    return res.status(400).json({ status: 'error', message: error?.message || 'Failed to update expected count.' });
+  }
+});
+
+/**
+ * PATCH /api/questions/paste-import/sessions/:sessionId/items/:sourceOrder (Protected - Admin Only)
+ * Allows admin to assign a verified answer to an invalid/missing-answer question without touching valid records.
+ */
+router.patch('/paste-import/sessions/:sessionId/items/:sourceOrder', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    const sourceOrder = Number(req.params.sourceOrder);
+    const correctAnswer = Number(req.body?.correctAnswer);
+    if (!sessionId || !/^paste_[a-z0-9_]+$/i.test(sessionId) || !Number.isInteger(sourceOrder) || sourceOrder < 1) {
+      return res.status(400).json({ status: 'error', message: 'Invalid session ID or sourceOrder.' });
+    }
+    const result = await updatePasteImportItemAnswer(sessionId, sourceOrder, correctAnswer);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (error: any) {
+    return res.status(400).json({ status: 'error', message: error?.message || 'Failed to update question answer.' });
+  }
+});
 
 export default router;

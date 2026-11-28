@@ -23,6 +23,7 @@ import { dynamicSyllabusService } from '../services/dynamicSyllabusService'
 import { apiFetch } from '../utils/api'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { buildAuthRedirectUrl, savePostLoginRedirect } from '../utils/authRedirect'
+import { StudyMaterialsTranslatorBar } from '../components/study/StudyMaterialsTranslatorBar'
 import './StudyMaterials.css'
 
 type GroupId = 'group1' | 'group2_2a' | 'group4_vao'
@@ -175,6 +176,7 @@ const StudyMaterials = () => {
                   </>}
               </span>
             </h1>
+            <StudyMaterialsTranslatorBar compact />
           </div>
           <p className="materials-subtitle">{'Comprehensive syllabus-mapped learning modules, study notes, and lesson-wise practice quizzes'}</p>
         </motion.div>

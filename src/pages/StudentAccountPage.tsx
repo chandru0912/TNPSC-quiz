@@ -45,7 +45,7 @@ const HELP_FAQS = [
     a: 'Use the Study Materials or Textbook Library links in the left sidebar to browse 6th–12th Standard materials by Medium, Standard, Subject, and Term/Volume.',
   },
   {
-    q: 'How do I upgrade or manage my TNPSC Study Hub subscription?',
+    q: 'How do I upgrade or manage my TNPSC Aspirant Orbit subscription?',
     a: 'Open Upgrade Plan from the Profile menu or click Subscription in the sidebar to view available plans and your active subscription status.',
   },
   {
@@ -330,7 +330,7 @@ const StudentAccountPage: React.FC<StudentAccountPageProps> = ({ section }) => {
             <div className="account-page-header">
               <h1 className="account-page-title">Account Settings</h1>
               <p className="account-page-subtitle">
-                Manage your TNPSC Study Hub profile details, unique username, plan, and account preferences.
+                Manage your TNPSC Aspirant Orbit profile details, unique username, plan, and account preferences.
               </p>
             </div>
 
@@ -341,7 +341,7 @@ const StudentAccountPage: React.FC<StudentAccountPageProps> = ({ section }) => {
                     <div className="account-row-info">
                       <span className="account-row-value">Sign in required</span>
                       <span className="account-row-desc">
-                        Sign in to view and manage your TNPSC Study Hub account details.
+                        Sign in to view and manage your TNPSC Aspirant Orbit account details.
                       </span>
                     </div>
                     <button type="button" className="account-btn account-btn-primary" onClick={() => navigate('/login')}>
@@ -446,7 +446,7 @@ const StudentAccountPage: React.FC<StudentAccountPageProps> = ({ section }) => {
                             {activeStudent.username ? `@${activeStudent.username}` : 'Not set yet'}
                           </span>
                         )}
-                        <span className="account-row-desc">Your unique username on TNPSC Study Hub</span>
+                        <span className="account-row-desc">Your unique username on TNPSC Aspirant Orbit</span>
                       </div>
                       {!editingUsername && (
                         <button

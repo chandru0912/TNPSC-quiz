@@ -3137,14 +3137,9 @@ export const StudyMaterialsManagement: React.FC<Props> = ({ token }) => {
               ) : (
                 <div className="smm-note-preview glass">
                   <h4>{noteModal.topicName}</h4>
-                  <div
-                    className="smm-rendered-content"
-                    dangerouslySetInnerHTML={{
-                      __html: noteModal.content
-                        ? noteModal.content.replace(/\n/g, '<br />')
-                        : '<em>No content entered yet.</em>',
-                    }}
-                  />
+                  <div className="smm-rendered-content" style={{ whiteSpace: 'pre-wrap' }}>
+                    {noteModal.content ? noteModal.content : <em>No content entered yet.</em>}
+                  </div>
                 </div>
               )}
             </div>

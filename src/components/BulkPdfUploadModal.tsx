@@ -647,7 +647,7 @@ export const BulkPdfUploadModal: React.FC<BulkPdfUploadModalProps> = ({
               <div>
                 <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Google Drive Textbook Uploader</h2>
                 <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-                  Stream Samacheer Kalvi textbooks directly into "TNPSC Study Hub Materials" folder
+                  Stream Samacheer Kalvi textbooks directly into "TNPSC Aspirant Orbit Materials" folder
                 </p>
               </div>
             </div>

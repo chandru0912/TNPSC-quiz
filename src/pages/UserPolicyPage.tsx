@@ -7,7 +7,7 @@ const USER_POLICY_SECTIONS = [
     id: 'purpose',
     title: '1. Purpose & Scope',
     paragraphs: [
-      'This User Policy outlines the expected conduct, responsibilities, and acceptable use rules for all students and visitors using TNPSC Study Hub. By accessing or using our study materials, MCQ practice modules, mock tests, previous year papers, or support services, you agree to follow these guidelines.',
+      'This User Policy outlines the expected conduct, responsibilities, and acceptable use rules for all students and visitors using TNPSC Aspirant Orbit. By accessing or using our study materials, MCQ practice modules, mock tests, previous year papers, or support services, you agree to follow these guidelines.',
     ],
   },
   {
@@ -18,7 +18,7 @@ const USER_POLICY_SECTIONS = [
     ],
     bullets: [
       'Keep your Google account credentials secure and do not share your account access with other individuals.',
-      'TNPSC Study Hub enforces single active device session protection to safeguard your account and learning records.',
+      'TNPSC Aspirant Orbit enforces single active device session protection to safeguard your account and learning records.',
       'Provide accurate profile details such as your target TNPSC exam group so analytics and study recommendations remain accurate.',
     ],
   },
@@ -26,7 +26,7 @@ const USER_POLICY_SECTIONS = [
     id: 'acceptable-use',
     title: '3. Acceptable Use & Content Integrity',
     paragraphs: [
-      'All study notes, curated MCQ sets, mock tests, and platform interfaces on TNPSC Study Hub are provided for personal educational preparation.',
+      'All study notes, curated MCQ sets, mock tests, and platform interfaces on TNPSC Aspirant Orbit are provided for personal educational preparation.',
     ],
     bullets: [
       'Do not scrape, bulk-download, redistribute, resell, or publicly mirror platform MCQs, mock tests, or proprietary study materials.',
@@ -45,7 +45,7 @@ const USER_POLICY_SECTIONS = [
     id: 'support-conduct',
     title: '5. Help Center & Support Communication',
     paragraphs: [
-      'When contacting TNPSC Study Hub Support through the Help Center chat widget, students are expected to communicate respectfully and submit genuine academic, account, payment, or technical inquiries. Abusive language, spam, or repeated fraudulent tickets may result in support or account restrictions.',
+      'When contacting TNPSC Aspirant Orbit Support through the Help Center chat widget, students are expected to communicate respectfully and submit genuine academic, account, payment, or technical inquiries. Abusive language, spam, or repeated fraudulent tickets may result in support or account restrictions.',
     ],
   },
   {
@@ -59,7 +59,7 @@ const USER_POLICY_SECTIONS = [
     id: 'enforcement',
     title: '7. Policy Enforcement & Updates',
     paragraphs: [
-      'TNPSC Study Hub reserves the right to investigate suspected violations and restrict or suspend accounts that breach this User Policy. We may update this policy periodically to reflect platform improvements or legal requirements, and continued use of the platform constitutes acceptance of the latest version.',
+      'TNPSC Aspirant Orbit reserves the right to investigate suspected violations and restrict or suspend accounts that breach this User Policy. We may update this policy periodically to reflect platform improvements or legal requirements, and continued use of the platform constitutes acceptance of the latest version.',
     ],
   },
 ]
@@ -97,7 +97,7 @@ const UserPolicyPage: React.FC = () => {
             </h1>
           </div>
           <p style={{ margin: '0.4rem 0 0', fontSize: '0.9rem', color: '#94a3b8', lineHeight: 1.6 }}>
-            Acceptable use guidelines, student responsibilities, and community standards for TNPSC Study Hub.
+            Acceptable use guidelines, student responsibilities, and community standards for TNPSC Aspirant Orbit.
           </p>
         </div>
 

@@ -144,7 +144,7 @@ const HelpSupportPage: React.FC<HelpSupportPageProps> = ({ section }) => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#ffd700', fontSize: '0.9rem', fontWeight: 700 }}>
                 <BookOpen size={16} />
-                <span>How to Use TNPSC Study Hub</span>
+                <span>How to Use TNPSC Aspirant Orbit</span>
               </div>
               <div
                 style={{

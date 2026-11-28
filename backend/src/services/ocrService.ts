@@ -1,5 +1,5 @@
 /**
- * OCR Service for TNPSC Study Hub
+ * OCR Service for TNPSC Aspirant Orbit
  * Multi-tiered OCR supporting Tamil (ta) and English (en) documents.
  * 
  * Hierarchy:

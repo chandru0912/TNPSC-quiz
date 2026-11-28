@@ -60,7 +60,7 @@ export const CookieConsentManager: React.FC = () => {
             <div className="cookie-banner-copy">
               <div className="cookie-banner-title">
                 <Cookie size={18} style={{ color: '#ffd700' }} />
-                <span>Your Cookie Preferences on TNPSC Study Hub</span>
+                <span>Your Cookie Preferences on TNPSC Aspirant Orbit</span>
               </div>
               <p className="cookie-banner-desc">
                 We use strictly necessary cookies to keep your student login session secure, and optional cookies for study preferences and first-party platform analytics. Optional analytics never run unless you consent.
@@ -193,7 +193,7 @@ export const CookieConsentManager: React.FC = () => {
                     </label>
                   </div>
                   <p className="cookie-category-desc">
-                    Allows TNPSC Study Hub first-party page-view and session-activity analytics so we can improve study modules and platform performance. Disabled until you opt in; no third-party ad trackers are used.
+                    Allows TNPSC Aspirant Orbit first-party page-view and session-activity analytics so we can improve study modules and platform performance. Disabled until you opt in; no third-party ad trackers are used.
                   </p>
                   <span className="cookie-category-meta">
                     Storage: <code>tnpsc_visitor_id</code> (localStorage) and <code>tnpsc_session_id</code> (sessionStorage), cleared automatically if rejected or withdrawn.
@@ -214,7 +214,7 @@ export const CookieConsentManager: React.FC = () => {
                     </label>
                   </div>
                   <p className="cookie-category-desc">
-                    TNPSC Study Hub loads external scripts only on demand when you actively use Google Sign-In (<code>accounts.google.com</code>) or Razorpay Checkout (<code>checkout.razorpay.com</code>) for subscriptions. We do not use advertising or marketing cookies.
+                    TNPSC Aspirant Orbit loads external scripts only on demand when you actively use Google Sign-In (<code>accounts.google.com</code>) or Razorpay Checkout (<code>checkout.razorpay.com</code>) for subscriptions. We do not use advertising or marketing cookies.
                   </p>
                 </div>
 

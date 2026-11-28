@@ -58,6 +58,7 @@ import { TextbookIndexingControlCenter } from '../components/admin/TextbookIndex
 import { GoogleDriveTextbooksPanel } from '../components/admin/GoogleDriveTextbooksPanel'
 import { GoogleDriveTextbooksTab } from '../components/admin/GoogleDriveTextbooksTab'
 import { BulkMcqPastePanel } from '../components/admin/BulkMcqPastePanel'
+import { AdminTranslationControlCenter } from '../components/admin/AdminTranslationControlCenter'
 import { MockTestManagement } from '../components/admin/MockTestManagement'
 import { MockTestMcqGenerator } from '../components/admin/MockTestMcqGenerator'
 import { AdminHelpCenterPanel } from '../components/admin/AdminHelpCenterPanel'
@@ -467,7 +468,7 @@ const Admin = () => {
     connected: false,
     configured: true,
     connectionState: 'DISCONNECTED',
-    folderName: 'TNPSC Study Hub Materials',
+    folderName: 'TNPSC Aspirant Orbit Materials',
   })
   const [isCheckingDrive, setIsCheckingDrive] = useState(false)
   const [isConnectingDrive, setIsConnectingDrive] = useState(false)
@@ -3800,6 +3801,7 @@ const Admin = () => {
   const handleSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingQuestion || !token) return
+    if (!editingQuestion.id && mcqModalMode !== 'single') return
 
     // Mandatory Group and Topic Validation
     if (!editingQuestion.category) {
@@ -4424,6 +4426,10 @@ const Admin = () => {
           </div>
         )}
 
+        {isQuestions && token && (
+          <AdminTranslationControlCenter token={token} />
+        )}
+
         {isTextbooks && (
           <div className="admin-metrics-grid">
             <div className="admin-metric-card glass">
@@ -4570,7 +4576,7 @@ const Admin = () => {
               </div>
               <div className="metric-info">
                 <span className="metric-value" style={{ fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {driveStatus.folderName || 'TNPSC Study Hub Materials'}
+                  {driveStatus.folderName || 'TNPSC Aspirant Orbit Materials'}
                 </span>
                 <span className="metric-label">Target Drive Folder</span>
               </div>
@@ -6463,7 +6469,7 @@ const Admin = () => {
                   <strong style={{ color: '#ffd700' }}>OAuth Scope:</strong> <code style={{ color: '#cbd5e1' }}>https://www.googleapis.com/auth/drive.file</code> (App-isolated access)
                 </div>
                 <div>
-                  <strong style={{ color: '#ffd700' }}>Target Folder:</strong> <code style={{ color: '#cbd5e1' }}>TNPSC Study Hub Materials</code> (Auto-created on Drive)
+                  <strong style={{ color: '#ffd700' }}>Target Folder:</strong> <code style={{ color: '#cbd5e1' }}>TNPSC Aspirant Orbit Materials</code> (Auto-created on Drive)
                 </div>
                 <div>
                   <strong style={{ color: '#ffd700' }}>Local Callback:</strong> <code style={{ color: '#cbd5e1' }}>http://localhost:5000/api/drive/oauth/callback</code>
@@ -8675,9 +8681,12 @@ const Admin = () => {
                             setBulkPasteLanguage(patch.medium === 'English' ? 'english' : 'tamil')
                           }
                         }}
-                        onSavedToQuestionBank={(_ids, count) => {
+                        onSavedToQuestionBank={(ids, count) => {
                           fetchQuestions()
-                          showToast('success', `Question Bank updated (${count} MCQ(s))`)
+                          fetchAllMetrics()
+                          if (count > 0) {
+                            showToast('success', `Committed ${count} MCQ(s) to Staging (IDs: ${ids.slice(0, 3).map((id) => `#${id}`).join(', ')}${ids.length > 3 ? '…' : ''})`)
+                          }
                         }}
                         onViewInQuestionBank={() => {
                           setIsEditModalOpen(false)
@@ -8688,9 +8697,7 @@ const Admin = () => {
                           setDifficultyFilter('all')
                           setStatusFilter('staging')
                           setPage(1)
-                          setTimeout(() => {
-                            fetchQuestions()
-                          }, 50)
+                          fetchAllMetrics()
                         }}
                       />
                     </div>
@@ -11007,7 +11014,7 @@ const Admin = () => {
                   Are you sure you want to permanently delete <strong>"{deletingDriveMaterial.fileName}"</strong>?
                 </p>
                 <div style={{ padding: '0.65rem 0.85rem', background: 'rgba(239, 68, 68, 0.08)', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.25)', fontSize: '0.8rem', color: '#fca5a5' }}>
-                  ⚠️ This action will permanently remove the file from your Google Drive ("TNPSC Study Hub Materials") and remove its metadata record from PostgreSQL.
+                  ⚠️ This action will permanently remove the file from your Google Drive ("TNPSC Aspirant Orbit Materials") and remove its metadata record from PostgreSQL.
                 </div>
               </div>
 
@@ -11106,7 +11113,7 @@ const Admin = () => {
                     color: '#fca5a5',
                   }}
                 >
-                  ⚠️ <strong>Permanent Action:</strong> These PDF files will be deleted from your Google Drive ("TNPSC Study Hub Materials") and removed from the database. This action cannot be undone.
+                  ⚠️ <strong>Permanent Action:</strong> These PDF files will be deleted from your Google Drive ("TNPSC Aspirant Orbit Materials") and removed from the database. This action cannot be undone.
                 </div>
               </div>
 

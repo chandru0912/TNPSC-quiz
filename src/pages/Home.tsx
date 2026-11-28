@@ -163,7 +163,7 @@ const Home = () => {
             
             <h1 className="hero-title">
               <span className="hero-title-line">TNPSC Group Exams</span>
-              <span className="hero-title-line gradient-text">Study Hub</span>
+              <span className="hero-title-line gradient-text">Aspirant Orbit</span>
             </h1>
             
             <p className="hero-subtitle">
@@ -332,7 +332,7 @@ const Home = () => {
             viewport={{ once: true }}
           >
             <h2 className="section-title">
-              Why Choose <span className="gradient-text">TNPSC Study Hub</span>
+              Why Choose <span className="gradient-text">TNPSC Aspirant Orbit</span>
             </h2>
             <p className="section-subtitle">
               Everything you need to crack TNPSC exams in one place

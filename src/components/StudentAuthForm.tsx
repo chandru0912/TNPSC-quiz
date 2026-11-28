@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
-  GraduationCap,
   Loader2,
   AlertCircle,
   ShieldCheck,
   X,
 } from 'lucide-react'
+import OrbitBrandLogo from './OrbitBrandLogo'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { apiFetch } from '../utils/api'
 import { requestGoogleOAuthCode, GoogleSignInCancelledError } from '../utils/googleOAuth'
@@ -130,7 +130,7 @@ export const StudentAuthForm = ({
     }
   }
 
-  const headerTitle = mode === 'register' ? 'Join TNPSC Study Hub' : 'Welcome Back'
+  const headerTitle = mode === 'register' ? 'Join TNPSC Aspirant Orbit' : 'Welcome to TNPSC Aspirant Orbit'
   const headerSubtitle =
     mode === 'register'
       ? 'Create your student account securely using your verified Google Account'
@@ -152,9 +152,9 @@ export const StudentAuthForm = ({
       {/* Brand Medallion & Heading */}
       <div className="auth-header">
         <div className="auth-icon" aria-hidden="true">
-          <GraduationCap size={32} />
+          <OrbitBrandLogo size={36} />
         </div>
-        <div className="auth-brand-pill">TNPSC Study Hub</div>
+        <div className="auth-brand-pill">TNPSC Aspirant Orbit</div>
         <h1 className="auth-title">{headerTitle}</h1>
         <p className="auth-subtitle">{headerSubtitle}</p>
       </div>
@@ -242,7 +242,7 @@ export const StudentAuthForm = ({
             </p>
           ) : (
             <p>
-              New to TNPSC Study Hub?{' '}
+              New to TNPSC Aspirant Orbit?{' '}
               <Link to="/register" className="auth-link" onClick={() => handleModeChange('register')}>
                 Register with Google
               </Link>
@@ -250,7 +250,7 @@ export const StudentAuthForm = ({
           )
         ) : (
           <p>
-            {mode === 'register' ? 'Already have an account? ' : 'New to TNPSC Study Hub? '}
+            {mode === 'register' ? 'Already have an account? ' : 'New to TNPSC Aspirant Orbit? '}
             <button
               type="button"
               className="auth-link auth-inline-btn"

@@ -58,8 +58,14 @@ export const StudentAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const stored = localStorage.getItem(USER_KEY)
       if (stored) {
         try {
-          return JSON.parse(stored)
+          const parsed = JSON.parse(stored)
+          if (parsed && typeof parsed === 'object' && parsed.id && parsed.email) {
+            return parsed as StudentUser
+          }
+          localStorage.removeItem(USER_KEY)
+          return null
         } catch {
+          localStorage.removeItem(USER_KEY)
           return null
         }
       }

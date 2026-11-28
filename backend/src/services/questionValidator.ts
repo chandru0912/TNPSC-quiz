@@ -1,6 +1,6 @@
 /**
  * Deterministic Question Validation, Normalization and Deduplication Module
- * for TNPSC Study Hub.
+ * for TNPSC Aspirant Orbit.
  *
  * Pure algorithmic validation:
  * - Interrogative question text checks

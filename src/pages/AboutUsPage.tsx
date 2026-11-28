@@ -91,11 +91,11 @@ const AboutUsPage: React.FC = () => {
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem' }}>
             <GraduationCap size={26} style={{ color: '#ffd700' }} />
             <h1 style={{ margin: 0, fontSize: 'clamp(1.45rem, 2.6vw, 1.95rem)', fontWeight: 800, color: '#f8fafc' }}>
-              About TNPSC Study Hub
+              About TNPSC Aspirant Orbit
             </h1>
           </div>
           <p style={{ margin: 0, fontSize: '0.94rem', color: '#cbd5e1', lineHeight: 1.7 }}>
-            TNPSC Study Hub is a dedicated online exam preparation platform built specifically for Tamil Nadu Public
+            TNPSC Aspirant Orbit is a dedicated online exam preparation platform built specifically for Tamil Nadu Public
             Service Commission (TNPSC) aspirants. We bring together syllabus-aligned study materials, Samacheer Kalvi
             textbooks, topic-wise MCQ practice, previous year question papers, full-length mock tests, and detailed
             performance analytics inside one unified learning portal.
@@ -196,7 +196,7 @@ const AboutUsPage: React.FC = () => {
         {/* Platform Features */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <h2 style={{ margin: 0, fontSize: '1.12rem', fontWeight: 800, color: '#ffd700' }}>
-            What You Get on TNPSC Study Hub
+            What You Get on TNPSC Aspirant Orbit
           </h2>
           <div
             style={{

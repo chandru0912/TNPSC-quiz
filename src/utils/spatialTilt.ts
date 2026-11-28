@@ -1,5 +1,5 @@
 /**
- * TNPSC Study Hub - Interactive 3D Spatial Tilt & Volumetric Lighting Engine
+ * TNPSC Aspirant Orbit - Interactive 3D Spatial Tilt & Volumetric Lighting Engine
  * 
  * Provides hardware-accelerated 60/120fps 3D cursor tracking, perspective rotation,
  * dynamic specular glare rendering, and true spatial parallax for logos and brand SVG icons.

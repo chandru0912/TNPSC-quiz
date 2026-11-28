@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tnpsc-hub-v5';
+const CACHE_NAME = 'tnpsc-hub-v8';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -17,6 +17,13 @@ self.addEventListener('install', (event) => {
   );
 });
 
+// Allow frontend update recovery to immediately activate any waiting Service Worker
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 // Activate: clean up all older caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
@@ -32,15 +39,31 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch: bypass cross-origin and /api completely; Network-First for HTML/navigation; Cache-First for hashed assets
+// Fetch: bypass cross-origin, /api, and /version.json completely; Network-First for HTML; safe Cache-First for hashed assets
 self.addEventListener('fetch', (event) => {
   const requestUrl = new URL(event.request.url);
 
-  // CRITICAL: NEVER intercept cross-origin requests, non-GET requests, or /api routes
+  // CRITICAL: NEVER intercept cross-origin requests, non-GET requests, /api routes, /version.json,
+  // or Vite development server modules (/src/, /@vite/, /@fs/, /@react-refresh, /node_modules/)
+  const isLocalDevHost =
+    requestUrl.hostname === 'localhost' ||
+    requestUrl.hostname === '127.0.0.1' ||
+    requestUrl.hostname === '[::1]';
+  const isViteDevModule =
+    requestUrl.pathname.startsWith('/src/') ||
+    requestUrl.pathname.startsWith('/@vite') ||
+    requestUrl.pathname.startsWith('/@fs/') ||
+    requestUrl.pathname.startsWith('/@id/') ||
+    requestUrl.pathname.startsWith('/@react-refresh') ||
+    requestUrl.pathname.startsWith('/node_modules/');
+
   if (
+    isLocalDevHost ||
+    isViteDevModule ||
     event.request.method !== 'GET' ||
     requestUrl.origin !== self.location.origin ||
-    requestUrl.pathname.startsWith('/api')
+    requestUrl.pathname.startsWith('/api') ||
+    requestUrl.pathname === '/version.json'
   ) {
     return;
   }
@@ -79,7 +102,17 @@ self.addEventListener('fetch', (event) => {
       }
 
       return fetch(event.request).then((response) => {
-        if (!response || !response.ok || response.status !== 200 || response.type !== 'basic') {
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const isAssetScriptOrStyle = /\.(js|mjs|css)(\?|$)/i.test(requestUrl.pathname);
+
+        // CRITICAL: Never cache HTML fallback responses (e.g. index.html) under .js/.css asset URLs
+        if (
+          !response ||
+          !response.ok ||
+          response.status !== 200 ||
+          response.type !== 'basic' ||
+          (isAssetScriptOrStyle && contentType.includes('text/html'))
+        ) {
           return response;
         }
 

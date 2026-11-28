@@ -106,7 +106,7 @@ export const QuickNewStudentModal: React.FC<QuickNewStudentModalProps> = ({
 
   const handleCopyCredentials = () => {
     if (!createdStudent) return;
-    const text = `TNPSC Study Hub Credentials:\nName: ${createdStudent.fullName}\nEmail: ${createdStudent.email}\nPassword: ${createdStudent.tempPass}\nPortal: https://tnpsc-quiz-1ve1.vercel.app/login`;
+    const text = `TNPSC Aspirant Orbit Credentials:\nName: ${createdStudent.fullName}\nEmail: ${createdStudent.email}\nPassword: ${createdStudent.tempPass}\nPortal: https://tnpsc-quiz-1ve1.vercel.app/login`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

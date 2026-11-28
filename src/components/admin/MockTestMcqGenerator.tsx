@@ -1480,7 +1480,7 @@ export const MockTestMcqGenerator: React.FC<MockTestMcqGeneratorProps> = ({
           <div>
             <h3 style={{ margin: 0, color: '#f8fafc', fontSize: '1.05rem' }}>Staging, Approval &amp; Publishing Queue</h3>
             <p style={{ margin: '0.15rem 0 0', fontSize: '0.78rem', color: '#94a3b8' }}>
-              Published Mock Tests automatically sync to both the TNPSC Study Hub Website and Android Application.
+              Published Mock Tests automatically sync to both the TNPSC Aspirant Orbit Website and Android Application.
             </p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>

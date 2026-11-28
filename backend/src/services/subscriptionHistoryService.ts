@@ -74,7 +74,7 @@ export async function ensureSubscriptionHistorySchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_stu_entitlements_student ON student_module_entitlements(student_id);
       `);
 
-      // Seed the 4 official TNPSC Study Hub subscription plans idempotently (duration_days intentionally NULL until Admin configures)
+      // Seed the 4 official TNPSC Aspirant Orbit subscription plans idempotently (duration_days intentionally NULL until Admin configures)
       await pool.query(`
         INSERT INTO subscription_plans (
           id, slug, plan_name, duration_days, price, currency, is_active, is_featured, sort_order, description, features, entitlements

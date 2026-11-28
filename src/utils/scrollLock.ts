@@ -1,5 +1,5 @@
 /**
- * TNPSC Study Hub - Shared Scroll Lock Utility
+ * TNPSC Aspirant Orbit - Shared Scroll Lock Utility
  * Provides robust background scroll locking with reference counting,
  * scroll position preservation, and mobile (iOS/Android) fixed-viewport support.
  */

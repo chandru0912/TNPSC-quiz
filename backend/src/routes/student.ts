@@ -8,6 +8,7 @@ import {
   normalizeTamilNaduDistrict,
 } from '../services/tamilNaduDistrictService';
 import { StudyManagementService } from '../services/studyManagementService';
+import { CACHE_MIDDLEWARE_PRESETS } from '../middleware/cacheMiddleware';
 import {
   generateStudentToken,
   verifyStudentToken,
@@ -41,6 +42,7 @@ import {
   GOOGLE_AUTH_REQUIRED_MESSAGE,
   type VerifiedGoogleProfile,
 } from '../services/googleAuthService';
+import { isTrustedAuthOriginRequest } from '../config/trustedOrigins';
 import {
   getStudentDashboardData,
   getPlatformStats,
@@ -91,7 +93,9 @@ function setStudentSessionCookie(res: Response, sessionId: string, expiresAt: Da
       `${name}=${encodeURIComponent(value)}`,
       'Path=/',
       'HttpOnly',
-      'SameSite=Lax',
+      // Cross-site Vercel frontend <-> backend requires SameSite=None; Secure over HTTPS.
+      // Localhost HTTP uses SameSite=Lax.
+      isProd ? 'SameSite=None' : 'SameSite=Lax',
       `Max-Age=${maxAgeSec}`,
     ];
     if (isProd) parts.push('Secure');
@@ -107,7 +111,13 @@ function setStudentSessionCookie(res: Response, sessionId: string, expiresAt: Da
 function clearStudentSessionCookie(res: Response) {
   const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
   const buildClear = (name: string) => {
-    const parts = [`${name}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+    const parts = [
+      `${name}=`,
+      'Path=/',
+      'HttpOnly',
+      isProd ? 'SameSite=None' : 'SameSite=Lax',
+      'Max-Age=0',
+    ];
     if (isProd) parts.push('Secure');
     return parts.join('; ');
   };
@@ -115,18 +125,7 @@ function clearStudentSessionCookie(res: Response) {
 }
 
 function isTrustedAuthOrigin(req: Request): boolean {
-  const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
-  if (!isProd) return true;
-  const origin = String(req.headers.origin || '').trim().replace(/\/+$/, '');
-  if (!origin) return true; // Same-origin or non-browser requests
-  if (/^https:\/\/tnpsc-quiz.*\.vercel\.app$/i.test(origin) || /^https:\/\/.*-moonzoro\.vercel\.app$/i.test(origin)) {
-    return true;
-  }
-  const extra = (process.env.CORS_ORIGIN || '')
-    .split(',')
-    .map((o) => o.trim().replace(/^["']|["']$/g, '').replace(/\/+$/, ''))
-    .filter(Boolean);
-  return extra.includes('*') || extra.includes(origin);
+  return isTrustedAuthOriginRequest(req);
 }
 
 const ALLOWED_TARGET_GROUPS = new Set(['group1', 'group2', 'group2a', 'group4']);
@@ -486,7 +485,7 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
       message: isNewUser
         ? 'Account created successfully with Google.'
         : linkedAccount
-          ? 'Google account securely linked to your existing TNPSC Study Hub account.'
+          ? 'Google account securely linked to your existing TNPSC Aspirant Orbit account.'
           : 'Logged in successfully with Google.',
       token,
       isNewUser,
@@ -2004,7 +2003,7 @@ router.post('/admin/create', requireAdminAuth, async (req: Request, res: Respons
     const cleanDistrict = district && typeof district === 'string' ? district.trim() : 'Chennai';
     const cleanCity = city && typeof city === 'string' ? city.trim() : 'Central';
     const cleanTier = subscriptionTier && typeof subscriptionTier === 'string' ? subscriptionTier.trim() : 'free';
-    const cleanPass = password && password.length >= 6 ? password : 'tnpsc' + Math.floor(1000 + Math.random() * 9000);
+    const cleanPass = password && password.length >= 6 ? password : crypto.randomBytes(9).toString('base64url');
 
     const existing = await pool.query('SELECT id FROM students WHERE LOWER(email) = $1', [cleanEmail]);
     if (existing.rows.length > 0) {
@@ -2248,7 +2247,7 @@ router.get('/study-materials', async (req: Request, res: Response) => {
 // STUDENT TEXTBOOK LIBRARY (PUBLISHED GOOGLE DRIVE TEXTBOOKS ONLY)
 // ============================================================================
 
-router.get('/textbooks/filters', async (req: Request, res: Response) => {
+router.get('/textbooks/filters', CACHE_MIDDLEWARE_PRESETS.studyMaterials, async (req: Request, res: Response) => {
   try {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     const data = await getPublishedStudentTextbookFilters({
@@ -2264,7 +2263,7 @@ router.get('/textbooks/filters', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/textbooks', async (req: Request, res: Response) => {
+router.get('/textbooks', CACHE_MIDDLEWARE_PRESETS.studyMaterials, async (req: Request, res: Response) => {
   try {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     const result = await queryPublishedStudentTextbooksPaginated({

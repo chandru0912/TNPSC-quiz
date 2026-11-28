@@ -27,7 +27,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
   const handleExportJson = () => {
     const reportData = {
       generatedAt: new Date().toISOString(),
-      reportScope: `TNPSC Study Hub Analytics (${activeRange.toUpperCase()})`,
+      reportScope: `TNPSC Aspirant Orbit Analytics (${activeRange.toUpperCase()})`,
       summaryMetrics: overviewCards,
       topDistricts,
       allDistricts: geographicData,
@@ -68,7 +68,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
       <div className="report-document-card glass printable-area">
         <div className="report-doc-header">
           <div>
-            <span className="doc-org-tag">TNPSC STUDY HUB ENTERPRISE PLATFORM</span>
+            <span className="doc-org-tag">TNPSC ASPIRANT ORBIT ENTERPRISE PLATFORM</span>
             <h2 className="doc-title">Comprehensive Platform Analytics Audit</h2>
             <p className="doc-date">
               Reporting Window: <strong>{activeRange.toUpperCase()}</strong> • Generated on {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}

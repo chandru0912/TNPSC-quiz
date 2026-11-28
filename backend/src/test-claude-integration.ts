@@ -16,7 +16,7 @@ import { cleanTamilUnicodeText } from './services/tamilUnicodeCleaner';
 
 async function runTests() {
   console.log('====================================================');
-  console.log('TNPSC STUDY HUB: CLAUDE AI INTEGRATION VERIFICATION');
+  console.log('TNPSC ASPIRANT ORBIT: CLAUDE AI INTEGRATION VERIFICATION');
   console.log('====================================================\n');
 
   let passed = 0;

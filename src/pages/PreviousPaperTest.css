@@ -18,9 +18,8 @@
   padding: 0.9rem 1.25rem;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  position: sticky;
-  top: 0.5rem;
-  z-index: 20;
+  position: relative;
+  z-index: 2;
 }
 
 .pyp-topbar-left {
@@ -159,6 +158,8 @@
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 1.25rem;
   align-items: start;
+  position: relative;
+  z-index: 1;
 }
 
 .pyp-question-panel {
@@ -310,7 +311,8 @@
   flex-direction: column;
   gap: 1rem;
   position: sticky;
-  top: 5.2rem;
+  top: calc(var(--navbar-height, 60px) + 1rem);
+  z-index: 2;
 }
 
 .pyp-palette-head {
@@ -708,6 +710,7 @@
     top: auto;
     max-height: 75vh;
     z-index: 60;
+    background: rgba(10, 15, 30, 0.96);
   }
 
   .pyp-palette-sidebar.mobile-open {
@@ -716,5 +719,12 @@
 
   .pyp-palette-close {
     display: inline-flex;
+  }
+}
+
+@media (max-width: 767px) {
+  .pyp-exam-page {
+    padding: 0.75rem 0.75rem calc(2rem + env(safe-area-inset-bottom, 0px));
+    gap: 0.75rem;
   }
 }

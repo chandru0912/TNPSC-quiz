@@ -98,15 +98,22 @@
   padding-top: var(--navbar-height, 56px);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767px) {
+  /* Reserve exact space for the fixed mobile header so content starts right below it */
   .main-content {
-    padding-top: var(--navbar-height, 70px);
+    padding-top: var(--navbar-height, 64px);
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding-top: var(--navbar-height, 60px);
   }
 }
 
 @media (max-width: 380px) {
   .main-content {
-    padding-top: var(--navbar-height, 64px);
+    padding-top: var(--navbar-height, 56px);
   }
 }
 

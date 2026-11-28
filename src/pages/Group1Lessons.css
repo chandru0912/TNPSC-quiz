@@ -449,3 +449,295 @@
     font-size: 1.65rem;
   }
 }
+
+/* ==========================================================================
+   MOBILE-ONLY ALIGNMENT: CHAPTER HEADER, LESSON CARDS & ACTION BUTTONS (<= 767px)
+   Desktop (>= 1024px) and Tablet (768px - 1023px) remain 100% unchanged.
+   ========================================================================== */
+@media screen and (max-width: 767px) {
+  .lessons-page {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    padding: 1rem 0.9rem 3rem;
+  }
+
+  .lessons-page .lessons-container,
+  .lessons-page .chapters-lesson-stack,
+  .lessons-page .chapter-block {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  /* 1. Chapter Header Alignment */
+  .lessons-page .chapter-block-head {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 0.95rem 1rem;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.55rem 0.75rem;
+  }
+
+  .lessons-page .chapter-block-title-group {
+    display: contents;
+  }
+
+  .lessons-page .chapter-block-title-row {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+  }
+
+  .lessons-page .chapter-block-num,
+  .lessons-page .chapter-pill,
+  .lessons-page .chapter-block-badge {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+    flex-shrink: 0;
+    width: fit-content;
+    max-width: 100%;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    box-sizing: border-box;
+  }
+
+  .lessons-page .chapter-block-count {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    line-height: 1.2;
+  }
+
+  .lessons-page .chapter-lesson-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    line-height: 1.2;
+  }
+
+  .lessons-page .chapter-block-title {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    font-size: 1.04rem;
+    line-height: 1.38;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  .lessons-page .chapter-block-tamil {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* 2. Lesson Card Layout */
+  .lessons-page .lessons-list-grid,
+  .lessons-page .lessons-table {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 0.85rem;
+    gap: 0.75rem;
+  }
+
+  .lessons-page .lesson-full-card,
+  .lessons-page .lesson-row,
+  .lessons-page .lesson-entry {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 1rem 0.95rem;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+    overflow: visible;
+  }
+
+  .lessons-page .lesson-full-card:hover {
+    transform: none;
+  }
+
+  .lessons-page .lesson-left {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .lessons-page .lesson-number-circle,
+  .lessons-page .lesson-idx {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    flex-shrink: 0;
+    font-size: 0.84rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .lessons-page .lesson-info,
+  .lessons-page .lesson-entry-main {
+    flex: 1 1 0%;
+    min-width: 0;
+    gap: 0.25rem;
+  }
+
+  .lessons-page .lesson-title-text,
+  .lessons-page .lesson-entry-name {
+    font-size: 0.96rem;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    text-align: left;
+  }
+
+  .lessons-page .lesson-desc-text {
+    font-size: 0.82rem;
+    line-height: 1.45;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  /* 3. Lesson Action Buttons (Available, Read Study Notes, Practice) */
+  .lessons-page .lesson-right,
+  .lessons-page .lesson-entry-actions {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+
+  .lessons-page .lesson-right .awaiting-notes-tag,
+  .lessons-page .lesson-right .lesson-time-chip {
+    grid-column: 1 / -1;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 30px;
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.76rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    box-sizing: border-box;
+  }
+
+  .lessons-page .lesson-right .view-lesson-btn,
+  .lessons-page .lesson-right .lesson-btn,
+  .lessons-page .lesson-entry-actions .btn {
+    margin-left: 0 !important;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 40px;
+    height: auto;
+    padding: 0.55rem 0.85rem;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    text-align: center;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.25;
+    font-size: 0.82rem;
+    box-sizing: border-box;
+  }
+
+  .lessons-page .lesson-right .view-lesson-btn::before,
+  .lessons-page .lesson-right .lesson-btn::before {
+    border-radius: 11px 11px 50% 50%;
+  }
+
+  .lessons-page .lesson-right .view-lesson-btn svg,
+  .lessons-page .lesson-right .lesson-btn svg,
+  .lessons-page .lesson-entry-actions .btn svg {
+    flex-shrink: 0;
+  }
+}
+
+@media screen and (max-width: 360px) {
+  .lessons-page {
+    padding: 0.85rem 0.7rem 2.5rem;
+  }
+
+  .lessons-page .chapter-block-head {
+    padding: 0.9rem 0.85rem;
+    gap: 0.45rem 0.55rem;
+  }
+
+  .lessons-page .lessons-list-grid,
+  .lessons-page .lessons-table {
+    padding: 0.7rem;
+  }
+
+  .lessons-page .lesson-full-card,
+  .lessons-page .lesson-row,
+  .lessons-page .lesson-entry {
+    padding: 0.85rem 0.8rem;
+  }
+
+  .lessons-page .lesson-right,
+  .lessons-page .lesson-entry-actions {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .lessons-page .lesson-right .view-lesson-btn,
+  .lessons-page .lesson-right .lesson-btn,
+  .lessons-page .lesson-entry-actions .btn {
+    padding: 0.52rem 0.7rem;
+    font-size: 0.79rem;
+    min-height: 39px;
+    white-space: normal;
+  }
+}

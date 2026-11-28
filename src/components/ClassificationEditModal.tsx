@@ -7,7 +7,7 @@ import {
   getAllowedMediums,
   getAllowedTerms,
   type StandardId,
-} from '../../backend/src/data/samacheerTextbookCatalog'
+} from '../data/samacheerTextbookCatalog'
 
 interface ClassificationEditModalProps {
   isOpen: boolean;

@@ -1,6 +1,6 @@
 /**
  * Standard AI Provider Interface & Types
- * TNPSC Study Hub - Independent Claude AI & Google Gemini AI Integration
+ * TNPSC Aspirant Orbit - Independent Claude AI & Google Gemini AI Integration
  */
 
 export type AIProviderName = 'claude' | 'gemini' | 'openai';

@@ -8,6 +8,8 @@
  * Powered by PostgreSQL via /api/syllabus/* endpoints.
  */
 
+import { apiFetch } from '../utils/api';
+
 export interface DynamicExam {
   id: string;
   name: string;
@@ -212,7 +214,7 @@ export const dynamicSyllabusService = {
       return cache.exams;
     }
     try {
-      const res = await fetch('/api/syllabus/exams');
+      const res = await apiFetch('/api/syllabus/exams');
       const data = await res.json();
       if (data.success && Array.isArray(data.exams) && data.exams.length > 0) {
         // Support the 3 canonical groups: TNPSC Group 1, TNPSC Group 2 & 2A, TNPSC Group 4
@@ -257,7 +259,7 @@ export const dynamicSyllabusService = {
     }
 
     try {
-      const res = await fetch(`/api/syllabus/subjects?groupId=${encodeURIComponent(examId)}`);
+      const res = await apiFetch(`/api/syllabus/subjects?groupId=${encodeURIComponent(examId)}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.subjects) && data.subjects.length > 0) {
         const subs: DynamicSubject[] = data.subjects.map((s: any) => ({
@@ -320,7 +322,7 @@ export const dynamicSyllabusService = {
 
     try {
       const url = `/api/syllabus/units?groupId=${encodeURIComponent(examId)}&subjectId=${encodeURIComponent(subjectId)}${stdNum ? `&standardId=${stdNum}` : ''}`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       const data = await res.json();
       if (data.success && Array.isArray(data.units) && (data.units.length > 0 || options?.allowEmpty)) {
         const units: DynamicUnit[] = data.units.map((u: any) => ({
@@ -390,7 +392,7 @@ export const dynamicSyllabusService = {
       if (uNum) q.set('unitNumber', String(uNum));
       if (uId) q.set('unitId', String(uId));
 
-      const res = await fetch(`/api/syllabus/lessons?${q.toString()}`);
+      const res = await apiFetch(`/api/syllabus/lessons?${q.toString()}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.lessons)) {
         cache.lessons.set(cacheKey, data.lessons);
@@ -427,7 +429,7 @@ export const dynamicSyllabusService = {
       if (lTitle) q.set('lessonTitle', lTitle);
       if (uId) q.set('unitId', String(uId));
 
-      const res = await fetch(`/api/syllabus/topics?${q.toString()}`);
+      const res = await apiFetch(`/api/syllabus/topics?${q.toString()}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.topics) && data.topics.length > 0) {
         const seen = new Set<string>();
@@ -452,7 +454,7 @@ export const dynamicSyllabusService = {
    */
   async reorderUnits(items: Array<{ id: number; display_order: number }>, token?: string): Promise<boolean> {
     try {
-      const res = await fetch('/api/syllabus/reorder', {
+      const res = await apiFetch('/api/syllabus/reorder', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -476,7 +478,7 @@ export const dynamicSyllabusService = {
    */
   async reorderLessons(items: Array<{ id: string; display_order: number }>, token?: string): Promise<boolean> {
     try {
-      const res = await fetch('/api/syllabus/reorder', {
+      const res = await apiFetch('/api/syllabus/reorder', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -500,7 +502,7 @@ export const dynamicSyllabusService = {
    */
   async reorderTopics(items: Array<{ id: number; display_order: number }>, token?: string): Promise<boolean> {
     try {
-      const res = await fetch('/api/syllabus/reorder', {
+      const res = await apiFetch('/api/syllabus/reorder', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

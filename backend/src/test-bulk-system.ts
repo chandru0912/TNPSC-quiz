@@ -20,7 +20,7 @@ import { classifyPdf, ClassifyPdfInput } from './services/bulkClassificationServ
 
 async function runTests() {
   console.log('================================================================');
-  console.log('🚀 TNPSC STUDY HUB: BULK PDF & SYLLABUS CLASSIFICATION TEST SUITE');
+  console.log('🚀 TNPSC ASPIRANT ORBIT: BULK PDF & SYLLABUS CLASSIFICATION TEST SUITE');
   console.log('================================================================\n');
 
   let passedTests = 0;

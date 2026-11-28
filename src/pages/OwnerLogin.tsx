@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Shield, Lock, Eye, EyeOff } from 'lucide-react'
+import { Lock, Eye, EyeOff } from 'lucide-react'
+import OrbitBrandLogo from '../components/OrbitBrandLogo'
 import { apiFetch, parseApiResponse, classifyApiError, classifyFetchFailure } from '../utils/api'
 import './Admin.css'
 
@@ -82,9 +83,13 @@ const OwnerLogin: React.FC = () => {
           headers: { Authorization: `Bearer ${issuedToken}` },
           timeoutMs: 10000,
         })
-        const verifyJson = await verifyRes.json().catch(() => null)
+        const verifyParsed = await parseApiResponse(verifyRes)
+        const verifyJson = verifyParsed.data
         if (!verifyRes.ok || !verifyJson?.valid || !verifyJson?.user) {
-          setError('Admin role verification failed on server. Access denied.')
+          setError(
+            (typeof verifyJson?.message === 'string' && verifyJson.message.trim()) ||
+              'Admin role verification failed on server. Access denied.'
+          )
           return
         }
 
@@ -99,7 +104,7 @@ const OwnerLogin: React.FC = () => {
       } else if (res.status === 429) {
         setError('Too many login attempts. Please wait a few minutes and try again.')
       } else {
-        const classified = classifyApiError(res, parsed, 'Authentication failed. Please try again.')
+        const classified = classifyApiError(res, parsed.data, parsed.rawText, '/api/admin/login')
         setError(classified)
       }
     } catch (err) {
@@ -144,11 +149,11 @@ const OwnerLogin: React.FC = () => {
         >
           <div className="admin-auth-header">
             <div className="admin-auth-icon">
-              <Shield size={32} />
+              <OrbitBrandLogo size={36} />
             </div>
-            <h1 className="admin-auth-title">Owner Admin Login</h1>
+            <h1 className="admin-auth-title">TNPSC Aspirant Orbit Admin</h1>
             <p className="admin-auth-subtitle">
-              Authorized owner access only &bull; TNPSC Study Hub Control Center
+              Authorized owner access only &bull; TNPSC Aspirant Orbit Control Center
             </p>
           </div>
 

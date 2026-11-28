@@ -1,7 +1,7 @@
 {
-  "name": "TNPSC Study Hub",
-  "short_name": "TNPSC Hub",
-  "description": "Comprehensive Tamil Nadu Public Service Commission exam preparation with mock tests, MCQs, and syllabus-aligned study materials.",
+  "name": "TNPSC Aspirant Orbit",
+  "short_name": "Aspirant Orbit",
+  "description": "TNPSC Aspirant Orbit — Comprehensive Tamil Nadu Public Service Commission exam preparation platform with mock tests, MCQs, Samacheer Kalvi textbooks, and syllabus-aligned study materials.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

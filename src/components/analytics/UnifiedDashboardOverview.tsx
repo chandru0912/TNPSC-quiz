@@ -546,7 +546,7 @@ export const UnifiedDashboardOverview: React.FC<UnifiedDashboardOverviewProps> =
         <div className="ud-header-left">
           <div className="ud-badge-pill">
             <Shield size={13} className="ud-shield-icon" />
-            <span>TNPSC STUDY HUB TELEMETRY</span>
+            <span>TNPSC ASPIRANT ORBIT TELEMETRY</span>
           </div>
           <h1 className="ud-main-heading">Enterprise Analytics Dashboard</h1>
           <p className="ud-subheading">

@@ -38,29 +38,29 @@ export const PRIVACY_POLICY_METADATA = {
 export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
   title: 'Privacy Policy',
   subtitle:
-    'A transparent, technically accurate explanation of what information TNPSC Study Hub collects, why we collect it, how it is used and protected, and the privacy rights available to students.',
+    'A transparent, technically accurate explanation of what information TNPSC Aspirant Orbit collects, why we collect it, how it is used and protected, and the privacy rights available to students.',
   effectiveDateLabel: 'Effective Date',
   effectiveDateValue: PRIVACY_POLICY_METADATA.effectiveDate,
   lastUpdatedLabel: 'Last Updated',
   lastUpdatedValue: PRIVACY_POLICY_METADATA.lastUpdated,
   legalReviewBanner:
-    'Notice: This Privacy Policy is based on the verified technical implementation of TNPSC Study Hub. Before final legal publication, administrator configuration of verified contact details and review by a qualified Indian privacy/legal professional are recommended.',
+    'Notice: This Privacy Policy is based on the verified technical implementation of TNPSC Aspirant Orbit. Before final legal publication, administrator configuration of verified contact details and review by a qualified Indian privacy/legal professional are recommended.',
   sections: [
     {
       id: 'introduction',
       number: 1,
       title: 'Introduction',
       paragraphs: [
-        'Welcome to TNPSC Study Hub. Protecting your privacy and handling your personal information transparently is a core responsibility of our platform.',
-        'This Privacy Policy explains what personal and technical data TNPSC Study Hub actually collects, how and why it is processed, where it is stored, which third-party services are involved, and how students can update or delete their account information.',
+        'Welcome to TNPSC Aspirant Orbit. Protecting your privacy and handling your personal information transparently is a core responsibility of our platform.',
+        'This Privacy Policy explains what personal and technical data TNPSC Aspirant Orbit actually collects, how and why it is processed, where it is stored, which third-party services are involved, and how students can update or delete their account information.',
       ],
     },
     {
       id: 'about-platform',
       number: 2,
-      title: 'About TNPSC Study Hub',
+      title: 'About TNPSC Aspirant Orbit',
       paragraphs: [
-        'TNPSC Study Hub is an online exam preparation platform built for students preparing for Tamil Nadu Public Service Commission (TNPSC) examinations, including Group 1, Group 2, Group 2A, and Group 4 & VAO.',
+        'TNPSC Aspirant Orbit is an online exam preparation platform built for students preparing for Tamil Nadu Public Service Commission (TNPSC) examinations, including Group 1, Group 2, Group 2A, and Group 4 & VAO.',
         'The platform provides Samacheer Kalvi Textbook Library access (6th–12th Standard), Study Materials, MCQ Practice, Unit Wise and Full-Length Mock Tests, Previous Year Question Papers, Mark List, Performance Analytics, and Progress Tracking.',
       ],
       note: 'Legal Entity Name & Registered Business Address: [Pending Administrator Review and Configuration].',
@@ -70,7 +70,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 3,
       title: 'Scope of This Privacy Policy',
       paragraphs: [
-        'This Privacy Policy applies to all student-facing web pages, authentication flows, learning modules, mock tests, subscription checkout flows, and backend APIs operated by TNPSC Study Hub.',
+        'This Privacy Policy applies to all student-facing web pages, authentication flows, learning modules, mock tests, subscription checkout flows, and backend APIs operated by TNPSC Aspirant Orbit.',
         'External websites or third-party platforms (such as Google and Razorpay) are governed by their respective privacy policies.',
       ],
     },
@@ -79,7 +79,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 4,
       title: 'Information We Collect',
       paragraphs: [
-        'TNPSC Study Hub collects only the information needed to authenticate student accounts, deliver learning modules, process subscriptions, and secure the platform:',
+        'TNPSC Aspirant Orbit collects only the information needed to authenticate student accounts, deliver learning modules, process subscriptions, and secure the platform:',
       ],
       bullets: [
         'Account and registration information (full name, username, verified email, student ID, selected TNPSC exam category).',
@@ -110,9 +110,9 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 6,
       title: 'Google Login and Authentication',
       paragraphs: [
-        'Student registration and login on TNPSC Study Hub are restricted exclusively to verified Google Accounts using Google Identity Services. Manual email-only registration, password-only student login, and student password-reset endpoints are disabled.',
+        'Student registration and login on TNPSC Aspirant Orbit are restricted exclusively to verified Google Accounts using Google Identity Services. Manual email-only registration, password-only student login, and student password-reset endpoints are disabled.',
         'Every Google authorization code or ID Token is verified on our Express backend using the official google-auth-library (OAuth2Client.verifyIdToken), validating the cryptographic Google signature, Client ID audience, Google issuer, token expiration, Subject ID, and email_verified === true status.',
-        'We accept Google-verified Gmail accounts and Google Workspace accounts with a verified hosted-domain (hd) claim matching the email domain. For account security, TNPSC Study Hub enforces a Single Active Device Session per student account and logs successful login timestamps along with device type, browser name, and operating system.',
+        'We accept Google-verified Gmail accounts and Google Workspace accounts with a verified hosted-domain (hd) claim matching the email domain. For account security, TNPSC Aspirant Orbit enforces a Single Active Device Session per student account and logs successful login timestamps along with device type, browser name, and operating system.',
       ],
     },
     {
@@ -150,7 +150,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       title: 'Subscription and Payment Information',
       paragraphs: [
         'Paid subscription plans (MCQ Practice, Mock Test, Previous Papers, Test Batch) are processed through Razorpay.',
-        'TNPSC Study Hub stores only transaction and entitlement records in PostgreSQL (subscription_transactions and student_module_entitlements):',
+        'TNPSC Aspirant Orbit stores only transaction and entitlement records in PostgreSQL (subscription_transactions and student_module_entitlements):',
       ],
       bullets: [
         'Subscription plan ID, plan name snapshot, and configured plan price.',
@@ -158,7 +158,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
         'Razorpay Order ID, Razorpay Payment ID, general payment method category, payment status, subscription status, and activation/expiry timestamps.',
         'Student email snapshot at the time of transaction (student_email_snapshot).',
       ],
-      note: 'Payment Credential Assurance: TNPSC Study Hub does NOT collect or store debit/credit card numbers, CVV codes, net-banking passwords, or UPI PINs. All payment credentials are handled directly by Razorpay.',
+      note: 'Payment Credential Assurance: TNPSC Aspirant Orbit does NOT collect or store debit/credit card numbers, CVV codes, net-banking passwords, or UPI PINs. All payment credentials are handled directly by Razorpay.',
     },
     {
       id: 'technical-data',
@@ -192,7 +192,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 12,
       title: 'Third-Party Services and Integrations',
       paragraphs: [
-        'The following verified third-party services are integrated into TNPSC Study Hub. Admin-only AI integrations (Anthropic Claude / Google Gemini) are restricted to administrator content creation/translation and do NOT receive student personal information.',
+        'The following verified third-party services are integrated into TNPSC Aspirant Orbit. Admin-only AI integrations (Anthropic Claude / Google Gemini) are restricted to administrator content creation/translation and do NOT receive student personal information.',
       ],
       table: {
         headers: ['Provider', 'Purpose', 'Receives Student Personal Data?'],
@@ -211,7 +211,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 13,
       title: 'Data Sharing and Disclosure',
       paragraphs: [
-        'TNPSC Study Hub does not sell, rent, or trade student personal information.',
+        'TNPSC Aspirant Orbit does not sell, rent, or trade student personal information.',
         'Information is shared only with the essential infrastructure and payment providers listed above to deliver the service, or when required to comply with applicable Indian law, court orders, lawful government requests, or to protect platform security.',
       ],
     },
@@ -228,7 +228,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       id: 'data-security',
       number: 15,
       title: 'Data Security',
-      paragraphs: ['The following security safeguards are verified in the TNPSC Study Hub codebase:'],
+      paragraphs: ['The following security safeguards are verified in the TNPSC Aspirant Orbit codebase:'],
       bullets: [
         'HTTPS/TLS transport encryption and Helmet security headers (including HSTS in production).',
         'Server-side cryptographic Google ID Token verification using google-auth-library.',
@@ -274,7 +274,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 19,
       title: 'Account Deletion',
       paragraphs: [
-        'TNPSC Study Hub supports permanent self-service account deletion (DELETE /api/student/account). To confirm deletion, you must enter your registered email address and type "DELETE".',
+        'TNPSC Aspirant Orbit supports permanent self-service account deletion (DELETE /api/student/account). To confirm deletion, you must enter your registered email address and type "DELETE".',
         'Upon confirmation, your active sessions are revoked immediately, cookies are cleared, and your student record is deleted from PostgreSQL. Cascading deletion permanently removes study_sessions, question_attempts, mock_test_attempts, mock_test_sessions, study_material_progress, student_activity, daily_streaks, student_module_entitlements, and student_sessions.',
         'Deleted account and learning data cannot be recovered. Financial transaction records (subscription_transactions) and anonymized visitor_sessions have student_id set to NULL for accounting/legal continuity.',
       ],
@@ -292,7 +292,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 21,
       title: "Children's Privacy",
       paragraphs: [
-        'Although TNPSC competitive examinations primarily serve adult aspirants, TNPSC Study Hub also hosts 6th–12th Standard Samacheer Kalvi textbooks. The current registration system does not collect age or date of birth.',
+        'Although TNPSC competitive examinations primarily serve adult aspirants, TNPSC Aspirant Orbit also hosts 6th–12th Standard Samacheer Kalvi textbooks. The current registration system does not collect age or date of birth.',
         'Under India’s Digital Personal Data Protection Act, 2023 (DPDP Act, 2023), individuals under 18 years of age are classified as children. Students under 18 should use this platform only with the consent and supervision of a parent or lawful guardian.',
       ],
       note: 'Age-gating and verifiable parental consent workflows: [Pending Administrator & Legal Review].',
@@ -302,7 +302,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 22,
       title: 'International Data Processing',
       paragraphs: [
-        'Certain infrastructure and service providers used by TNPSC Study Hub (including Google, Vercel, and Neon/AWS cloud infrastructure) operate global data centers. Accordingly, your data may be processed or stored outside India subject to the security and contractual frameworks of those providers and applicable Indian law.',
+        'Certain infrastructure and service providers used by TNPSC Aspirant Orbit (including Google, Vercel, and Neon/AWS cloud infrastructure) operate global data centers. Accordingly, your data may be processed or stored outside India subject to the security and contractual frameworks of those providers and applicable Indian law.',
       ],
     },
     {
@@ -310,7 +310,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 23,
       title: 'Data Breach and Security Incident Handling',
       paragraphs: [
-        'In the event of a confirmed personal data breach, TNPSC Study Hub will take prompt containment measures (including revoking affected sessions and remediating root causes) and notify affected students and applicable authorities in accordance with Indian law.',
+        'In the event of a confirmed personal data breach, TNPSC Aspirant Orbit will take prompt containment measures (including revoking affected sessions and remediating root causes) and notify affected students and applicable authorities in accordance with Indian law.',
       ],
     },
     {
@@ -326,7 +326,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
       number: 25,
       title: 'Cookies and Session Management',
       paragraphs: [
-        'This section explains how TNPSC Study Hub uses cookies and browser storage technologies, what each verified mechanism does, and how you can control your cookie preferences.',
+        'This section explains how TNPSC Aspirant Orbit uses cookies and browser storage technologies, what each verified mechanism does, and how you can control your cookie preferences.',
       ],
       subsections: [
         {
@@ -337,7 +337,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
         },
         {
           label: 'B. Why We Use Cookies',
-          paragraphs: ['TNPSC Study Hub uses cookies and browser storage for the following verified purposes:'],
+          paragraphs: ['TNPSC Aspirant Orbit uses cookies and browser storage for the following verified purposes:'],
           bullets: [
             'Authentication and login sessions: verifying your signed-in student session across API requests.',
             'Session management: enforcing Single Active Device Session security and handling post-login redirects.',
@@ -348,7 +348,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
         },
         {
           label: 'C. Types of Cookies',
-          paragraphs: ['We organize cookies and browser storage on TNPSC Study Hub into four clear categories:'],
+          paragraphs: ['We organize cookies and browser storage on TNPSC Aspirant Orbit into four clear categories:'],
           bullets: [
             'Strictly Necessary Cookies & Storage: Essential for student login, session verification, single-device revocation, and storing your cookie consent decision. These cannot be disabled without breaking core login functionality.',
             'Functional Storage: Supports multi-tab study-time coordination, live syllabus/content sync notifications, and temporary MCQ translation caching.',
@@ -359,7 +359,7 @@ export const PRIVACY_POLICY_DOCUMENT: PrivacyPolicyDocument = {
         {
           label: 'D. Cookie Information',
           paragraphs: [
-            'The table below lists the actual cookies and browser storage keys verified in the TNPSC Study Hub codebase:',
+            'The table below lists the actual cookies and browser storage keys verified in the TNPSC Aspirant Orbit codebase:',
           ],
         },
       ],

@@ -397,7 +397,8 @@ router.post('/translate', requireStudentOrAdminAuth, async (req: Request, res: R
     }
 
     const cacheOnly = Boolean(req.body?.cacheOnly);
-    const result = await translateStudyMaterialQuestions(questionIds, { cacheOnly });
+    const pretranslate = Boolean(req.body?.pretranslate ?? req.body?.background);
+    const result = await translateStudyMaterialQuestions(questionIds, { cacheOnly, pretranslate });
     return res.status(200).json({
       status: 'success',
       language: 'ta',

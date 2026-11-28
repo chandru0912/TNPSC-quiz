@@ -87,10 +87,16 @@ export function getDirectDatabaseUrl(): string {
   return process.env.DIRECT_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 }
 
+const parsedPoolMax = Number(process.env.PG_POOL_MAX);
 const poolSettings = {
-  max: isServerless ? 3 : 10,
+  max: Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? parsedPoolMax : isServerless ? 5 : 15,
   connectionTimeoutMillis: 15000,
-  idleTimeoutMillis: isServerless ? 5000 : 15000,
+  idleTimeoutMillis: isServerless ? 10000 : 30000,
+  maxUses: isServerless ? 500 : 7500,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  statement_timeout: isServerless ? 25000 : 30000,
+  query_timeout: isServerless ? 25000 : 30000,
   allowExitOnIdle: isServerless,
 };
 

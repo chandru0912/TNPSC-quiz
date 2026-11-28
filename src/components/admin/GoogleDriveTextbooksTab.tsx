@@ -114,7 +114,7 @@ export const GoogleDriveTextbooksTab: React.FC<Props> = ({ token, onConnectGoogl
   const [books, setBooks] = useState<DriveTextbookItem[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
-  const [folderName, setFolderName] = useState('TNPSC Study Hub Textbooks')
+  const [folderName, setFolderName] = useState('TNPSC Aspirant Orbit Textbooks')
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [verifyingId, setVerifyingId] = useState<number | null>(null)
@@ -215,7 +215,7 @@ export const GoogleDriveTextbooksTab: React.FC<Props> = ({ token, onConnectGoogl
       const res = await apiFetch('/api/textbooks/drive-library/admin/sync', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderName: folderName.trim() || 'TNPSC Study Hub Textbooks' }),
+        body: JSON.stringify({ folderName: folderName.trim() || 'TNPSC Aspirant Orbit Textbooks' }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || json.status !== 'success') {

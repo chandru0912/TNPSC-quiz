@@ -24,6 +24,8 @@ import {
 } from 'lucide-react'
 import { apiFetch } from '../../utils/api'
 import { notifyStudentSync } from '../../utils/studentSync'
+import { estimatePasteTextQuestionCount } from '../../utils/pasteTextMcqEstimator'
+import { PasteTextJsonStagingPanel, type PasteConversionSession } from './PasteTextJsonStagingPanel'
 
 export interface QuestionBankAiContext {
   category: string
@@ -156,13 +158,6 @@ const GROUP_OPTIONS = [
   { value: 'group4', label: 'TNPSC Group 4' },
 ]
 
-function estimateQuestionCountClient(raw: string): number {
-  const clean = raw.replace(/\r\n/g, '\n').trim()
-  if (!clean) return 0
-  const matches = clean.match(/^\s*(?:(?:QUESTION|Q\.?|QUES\.?|கேள்வி|வினா)\s*#?\s*\d{1,4}|\d{1,4}\s*[.)]\s+\S|\(\d{1,4}\)\s+\S)/gim)
-  return matches ? matches.length : clean.split(/\n{2,}/).filter((p) => p.trim()).length
-}
-
 export const PreviousPaperAiPdfGenerator: React.FC<Props> = ({
   token,
   mode = 'previous_papers',
@@ -201,6 +196,9 @@ export const PreviousPaperAiPdfGenerator: React.FC<Props> = ({
     errors: string[]
     warnings: string[]
   } | null>(null)
+  // Isolated Paste Text -> Exact JSON -> Sequential Staging state (Question Bank Paste Text ONLY)
+  const [pasteSession, setPasteSession] = useState<PasteConversionSession | null>(null)
+  const [convertingPasteText, setConvertingPasteText] = useState<boolean>(false)
 
   // Option B: JSON File Upload state
   const jsonInputRef = useRef<HTMLInputElement | null>(null)
@@ -390,7 +388,10 @@ export const PreviousPaperAiPdfGenerator: React.FC<Props> = ({
   }, [activeJob?.id, activeJob?.status, token])
 
   const liveCharCount = sourceText.length
-  const liveEstQuestions = useMemo(() => estimateQuestionCountClient(sourceText), [sourceText])
+  const liveEstQuestions = useMemo(
+    () => estimatePasteTextQuestionCount(sourceText),
+    [sourceText]
+  )
 
   const handleTestConnection = async () => {
     setTestingConn(true)
@@ -412,7 +413,93 @@ export const PreviousPaperAiPdfGenerator: React.FC<Props> = ({
     }
   }
 
+  // Shared Paste Text -> Exact Canonical JSON conversion handler (used by BOTH Question Bank and Previous Year Papers)
+  const pasteApiBasePath = isQuestionBank
+    ? '/api/questions/paste-import'
+    : '/api/admin/previous-papers/paste-import'
+
+  const handleConvertPasteTextToJson = async () => {
+    if (!sourceText.trim()) {
+      setBanner({ type: 'error', text: 'Please paste MCQ source text into the Paste Text editor first.' })
+      return
+    }
+    setConvertingPasteText(true)
+    setBanner(null)
+    try {
+      const metadataPayload = isQuestionBank
+        ? (() => {
+            const ctx = questionBankContext
+            const qbLang = medium === 'English' ? 'english' : medium === 'Bilingual' ? 'bilingual' : 'tamil'
+            return {
+              category: ctx?.category || group,
+              subject: ctx?.subject || subject,
+              classId: ctx?.classId ?? 6,
+              unitId: ctx?.unitId ?? 1,
+              lessonTitle: (ctx?.lessonTitle || ctx?.topic || subject || 'General Lesson').trim(),
+              lessonId: ctx?.lessonId || null,
+              topic: (ctx?.topic || ctx?.lessonTitle || subject || 'General Topic').trim(),
+              difficulty,
+              language: qbLang,
+              targetSystem: ctx?.targetSystem || 'main_practice',
+              sourceReference: ctx?.sourceReference || null,
+            }
+          })()
+        : {
+            group,
+            examName: examName.trim() || `TNPSC ${year} ${paperType} Paper`,
+            year,
+            subject,
+            medium,
+            paperType,
+          }
+
+      const res = await apiFetch(`${pasteApiBasePath}/convert`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        timeoutMs: 60000,
+        body: JSON.stringify({
+          sourceText,
+          expectedQuestions,
+          metadata: metadataPayload,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.status !== 'success' || !json.data) {
+        setBanner({ type: 'error', text: json.message || 'Failed to convert pasted text to JSON.' })
+        return
+      }
+      const converted: PasteConversionSession = json.data
+      setPasteSession(converted)
+      setValidationReport({
+        valid: converted.canStage,
+        charCount: converted.charCount,
+        estimatedQuestions: converted.detectedQuestions,
+        errors: converted.errors,
+        warnings: converted.warnings,
+      })
+      if (converted.canStage) {
+        setBanner({
+          type: 'success',
+          text: `Converted ${converted.detectedQuestions} question(s) into exact canonical JSON (${converted.validQuestions} valid, 0 content changes). Review the JSON preview below and click "Continue to Staging Upload".`,
+        })
+      } else {
+        setBanner({
+          type: 'error',
+          text: converted.errors.join(' ') || 'Validation issues found. Inspect the preview below and fix the source text before staging.',
+        })
+      }
+    } catch (err: any) {
+      setBanner({ type: 'error', text: err?.message || 'Error converting pasted text to JSON.' })
+    } finally {
+      setConvertingPasteText(false)
+    }
+  }
+
   const handleValidateInput = async () => {
+    if (inputMethod === 'text') {
+      await handleConvertPasteTextToJson()
+      return
+    }
     setBanner(null)
     try {
       const res = await apiFetch('/api/admin/previous-papers/ai/validate-text', {
@@ -1181,6 +1268,7 @@ export const PreviousPaperAiPdfGenerator: React.FC<Props> = ({
                 onClick={() => {
                   setSourceText('')
                   setValidationReport(null)
+                  setPasteSession(null)
                 }}
                 disabled={!sourceText}
               >
@@ -1363,20 +1451,56 @@ export const PreviousPaperAiPdfGenerator: React.FC<Props> = ({
           <button
             type="button"
             className="pypm-btn pypm-btn-primary"
-            disabled={!canStartStep3 || submitting || isJobRunning}
-            onClick={() => void handleStartGeminiProcessing()}
+            disabled={!canStartStep3 || submitting || isJobRunning || convertingPasteText}
+            onClick={() => {
+              if (inputMethod === 'text') {
+                void handleConvertPasteTextToJson()
+              } else {
+                void handleStartGeminiProcessing()
+              }
+            }}
           >
-            {submitting || isJobRunning ? <Loader2 size={16} className="pypm-spin" /> : <Sparkles size={16} />}
+            {submitting || isJobRunning || convertingPasteText ? <Loader2 size={16} className="pypm-spin" /> : <Sparkles size={16} />}
             <span>
-              {submitting
-                ? 'Submitting to Google Gemini AI...'
-                : isJobRunning
-                  ? `Processing Batch ${activeJob?.currentBatch || 0}/${activeJob?.totalBatches || 1}...`
-                  : `STEP 3 — PARSE ${inputMethod === 'json' ? 'JSON' : 'TEXT'} QUESTIONS WITH GEMINI AI`}
+              {inputMethod === 'text'
+                ? convertingPasteText
+                  ? 'Converting Paste Text to Exact JSON...'
+                  : 'STEP 3 — CONVERT PASTE TEXT TO EXACT JSON & PREVIEW'
+                : submitting
+                  ? 'Submitting to Google Gemini AI...'
+                  : isJobRunning
+                    ? `Processing Batch ${activeJob?.currentBatch || 0}/${activeJob?.totalBatches || 1}...`
+                    : `STEP 3 — PARSE ${inputMethod === 'json' ? 'JSON' : 'TEXT'} QUESTIONS WITH GEMINI AI`}
             </span>
           </button>
         </div>
       </div>
+
+      {/* SHARED PASTE TEXT -> EXACT JSON PREVIEW & SEQUENTIAL STAGING UPLOAD PANEL (Question Bank & Previous Year Papers) */}
+      {inputMethod === 'text' && pasteSession && (
+        <PasteTextJsonStagingPanel
+          key={pasteSession.sessionId || pasteSession.sourceSha256}
+          token={token}
+          session={pasteSession}
+          batchSize={batchSize}
+          apiBasePath={pasteApiBasePath}
+          destinationLabel={isQuestionBank ? 'Question Bank STAGING' : 'Previous Year Papers STAGING'}
+          onRevalidate={() => void handleConvertPasteTextToJson()}
+          revalidating={convertingPasteText}
+          onSessionUpdated={(updated) => {
+            setPasteSession(updated)
+            if (updated.expectedQuestions !== expectedQuestions) {
+              setExpectedQuestions(updated.expectedQuestions)
+            }
+          }}
+          onSavedToQuestionBank={isQuestionBank ? onSavedToQuestionBank : undefined}
+          onSavedToPreviousPaper={!isQuestionBank ? (paperId, count) => {
+            setSavedStagingPaperId(paperId)
+            onSavedToStaging?.(paperId, count)
+          } : undefined}
+          onViewInQuestionBank={isQuestionBank ? onViewInQuestionBank : undefined}
+        />
+      )}
 
       {/* SECTION 3: REAL-TIME PROCESSING STAGES & COVERAGE REPORT */}
       {activeJob && (

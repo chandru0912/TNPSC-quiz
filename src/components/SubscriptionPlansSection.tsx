@@ -219,7 +219,7 @@ export const SubscriptionPlansSection: React.FC<SubscriptionPlansSectionProps> =
           key: order.keyId,
           amount: order.amountPaise,
           currency: order.currency || 'INR',
-          name: 'TNPSC Study Hub',
+          name: 'TNPSC Aspirant Orbit',
           description: `${order.planName} Subscription`,
           order_id: order.orderId,
           prefill: {
@@ -429,7 +429,7 @@ export const SubscriptionPlansSection: React.FC<SubscriptionPlansSectionProps> =
       )}
 
       {/* Subscription Plans Section */}
-      <section className="sub-plans-section glass" aria-label="TNPSC Study Hub Subscription Plans">
+      <section className="sub-plans-section glass" aria-label="TNPSC Aspirant Orbit Subscription Plans">
         <div className="sub-plans-head">
           <div>
             <span className="sub-plans-kicker">
@@ -438,7 +438,7 @@ export const SubscriptionPlansSection: React.FC<SubscriptionPlansSectionProps> =
             </span>
             <h2 className="sub-plans-title">Choose Your Subscription Plan</h2>
             <p className="sub-plans-subtitle">
-              Unlock the TNPSC Study Hub features that help you prepare smarter.
+              Unlock the TNPSC Aspirant Orbit features that help you prepare smarter.
             </p>
           </div>
         </div>

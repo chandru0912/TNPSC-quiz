@@ -87,7 +87,7 @@ export function TargetGroupOnboardingModal() {
             Select Your Target Exam Group
           </h2>
           <p className="auth-subtitle">
-            Personalize your TNPSC Study Hub syllabus, study notes, and practice tests. You can change this anytime.
+            Personalize your TNPSC Aspirant Orbit syllabus, study notes, and practice tests. You can change this anytime.
           </p>
         </div>
 

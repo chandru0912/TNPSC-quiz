@@ -472,7 +472,7 @@ export const FloatingSupportChatWidget: React.FC = () => {
         <section
           className="fchat-window"
           role="dialog"
-          aria-label="TNPSC Study Hub Support Chat"
+          aria-label="TNPSC Aspirant Orbit Support Chat"
         >
           {/* Header */}
           <header className="fchat-header">
@@ -482,7 +482,7 @@ export const FloatingSupportChatWidget: React.FC = () => {
               </span>
               <div className="fchat-header-titles">
                 <div className="fchat-header-title-row">
-                  <h2 className="fchat-header-title">TNPSC Study Hub Support</h2>
+                  <h2 className="fchat-header-title">TNPSC Aspirant Orbit Support</h2>
                   <span
                     className={`fchat-presence-pill ${isOnline ? 'is-online' : 'is-offline'}`}
                     title={isOnline ? 'Support is online' : 'Currently offline'}
@@ -548,7 +548,7 @@ export const FloatingSupportChatWidget: React.FC = () => {
             <div className="fchat-auth-gate">
               <div className="fchat-bubble fchat-bubble--support">
                 <div className="fchat-bubble-body">
-                  Hello! Welcome to TNPSC Study Hub Support. How can we help you today?
+                  Hello! Welcome to TNPSC Aspirant Orbit Support. How can we help you today?
                 </div>
                 <div className="fchat-bubble-time">{formatChatTime(new Date().toISOString())}</div>
               </div>
@@ -705,7 +705,7 @@ export const FloatingSupportChatWidget: React.FC = () => {
                   <>
                     <div className="fchat-bubble fchat-bubble--support">
                       <div className="fchat-bubble-body">
-                        Hello! Welcome to TNPSC Study Hub Support. How can we help you today?
+                        Hello! Welcome to TNPSC Aspirant Orbit Support. How can we help you today?
                       </div>
                       <div className="fchat-bubble-time">{formatChatTime(new Date().toISOString())}</div>
                     </div>

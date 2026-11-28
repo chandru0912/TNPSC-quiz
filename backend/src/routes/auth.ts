@@ -1,9 +1,49 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import pool from '../db';
-import { generateAdminToken, requireAdminAuth, AuthenticatedRequest } from '../middleware/auth';
+import {
+  generateAdminToken,
+  revokeAdminToken,
+  requireAdminAuth,
+  isAuthorizedAdminRole,
+  AuthenticatedRequest,
+} from '../middleware/auth';
 import { adminLoginLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
+
+const IS_PROD = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+
+function hashAdminPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `scrypt$${salt}$${derived}`;
+}
+
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function verifyAdminPassword(plain: string, stored: string): { valid: boolean; needsRehash: boolean } {
+  if (!stored) return { valid: false, needsRehash: false };
+  if (stored.startsWith('scrypt$')) {
+    const parts = stored.split('$');
+    if (parts.length !== 3) return { valid: false, needsRehash: false };
+    const [, salt, hashHex] = parts;
+    const derived = crypto.scryptSync(plain, salt, 64).toString('hex');
+    return { valid: timingSafeStringEqual(derived, hashHex), needsRehash: false };
+  }
+  // Legacy plaintext compatibility with automatic upgrade to scrypt hash on next login
+  return { valid: timingSafeStringEqual(plain, stored), needsRehash: true };
+}
+
+function isSuperAdminRole(role?: string | null): boolean {
+  const r = String(role || '').trim().toLowerCase();
+  return r === 'super_admin' || r === 'owner';
+}
 
 // Ensure admin_users table exists and has default accounts
 let isTableInitialized = false;
@@ -22,37 +62,16 @@ export async function ensureAdminUsersTable() {
     `);
 
     const countRes = await pool.query('SELECT COUNT(*) FROM admin_users');
-    if (parseInt(countRes.rows[0].count, 10) === 0) {
-      const defaultUsers = [
-        {
-          username: process.env.ADMIN_USERNAME || 'admin',
-          password: process.env.ADMIN_PASSWORD || 'tnpscadmin2026',
-          name: 'Super Admin',
-          role: 'super_admin',
-        },
-        {
-          username: 'content_admin',
-          password: 'tnpsccontent2026',
-          name: 'Content Administrator',
-          role: 'admin',
-        },
-        {
-          username: 'reviewer',
-          password: 'tnpscreview2026',
-          name: 'Syllabus Reviewer',
-          role: 'reviewer',
-        },
-      ];
-
-      for (const u of defaultUsers) {
-        await pool.query(
-          `INSERT INTO admin_users (username, password, name, role)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (username) DO NOTHING`,
-          [u.username, u.password, u.name, u.role]
-        );
-      }
-      console.log('Seeded default admin accounts into admin_users table.');
+    if (parseInt(countRes.rows[0].count, 10) === 0 && process.env.ADMIN_PASSWORD) {
+      const primaryUser = (process.env.ADMIN_USERNAME || 'admin').trim();
+      const hashedPrimary = hashAdminPassword(process.env.ADMIN_PASSWORD.trim());
+      await pool.query(
+        `INSERT INTO admin_users (username, password, name, role)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (username) DO NOTHING`,
+        [primaryUser, hashedPrimary, 'Super Admin', 'super_admin']
+      );
+      console.log('Seeded primary admin account into admin_users table (scrypt hashed).');
     }
     isTableInitialized = true;
   } catch (err: any) {
@@ -81,13 +100,17 @@ export function getConfiguredAdminCount(): number {
 function getEnvAdmins(): EnvAdmin[] {
   const admins: EnvAdmin[] = [];
   const primaryUser = (process.env.ADMIN_USERNAME || 'admin').trim();
-  const primaryPass = (process.env.ADMIN_PASSWORD || 'tnpscadmin2026').trim();
-  admins.push({
-    username: primaryUser,
-    password: primaryPass,
-    name: 'Super Admin',
-    role: 'super_admin',
-  });
+  const primaryPass = (process.env.ADMIN_PASSWORD || '').trim();
+  if (primaryPass) {
+    admins.push({
+      username: primaryUser,
+      password: primaryPass,
+      name: 'Super Admin',
+      role: 'super_admin',
+    });
+  } else if (IS_PROD) {
+    console.error('[SECURITY WARNING] ADMIN_PASSWORD is not configured in production environment.');
+  }
 
   const rawUsers = process.env.ADMIN_USERS || '';
   if (rawUsers.trim()) {
@@ -131,16 +154,23 @@ router.post(['/login', '/owner-login', '/', '/api/admin/login', '/admin/login'],
   // 1. Check in Environment variables (.env) first for immediate production reliability
   const envAdmins = getEnvAdmins();
   const envMatch = envAdmins.find(
-    (a) => a.username.toLowerCase() === cleanUser.toLowerCase() && a.password === cleanPass
+    (a) => a.username.toLowerCase() === cleanUser.toLowerCase() && timingSafeStringEqual(a.password, cleanPass)
   );
 
   if (envMatch) {
+    if (!isAuthorizedAdminRole(envMatch.role)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Forbidden: This account is not authorized for owner admin access.',
+      });
+    }
     // Non-blocking background table initialization
     ensureAdminUsersTable().catch((err) => {
       console.error('Background admin table initialization notice:', err.message);
     });
 
-    const token = generateAdminToken(envMatch.username, envMatch.name, envMatch.role);
+    const normalizedRole = String(envMatch.role).trim().toLowerCase();
+    const token = generateAdminToken(envMatch.username, envMatch.name, normalizedRole);
     return res.status(200).json({
       status: 'success',
       message: 'Admin authenticated successfully',
@@ -148,7 +178,7 @@ router.post(['/login', '/owner-login', '/', '/api/admin/login', '/admin/login'],
       user: {
         username: envMatch.username,
         name: envMatch.name,
-        role: envMatch.role,
+        role: normalizedRole,
       },
     });
   }
@@ -182,7 +212,13 @@ router.post(['/login', '/owner-login', '/', '/api/admin/login', '/admin/login'],
           message: 'Forbidden: This account is not authorized for owner admin access.',
         });
       }
-      if (user.password === cleanPass) {
+      const passCheck = verifyAdminPassword(cleanPass, String(user.password || ''));
+      if (passCheck.valid) {
+        if (passCheck.needsRehash) {
+          pool
+            .query('UPDATE admin_users SET password = $1 WHERE id = $2', [hashAdminPassword(cleanPass), user.id])
+            .catch((e: any) => console.warn('[AdminAuth] Failed to upgrade legacy admin password hash:', e?.message));
+        }
         const token = generateAdminToken(user.username, user.name, user.role);
         return res.status(200).json({
           status: 'success',
@@ -229,6 +265,7 @@ router.post(['/login', '/owner-login', '/', '/api/admin/login', '/admin/login'],
  * Validates active admin session token and returns active profile
  */
 router.get('/verify', requireAdminAuth, (req: AuthenticatedRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   return res.status(200).json({
     status: 'success',
     valid: true,
@@ -280,10 +317,40 @@ router.get('/users', requireAdminAuth, async (_req: AuthenticatedRequest, res: R
 });
 
 /**
+ * POST /api/admin/logout
+ * Persistently revokes the current admin session token (JTI) in PostgreSQL across all server instances
+ */
+router.post('/logout', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+  if (token) {
+    try {
+      await revokeAdminToken(token, req.adminUser);
+    } catch (err: any) {
+      console.error('[AdminAuth] Failed to persist admin token revocation:', err?.message || err);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to revoke admin session. Please retry.',
+      });
+    }
+  }
+  return res.status(200).json({
+    status: 'success',
+    message: 'Admin logged out successfully',
+  });
+});
+
+/**
  * POST /api/admin/users
- * Creates a new admin account in admin_users table
+ * Creates a new admin account in admin_users table (super_admin / owner only)
  */
 router.post('/users', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!isSuperAdminRole(req.adminUser?.role)) {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Forbidden: Only super administrators can create admin accounts.',
+    });
+  }
   await ensureAdminUsersTable();
   const { username, password, name, role } = req.body;
 
@@ -306,10 +373,10 @@ router.post('/users', requireAdminAuth, async (req: AuthenticatedRequest, res: R
     });
   }
 
-  if (cleanPass.length < 6) {
+  if (cleanPass.length < 8) {
     return res.status(400).json({
       status: 'error',
-      message: 'Password must be at least 6 characters long',
+      message: 'Password must be at least 8 characters long',
     });
   }
 
@@ -323,11 +390,12 @@ router.post('/users', requireAdminAuth, async (req: AuthenticatedRequest, res: R
   }
 
   try {
+    const hashedPassword = hashAdminPassword(cleanPass);
     const insertRes = await pool.query(
       `INSERT INTO admin_users (username, password, name, role)
        VALUES ($1, $2, $3, $4)
        RETURNING id, username, name, role, created_at`,
-      [cleanUser, cleanPass, cleanName, cleanRole]
+      [cleanUser, hashedPassword, cleanName, cleanRole]
     );
 
     return res.status(201).json({
@@ -361,6 +429,12 @@ router.post('/users', requireAdminAuth, async (req: AuthenticatedRequest, res: R
  * Removes an admin account from database (cannot delete root super_admin)
  */
 router.delete('/users/:id', requireAdminAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!isSuperAdminRole(req.adminUser?.role)) {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Forbidden: Only super administrators can delete admin accounts.',
+    });
+  }
   await ensureAdminUsersTable();
   const userId = parseInt(req.params.id, 10);
 

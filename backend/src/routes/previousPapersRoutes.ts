@@ -35,6 +35,13 @@ import {
   deleteAdminPreviousPaper,
 } from '../services/previousPapersAdminService';
 import {
+  createPypPasteImportSession,
+  stagePypSessionQuestionsSequentially,
+  updatePasteImportExpectedCount,
+  updatePasteImportItemAnswer,
+} from '../services/pypPasteImportSessionService';
+import { getPasteImportSession } from '../services/pasteImportSessionService';
+import {
   bulkApprovePreviousPapers,
   bulkPublishPreviousPapers,
   bulkRejectPreviousPapers,
@@ -157,6 +164,120 @@ adminPreviousPapersRouter.get('/:id(\\d+)', async (req: Request, res: Response) 
   } catch (err: any) {
     console.error('[Admin Previous Paper Detail Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to load examination.' });
+  }
+});
+
+// ============================================================================
+// SHARED PASTE TEXT -> EXACT JSON -> SEQUENTIAL PYP STAGING ENDPOINTS
+// (Uses the exact same pasteTextMcqParser engine as Question Bank, writes ONLY to previous_year_papers)
+// ============================================================================
+
+adminPreviousPapersRouter.post('/paste-import/convert', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sourceText = typeof req.body?.sourceText === 'string' ? req.body.sourceText : '';
+    const expectedQuestions = Number(req.body?.expectedQuestions || 0);
+    const meta = req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {};
+
+    if (!sourceText.trim()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Paste Text input is empty. Please paste Previous Year Paper questions first.',
+      });
+    }
+    if (sourceText.length > 5_000_000) {
+      return res.status(413).json({
+        status: 'error',
+        message: 'Pasted text exceeds the 5 MB safety limit.',
+      });
+    }
+
+    const result = await createPypPasteImportSession(
+      sourceText,
+      expectedQuestions,
+      {
+        group: String(meta.group || 'group4'),
+        examName: String(meta.examName || ''),
+        year: Number(meta.year || new Date().getFullYear()),
+        subject: String(meta.subject || 'General Studies'),
+        medium: (['English', 'Tamil', 'Bilingual'].includes(String(meta.medium))
+          ? String(meta.medium)
+          : 'English') as 'English' | 'Tamil' | 'Bilingual',
+        paperType: String(meta.paperType || 'Prelims'),
+      },
+      null
+    );
+
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    console.error('[PYP Paste Import Convert Error]:', err?.message || err);
+    return res.status(500).json({ status: 'error', message: err?.message || 'Failed to convert pasted text to JSON.' });
+  }
+});
+
+adminPreviousPapersRouter.post('/paste-import/sessions/:sessionId/stage-next', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    if (!sessionId || !/^pyp_paste_[a-z0-9_]+$/i.test(sessionId)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid Previous Year Paper upload session ID.' });
+    }
+    const sourceOrders = Array.isArray(req.body?.sourceOrders)
+      ? req.body.sourceOrders.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n) && n > 0)
+      : undefined;
+    if (sourceOrders && sourceOrders.length > 100) {
+      return res.status(400).json({ status: 'error', message: 'Maximum 100 questions per sequential staging batch.' });
+    }
+    const allowValidOnly = Boolean(req.body?.allowValidOnly);
+    const result = await stagePypSessionQuestionsSequentially(sessionId, sourceOrders, allowValidOnly);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    const msg = err?.message || 'Sequential staging upload failed.';
+    const isClientErr = /not found|mismatch|invalid|does not belong/i.test(msg);
+    console.error('[PYP Paste Import Stage Error]:', msg);
+    return res.status(isClientErr ? 400 : 500).json({ status: 'error', message: msg });
+  }
+});
+
+adminPreviousPapersRouter.get('/paste-import/sessions/:sessionId', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    if (!sessionId || !/^pyp_paste_[a-z0-9_]+$/i.test(sessionId)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid upload session ID.' });
+    }
+    const session = await getPasteImportSession(sessionId);
+    if (!session) return res.status(404).json({ status: 'error', message: 'Upload session not found.' });
+    return res.status(200).json({ status: 'success', data: session });
+  } catch (err: any) {
+    console.error('[PYP Paste Import Get Session Error]:', err?.message || err);
+    return res.status(500).json({ status: 'error', message: 'Failed to load upload session.' });
+  }
+});
+
+adminPreviousPapersRouter.patch('/paste-import/sessions/:sessionId/expected-count', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    const expectedQuestions = Number(req.body?.expectedQuestions);
+    if (!sessionId || !/^pyp_paste_[a-z0-9_]+$/i.test(sessionId)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid upload session ID.' });
+    }
+    const result = await updatePasteImportExpectedCount(sessionId, expectedQuestions);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    return res.status(400).json({ status: 'error', message: err?.message || 'Failed to update expected count.' });
+  }
+});
+
+adminPreviousPapersRouter.patch('/paste-import/sessions/:sessionId/items/:sourceOrder', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = String(req.params.sessionId || '').trim();
+    const sourceOrder = Number(req.params.sourceOrder);
+    const correctAnswer = Number(req.body?.correctAnswer);
+    if (!sessionId || !/^pyp_paste_[a-z0-9_]+$/i.test(sessionId) || !Number.isInteger(sourceOrder) || sourceOrder < 1) {
+      return res.status(400).json({ status: 'error', message: 'Invalid session ID or sourceOrder.' });
+    }
+    const result = await updatePasteImportItemAnswer(sessionId, sourceOrder, correctAnswer);
+    return res.status(200).json({ status: 'success', data: result });
+  } catch (err: any) {
+    return res.status(400).json({ status: 'error', message: err?.message || 'Failed to update question answer.' });
   }
 });
 
@@ -738,6 +859,62 @@ router.get('/sessions/:sessionId(\\d+)/result', requireStudentAuth, async (req: 
   } catch (err: any) {
     console.error('[Previous Paper Result Error]:', err);
     return res.status(500).json({ status: 'error', message: err.message || 'Failed to load test result.' });
+  }
+});
+
+import {
+  translatePreviousPaperQuestions,
+  normalizeQuestionIds,
+  MAX_TRANSLATION_IDS,
+} from '../services/mcqTranslationService';
+import { requireStudentOrAdminAuth } from '../middleware/auth';
+
+// POST /api/previous-papers/translate (Authenticated Student/Admin: Ultra-fast cached & batched Tamil translation)
+router.post('/translate', requireStudentOrAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const rawLanguage = String(req.body?.targetLanguage || req.body?.language || 'ta').trim().toLowerCase();
+    if (!['ta', 'tamil'].includes(rawLanguage)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Only Tamil (ta) translation is supported. English questions are served from the original paper.',
+      });
+    }
+
+    const rawIds = req.body?.questionIds;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'A non-empty questionIds array is required.' });
+    }
+    if (rawIds.length > MAX_TRANSLATION_IDS) {
+      return res.status(400).json({
+        status: 'error',
+        message: `A maximum of ${MAX_TRANSLATION_IDS} question IDs can be translated per request.`,
+      });
+    }
+
+    const questionIds = normalizeQuestionIds(rawIds);
+    if (questionIds.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'All question IDs must be positive integers.' });
+    }
+
+    const cacheOnly = Boolean(req.body?.cacheOnly);
+    const pretranslate = Boolean(req.body?.pretranslate ?? req.body?.background);
+    const result = await translatePreviousPaperQuestions(questionIds, { cacheOnly, pretranslate });
+    return res.status(200).json({
+      status: 'success',
+      language: 'ta',
+      count: result.translations.length,
+      data: result.translations,
+      missingIds: result.missingIds,
+      failedIds: result.failures.map((f) => f.questionId),
+      errors: result.failures,
+      stats: result.stats,
+    });
+  } catch (err: any) {
+    console.error('[Previous Paper Translation Error]:', err?.message || err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to translate previous paper questions. Please retry.',
+    });
   }
 });
 

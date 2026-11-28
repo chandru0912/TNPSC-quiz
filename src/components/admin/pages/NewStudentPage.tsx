@@ -106,7 +106,7 @@ export const NewStudentPage: React.FC<NewStudentPageProps> = ({ token, onSuccess
 
   const handleCopyCredentials = () => {
     if (!createdStudent) return;
-    const text = `TNPSC Study Hub Credentials:\nName: ${createdStudent.fullName}\nEmail: ${createdStudent.email}\nPassword: ${createdStudent.tempPass}\nPortal: ${window.location.origin}/login`;
+    const text = `TNPSC Aspirant Orbit Credentials:\nName: ${createdStudent.fullName}\nEmail: ${createdStudent.email}\nPassword: ${createdStudent.tempPass}\nPortal: ${window.location.origin}/login`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

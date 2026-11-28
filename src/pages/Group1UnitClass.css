@@ -1358,3 +1358,161 @@
   }
 }
 
+/* ==========================================================================
+   MOBILE-ONLY ALIGNMENT: SELECT STANDARD & SELECT UNIT (<= 767px)
+   Desktop (>= 1024px) and Tablet (768px - 1023px) remain 100% unchanged.
+   ========================================================================== */
+@media screen and (max-width: 767px) {
+  .unit-class-page .switchers-wrapper {
+    width: 100%;
+    max-width: 100%;
+    padding: 1rem;
+    gap: 1rem;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .unit-class-page .switcher-row.standard-switcher-row,
+  .unit-class-page .switcher-row.unit-switcher-row {
+    width: 100%;
+    max-width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    box-sizing: border-box;
+  }
+
+  .unit-class-page .switcher-row.standard-switcher-row .switcher-label,
+  .unit-class-page .switcher-row.unit-switcher-row .switcher-label {
+    min-width: 0;
+    width: 100%;
+    display: block;
+    text-align: left;
+  }
+
+  /* 1. Select Standard: Clean 2-column equal-height grid */
+  .unit-class-page .switcher-pills.standard-switcher-pills {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 0.55rem;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .unit-class-page .switcher-pills.standard-switcher-pills .switcher-pill {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 42px;
+    height: 100%;
+    padding: 0.5rem 0.65rem;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    line-height: 1.25;
+    box-sizing: border-box;
+  }
+
+  /* 2. Select Unit: Full-width vertical list with clean wrapping */
+  .unit-class-page .switcher-pills.unit-switcher-pills {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .unit-class-page .switcher-pills.unit-switcher-pills .switcher-pill.unit-pill {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0.65rem 0.9rem;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.38;
+    box-sizing: border-box;
+  }
+}
+
+@media screen and (max-width: 360px) {
+  .unit-class-page .switchers-wrapper {
+    padding: 0.85rem;
+  }
+
+  .unit-class-page .switcher-pills.standard-switcher-pills {
+    gap: 0.45rem;
+  }
+
+  .unit-class-page .switcher-pills.standard-switcher-pills .switcher-pill {
+    padding: 0.45rem 0.45rem;
+    font-size: 0.78rem;
+    min-height: 38px;
+  }
+
+  .unit-class-page .switcher-pills.unit-switcher-pills .switcher-pill.unit-pill {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.78rem;
+  }
+}
+
+/* Mobile-only Lesson Action Button Alignment for Unit Class cards (<= 767px) */
+@media screen and (max-width: 767px) {
+  .unit-class-page .lesson-action-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    align-items: stretch;
+    gap: 0.55rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .unit-class-page .lesson-read-btn,
+  .unit-class-page .lesson-practice-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding: 0.55rem 0.8rem;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    text-align: center;
+    white-space: nowrap;
+    overflow: visible;
+    box-sizing: border-box;
+  }
+
+  .unit-class-page .lesson-read-btn svg,
+  .unit-class-page .lesson-practice-btn svg {
+    flex-shrink: 0;
+  }
+}
+
+@media screen and (max-width: 360px) {
+  .unit-class-page .lesson-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .unit-class-page .lesson-read-btn,
+  .unit-class-page .lesson-practice-btn {
+    white-space: normal;
+  }
+}
+
+

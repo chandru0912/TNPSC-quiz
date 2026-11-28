@@ -92,7 +92,35 @@ export interface ApiFetchOptions extends RequestInit {
   timeoutMs?: number;
 }
 
+// Coalesces concurrent identical GET requests (e.g. StrictMode double-effects or sibling widgets)
+// so each caller receives its own cloned Response without firing duplicate network requests.
+const inFlightGetRequests = new Map<string, Promise<Response>>();
+
 export async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Response> {
+  const method = String(options.method || 'GET').toUpperCase();
+  const canCoalesce = method === 'GET' && !options.signal;
+
+  if (canCoalesce) {
+    const dedupUrl = getApiUrl(path);
+    const dedupAuth = new Headers(options.headers || {}).get('Authorization') || getActiveAuthToken() || '';
+    const dedupKey = `${dedupUrl}|${dedupAuth}`;
+    const existing = inFlightGetRequests.get(dedupKey);
+    if (existing) {
+      const sharedRes = await existing;
+      return sharedRes.clone();
+    }
+    const reqPromise = apiFetchInternal(path, options).finally(() => {
+      inFlightGetRequests.delete(dedupKey);
+    });
+    inFlightGetRequests.set(dedupKey, reqPromise);
+    const res = await reqPromise;
+    return res.clone();
+  }
+
+  return apiFetchInternal(path, options);
+}
+
+async function apiFetchInternal(path: string, options: ApiFetchOptions = {}): Promise<Response> {
   const { timeoutMs = 30000, cache = 'no-store', ...fetchOptions } = options;
   const primaryUrl = getApiUrl(path);
 
@@ -123,18 +151,31 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
     try {
       let response = await executeFetch(primaryUrl, activeSignal);
 
-      // Automated Multi-Tier 404 Failover:
-      // If primaryUrl returned 404 and is a candidate for fallback
-      if (response.status === 404 && typeof path === 'string' && path.startsWith('/')) {
-        const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+      // Automated Multi-Tier Failover:
+      // Trigger if primaryUrl returned 404/405 OR returned HTML (Vercel SPA index.html catch-all on GET /api/*)
+      const respContentType = (response.headers.get('content-type') || '').toLowerCase();
+      const isApiPath = typeof path === 'string' && path.startsWith('/api/');
+      const isSpaHtmlCatchAll = isApiPath && respContentType.includes('text/html');
+      const needsFailover =
+        (response.status === 404 || response.status === 405 || isSpaHtmlCatchAll) &&
+        typeof path === 'string' &&
+        path.startsWith('/');
 
-        // Tier 1: If on remote or preview domain, and primary was relative or not production backend,
+      if (needsFailover) {
+        const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+        const isBrowserOnLocalhost =
+          typeof window !== 'undefined' &&
+          /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname);
+
+        // Tier 1 (Production / Remote domains ONLY — never cross-route localhost to production backend):
+        // If on remote or preview domain, and primary was relative or not production backend,
         // retry against the canonical PRODUCTION_BACKEND_URL
-        if (PRODUCTION_BACKEND_URL && !primaryUrl.startsWith(PRODUCTION_BACKEND_URL)) {
+        if (!isBrowserOnLocalhost && PRODUCTION_BACKEND_URL && !primaryUrl.startsWith(PRODUCTION_BACKEND_URL)) {
           try {
             const fallbackUrl = `${PRODUCTION_BACKEND_URL}${normalizedPath}`;
             const fbRes = await executeFetch(fallbackUrl, activeSignal);
-            if (fbRes.ok || fbRes.status !== 404) {
+            const fbContentType = (fbRes.headers.get('content-type') || '').toLowerCase();
+            if ((fbRes.ok && !fbContentType.includes('text/html')) || (fbRes.status !== 404 && fbRes.status !== 405 && !fbContentType.includes('text/html'))) {
               return fbRes;
             }
           } catch {
@@ -142,12 +183,13 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}): Pro
           }
         }
 
-        // Tier 2: If in local development and primary was relative via dev proxy,
+        // Tier 2 (Localhost ONLY): If in local development and primary was relative via dev proxy,
         // retry directly against LOCAL_BACKEND_URL (http://localhost:5000)
-        if (!primaryUrl.startsWith(LOCAL_BACKEND_URL) && typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(window.location.hostname)) {
+        if (isBrowserOnLocalhost && !primaryUrl.startsWith(LOCAL_BACKEND_URL)) {
           try {
             const fbRes = await executeFetch(`${LOCAL_BACKEND_URL}${normalizedPath}`, activeSignal);
-            if (fbRes.ok || fbRes.status !== 404) {
+            const fbContentType = (fbRes.headers.get('content-type') || '').toLowerCase();
+            if ((fbRes.ok && !fbContentType.includes('text/html')) || (fbRes.status !== 404 && fbRes.status !== 405 && !fbContentType.includes('text/html'))) {
               return fbRes;
             }
           } catch {

@@ -1,6 +1,6 @@
 /**
  * AI Provider Central Configuration Service
- * TNPSC Study Hub - Single Source of Truth for Claude AI & Google Gemini AI
+ * TNPSC Aspirant Orbit - Single Source of Truth for Claude AI & Google Gemini AI
  *
  * Implements centralized provider management:
  * - getProviderConfig(provider)

@@ -176,7 +176,7 @@ export class GeminiProviderService implements IAIProvider {
     let primaryModel = getGeminiModel();
     try {
       const dbRes = await pool.query('SELECT model FROM ai_provider_configs WHERE provider = $1', ['gemini']);
-      if (dbRes.rows[0]?.model) primaryModel = dbRes.rows[0].model;
+      if (dbRes.rows[0]?.model) primaryModel = resolveGeminiModel(dbRes.rows[0].model);
     } catch {}
 
     const genAI = new GoogleGenerativeAI(apiKey);

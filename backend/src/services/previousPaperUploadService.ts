@@ -295,7 +295,7 @@ export async function initiateLargePdfUpload(params: {
     }
   }
 
-  // Tier 2: Google Drive Direct Resumable Upload Session (already integrated in TNPSC Study Hub!)
+  // Tier 2: Google Drive Direct Resumable Upload Session (already integrated in TNPSC Aspirant Orbit!)
   try {
     const driveStatus = await getConnectionStatus();
     if (driveStatus.connected) {

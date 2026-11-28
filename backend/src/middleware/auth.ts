@@ -6,11 +6,134 @@ import {
   SESSION_REVOKED_MESSAGE,
 } from '../services/studentSessionService';
 
+const isProdEnv = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+const LEGACY_DEV_ADMIN_SECRET = 'tnpsc_quiz_admin_jwt_secret_key_2026';
+const LEGACY_DEV_STUDENT_SECRET = 'tnpsc_student_session_secret_key_2026';
+const MIN_PROD_SECRET_LENGTH = 32;
+const REVOKED_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+// L1 per-instance cache backed by PostgreSQL `revoked_admin_tokens` for multi-instance serverless consistency.
+const revokedAdminTokens = new Map<string, number>();
+let revokedTableReady = false;
+let lastRevokedCleanupMs = 0;
+
+async function ensureRevokedAdminTokensTable(): Promise<void> {
+  if (revokedTableReady) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS revoked_admin_tokens (
+      token_id VARCHAR(128) PRIMARY KEY,
+      admin_username VARCHAR(100),
+      revoked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_revoked_admin_tokens_expires_at
+    ON revoked_admin_tokens (expires_at);
+  `);
+  revokedTableReady = true;
+}
+
+function extractAdminTokenIdentifier(
+  token: string,
+  payload?: { jti?: string } | null
+): string {
+  const jti = typeof payload?.jti === 'string' ? payload.jti.trim() : '';
+  if (jti) return `jti:${jti}`;
+  return `sha256:${crypto.createHash('sha256').update(String(token || '').trim()).digest('hex')}`;
+}
+
+export async function cleanupExpiredRevokedAdminTokens(force = false): Promise<number> {
+  const now = Date.now();
+  if (!force && now - lastRevokedCleanupMs < REVOKED_CLEANUP_INTERVAL_MS) {
+    return 0;
+  }
+  lastRevokedCleanupMs = now;
+  for (const [k, exp] of revokedAdminTokens.entries()) {
+    if (exp <= now) revokedAdminTokens.delete(k);
+  }
+  try {
+    await ensureRevokedAdminTokensTable();
+    const res = await pool.query('DELETE FROM revoked_admin_tokens WHERE expires_at <= NOW()');
+    return res.rowCount || 0;
+  } catch (err: any) {
+    console.warn('[AdminAuth] Expired revoked token cleanup notice:', err?.message || err);
+    return 0;
+  }
+}
+
+export async function revokeAdminToken(
+  token: string,
+  payload?: { jti?: string; username?: string; exp?: number } | null
+): Promise<string | null> {
+  const clean = String(token || '').trim();
+  if (!clean) return null;
+  const tokenId = extractAdminTokenIdentifier(clean, payload);
+  const expMs = payload?.exp && payload.exp > Date.now() ? payload.exp : Date.now() + 24 * 60 * 60 * 1000;
+
+  revokedAdminTokens.set(tokenId, expMs);
+  await ensureRevokedAdminTokensTable();
+  await pool.query(
+    `INSERT INTO revoked_admin_tokens (token_id, admin_username, expires_at)
+     VALUES ($1, $2, to_timestamp($3 / 1000.0))
+     ON CONFLICT (token_id) DO NOTHING`,
+    [tokenId, payload?.username || null, expMs]
+  );
+
+  void cleanupExpiredRevokedAdminTokens(false);
+  return tokenId;
+}
+
+export function isAdminTokenRevoked(token: string, payload?: { jti?: string } | null): boolean {
+  const tokenId = extractAdminTokenIdentifier(token, payload);
+  const exp = revokedAdminTokens.get(tokenId);
+  if (!exp) return false;
+  if (exp <= Date.now()) {
+    revokedAdminTokens.delete(tokenId);
+    return false;
+  }
+  return true;
+}
+
+export async function isAdminTokenRevokedDistributed(
+  token: string,
+  payload?: { jti?: string } | null
+): Promise<boolean> {
+  const tokenId = extractAdminTokenIdentifier(token, payload);
+  if (isAdminTokenRevoked(token, payload)) return true;
+
+  try {
+    await ensureRevokedAdminTokensTable();
+    const res = await pool.query(
+      'SELECT expires_at FROM revoked_admin_tokens WHERE token_id = $1 AND expires_at > NOW() LIMIT 1',
+      [tokenId]
+    );
+    if (res.rows.length > 0) {
+      const expMs = new Date(res.rows[0].expires_at).getTime();
+      revokedAdminTokens.set(tokenId, Number.isFinite(expMs) ? expMs : Date.now() + 60_000);
+      return true;
+    }
+  } catch (err: any) {
+    console.warn('[AdminAuth] Distributed revocation lookup notice:', err?.message || err);
+  }
+  return false;
+}
+
 function getJwtSecret(): string {
-  return process.env.ADMIN_JWT_SECRET || 'tnpsc_quiz_admin_jwt_secret_key_2026';
+  const configured = (process.env.ADMIN_JWT_SECRET || '').trim();
+  const studentConfigured = (process.env.STUDENT_JWT_SECRET || '').trim();
+  if (isProdEnv) {
+    if (!configured || configured.length < MIN_PROD_SECRET_LENGTH || configured === LEGACY_DEV_ADMIN_SECRET) {
+      throw new Error('FATAL_SECURITY_CONFIG: ADMIN_JWT_SECRET must be explicitly configured (>= 32 chars) in production.');
+    }
+    if (studentConfigured && configured === studentConfigured) {
+      throw new Error('FATAL_SECURITY_CONFIG: ADMIN_JWT_SECRET and STUDENT_JWT_SECRET must be independently generated distinct values in production.');
+    }
+    return configured;
+  }
+  return configured || LEGACY_DEV_ADMIN_SECRET;
 }
 
 export interface AdminPayload {
+  jti?: string;
   username: string;
   name?: string;
   role: string;
@@ -21,6 +144,7 @@ export interface AdminPayload {
 export function generateAdminToken(username: string, name?: string, role: string = 'admin'): string {
   const secret = getJwtSecret();
   const payload: AdminPayload = {
+    jti: crypto.randomUUID(),
     username,
     name: name || username,
     role,
@@ -53,6 +177,9 @@ export function verifyAdminToken(token: string): AdminPayload | null {
     if (payload.exp < Date.now()) {
       return null; // Expired
     }
+    if (isAdminTokenRevoked(token, payload)) {
+      return null;
+    }
     return payload;
   } catch {
     return null;
@@ -63,26 +190,35 @@ export interface AuthenticatedRequest extends Request {
   adminUser?: AdminPayload;
 }
 
-const AUTHORIZED_ADMIN_ROLES = new Set(['super_admin', 'admin', 'owner']);
+export const AUTHORIZED_ADMIN_ROLES = new Set(['super_admin', 'admin', 'owner']);
+
+export function isAuthorizedAdminRole(role: unknown): boolean {
+  return AUTHORIZED_ADMIN_ROLES.has(String(role || '').trim().toLowerCase());
+}
 
 function getConfiguredPrimaryAdminUsername(): string {
   return (process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
 }
 
-function getConfiguredEnvAdminUsernames(): Set<string> {
-  const set = new Set<string>([getConfiguredPrimaryAdminUsername()]);
+function getConfiguredEnvAdminMap(): Map<string, { role: string; name: string }> {
+  const map = new Map<string, { role: string; name: string }>();
+  const primaryUser = getConfiguredPrimaryAdminUsername();
+  if (primaryUser) {
+    map.set(primaryUser, { role: 'super_admin', name: 'Super Admin' });
+  }
   const raw = process.env.ADMIN_USERS || '';
   if (raw.trim()) {
     for (const entry of raw.split(',')) {
       const parts = entry.trim().split(':');
       const u = parts[0]?.trim().toLowerCase();
+      const n = parts[2]?.trim() || parts[0]?.trim() || 'Admin';
       const r = (parts[3]?.trim() || 'admin').toLowerCase();
-      if (u && AUTHORIZED_ADMIN_ROLES.has(r)) {
-        set.add(u);
+      if (u && isAuthorizedAdminRole(r) && !map.has(u)) {
+        map.set(u, { role: r, name: n });
       }
     }
   }
-  return set;
+  return map;
 }
 
 async function verifyAdminUserInDatabaseOrEnv(
@@ -91,7 +227,10 @@ async function verifyAdminUserInDatabaseOrEnv(
   const cleanUser = String(username || '').trim().toLowerCase();
   if (!cleanUser) return { valid: false };
 
-  // 1. Check PostgreSQL admin_users table first (authoritative server-side role check)
+  const envMap = getConfiguredEnvAdminMap();
+  const envOwner = envMap.get(cleanUser);
+
+  // 1. Check PostgreSQL admin_users table (authoritative server-side role check)
   try {
     const dbRes = await pool.query(
       'SELECT username, name, role FROM admin_users WHERE LOWER(username) = LOWER($1) LIMIT 1',
@@ -99,19 +238,22 @@ async function verifyAdminUserInDatabaseOrEnv(
     );
     if (dbRes.rows.length > 0) {
       const row = dbRes.rows[0];
-      const role = String(row.role || '').trim().toLowerCase();
-      if (AUTHORIZED_ADMIN_ROLES.has(role)) {
-        return { valid: true, role: row.role, name: row.name };
+      if (isAuthorizedAdminRole(row.role)) {
+        return { valid: true, role: String(row.role).trim().toLowerCase(), name: row.name };
+      }
+      // If DB has an outdated/non-admin role, only allow if explicitly configured as primary env owner
+      if (envOwner && cleanUser === getConfiguredPrimaryAdminUsername()) {
+        return { valid: true, role: envOwner.role, name: envOwner.name };
       }
       return { valid: false };
     }
   } catch {
-    // If DB is temporarily unreachable, fall back only to explicitly configured env owner
+    // If DB is temporarily unreachable, fall back only to explicitly configured env owner/admins
   }
 
   // 2. Fallback to configured environment owner/admin accounts
-  if (getConfiguredEnvAdminUsernames().has(cleanUser)) {
-    return { valid: true, role: 'super_admin', name: 'Super Admin' };
+  if (envOwner) {
+    return { valid: true, role: envOwner.role, name: envOwner.name };
   }
 
   return { valid: false };
@@ -150,6 +292,14 @@ export async function requireAdminAuth(req: AuthenticatedRequest, res: Response,
     });
   }
 
+  // Enforce distributed token revocation across all serverless / multi-instance deployments
+  if (await isAdminTokenRevokedDistributed(token, verified)) {
+    return res.status(401).json({
+      status: 'error',
+      message: 'Unauthorized: Admin session has been revoked. Please login again.',
+    });
+  }
+
   // Never trust token role blindly — verify authorized admin role server-side against PostgreSQL / env
   const serverCheck = await verifyAdminUserInDatabaseOrEnv(verified.username);
   if (!serverCheck.valid) {
@@ -172,7 +322,18 @@ export async function requireAdminAuth(req: AuthenticatedRequest, res: Response,
 // ----------------------------------------------------
 
 function getStudentJwtSecret(): string {
-  return process.env.STUDENT_JWT_SECRET || 'tnpsc_student_session_secret_key_2026';
+  const configured = (process.env.STUDENT_JWT_SECRET || '').trim();
+  const adminConfigured = (process.env.ADMIN_JWT_SECRET || '').trim();
+  if (isProdEnv) {
+    if (!configured || configured.length < MIN_PROD_SECRET_LENGTH || configured === LEGACY_DEV_STUDENT_SECRET) {
+      throw new Error('FATAL_SECURITY_CONFIG: STUDENT_JWT_SECRET must be explicitly configured (>= 32 chars) in production.');
+    }
+    if (adminConfigured && configured === adminConfigured) {
+      throw new Error('FATAL_SECURITY_CONFIG: STUDENT_JWT_SECRET and ADMIN_JWT_SECRET must be independently generated distinct values in production.');
+    }
+    return configured;
+  }
+  return configured || LEGACY_DEV_STUDENT_SECRET;
 }
 
 export interface StudentPayload {
@@ -428,6 +589,12 @@ export async function requireStudentOrAdminAuth(
 
   const adminVerified = verifyAdminToken(token);
   if (adminVerified) {
+    if (await isAdminTokenRevokedDistributed(token, adminVerified)) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Unauthorized: Admin session has been logged out. Please login again.',
+      });
+    }
     req.adminUser = adminVerified;
     return next();
   }

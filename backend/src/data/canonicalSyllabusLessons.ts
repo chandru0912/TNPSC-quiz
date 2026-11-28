@@ -1,7 +1,7 @@
 /**
  * canonicalSyllabusLessons.ts
  *
- * Authoritative Canonical Syllabus Lessons Dataset for TNPSC Study Hub.
+ * Authoritative Canonical Syllabus Lessons Dataset for TNPSC Aspirant Orbit.
  * Strictly covers all 4 TNPSC Subjects:
  * 1. General Studies (Exactly 6 Parent Units: Units 1 to 6)
  * 2. Aptitude and Mental Ability (Units 1 to 2)

@@ -29,6 +29,7 @@ import { useStudentAuth } from '../context/StudentAuthContext';
 import { StudentAvatar } from './StudentAvatar';
 import { resolveStudentDisplayName } from '../utils/studentProfile';
 import { SubscriptionButton } from './SubscriptionButton';
+import OrbitBrandLogo from './OrbitBrandLogo';
 import './StudentSidebar.css';
 
 interface StudentSidebarProps {
@@ -268,10 +269,10 @@ export const StudentSidebar: React.FC<StudentSidebarProps> = ({
       <div className="student-sidebar-brand">
         <Link to="/" className="student-brand-link" onClick={handleLinkClick}>
           <div className="student-brand-mark">
-            <Sparkles size={20} />
+            <OrbitBrandLogo size={24} />
           </div>
           <div className="student-brand-text">
-            <span className="student-brand-title">Study Hub</span>
+            <span className="student-brand-title">Aspirant Orbit</span>
             <span className="student-brand-sub">TNPSC Premium</span>
           </div>
         </Link>

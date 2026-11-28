@@ -3,6 +3,11 @@ import pool from '../db';
 import { classifyTermVolume, getMappedTextbookSubjects, normalizeSubjectKey } from '../services/mcqCascadeService';
 import { getCanonicalLessons } from '../data/canonicalSyllabusLessons';
 import { getRegisteredTopicsForLesson } from '../services/topicAlignmentService';
+import { translateStudyMaterialBatch, type StudyMaterialLang } from '../services/studyMaterialsTranslationService';
+import { mcqPracticeLimiter } from '../middleware/rateLimiter';
+
+const MAX_STUDY_TRANSLATION_ITEMS = 60;
+const MAX_STUDY_TRANSLATION_ITEM_CHARS = 2000;
 
 const router = Router();
 
@@ -705,6 +710,62 @@ router.get('/topics', async (req: Request, res: Response) => {
       success: false,
       message: error.message || 'Failed to fetch topics',
       topics: [],
+    });
+  }
+});
+
+/**
+ * POST /api/study-materials/translate
+ * High-performance English <-> Tamil batch translation exclusively for Study Materials.
+ * Uses 2-tier caching (RAM LRU + PostgreSQL `study_material_translations`) and
+ * reuses the existing AIProviderFactory multi-provider engine with automatic failover.
+ */
+router.post('/translate', mcqPracticeLimiter, async (req: Request, res: Response) => {
+  try {
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (rawItems.length > MAX_STUDY_TRANSLATION_ITEMS) {
+      return res.status(400).json({
+        success: false,
+        message: `At most ${MAX_STUDY_TRANSLATION_ITEMS} items can be translated per request.`,
+      });
+    }
+    const sanitizedItems = rawItems.map((item: any) => ({
+      ...item,
+      text: typeof item?.text === 'string' ? item.text.slice(0, MAX_STUDY_TRANSLATION_ITEM_CHARS) : '',
+    }));
+    const targetLang: StudyMaterialLang = req.body?.targetLang === 'en' ? 'en' : 'ta';
+    const sourceLang: StudyMaterialLang | undefined =
+      req.body?.sourceLang === 'en' || req.body?.sourceLang === 'ta'
+        ? req.body.sourceLang
+        : undefined;
+
+    if (sanitizedItems.length === 0) {
+      return res.status(200).json({
+        success: true,
+        targetLang,
+        translations: {},
+        failedKeys: [],
+        stats: { total: 0, memoryHits: 0, dbHits: 0, aiTranslated: 0, skipped: 0, failed: 0 },
+      });
+    }
+
+    const result = await translateStudyMaterialBatch(sanitizedItems, {
+      targetLang,
+      sourceLang,
+    });
+
+    return res.status(200).json({
+      success: true,
+      targetLang,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error('[Study Material Routes] Error translating study materials:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Study materials translation failed',
+      translations: {},
+      failedKeys: [],
     });
   }
 });

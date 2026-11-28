@@ -1,6 +1,6 @@
 /**
  * AI Provider Factory
- * TNPSC Study Hub - Multi-Provider Isolation Architecture
+ * TNPSC Aspirant Orbit - Multi-Provider Isolation Architecture
  *
  * Enforces strict provider separation:
  * - Direct lookup of provider instances.

@@ -27,7 +27,7 @@ const router = Router();
 router.get('/', (_req: Request, res: Response) => {
   return res.status(200).json({
     status: 'online',
-    service: 'TNPSC Study Hub AI Generation Engine',
+    service: 'TNPSC Aspirant Orbit AI Generation Engine',
     providers: ['claude', 'gemini', 'openai'],
     endpoints: {
       providers: 'GET /api/ai/providers',

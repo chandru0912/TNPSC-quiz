@@ -11,6 +11,7 @@ import {
   Eraser,
   FileText,
   Grid,
+  Languages,
   RotateCcw,
   Send,
   ShieldCheck,
@@ -19,6 +20,7 @@ import {
 import { apiFetch } from '../utils/api'
 import { useStudentAuth } from '../context/StudentAuthContext'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
+import { useMcqTranslations } from '../hooks/useMcqTranslations'
 import { notifyStudentSync } from '../utils/studentSync'
 import { buildAuthRedirectUrl, savePostLoginRedirect } from '../utils/authRedirect'
 import { QuestionPalette, type QuestionPaletteStatus } from '../components/exam/QuestionPalette'
@@ -127,8 +129,14 @@ const PreviousPaperTest = () => {
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [showLeaveModal, setShowLeaveModal] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [questionLang, setQuestionLang] = useState<'en' | 'ta'>('en')
   const [resultData, setResultData] = useState<SessionResultData | null>(null)
   const [showReviewAll, setShowReviewAll] = useState(false)
+
+  const {
+    translations: pypTranslations,
+    isActiveQuestionTranslating,
+  } = useMcqTranslations(questions, questionLang, Math.max(0, currentQNum - 1), '/api/previous-papers/translate')
 
   const autoSubmittedRef = useRef(false)
   const resultSessionParam = searchParams.get('resultSession')
@@ -596,7 +604,7 @@ const PreviousPaperTest = () => {
           </button>
           <div>
             <div className="pyp-brand-line">
-              <span className="pyp-hub-tag">TNPSC Study Hub</span>
+              <span className="pyp-hub-tag">TNPSC Aspirant Orbit</span>
               <span className="pyp-status-dot">● In Progress</span>
             </div>
             <h1 className="pyp-exam-heading">
@@ -613,6 +621,23 @@ const PreviousPaperTest = () => {
           <div className="pyp-meta-pill">
             <span>Total Marks</span>
             <strong>{paper?.totalMarks || 300}</strong>
+          </div>
+          <div className="mcq-lang-switch glass" role="group" aria-label="Question language">
+            <Languages size={14} className="mcq-lang-icon" />
+            <button
+              type="button"
+              className={`mcq-lang-btn ${questionLang === 'en' ? 'active' : ''}`}
+              onClick={() => setQuestionLang('en')}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              className={`mcq-lang-btn ${questionLang === 'ta' ? 'active' : ''}`}
+              onClick={() => setQuestionLang('ta')}
+            >
+              தமிழ்
+            </button>
           </div>
           <div className={`pyp-timer-pill ${isWarning5 ? 'critical' : isWarning15 ? 'warning' : ''}`}>
             <Clock size={16} />
@@ -654,33 +679,47 @@ const PreviousPaperTest = () => {
                   Question {currentQuestion.questionNumber} of {questions.length}
                 </span>
                 <span className="pyp-q-subject-tag">{currentQuestion.subject}</span>
+                {isActiveQuestionTranslating && (
+                  <span className="pyp-q-subject-tag" style={{ opacity: 0.85 }}>
+                    Translating to Tamil…
+                  </span>
+                )}
                 {currentAnswerState.isMarkedForReview && (
                   <span className="pyp-q-review-tag">Marked for Review</span>
                 )}
               </div>
 
-              <h2 className="pyp-q-text">{currentQuestion.questionText}</h2>
+              {(() => {
+                const activeTr = questionLang === 'ta' ? pypTranslations[currentQuestion.id] : undefined
+                const displayedText = activeTr?.question || currentQuestion.questionText
+                const displayedOpts = activeTr?.options || currentQuestion.options
+                return (
+                  <>
+                    <h2 className="pyp-q-text">{displayedText}</h2>
 
-              <div className="pyp-options-list" role="radiogroup" aria-label={`Question ${currentQuestion.questionNumber} options`}>
-                {currentQuestion.options.map((opt, idx) => {
-                  const isSelected = currentAnswerState.selectedOption === idx
-                  return (
-                    <label
-                      key={idx}
-                      className={`pyp-option-card ${isSelected ? 'selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name={`q-${currentQuestion.id}`}
-                        checked={isSelected}
-                        onChange={() => handleSelectOption(idx)}
-                      />
-                      <span className="pyp-opt-letter">{String.fromCharCode(65 + idx)}</span>
-                      <span className="pyp-opt-text">{opt}</span>
-                    </label>
-                  )
-                })}
-              </div>
+                    <div className="pyp-options-list" role="radiogroup" aria-label={`Question ${currentQuestion.questionNumber} options`}>
+                      {displayedOpts.map((opt, idx) => {
+                        const isSelected = currentAnswerState.selectedOption === idx
+                        return (
+                          <label
+                            key={idx}
+                            className={`pyp-option-card ${isSelected ? 'selected' : ''}`}
+                          >
+                            <input
+                              type="radio"
+                              name={`q-${currentQuestion.id}`}
+                              checked={isSelected}
+                              onChange={() => handleSelectOption(idx)}
+                            />
+                            <span className="pyp-opt-letter">{String.fromCharCode(65 + idx)}</span>
+                            <span className="pyp-opt-text">{opt}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </>
+                )
+              })()}
 
               <div className="pyp-q-controls">
                 <div className="pyp-q-controls-left">

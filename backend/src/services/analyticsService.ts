@@ -1,4 +1,9 @@
 import pool from '../db';
+import {
+  getAwardSettings,
+  resolveAwardForPercentage,
+  type AwardType,
+} from './awardService';
 import { broadcastAnalyticsEvent } from './analyticsEventBus';
 import { normalizeTamilNaduDistrict } from './tamilNaduDistrictService';
 import { recordVerifiedSubscriptionTransaction } from './subscriptionHistoryService';
@@ -2358,26 +2363,117 @@ export class AnalyticsService {
       [distParam]
     );
 
+    const studentIds = listRes.rows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
+    const awardsByStudent = new Map<
+      number,
+      {
+        awards: Array<{
+          id: number;
+          type: 'GOLD' | 'PLATINUM' | 'SILVER';
+          title: string;
+          description: string;
+          percentage: number;
+          earnedAt: string;
+        }>;
+        summary: { goldCount: number; platinumCount: number; silverCount: number; totalAwards: number };
+      }
+    >();
+
+    if (studentIds.length > 0) {
+      const [awardRowsRes, awardSettings] = await Promise.all([
+        safeQuery(
+          'students.awards',
+          `SELECT
+             mta.id,
+             mta.student_id,
+             COALESCE(mta.lesson_title, mta.test_title, 'Assessment') AS title_text,
+             COALESCE(mta.subject, mta.subject_id, 'TNPSC Exam') AS subject_text,
+             COALESCE(mta.percentage, 0) AS percentage,
+             COALESCE(mta.award_type, 'NONE') AS award_type,
+             COALESCE(mta.completed_at, CURRENT_TIMESTAMP) AS earned_at
+           FROM mock_test_attempts mta
+           WHERE mta.student_id = ANY($1::int[])
+             AND COALESCE(mta.status, 'completed') = 'completed'
+             AND mta.attempted_questions > 0
+           ORDER BY mta.completed_at DESC, mta.id DESC`,
+          [studentIds]
+        ),
+        getAwardSettings(),
+      ]);
+
+      for (const row of awardRowsRes.rows) {
+        const sid = Number(row.student_id);
+        const pct = Math.round(Number(row.percentage || 0) * 100) / 100;
+        const stored = String(row.award_type || '').toUpperCase().trim();
+        const resolved: AwardType =
+          stored === 'GOLD' || stored === 'PLATINUM' || stored === 'SILVER' || stored === 'NONE'
+            ? (stored as AwardType)
+            : resolveAwardForPercentage(pct, awardSettings);
+
+        if (resolved === 'NONE') continue;
+
+        let bucket = awardsByStudent.get(sid);
+        if (!bucket) {
+          bucket = {
+            awards: [],
+            summary: { goldCount: 0, platinumCount: 0, silverCount: 0, totalAwards: 0 },
+          };
+          awardsByStudent.set(sid, bucket);
+        }
+
+        if (resolved === 'GOLD') bucket.summary.goldCount++;
+        else if (resolved === 'PLATINUM') bucket.summary.platinumCount++;
+        else if (resolved === 'SILVER') bucket.summary.silverCount++;
+        bucket.summary.totalAwards++;
+
+        const awardLabel =
+          resolved === 'GOLD'
+            ? 'Gold Achievement'
+            : resolved === 'PLATINUM'
+              ? 'Platinum Achievement'
+              : 'Silver Achievement';
+
+        bucket.awards.push({
+          id: Number(row.id),
+          type: resolved,
+          title: awardLabel,
+          description: `${String(row.title_text)} (${pct}% accuracy • ${String(row.subject_text)})`,
+          percentage: pct,
+          earnedAt: row.earned_at ? new Date(row.earned_at).toISOString() : new Date().toISOString(),
+        });
+      }
+    }
+
     return {
       groupBreakdown: groupRes.rows.map((r) => ({
         group: r.target_group ? r.target_group.toUpperCase() : 'GROUP4',
         count: parseInt(r.count, 10),
       })),
-      students: listRes.rows.map((r) => ({
-        id: r.id,
-        fullName: r.full_name,
-        email: r.email,
-        targetGroup: r.target_group || 'group4',
-        district: r.district || 'Location unavailable',
-        city: r.city || null,
-        tier: r.subscription_tier || 'free',
-        isOnline: Boolean(r.is_online),
-        mcqCount: parseInt(r.total_mcqs, 10),
-        accuracy: parseFloat(r.accuracy),
-        studyHours: Math.round(parseFloat(r.study_hours) * 10) / 10,
-        createdAt: r.created_at,
-        lastLoginAt: r.last_login_at,
-      })),
+      students: listRes.rows.map((r) => {
+        const awardData = awardsByStudent.get(Number(r.id));
+        return {
+          id: r.id,
+          fullName: r.full_name,
+          email: r.email,
+          targetGroup: r.target_group || 'group4',
+          district: r.district || 'Location unavailable',
+          city: r.city || null,
+          tier: r.subscription_tier || 'free',
+          isOnline: Boolean(r.is_online),
+          mcqCount: parseInt(r.total_mcqs, 10),
+          accuracy: parseFloat(r.accuracy),
+          studyHours: Math.round(parseFloat(r.study_hours) * 10) / 10,
+          createdAt: r.created_at,
+          lastLoginAt: r.last_login_at,
+          awards: awardData?.awards || [],
+          awardSummary: awardData?.summary || {
+            goldCount: 0,
+            platinumCount: 0,
+            silverCount: 0,
+            totalAwards: 0,
+          },
+        };
+      }),
     };
   }
 

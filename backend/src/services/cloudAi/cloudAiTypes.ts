@@ -1,6 +1,6 @@
 /**
  * Claude AI Architecture Types & Provider Interfaces
- * TNPSC Study Hub - Anthropic Claude
+ * TNPSC Aspirant Orbit - Anthropic Claude
  */
 
 export type CloudAIProviderName = 'claude';

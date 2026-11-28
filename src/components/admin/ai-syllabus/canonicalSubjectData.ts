@@ -1,7 +1,7 @@
 /**
  * canonicalSubjectData.ts
  *
- * Authoritative Canonical Subject & Unit Definitions for TNPSC Study Hub.
+ * Authoritative Canonical Subject & Unit Definitions for TNPSC Aspirant Orbit.
  * Enforces:
  * 1. General Studies - Exactly 6 Parent Units.
  * 2. Aptitude and Mental Ability - Dynamic syllabus units (2 units).

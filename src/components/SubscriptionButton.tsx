@@ -24,7 +24,7 @@ export const SubscriptionButton: React.FC<SubscriptionButtonProps> = ({
       onClick={onClick}
       aria-label="Subscription"
       aria-current={isActive ? 'page' : undefined}
-      title="View TNPSC Study Hub Subscription Plans"
+      title="View TNPSC Aspirant Orbit Subscription Plans"
     >
       <Crown
         size={variant === 'sidebar' ? 17 : 15}

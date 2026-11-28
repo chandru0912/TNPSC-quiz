@@ -14,6 +14,7 @@ import {
   Grid,
   ChevronRight,
   Languages,
+  Send,
 } from 'lucide-react'
 import { useStudyTimeTracker } from '../hooks/useStudyTimeTracker'
 import { useMcqTranslations } from '../hooks/useMcqTranslations'
@@ -38,6 +39,7 @@ import {
   type AchievementAwardResult,
 } from '../components/exam/AchievementAwards'
 import { QuestionPalette, type QuestionPaletteStatus } from '../components/exam/QuestionPalette'
+import { TestSubmissionConfirmModal } from '../components/exam/TestSubmissionConfirmModal'
 import './PreviousPaperTest.css'
 import './MCQPractice.css'
 import './MockTests.css'
@@ -594,17 +596,22 @@ const MockTests = () => {
   const fetchPublishedTests = async () => {
     try {
       setLoading(true)
+      setErrorMsg('')
       const params = new URLSearchParams()
       params.set('group', selectedGroup)
       if (selectedTestCategory === 'full_length') {
         params.set('testCategory', 'full_length')
       }
       const res = await apiFetch(`/api/mock-tests?${params.toString()}`)
-      const data = await res.json()
-      if (res.ok && data.status === 'success') {
+      const data = await res.json().catch(() => null)
+      if (res.ok && data?.status === 'success') {
         setTests(Array.isArray(data.data) ? data.data : [])
+      } else {
+        setTests([])
+        setErrorMsg(data?.message || 'Unable to load published mock tests.')
       }
     } catch {
+      setTests([])
       setErrorMsg('Unable to load published mock tests.')
     } finally {
       setLoading(false)
@@ -644,7 +651,7 @@ const MockTests = () => {
       })),
     [questions]
   )
-  const { translations } = useMcqTranslations(translatableQuestions, questionLang)
+  const { translations } = useMcqTranslations(translatableQuestions, questionLang, currentIndex)
   const activeSubjectObj = registrySubjects.find((s) => s.id === effectiveSubjectId) || null
 
   const matchesSubjectSlug = (testSubj: string | undefined | null, slug: string): boolean => {
@@ -824,19 +831,25 @@ const MockTests = () => {
     persistProgress(nextAnswers, currentIndex)
   }
 
+  const [submitModalError, setSubmitModalError] = useState<string | null>(null)
+
   const handleSubmitExam = async (autoSubmit = false) => {
     if (!activeTest || submitting) return
-    setShowSubmitModal(false)
     if (!autoSubmit && !showSubmitModal) {
+      setSubmitModalError(null)
       setShowSubmitModal(true)
       return
     }
 
     const studentToken = localStorage.getItem('tnpsc_student_token')
-    if (!studentToken) return
+    if (!studentToken) {
+      setSubmitModalError('Your login session has expired. Please sign in again to submit your test.')
+      return
+    }
 
     try {
       setSubmitting(true)
+      setSubmitModalError(null)
       const timeSpentSeconds = Math.max(1, Math.round((Date.now() - startTimestampRef.current) / 1000))
       const url = isSyllabusMode ? '/api/mock-tests/syllabus/submit' : `/api/mock-tests/${activeTest.id}/submit`
       const bodyPayload = isSyllabusMode
@@ -872,11 +885,14 @@ const MockTests = () => {
         },
         body: JSON.stringify(bodyPayload),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       if (!res.ok || data.status !== 'success') {
-        setErrorMsg(data.message || 'Failed to submit mock test.')
+        const msg = data.message || 'Failed to submit mock test. Your answers are preserved—please retry.'
+        setSubmitModalError(msg)
+        setErrorMsg(msg)
         return
       }
+      setShowSubmitModal(false)
       setExamResult(data.data)
       const resPct = Number(data.data?.percentage || 0)
       const resAward: AchievementAwardResult =
@@ -904,7 +920,9 @@ const MockTests = () => {
       notifyStudentSync()
       fetchPublishedTests()
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Submission failed.')
+      const msg = err?.message || 'Network error while submitting mock test. Your answers are safe—please retry.'
+      setSubmitModalError(msg)
+      setErrorMsg(msg)
     } finally {
       setSubmitting(false)
     }
@@ -940,7 +958,7 @@ const MockTests = () => {
             </button>
             <div>
               <div className="pyp-brand-line">
-                <span className="pyp-hub-tag">TNPSC Study Hub</span>
+                <span className="pyp-hub-tag">TNPSC Aspirant Orbit</span>
                 <span className="pyp-status-dot">● Completed</span>
               </div>
               <h1 className="pyp-exam-heading">{examResult.testTitle}</h1>
@@ -1061,7 +1079,7 @@ const MockTests = () => {
             </button>
             <div>
               <div className="pyp-brand-line">
-                <span className="pyp-hub-tag">TNPSC Study Hub</span>
+                <span className="pyp-hub-tag">TNPSC Aspirant Orbit</span>
                 <span className="pyp-status-dot">● In Progress</span>
               </div>
               <h1 className="pyp-exam-heading">{activeTest.title}</h1>
@@ -1166,20 +1184,29 @@ const MockTests = () => {
               </div>
 
               <div className="pyp-q-controls-right">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    if (currentIndex < questions.length - 1) {
-                      goToQuestion(currentIndex + 1)
-                    } else {
+                {currentIndex === questions.length - 1 ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary exam-final-submit-btn"
+                    onClick={() => {
                       persistProgress(answers, currentIndex)
-                    }
-                  }}
-                >
-                  <span>Save &amp; Next</span>
-                  <ArrowRight size={16} />
-                </button>
+                      setSubmitModalError(null)
+                      setShowSubmitModal(true)
+                    }}
+                  >
+                    <Send size={15} />
+                    <span>Submit Test</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => goToQuestion(currentIndex + 1)}
+                  >
+                    <span>Save &amp; Next</span>
+                    <ArrowRight size={16} />
+                  </button>
+                )}
               </div>
             </div>
           </main>
@@ -1207,28 +1234,19 @@ const MockTests = () => {
           />
         </div>
 
-        {showSubmitModal && (
-          <div className="pyp-modal-backdrop">
-            <div className="pyp-modal-card glass">
-              <h3>Submit Mock Test?</h3>
-              <p>Review your attempt summary before final submission.</p>
-              <div className="pyp-modal-summary">
-                <div><span>Total Questions</span><strong>{questions.length}</strong></div>
-                <div><span>Answered</span><strong className="green">{answeredCount}</strong></div>
-                <div><span>Unanswered</span><strong className="amber">{Math.max(0, questions.length - answeredCount)}</strong></div>
-                <div><span>Marked for Review</span><strong className="purple">{Object.values(markedForReview).filter(Boolean).length}</strong></div>
-              </div>
-              <div className="pyp-modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowSubmitModal(false)} disabled={submitting}>
-                  Continue Test
-                </button>
-                <button type="button" className="btn btn-primary" onClick={() => handleSubmitExam(true)} disabled={submitting}>
-                  {submitting ? 'Submitting...' : 'Confirm & Submit'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <TestSubmissionConfirmModal
+          isOpen={showSubmitModal}
+          totalQuestions={questions.length}
+          answeredQuestions={answeredCount}
+          markedForReview={Object.values(markedForReview).filter(Boolean).length}
+          isSubmitting={submitting}
+          errorMessage={submitModalError}
+          onClose={() => {
+            setSubmitModalError(null)
+            setShowSubmitModal(false)
+          }}
+          onConfirmSubmit={() => void handleSubmitExam(true)}
+        />
       </div>
     )
   }
@@ -1661,6 +1679,10 @@ const MockTests = () => {
                       )
                     })}
                   </div>
+                ) : errorMsg ? (
+                  <p className="hierarchy-empty-note" style={{ color: '#fca5a5' }}>
+                    {errorMsg}
+                  </p>
                 ) : (
                   <p className="hierarchy-empty-note">
                     No units mapped in Study Materials for {selectedStandardId}th Standard ({activeSubjectObj?.name}).

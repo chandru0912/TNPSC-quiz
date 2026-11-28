@@ -1,6 +1,6 @@
 /**
  * Google Gemini Specific Prompt Definitions
- * TNPSC Study Hub - Google Gemini AI Prompts
+ * TNPSC Aspirant Orbit - Google Gemini AI Prompts
  * 
  * Configured specifically for Google Gemini (Gemini 1.5 Flash / Gemini 2.0 / Gemini 2.5).
  * Enforces TNPSC item writing standards, 12 question types, and standardized JSON output schema.

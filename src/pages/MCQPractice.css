@@ -2542,13 +2542,45 @@
   }
 
   .mcq-pyp-exam-page .pyp-q-controls {
-    padding-top: 10px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    width: 100%;
+    padding-top: 10px;
+    box-sizing: border-box;
   }
 
   .mcq-pyp-exam-page .pyp-q-controls-left,
   .mcq-pyp-exam-page .pyp-q-controls-right {
-    gap: 6px;
+    display: contents;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-controls .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    height: 38px;
+    min-height: 38px;
+    padding: 0 8px;
+    gap: 4px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1.15;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    box-sizing: border-box;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-controls .btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
   }
 
   /* Mobile-Only Badge Alignment Fixes (MCQ Practice & Quizzes, <= 767px) */
@@ -2644,5 +2676,22 @@
     padding: 3px 7px;
     font-size: 0.72rem;
     gap: 3px;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-controls {
+    gap: 6px;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-controls .btn {
+    height: 36px;
+    min-height: 36px;
+    padding: 0 5px;
+    gap: 3px;
+    font-size: 0.65rem;
+  }
+
+  .mcq-pyp-exam-page .pyp-q-controls .btn svg {
+    width: 12px;
+    height: 12px;
   }
 }

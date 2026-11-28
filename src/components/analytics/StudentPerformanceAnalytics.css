@@ -1,0 +1,417 @@
+/* Student Performance Analytics – Redesign & Alignment Styles */
+
+/* 1. Enrollment per Target Examination Cards */
+.sp-exam-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+  gap: 0.85rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sp-exam-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.05rem;
+  border-radius: 14px;
+  background: linear-gradient(155deg, rgba(16, 24, 48, 0.86) 0%, rgba(10, 15, 30, 0.94) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  min-height: 122px;
+  box-sizing: border-box;
+  transition: border-color 0.18s ease, transform 0.16s ease;
+}
+
+.sp-exam-card:hover {
+  border-color: rgba(168, 85, 247, 0.45);
+  transform: translateY(-2px);
+}
+
+.sp-exam-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.sp-exam-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.22) 0%, rgba(99, 102, 241, 0.18) 100%);
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  color: #e9d5ff;
+}
+
+.sp-exam-card-icon.is-gold {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.2) 0%, rgba(245, 158, 11, 0.16) 100%);
+  border-color: rgba(255, 215, 0, 0.42);
+  color: #fde047;
+}
+
+.sp-exam-card-icon.is-cyan {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(14, 165, 233, 0.16) 100%);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #7dd3fc;
+}
+
+.sp-exam-card-icon.is-green {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.16) 100%);
+  border-color: rgba(52, 211, 153, 0.4);
+  color: #6ee7b7;
+}
+
+.sp-exam-card-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #f8fafc;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-exam-card-metrics {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.sp-exam-card-count {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.sp-exam-card-share {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #c4b5fd;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sp-exam-card-bar {
+  width: 100%;
+  height: 5px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+}
+
+.sp-exam-card-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #a855f7 0%, #ffd700 100%);
+  transition: width 0.35s ease;
+}
+
+/* 2. Aligned Student Performance Roster & Subject Matrix Tables */
+.sp-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.sp-aligned-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.83rem;
+}
+
+.sp-aligned-table--matrix {
+  min-width: 720px;
+}
+
+.sp-aligned-table thead th {
+  padding: 0.8rem 0.75rem;
+  background: rgba(11, 17, 32, 0.94);
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.sp-aligned-table tbody tr {
+  height: 64px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  transition: background 0.14s ease;
+}
+
+.sp-aligned-table--matrix tbody tr {
+  height: 56px;
+}
+
+.sp-aligned-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.sp-aligned-table tbody tr:hover {
+  background: rgba(124, 58, 237, 0.08);
+}
+
+.sp-aligned-table td {
+  padding: 0.65rem 0.75rem;
+  vertical-align: middle;
+  color: #e2e8f0;
+  box-sizing: border-box;
+}
+
+.sp-col-left {
+  text-align: left !important;
+}
+
+.sp-col-center {
+  text-align: center !important;
+}
+
+.sp-tabular {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Candidate Profile cell truncation */
+.sp-candidate-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.sp-candidate-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.sp-candidate-name {
+  font-weight: 700;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-candidate-email {
+  font-size: 0.73rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-loc-center {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+}
+
+.sp-loc-center span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 3. Awards Badges & Popup Modal */
+.sp-awards-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  flex-wrap: nowrap;
+}
+
+.sp-award-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.22rem 0.48rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.14s ease, filter 0.15s ease;
+}
+
+.sp-award-chip:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.12);
+}
+
+.sp-award-chip--gold {
+  background: rgba(255, 215, 0, 0.16);
+  border-color: rgba(255, 215, 0, 0.48);
+  color: #fde047;
+}
+
+.sp-award-chip--platinum {
+  background: rgba(168, 85, 247, 0.18);
+  border-color: rgba(192, 132, 252, 0.48);
+  color: #e9d5ff;
+}
+
+.sp-award-chip--silver {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(203, 213, 225, 0.42);
+  color: #e2e8f0;
+}
+
+.sp-award-more-btn {
+  padding: 0.2rem 0.46rem;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  color: #7dd3fc;
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sp-no-awards {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* Awards Popup List */
+.sp-awards-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.sp-awards-modal-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.sp-awards-modal-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.sp-awards-modal-emoji {
+  font-size: 1.2rem;
+  line-height: 1.1;
+  flex-shrink: 0;
+}
+
+.sp-awards-modal-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.sp-awards-modal-desc {
+  font-size: 0.76rem;
+  color: #94a3b8;
+  margin-top: 0.15rem;
+  line-height: 1.4;
+}
+
+.sp-awards-modal-date {
+  font-size: 0.71rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 4. Subject Matrix Accuracy Bar */
+.sp-accuracy-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  width: 96px;
+}
+
+.sp-accuracy-track {
+  width: 100%;
+  height: 5px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.sp-accuracy-fill {
+  height: 100%;
+  border-radius: 9999px;
+}
+
+.sp-accuracy-fill.is-high {
+  background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+}
+
+.sp-accuracy-fill.is-med {
+  background: linear-gradient(90deg, #0ea5e9 0%, #38bdf8 100%);
+}
+
+.sp-accuracy-fill.is-low {
+  background: linear-gradient(90deg, #f59e0b 0%, #fbbf24 100%);
+}
+
+.sp-incorrect-val {
+  color: #fda4af;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .sp-exam-cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+
+  .sp-exam-card {
+    padding: 0.85rem;
+    min-height: 110px;
+  }
+
+  .sp-exam-card-count {
+    font-size: 1.3rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .sp-exam-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}

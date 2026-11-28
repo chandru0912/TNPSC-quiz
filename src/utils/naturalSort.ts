@@ -1,7 +1,7 @@
 /**
  * naturalSort.ts
  *
- * Robust natural numeric sorting utilities for TNPSC Study Hub.
+ * Robust natural numeric sorting utilities for TNPSC Aspirant Orbit.
  * Properly orders alphanumeric multi-segment numbering like:
  * - "1.1", "1.2", "1.9", "1.10", "1.11", ..., "1.15"
  * - "L-1.1", "L-1.2", "L-1.10"

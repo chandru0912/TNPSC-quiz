@@ -2,12 +2,19 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Menu, X, GraduationCap, Home, BookOpen, FileText, BarChart3, User, UserPlus, LogOut } from 'lucide-react'
 import MobileAuthSlide, { type AuthSlideType } from './MobileAuthSlide'
+import OrbitBrandLogo from './OrbitBrandLogo'
 import { useScrollLock } from '../hooks/useScrollLock'
 import { useStudentAuth } from '../context/StudentAuthContext'
+import {
+  getStudentInitials,
+  normalizeStudentAvatarUrl,
+  resolveStudentDisplayName,
+} from '../utils/studentProfile'
 import './Navbar.css'
 
 const Navbar = () => {
-  const { isAuthenticated, isPreviewMode, exitStudentPreview } = useStudentAuth()
+  const { student, isAuthenticated, isPreviewMode, exitStudentPreview } = useStudentAuth()
+  const [avatarFailed, setAvatarFailed] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [activeAuthSlide, setActiveAuthSlide] = useState<AuthSlideType>('none')
   const location = useLocation()
@@ -36,6 +43,18 @@ const Navbar = () => {
     setIsOpen(false)
     setActiveAuthSlide('none')
   }
+
+  // Close mobile drawer on Escape key press
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen])
 
   // Ensure auth slide closes if resized to PC / desktop view
   useEffect(() => {
@@ -106,19 +125,33 @@ const Navbar = () => {
   }
 
   const hasDesktopRightActions = isPreviewMode || (!isAdminRoute && !isAuthenticated)
+  const mobileStudentName = isAuthenticated && student ? resolveStudentDisplayName(student) : ''
+  const mobileStudentAvatar = isAuthenticated && student ? normalizeStudentAvatarUrl(student.avatarUrl) : null
+  const mobileStudentInitials = isAuthenticated && student ? getStudentInitials(mobileStudentName, student.email) : 'S'
+
+  useEffect(() => {
+    setAvatarFailed(false)
+  }, [mobileStudentAvatar])
 
   return (
     <nav className="navbar glass">
       <div className={`nav-container ${!hasDesktopRightActions ? 'nav-container--centered' : ''}`}>
-        <Link to="/" className="nav-logo" aria-label="TNPSC Study Hub home" onClick={closeMenu}>
+        <Link to="/" className="nav-logo" aria-label="TNPSC Aspirant Orbit home" onClick={closeMenu}>
           <span className="nav-logo-icon-3d">
-            <GraduationCap className="nav-logo-icon" size={24} />
+            <OrbitBrandLogo className="nav-logo-icon" size={24} />
           </span>
           <span className="nav-logo-text-group">
-            <span className="nav-logo-text">TNPSC Study Hub</span>
-            <span className="nav-logo-short">TNPSC</span>
+            <span className="nav-logo-text">TNPSC Aspirant Orbit</span>
+            <span className="nav-logo-short">Aspirant Orbit</span>
           </span>
         </Link>
+
+        {/* Mobile Right-Side Drawer Click-Outside Backdrop */}
+        <div
+          className={`nav-mobile-backdrop ${isOpen ? 'active' : ''}`}
+          onClick={closeMenu}
+          aria-hidden="true"
+        />
 
         <ul id="primary-navigation" className={`nav-menu ${isOpen ? 'active' : ''}`}>
           {navLinks.map((link) => {
@@ -192,6 +225,28 @@ const Navbar = () => {
                 <span>Register</span>
               </Link>
             </>
+          )}
+
+          {!isAdminRoute && isAuthenticated && student && (
+            <Link
+              to="/dashboard/profile"
+              className="nav-mobile-student-profile"
+              onClick={closeMenu}
+              aria-label="Open student profile"
+            >
+              <span className="nav-mobile-avatar">
+                {mobileStudentAvatar && !avatarFailed ? (
+                  <img
+                    src={mobileStudentAvatar}
+                    alt="Student profile"
+                    referrerPolicy="no-referrer"
+                    onError={() => setAvatarFailed(true)}
+                  />
+                ) : (
+                  <span>{mobileStudentInitials}</span>
+                )}
+              </span>
+            </Link>
           )}
 
           <button

@@ -298,8 +298,65 @@ export async function runMigration() {
       ON mcq_question_translations (question_id, translation_language, translation_status);
 
       ALTER TABLE mcq_question_translations
+        ADD COLUMN IF NOT EXISTS source_language VARCHAR(8) NOT NULL DEFAULT 'en',
         ADD COLUMN IF NOT EXISTS model_name VARCHAR(120),
         ADD COLUMN IF NOT EXISTS translation_version INT NOT NULL DEFAULT 1;
+
+      CREATE INDEX IF NOT EXISTS idx_mcq_translations_fast_lookup
+      ON mcq_question_translations (question_id, source_language, translation_language, translation_version, translation_status);
+
+      -- Persistent Tamil translation cache for Previous Year Paper questions
+      CREATE TABLE IF NOT EXISTS pyp_question_translations (
+        id SERIAL PRIMARY KEY,
+        pyp_question_id INT NOT NULL REFERENCES previous_year_paper_questions(id) ON DELETE CASCADE,
+        source_language VARCHAR(8) NOT NULL DEFAULT 'en',
+        translation_language VARCHAR(8) NOT NULL DEFAULT 'ta',
+        translated_question TEXT NOT NULL,
+        translated_option_a TEXT NOT NULL,
+        translated_option_b TEXT NOT NULL,
+        translated_option_c TEXT NOT NULL,
+        translated_option_d TEXT NOT NULL,
+        translated_explanation TEXT NOT NULL DEFAULT '',
+        source_content_hash VARCHAR(64) NOT NULL,
+        translation_status VARCHAR(20) NOT NULL DEFAULT 'approved',
+        provider VARCHAR(50),
+        model_name VARCHAR(120),
+        translation_version INT NOT NULL DEFAULT 1,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uq_pyp_translation_question_language UNIQUE (pyp_question_id, translation_language)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pyp_translations_fast_lookup
+      ON pyp_question_translations (pyp_question_id, source_language, translation_language, translation_version, translation_status);
+
+      -- Persistent distributed admin token revocation store (JTI / SHA-256 hash only; never raw JWTs)
+      CREATE TABLE IF NOT EXISTS revoked_admin_tokens (
+        token_id VARCHAR(128) PRIMARY KEY,
+        admin_username VARCHAR(100),
+        revoked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_revoked_admin_tokens_expires_at
+      ON revoked_admin_tokens (expires_at);
+
+      -- Targeted composite indexes for hot query paths (zero duplicates)
+      CREATE INDEX IF NOT EXISTS idx_mock_tests_published_cat_order
+      ON mock_tests (category, test_category, published_at DESC, id DESC)
+      WHERE status IN ('published', 'scheduled');
+
+      CREATE INDEX IF NOT EXISTS idx_mock_attempts_student_completed
+      ON mock_test_attempts (student_id, completed_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_student_test_sessions_student_time
+      ON student_test_sessions (student_id, submitted_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_mock_test_questions_order
+      ON mock_test_questions (mock_test_id, question_order ASC, id ASC);
+
+      CREATE INDEX IF NOT EXISTS idx_support_tickets_student_created
+      ON support_tickets (student_id, created_at DESC);
     `);
 
     // Backfill existing questions: set study_materials for textbook-grounded or lesson-mapped questions

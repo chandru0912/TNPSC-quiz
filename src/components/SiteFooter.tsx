@@ -4,12 +4,12 @@ import {
   BookOpen,
   ClipboardCheck,
   FileText,
-  GraduationCap,
   Languages,
   Layers,
   ShieldCheck,
   Target,
 } from 'lucide-react'
+import OrbitBrandLogo from './OrbitBrandLogo'
 import './SiteFooter.css'
 
 const STANDARDS = [6, 7, 8, 9, 10, 11, 12] as const
@@ -47,11 +47,11 @@ export const SiteFooter: React.FC = () => {
       <div className="site-footer-inner">
         {/* Brand Identity Row */}
         <div className="site-footer-brand-bar">
-          <Link to="/" className="footer-brand" aria-label="TNPSC Study Hub Home">
+          <Link to="/" className="footer-brand" aria-label="TNPSC Aspirant Orbit Home">
             <span className="footer-logo-icon-3d">
-              <GraduationCap className="footer-logo-icon" size={22} />
+              <OrbitBrandLogo className="footer-logo-icon" size={24} />
             </span>
-            <span className="footer-logo">TNPSC Study Hub</span>
+            <span className="footer-logo">TNPSC Aspirant Orbit</span>
           </Link>
         </div>
 
@@ -193,7 +193,7 @@ export const SiteFooter: React.FC = () => {
 
         {/* Copyright Row */}
         <div className="site-footer-bottom">
-          <p className="site-footer-copy">© 2026 TNPSC Study Hub. All Rights Reserved.</p>
+          <p className="site-footer-copy">© 2026 TNPSC Aspirant Orbit. All Rights Reserved.</p>
         </div>
       </div>
     </footer>

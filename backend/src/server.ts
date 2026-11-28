@@ -12,6 +12,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors, { CorsOptions } from 'cors';
 import pool, { isProductionOrCloud } from './db';
 import { ensureDatabaseSchema } from './migrate';
+import { isTrustedOrigin } from './config/trustedOrigins';
 import { normalizePayloadUnicode } from './utils/tamilUnicode';
 import questionsRouter from './routes/questions';
 import authRouter, { getConfiguredAdminCount } from './routes/auth';
@@ -49,8 +50,9 @@ import {
 import {
   CACHE_MIDDLEWARE_PRESETS,
   cacheInvalidationMiddleware,
+  responseCacheMiddleware,
 } from './middleware/cacheMiddleware';
-import { cacheService } from './services/cacheService';
+import { cacheService, CACHE_CONFIG } from './services/cacheService';
 import { getAllCircuitBreakerSnapshots } from './services/circuitBreakerService';
 import { requireAdminAuth } from './middleware/auth';
 import { validateGoogleOAuthStartupConfig } from './services/googleAuthService';
@@ -66,59 +68,16 @@ app.disable('x-powered-by');
 // Disable ETag generation globally so dynamic API endpoints never return HTTP 304 (Not Modified)
 app.set('etag', false);
 
-const allowedOrigins = [
-  'https://tnpsc-quiz-lrkivhxrn-moonzoro.vercel.app',
-  'https://tnpsc-quiz-1rra490pf-moonzoro.vercel.app',
-  'https://tnpsc-quiz-lval.vercel.app',
-  'https://tnpsc-quiz-jwkl.vercel.app',
-  'https://tnpsc-quiz-jwk1.vercel.app',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:3000',
-  'http://localhost:5000',
-];
-
-if (process.env.CORS_ORIGIN) {
-  process.env.CORS_ORIGIN.split(',').forEach((o) => {
-    const trimmed = o.trim().replace(/^["']|["']$/g, '').replace(/\/+$/, '');
-    if (trimmed && !allowedOrigins.includes(trimmed)) {
-      allowedOrigins.push(trimmed);
-    }
-  });
-}
-
-const isOriginAllowed = (origin: string): boolean => {
-  const clean = origin.trim().replace(/\/+$/, '');
-  if (allowedOrigins.includes('*') || process.env.CORS_ORIGIN === '*') {
-    return true;
-  }
-  if (allowedOrigins.includes(clean) || allowedOrigins.includes(origin)) {
-    return true;
-  }
-  // Allow local development origins on any port
-  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(clean)) {
-    return true;
-  }
-  // Allow all Vercel deployment and preview subdomains for this project
-  if (/^https:\/\/tnpsc-quiz.*\.vercel\.app$/.test(clean) || /^https:\/\/.*-moonzoro\.vercel\.app$/.test(clean)) {
-    return true;
-  }
-  return false;
-};
-
 const corsOptions: CorsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     // Allow non-browser requests or same-origin requests with no Origin header
     if (!origin) {
       return callback(null, true);
     }
-    if (isOriginAllowed(origin)) {
+    if (isTrustedOrigin(origin)) {
       return callback(null, true);
     }
-    if (process.env.NODE_ENV !== 'production') {
-      return callback(null, true);
-    }
-    // Disallow without throwing a 500 error to ensure clean CORS handling
+    // Disallow untrusted origins without throwing a 500 error (strictly no wildcard with credentials)
     return callback(null, false);
   },
   credentials: true,
@@ -412,8 +371,14 @@ app.use('/api/student', requireSchemaMiddleware, generalStudentApiLimiter, stude
 app.use('/student', requireSchemaMiddleware, generalStudentApiLimiter, studentRouter);
 app.use('/api/api/student', requireSchemaMiddleware, generalStudentApiLimiter, studentRouter);
 
+const publicExamCatalogCache = responseCacheMiddleware({
+  namespace: 'mcq',
+  ttlMs: CACHE_CONFIG.ttl.mcqMs,
+  shouldCache: (req) => !req.path.includes('/sessions') && !req.path.includes('/result'),
+});
+
 app.use(['/api/admin/previous-papers', '/admin/previous-papers', '/api/api/admin/previous-papers'], requireSchemaMiddleware, invalidateMcqCache, adminPreviousPapersRouter);
-app.use(['/api/previous-papers', '/previous-papers', '/api/api/previous-papers'], requireSchemaMiddleware, mcqPracticeLimiter, previousPapersRouter);
+app.use(['/api/previous-papers', '/previous-papers', '/api/api/previous-papers'], requireSchemaMiddleware, mcqPracticeLimiter, publicExamCatalogCache, previousPapersRouter);
 
 app.get(['/api/dashboard/performance', '/dashboard/performance'], requireSchemaMiddleware, generalStudentApiLimiter, requireStudentAuth, async (req: StudentAuthenticatedRequest, res: Response) => {
   try {
@@ -436,7 +401,7 @@ app.use('/study-management', requireSchemaMiddleware, invalidateAllContentCache,
 app.use('/api/api/study-management', requireSchemaMiddleware, invalidateAllContentCache, studyManagementRouter);
 
 app.use(['/api/admin/mock-tests', '/admin/mock-tests', '/api/api/admin/mock-tests'], requireSchemaMiddleware, invalidateMcqCache, adminMockTestsRouter);
-app.use(['/api/mock-tests', '/mock-tests', '/api/api/mock-tests'], requireSchemaMiddleware, mcqPracticeLimiter, studentMockTestsRouter);
+app.use(['/api/mock-tests', '/mock-tests', '/api/api/mock-tests'], requireSchemaMiddleware, mcqPracticeLimiter, publicExamCatalogCache, studentMockTestsRouter);
 
 app.use(['/api/admin/subscriptions', '/admin/subscriptions', '/api/api/admin/subscriptions'], requireSchemaMiddleware, adminSubscriptionsRouter);
 app.use(['/api/subscriptions', '/subscriptions', '/api/api/subscriptions'], requireSchemaMiddleware, generalStudentApiLimiter, subscriptionsRouter);

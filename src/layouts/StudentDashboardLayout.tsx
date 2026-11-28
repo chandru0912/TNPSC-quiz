@@ -76,7 +76,7 @@ export const StudentDashboardLayout: React.FC = () => {
     if (p.startsWith('/study-notes')) {
       return { title: 'Study Notes', category: 'Lesson Notes' };
     }
-    return { title: 'Study Hub', category: 'Student Portal' };
+    return { title: 'Aspirant Orbit', category: 'Student Portal' };
   };
 
   const { title: currentTitle, category: currentCategory } = getPageTitle();

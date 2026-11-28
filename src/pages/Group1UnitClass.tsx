@@ -382,9 +382,9 @@ const Group1UnitClass = () => {
           {/* Quick Switchers: Classes and Units */}
           <div className="switchers-wrapper glass">
             {/* Standard Switcher (6th to 12th) */}
-            <div className="switcher-row">
+            <div className="switcher-row standard-switcher-row">
               <span className="switcher-label">{'Select Standard:'}</span>
-              <div className="switcher-pills">
+              <div className="switcher-pills standard-switcher-pills">
                 {standardClasses.map((cls) => {
                   const isActive = cls.id === parsedClassId
                   return (
@@ -401,9 +401,9 @@ const Group1UnitClass = () => {
             </div>
 
             {/* Unit Switcher */}
-            <div className="switcher-row">
+            <div className="switcher-row unit-switcher-row">
               <span className="switcher-label">{'Select Unit:'}</span>
-              <div className="switcher-pills">
+              <div className="switcher-pills unit-switcher-pills">
                 {availableUnits.map((u) => {
                   const isActive = u.id === parsedUnitId
                   const buttonLabel = formatUnitButtonLabel(u)

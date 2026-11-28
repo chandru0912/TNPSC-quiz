@@ -173,7 +173,7 @@ export const SubscriptionOverviewPage: React.FC<SubscriptionOverviewPageProps> =
         <div className="subpage-titles">
           <h1 className="subpage-title">Subscription &amp; Revenue Overview</h1>
           <p className="subpage-subtitle">
-            Configure TNPSC Study Hub subscription plans, pricing, validity durations, and monitor verified Razorpay revenue.
+            Configure TNPSC Aspirant Orbit subscription plans, pricing, validity durations, and monitor verified Razorpay revenue.
           </p>
         </div>
         <div className="sub-overview-header-actions">

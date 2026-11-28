@@ -7,7 +7,8 @@
   flex-direction: column;
   gap: 0.95rem;
   position: sticky;
-  top: 5.2rem;
+  top: calc(var(--navbar-height, 60px) + 1rem);
+  z-index: 2;
 }
 
 .qp-head {

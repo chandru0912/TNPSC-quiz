@@ -216,7 +216,7 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
   const [excludedIds, setExcludedIds] = useState<number[]>([])
 
   // UI & Operation States
-  const [folderName, setFolderName] = useState('TNPSC Study Hub Textbooks')
+  const [folderName, setFolderName] = useState('TNPSC Aspirant Orbit Textbooks')
   const [selectedFolderId, setSelectedFolderId] = useState('')
   const [showFolderPicker, setShowFolderPicker] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
@@ -852,7 +852,7 @@ export const GoogleDriveTextbooksPanel: React.FC<Props> = ({ token, onSyncComple
             style={{ maxWidth: '320px', flex: '1 1 220px' }}
             value={folderName}
             onChange={(e) => { setFolderName(e.target.value); setSelectedFolderId('') }}
-            placeholder="Drive folder name (e.g. TNPSC Study Hub Textbooks)"
+            placeholder="Drive folder name (e.g. TNPSC Aspirant Orbit Textbooks)"
           />
           <button
             type="button"

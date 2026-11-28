@@ -20,7 +20,6 @@ import {
   Cloud,
   Cpu,
   Eye,
-  Shield,
   Users,
   LogIn,
   LogOut,
@@ -29,6 +28,7 @@ import {
   ClipboardCheck,
   Headphones,
 } from 'lucide-react';
+import OrbitBrandLogo from '../OrbitBrandLogo';
 import './AdminSidebar.css';
 
 export type AdminSectionType =
@@ -153,11 +153,11 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         <div className="admin-sidebar-header">
           <div className="sidebar-brand-box">
             <div className="sidebar-shield-badge">
-              <Shield size={20} className="shield-icon-svg" />
+              <OrbitBrandLogo size={24} className="shield-icon-svg" />
             </div>
             <div className="sidebar-brand-titles">
-              <span className="brand-primary-name">TNPSC STUDY HUB</span>
-              <span className="brand-edition-tag">Control & SaaS Engine</span>
+              <span className="brand-primary-name">TNPSC ASPIRANT ORBIT</span>
+              <span className="brand-edition-tag">Admin Control Center</span>
             </div>
           </div>
           {onCloseMobile && (

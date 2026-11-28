@@ -39,6 +39,7 @@ import {
   type AchievementAwardResult,
 } from '../components/exam/AchievementAwards'
 import { AttemptHistoryModal } from '../components/exam/AttemptHistoryModal'
+import { TestSubmissionConfirmModal } from '../components/exam/TestSubmissionConfirmModal'
 import {
   getSubjectsForGroup,
   getStandardsForSubject,
@@ -681,10 +682,21 @@ const MCQPractice = () => {
     translations,
     failedIds: failedTranslationIds,
     isTranslating,
+    isActiveQuestionTranslating,
     translatedCount,
     translationStatus,
     retry: retryTranslations,
   } = useMcqTranslations(filteredQuestions, questionLang, activeQuestionIndex)
+
+  const [showTamilReadyBadge, setShowTamilReadyBadge] = useState(false)
+  useEffect(() => {
+    if (questionLang === 'ta' && translationStatus === 'completed' && filteredQuestions.length > 0) {
+      setShowTamilReadyBadge(true)
+      const timer = window.setTimeout(() => setShowTamilReadyBadge(false), 2500)
+      return () => window.clearTimeout(timer)
+    }
+    setShowTamilReadyBadge(false)
+  }, [questionLang, translationStatus, filteredQuestions.length])
 
   const activeTranslation =
     questionLang === 'ta' && questionItem ? translations[Number(questionItem.id)] : undefined
@@ -899,14 +911,16 @@ const MCQPractice = () => {
     }
   }
 
-  const handleFinishQuiz = () => {
-    setShowSubmitPracticeModal(false)
+  const [isSubmittingQuiz, setIsSubmittingQuiz] = useState(false)
+  const [submitQuizError, setSubmitQuizError] = useState<string | null>(null)
+
+  const handleFinishQuiz = async () => {
+    if (isSubmittingQuiz) return
+    setSubmitQuizError(null)
+
     const finalAnsweredCount = Object.keys(userAnswers).length
     const finalScoreCount = Object.values(userAnswers).filter((a) => a.isCorrect).length
-    setAnsweredQuestions(finalAnsweredCount)
-    setScore(finalScoreCount)
-    setIsQuizCompleted(true)
-    setIsReviewMode(false)
+    const studentToken = localStorage.getItem('tnpsc_student_token')
 
     // Log any answered questions not yet recorded individually
     filteredQuestions.forEach((q, idx) => {
@@ -916,107 +930,121 @@ const MCQPractice = () => {
       }
     })
 
-    // Record completed Mock Test, Lesson Quiz, or Subject Drill to PostgreSQL
-    const studentToken = localStorage.getItem('tnpsc_student_token')
-    if (studentToken && finalAnsweredCount > 0) {
-      const explicitTitle = searchParams.get('title')
-      const assessmentType = explicitTitle
-        ? 'mock_test'
-        : urlLesson || urlLessonId
-          ? 'lesson_quiz'
-          : 'subject_drill'
-      const testTitle =
-        explicitTitle ||
-        urlLesson ||
-        urlUnitTitle ||
-        `${selectedGroup.toUpperCase()} ${urlSubjectId} Practice Drill`
-      const totalQ = filteredQuestions.length
-      const totalDuration = Math.max(1, elapsedSeconds || Math.round((Date.now() - quizStartTimeRef.current) / 1000))
-      const responses = filteredQuestions.map((q, idx) => {
-        const ans = userAnswers[idx]
-        return {
-          questionId: typeof q.id === 'number' ? q.id : null,
-          questionText: q.question,
-          options: q.options,
-          subject: q.subject || urlSubjectId || 'General Studies',
-          topic: q.topic || q.lessonTitle || testTitle,
-          selectedOption: ans ? ans.selected : null,
-          correctAnswer: q.correctAnswer,
-          isCorrect: ans ? ans.isCorrect : false,
-        }
-      })
-
-      const resolvedLessonTitle = urlLesson ? decodeURIComponent(urlLesson) : testTitle
-      apiFetch('/api/student/assessments/submit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${studentToken}`,
-        },
-        body: JSON.stringify({
-          testId: urlLessonId || `mcq-${normalizedGroup}-${effectiveSubjectId}-${effectiveClassId}-${activeUnitFilter || 0}`,
-          testTitle,
-          category: selectedGroup,
-          assessmentType,
-          submissionToken: submissionTokenRef.current,
-          totalQuestions: totalQ,
-          attemptedQuestions: finalAnsweredCount,
-          correctAnswers: finalScoreCount,
-          incorrectAnswers: Math.max(0, finalAnsweredCount - finalScoreCount),
-          unansweredQuestions: Math.max(0, totalQ - finalAnsweredCount),
-          score: finalScoreCount * 1.5,
-          maxScore: totalQ * 1.5,
-          timeSpentSeconds: totalDuration,
-          responses,
-          groupId: normalizedGroup,
-          subjectId: effectiveSubjectId,
-          standardId: effectiveClassId,
-          unitId: activeUnitFilter,
-          lessonId: urlLessonId,
-          lessonTitle: resolvedLessonTitle,
-          mockTestFormat: 'mcq_practice',
-        }),
-      })
-        .then(async (res) => {
-          if (res.ok) {
-            const json = await res.json().catch(() => null)
-            if (json?.grade) {
-              setLastSubmittedGrade({
-                grade: json.grade,
-                colorHex: json.gradeColor || '#a855f7',
-              })
-            }
-            const earnedPct =
-              typeof json?.percentage === 'number'
-                ? json.percentage
-                : Math.round((finalScoreCount / Math.max(1, totalQ)) * 1000) / 10
-            const earnedAward: AchievementAwardResult =
-              json?.awardType === 'GOLD' ||
-              json?.awardType === 'PLATINUM' ||
-              json?.awardType === 'SILVER' ||
-              json?.awardType === 'NONE'
-                ? json.awardType
-                : earnedPct >= 90
-                  ? 'GOLD'
-                  : earnedPct >= 75
-                    ? 'PLATINUM'
-                    : earnedPct >= 60
-                      ? 'SILVER'
-                      : 'NONE'
-            setLastSubmittedAward(earnedAward)
-            if (!json?.duplicate) {
-              setCelebrationState({
-                awardType: earnedAward,
-                percentage: earnedPct,
-                title: resolvedLessonTitle,
-              })
-            }
-            setProgressRefreshTick((t) => t + 1)
-            notifyStudentSync()
+    // Record completed Practice Session to PostgreSQL and wait for backend confirmation before marking submitted
+    if (studentToken) {
+      setIsSubmittingQuiz(true)
+      try {
+        const explicitTitle = searchParams.get('title')
+        const assessmentType = explicitTitle
+          ? 'mock_test'
+          : urlLesson || urlLessonId
+            ? 'lesson_quiz'
+            : 'subject_drill'
+        const testTitle =
+          explicitTitle ||
+          urlLesson ||
+          urlUnitTitle ||
+          `${selectedGroup.toUpperCase()} ${urlSubjectId} Practice Drill`
+        const totalQ = filteredQuestions.length
+        const totalDuration = Math.max(1, elapsedSeconds || Math.round((Date.now() - quizStartTimeRef.current) / 1000))
+        const responses = filteredQuestions.map((q, idx) => {
+          const ans = userAnswers[idx]
+          return {
+            questionId: typeof q.id === 'number' ? q.id : null,
+            questionText: q.question,
+            options: q.options,
+            subject: q.subject || urlSubjectId || 'General Studies',
+            topic: q.topic || q.lessonTitle || testTitle,
+            selectedOption: ans ? ans.selected : null,
+            correctAnswer: q.correctAnswer,
+            isCorrect: ans ? ans.isCorrect : false,
           }
         })
-        .catch((err) => console.warn('[StudentTrack] Failed to log assessment completion:', err))
+
+        const resolvedLessonTitle = urlLesson ? decodeURIComponent(urlLesson) : testTitle
+        const res = await apiFetch('/api/student/assessments/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${studentToken}`,
+          },
+          body: JSON.stringify({
+            testId: urlLessonId || `mcq-${normalizedGroup}-${effectiveSubjectId}-${effectiveClassId}-${activeUnitFilter || 0}`,
+            testTitle,
+            category: selectedGroup,
+            assessmentType,
+            submissionToken: submissionTokenRef.current,
+            totalQuestions: totalQ,
+            attemptedQuestions: finalAnsweredCount,
+            correctAnswers: finalScoreCount,
+            incorrectAnswers: Math.max(0, finalAnsweredCount - finalScoreCount),
+            unansweredQuestions: Math.max(0, totalQ - finalAnsweredCount),
+            score: finalScoreCount * 1.5,
+            maxScore: totalQ * 1.5,
+            timeSpentSeconds: totalDuration,
+            responses,
+            groupId: normalizedGroup,
+            subjectId: effectiveSubjectId,
+            standardId: effectiveClassId,
+            unitId: activeUnitFilter,
+            lessonId: urlLessonId,
+            lessonTitle: resolvedLessonTitle,
+            mockTestFormat: 'mcq_practice',
+          }),
+        })
+
+        const json = await res.json().catch(() => null)
+        if (!res.ok) {
+          setSubmitQuizError(json?.message || 'Unable to submit your test right now. Your answers are saved—please try again.')
+          return
+        }
+
+        if (json?.grade) {
+          setLastSubmittedGrade({
+            grade: json.grade,
+            colorHex: json.gradeColor || '#a855f7',
+          })
+        }
+        const earnedPct =
+          typeof json?.percentage === 'number'
+            ? json.percentage
+            : Math.round((finalScoreCount / Math.max(1, totalQ)) * 1000) / 10
+        const earnedAward: AchievementAwardResult =
+          json?.awardType === 'GOLD' ||
+          json?.awardType === 'PLATINUM' ||
+          json?.awardType === 'SILVER' ||
+          json?.awardType === 'NONE'
+            ? json.awardType
+            : earnedPct >= 90
+              ? 'GOLD'
+              : earnedPct >= 75
+                ? 'PLATINUM'
+                : earnedPct >= 60
+                  ? 'SILVER'
+                  : 'NONE'
+        setLastSubmittedAward(earnedAward)
+        if (!json?.duplicate) {
+          setCelebrationState({
+            awardType: earnedAward,
+            percentage: earnedPct,
+            title: resolvedLessonTitle,
+          })
+        }
+        setProgressRefreshTick((t) => t + 1)
+        notifyStudentSync()
+      } catch {
+        setSubmitQuizError('Network error while submitting your test. Your answers are intact—please retry.')
+        return
+      } finally {
+        setIsSubmittingQuiz(false)
+      }
     }
+
+    setShowSubmitPracticeModal(false)
+    setAnsweredQuestions(finalAnsweredCount)
+    setScore(finalScoreCount)
+    setIsQuizCompleted(true)
+    setIsReviewMode(false)
   }
 
   const handleStartReview = () => {
@@ -1607,7 +1635,7 @@ const MCQPractice = () => {
                 </button>
                 <div className="mcq-exam-title-block">
                   <div className="pyp-brand-line">
-                    <span className="pyp-hub-tag">TNPSC Study Hub</span>
+                    <span className="pyp-hub-tag">TNPSC Aspirant Orbit</span>
                     <span className="pyp-status-dot">
                       ● {isQuizCompleted && !isReviewMode ? 'Completed' : isReviewMode ? 'Review Mode' : 'Practice In Progress'}
                     </span>
@@ -1705,26 +1733,28 @@ const MCQPractice = () => {
               </div>
             </header>
 
-            {questionLang === 'ta' && filteredQuestions.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem' }}>
-                <div className={`mcq-translation-status status-${translationStatus}`}>
-                  {translationStatus === 'completed' ? (
-                    <span>{`✓ ${translatedCount}/${filteredQuestions.length} Tamil Ready`}</span>
-                  ) : translationStatus === 'processing' ? (
-                    <span>{`${translatedCount}/${filteredQuestions.length} Translated • ${filteredQuestions.length - translatedCount} Remaining`}</span>
-                  ) : failedTranslationIds.length > 0 ? (
-                    <>
-                      <span>{`${translatedCount}/${filteredQuestions.length} Translated • ${failedTranslationIds.length} Failed`}</span>
-                      <button type="button" className="mcq-retry-btn" onClick={retryTranslations}>
-                        Retry
-                      </button>
-                    </>
-                  ) : (
-                    <span>{`${translatedCount}/${filteredQuestions.length} Pending`}</span>
-                  )}
+            {questionLang === 'ta' &&
+              filteredQuestions.length > 0 &&
+              (translationStatus !== 'completed' || showTamilReadyBadge) && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className={`mcq-translation-status status-${translationStatus}`}>
+                    {translationStatus === 'completed' ? (
+                      <span>{`✓ Tamil Ready (${translatedCount}/${filteredQuestions.length})`}</span>
+                    ) : isTranslating ? (
+                      <span>{`Preparing Tamil... (${translatedCount}/${filteredQuestions.length})`}</span>
+                    ) : failedTranslationIds.length > 0 ? (
+                      <>
+                        <span>{`Preparing remaining Tamil questions (${translatedCount}/${filteredQuestions.length})`}</span>
+                        <button type="button" className="mcq-retry-btn" onClick={retryTranslations}>
+                          Refresh
+                        </button>
+                      </>
+                    ) : (
+                      <span>{`Preparing Tamil... (${translatedCount}/${filteredQuestions.length})`}</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* Question Card / Scorecard / Empty State */}
             {isQuizCompleted && !isReviewMode ? (
@@ -1872,6 +1902,11 @@ const MCQPractice = () => {
                       Question {activeQuestionIndex + 1} of {filteredQuestions.length}
                     </span>
                     <span className="pyp-q-subject-tag">{formatTag(questionItem)}</span>
+                    {isActiveQuestionTranslating && (
+                      <span className="mcq-translation-status status-processing" style={{ fontSize: '0.72rem', padding: '0.18rem 0.55rem' }}>
+                        Translating to Tamil…
+                      </span>
+                    )}
                     {markedForReview[activeQuestionIndex] && (
                       <span className="pyp-q-review-tag">Marked for Review</span>
                     )}
@@ -1950,10 +1985,24 @@ const MCQPractice = () => {
 
                     <div className="pyp-q-controls-right">
                       {!isReviewMode ? (
-                        <button type="button" className="btn btn-primary" onClick={handleSaveAndNext}>
-                          <span>Save &amp; Next</span>
-                          <ArrowRight size={16} />
-                        </button>
+                        isLastQuestion ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary exam-final-submit-btn"
+                            onClick={() => {
+                              setSubmitQuizError(null)
+                              setShowSubmitPracticeModal(true)
+                            }}
+                          >
+                            <Send size={15} />
+                            <span>Submit Test</span>
+                          </button>
+                        ) : (
+                          <button type="button" className="btn btn-primary" onClick={handleSaveAndNext}>
+                            <span>Save &amp; Next</span>
+                            <ArrowRight size={16} />
+                          </button>
+                        )
                       ) : (
                         !isLastQuestion && (
                           <button type="button" className="btn btn-primary" onClick={handleNext}>
@@ -2070,28 +2119,19 @@ const MCQPractice = () => {
             )}
 
             {/* Submit Practice Confirmation Modal */}
-            {showSubmitPracticeModal && (
-              <div className="pyp-modal-backdrop">
-                <div className="pyp-modal-card glass">
-                  <h3>Submit Practice?</h3>
-                  <p>Review your attempt summary before submitting your practice session.</p>
-                  <div className="pyp-modal-summary">
-                    <div><span>Total Questions</span><strong>{filteredQuestions.length}</strong></div>
-                    <div><span>Answered</span><strong className="green">{Object.keys(userAnswers).length}</strong></div>
-                    <div><span>Unanswered</span><strong className="amber">{Math.max(0, filteredQuestions.length - Object.keys(userAnswers).length)}</strong></div>
-                    <div><span>Marked for Review</span><strong className="purple">{Object.values(markedForReview).filter(Boolean).length}</strong></div>
-                  </div>
-                  <div className="pyp-modal-actions">
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowSubmitPracticeModal(false)}>
-                      Return to Practice
-                    </button>
-                    <button type="button" className="btn btn-primary" onClick={handleFinishQuiz}>
-                      Confirm &amp; Submit Practice
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+            <TestSubmissionConfirmModal
+              isOpen={showSubmitPracticeModal}
+              totalQuestions={filteredQuestions.length}
+              answeredQuestions={Object.keys(userAnswers).length}
+              markedForReview={Object.values(markedForReview).filter(Boolean).length}
+              isSubmitting={isSubmittingQuiz}
+              errorMessage={submitQuizError}
+              onClose={() => {
+                setSubmitQuizError(null)
+                setShowSubmitPracticeModal(false)
+              }}
+              onConfirmSubmit={() => void handleFinishQuiz()}
+            />
           </div>
         )}
 

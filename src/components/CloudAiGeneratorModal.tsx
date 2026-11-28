@@ -96,7 +96,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
     email?: string
     folderName: string
     configured: boolean
-  }>({ connected: false, folderName: 'TNPSC Study Hub Materials', configured: true })
+  }>({ connected: false, folderName: 'TNPSC Aspirant Orbit Materials', configured: true })
 
   // Inline Google Drive Resumable Upload States (Option 4)
   const [driveUploadFile, setDriveUploadFile] = useState<File | null>(null)
@@ -246,7 +246,7 @@ export const CloudAiGeneratorModal: React.FC<CloudAiGeneratorModalProps> = ({
         setDriveConnectionStatus({
           connected: Boolean(data.data?.connected),
           email: data.data?.email,
-          folderName: data.data?.folderName || 'TNPSC Study Hub Materials',
+          folderName: data.data?.folderName || 'TNPSC Aspirant Orbit Materials',
           configured: Boolean(data.data?.configured),
         })
       }

@@ -1,6 +1,6 @@
 /**
  * Claude AI Specific Prompt Definitions
- * TNPSC Study Hub - Claude AI Prompts
+ * TNPSC Aspirant Orbit - Claude AI Prompts
  * 
  * Configured specifically for Anthropic Claude (Claude 3.5 Sonnet / Claude 3.7 Sonnet).
  * Enforces TNPSC item writing standards, 12 question types, and standardized JSON output schema.

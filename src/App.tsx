@@ -3,25 +3,51 @@ import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-route
 import ScrollToTop from './components/ScrollToTop'
 import Navbar from './components/Navbar'
 import SiteFooter from './components/SiteFooter'
+import OrbitBrandLogo from './components/OrbitBrandLogo'
 import { initSpatialTilt } from './utils/spatialTilt'
 import StudentDashboardLayout from './layouts/StudentDashboardLayout'
 import StudentPreviewBanner from './components/StudentPreviewBanner'
 import { StudentAuthProvider } from './context/StudentAuthContext'
+import { StudyMaterialsLanguageShell } from './components/study/StudyMaterialsLanguageShell'
 import { CookieConsentProvider } from './context/CookieConsentContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { AppUpdateBanner } from './components/AppUpdateBanner'
+import {
+  canAutoReloadForUpdate,
+  markAssetChunkError,
+  performCleanUpdateReload,
+} from './utils/appVersion'
 import RequireStudentAuthRoute from './components/RequireStudentAuthRoute'
 import RequireAdminAuthRoute from './components/RequireAdminAuthRoute'
 import { startVisitorTracking, trackPageView } from './utils/visitorTracker'
 import './App.css'
 
-// Resilient lazy loader that retries once on transient chunk fetch errors (e.g. after Vercel deploy)
+// Resilient lazy loader that recovers automatically from stale deployment chunk mismatches
+// (e.g. after a new Vercel deploy) with loop-safe cache-busting recovery.
 function lazyWithRetry<T extends ComponentType<any>>(importer: () => Promise<{ default: T }>) {
   return lazy(async () => {
     try {
       return await importer()
-    } catch {
-      await new Promise((r) => setTimeout(r, 400))
-      return await importer()
+    } catch (firstErr) {
+      await new Promise((r) => setTimeout(r, 350))
+      try {
+        return await importer()
+      } catch (secondErr: any) {
+        const msg = String(secondErr?.message || firstErr || '').toLowerCase()
+        const isChunkFailure =
+          msg.includes('failed to fetch dynamically imported module') ||
+          msg.includes('importing a module script failed') ||
+          msg.includes('loading chunk') ||
+          msg.includes('mime type')
+        if (typeof window !== 'undefined' && isChunkFailure) {
+          markAssetChunkError()
+          if (canAutoReloadForUpdate()) {
+            void performCleanUpdateReload(false)
+            return await new Promise<{ default: T }>(() => {})
+          }
+        }
+        throw secondErr
+      }
     }
   })
 }
@@ -78,17 +104,20 @@ function RouteLoadingFallback() {
       role="status"
       aria-live="polite"
     >
-      <div
-        style={{
-          width: '36px',
-          height: '36px',
-          borderRadius: '50%',
-          border: '3px solid rgba(255, 215, 0, 0.18)',
-          borderTopColor: '#ffd700',
-          animation: 'spin 0.75s linear infinite',
-        }}
-      />
-      <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Loading module...</span>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.55rem' }}>
+        <OrbitBrandLogo size={34} />
+        <div
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            border: '3px solid rgba(255, 215, 0, 0.18)',
+            borderTopColor: '#ffd700',
+            animation: 'spin 0.75s linear infinite',
+          }}
+        />
+      </div>
+      <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#cbd5e1' }}>Loading TNPSC Aspirant Orbit...</span>
     </div>
   )
 }
@@ -228,41 +257,48 @@ function AppShell() {
             <Route path="/dashboard/terms-of-service" element={<HelpSupportPage section="terms-of-service" />} />
             <Route path="/dashboard/privacy-policy" element={<PrivacyPolicyPage />} />
             <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
-            <Route path="/materials" element={<StudyMaterials />} />
-            <Route path="/school-materials" element={<SchoolMaterials />} />
 
-            {/* Protected Study Materials, MCQ Practice, Mock Tests & Previous Papers Routes */}
+            {/* Study Materials Section — Scoped Global English <-> Tamil Translator */}
+            <Route element={<StudyMaterialsLanguageShell />}>
+              <Route path="/materials" element={<StudyMaterials />} />
+              <Route path="/school-materials" element={<SchoolMaterials />} />
+
+              <Route element={<RequireStudentAuthRoute />}>
+                <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
+                <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
+                <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
+                <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+                <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
+                <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
+                <Route path="/materials/group1/aptitude/unit/:unitId" element={<Group1UnitDetail />} />
+                <Route path="/materials/group1/aptitude/unit/:unitId/lessons" element={<Group1Lessons />} />
+                <Route path="/materials/group1/aptitude/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
+                <Route path="/materials/group1/aptitude/class/:classId" element={<Group1UnitClass />} />
+                <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
+                <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+                <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+                <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+                <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
+                <Route path="/materials/group2a/:subjectId" element={<Group2SubjectDetail />} />
+                <Route path="/materials/group2a/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
+                <Route path="/materials/group2a/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
+                <Route path="/materials/group2a/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
+                <Route path="/materials/group2a/:subjectId/class/:classId" element={<Group2UnitClass />} />
+                <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
+                <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
+                <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
+                <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
+                <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
+                <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+                <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+                <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
+                <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
+                <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
+              </Route>
+            </Route>
+
+            {/* Protected Previous Papers & Mark List Routes (outside Study Materials translator scope) */}
             <Route element={<RequireStudentAuthRoute />}>
-              <Route path="/materials/group1/general-studies" element={<Group1GeneralStudies />} />
-              <Route path="/materials/group1/unit/:unitId" element={<Group1UnitDetail />} />
-              <Route path="/materials/group1/unit/:unitId/lessons" element={<Group1Lessons />} />
-              <Route path="/materials/group1/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
-              <Route path="/materials/group1/class/:classId" element={<Group1UnitClass />} />
-              <Route path="/materials/group1/aptitude" element={<Group1Aptitude />} />
-              <Route path="/materials/group1/aptitude/unit/:unitId" element={<Group1UnitDetail />} />
-              <Route path="/materials/group1/aptitude/unit/:unitId/lessons" element={<Group1Lessons />} />
-              <Route path="/materials/group1/aptitude/unit/:unitId/class/:classId" element={<Group1UnitClass />} />
-              <Route path="/materials/group1/aptitude/class/:classId" element={<Group1UnitClass />} />
-              <Route path="/materials/group2/:subjectId" element={<Group2SubjectDetail />} />
-              <Route path="/materials/group2/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
-              <Route path="/materials/group2/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
-              <Route path="/materials/group2/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
-              <Route path="/materials/group2/:subjectId/class/:classId" element={<Group2UnitClass />} />
-              <Route path="/materials/group2a/:subjectId" element={<Group2SubjectDetail />} />
-              <Route path="/materials/group2a/:subjectId/unit/:unitId" element={<Group2UnitDetail />} />
-              <Route path="/materials/group2a/:subjectId/unit/:unitId/lessons" element={<Group2Lessons />} />
-              <Route path="/materials/group2a/:subjectId/unit/:unitId/class/:classId" element={<Group2UnitClass />} />
-              <Route path="/materials/group2a/:subjectId/class/:classId" element={<Group2UnitClass />} />
-              <Route path="/materials/group4/:subjectId" element={<Group4SubjectDetail />} />
-              <Route path="/materials/group4/:subjectId/unit/:unitId" element={<Group4UnitDetail />} />
-              <Route path="/materials/group4/:subjectId/unit/:unitId/lessons" element={<Group4Lessons />} />
-              <Route path="/materials/group4/:subjectId/unit/:unitId/class/:classId" element={<Group4UnitClass />} />
-              <Route path="/materials/group4/:subjectId/class/:classId" element={<Group4UnitClass />} />
-              <Route path="/study-notes/:group/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-              <Route path="/study-notes/:group/subject/:subjectId/unit/:unitId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-              <Route path="/study-notes/:group/subject/:subjectId/class/:classId/lesson/:lessonTitle" element={<StudyNotesPage />} />
-              <Route path="/study-materials/practice/:group/:subjectId/:classId/:unitId/:lessonId" element={<StudyMaterialsPractice />} />
-              <Route path="/study-materials/practice" element={<StudyMaterialsPractice />} />
               <Route path="/previous-papers/test/:paperId" element={<PreviousPaperTest />} />
               <Route path="/mark-list" element={<MarkList />} />
             </Route>
@@ -287,6 +323,7 @@ function AppShell() {
       </main>
 
       {!isPrivateOwnerRoute && !isDashboardRoute && <SiteFooter />}
+      <AppUpdateBanner />
     </div>
   )
 }
