@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import pool from '../db';
 import {
+  assertAdminJwtSecretReady,
   generateAdminToken,
   revokeAdminToken,
   requireAdminAuth,
@@ -139,125 +140,169 @@ function getEnvAdmins(): EnvAdmin[] {
  * Environment variables take precedence to ensure production login works reliably
  */
 router.post(['/login', '/owner-login', '/', '/api/admin/login', '/admin/login'], adminLoginLimiter, async (req: Request, res: Response) => {
-  const { username, password } = req.body;
+  let authStage: 'input_validation' | 'jwt_config_check' | 'env_auth' | 'db_auth' | 'jwt_signing' = 'input_validation';
+  try {
+    const { username, password } = req.body || {};
 
-  if (!username || !password) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'Username and password are required',
-    });
-  }
-
-  const cleanUser = String(username).trim();
-  const cleanPass = String(password).trim();
-
-  // 1. Check in Environment variables (.env) first for immediate production reliability
-  const envAdmins = getEnvAdmins();
-  const envMatch = envAdmins.find(
-    (a) => a.username.toLowerCase() === cleanUser.toLowerCase() && timingSafeStringEqual(a.password, cleanPass)
-  );
-
-  if (envMatch) {
-    if (!isAuthorizedAdminRole(envMatch.role)) {
-      return res.status(403).json({
+    if (!username || !password) {
+      return res.status(400).json({
         status: 'error',
-        message: 'Forbidden: This account is not authorized for owner admin access.',
+        message: 'Username and password are required',
       });
     }
-    // Non-blocking background table initialization
-    ensureAdminUsersTable().catch((err) => {
-      console.error('Background admin table initialization notice:', err.message);
-    });
 
-    const normalizedRole = String(envMatch.role).trim().toLowerCase();
-    const token = generateAdminToken(envMatch.username, envMatch.name, normalizedRole);
-    return res.status(200).json({
-      status: 'success',
-      message: 'Admin authenticated successfully',
-      token,
-      user: {
-        username: envMatch.username,
-        name: envMatch.name,
-        role: normalizedRole,
-      },
-    });
-  }
+    const cleanUser = String(username).trim();
+    const cleanPass = String(password).trim();
 
-  // If the username matches an environment admin account but the password did not match,
-  // check if it was overridden in DB; if DB is unreachable, return 401 Invalid credentials immediately.
-  const isKnownEnvUsername = envAdmins.some(
-    (a) => a.username.toLowerCase() === cleanUser.toLowerCase()
-  );
+    // Fail fast with a safe 503 configuration response if ADMIN_JWT_SECRET is missing/invalid/duplicate in production
+    // (prevents uncaught FATAL_SECURITY_CONFIG rejections from crashing serverless invocations into HTTP 502)
+    authStage = 'jwt_config_check';
+    assertAdminJwtSecretReady();
 
-  try {
-    await ensureAdminUsersTable();
-  } catch (err: any) {
-    console.error('Admin table initialization error:', err.message);
-  }
-
-  // 2. Check in Database admin_users table
-  let dbError: string | null = null;
-  try {
-    const dbRes = await pool.query(
-      'SELECT id, username, password, name, role FROM admin_users WHERE LOWER(username) = LOWER($1)',
-      [cleanUser]
+    // 1. Check in Environment variables (.env) first for immediate production reliability
+    authStage = 'env_auth';
+    const envAdmins = getEnvAdmins();
+    const envMatch = envAdmins.find(
+      (a) => a.username.toLowerCase() === cleanUser.toLowerCase() && timingSafeStringEqual(a.password, cleanPass)
     );
 
-    if (dbRes.rows.length > 0) {
-      const user = dbRes.rows[0];
-      const allowedRoles = new Set(['super_admin', 'admin', 'owner']);
-      if (!allowedRoles.has(String(user.role || '').trim().toLowerCase())) {
+    if (envMatch) {
+      if (!isAuthorizedAdminRole(envMatch.role)) {
         return res.status(403).json({
           status: 'error',
           message: 'Forbidden: This account is not authorized for owner admin access.',
         });
       }
-      const passCheck = verifyAdminPassword(cleanPass, String(user.password || ''));
-      if (passCheck.valid) {
-        if (passCheck.needsRehash) {
-          pool
-            .query('UPDATE admin_users SET password = $1 WHERE id = $2', [hashAdminPassword(cleanPass), user.id])
-            .catch((e: any) => console.warn('[AdminAuth] Failed to upgrade legacy admin password hash:', e?.message));
+      // Non-blocking background table initialization
+      ensureAdminUsersTable().catch((err) => {
+        console.error('Background admin table initialization notice:', err.message);
+      });
+
+      authStage = 'jwt_signing';
+      const normalizedRole = String(envMatch.role).trim().toLowerCase();
+      const token = generateAdminToken(envMatch.username, envMatch.name, normalizedRole);
+      return res.status(200).json({
+        status: 'success',
+        message: 'Admin authenticated successfully',
+        token,
+        user: {
+          username: envMatch.username,
+          name: envMatch.name,
+          role: normalizedRole,
+        },
+      });
+    }
+
+    // If the username matches an environment admin account but the password did not match,
+    // check if it was overridden in DB; if DB is unreachable, return 401 Invalid credentials immediately.
+    const isKnownEnvUsername = envAdmins.some(
+      (a) => a.username.toLowerCase() === cleanUser.toLowerCase()
+    );
+
+    authStage = 'db_auth';
+    try {
+      await ensureAdminUsersTable();
+    } catch (err: any) {
+      console.error('Admin table initialization error:', err.message);
+    }
+
+    // 2. Check in Database admin_users table
+    let dbError: string | null = null;
+    let matchedDbUser: { id: number; username: string; name: string; role: string } | null = null;
+    try {
+      const dbRes = await pool.query(
+        'SELECT id, username, password, name, role FROM admin_users WHERE LOWER(username) = LOWER($1)',
+        [cleanUser]
+      );
+
+      if (dbRes.rows.length > 0) {
+        const user = dbRes.rows[0];
+        if (!isAuthorizedAdminRole(user.role)) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Forbidden: This account is not authorized for owner admin access.',
+          });
         }
-        const token = generateAdminToken(user.username, user.name, user.role);
-        return res.status(200).json({
-          status: 'success',
-          message: 'Admin authenticated successfully',
-          token,
-          user: {
+        const passCheck = verifyAdminPassword(cleanPass, String(user.password || ''));
+        if (passCheck.valid) {
+          if (passCheck.needsRehash) {
+            pool
+              .query('UPDATE admin_users SET password = $1 WHERE id = $2', [hashAdminPassword(cleanPass), user.id])
+              .catch((e: any) => console.warn('[AdminAuth] Failed to upgrade legacy admin password hash:', e?.message));
+          }
+          matchedDbUser = {
             id: user.id,
             username: user.username,
             name: user.name,
-            role: user.role,
-          },
-        });
+            role: String(user.role).trim().toLowerCase(),
+          };
+        } else {
+          console.warn('Admin login failed: password mismatch for existing DB user');
+          return res.status(401).json({
+            status: 'error',
+            message: 'Invalid admin username or password',
+          });
+        }
       } else {
-        console.warn('Admin login failed: password mismatch for existing DB user');
-        return res.status(401).json({
-          status: 'error',
-          message: 'Invalid admin username or password',
-        });
+        console.warn('Admin login failed: user not found in DB and not in env');
       }
-    } else {
-      console.warn('Admin login failed: user not found in DB and not in env');
+    } catch (err: any) {
+      dbError = err.message || 'Database connection error';
+      console.error('Error querying admin_users table during login:', err.message);
     }
-  } catch (err: any) {
-    dbError = err.message || 'Database connection error';
-    console.error('Error querying admin_users table during login:', err.message);
-  }
 
-  if (dbError && !isKnownEnvUsername) {
-    return res.status(503).json({
+    if (matchedDbUser) {
+      authStage = 'jwt_signing';
+      const token = generateAdminToken(matchedDbUser.username, matchedDbUser.name, matchedDbUser.role);
+      return res.status(200).json({
+        status: 'success',
+        message: 'Admin authenticated successfully',
+        token,
+        user: {
+          id: matchedDbUser.id,
+          username: matchedDbUser.username,
+          name: matchedDbUser.name,
+          role: matchedDbUser.role,
+        },
+      });
+    }
+
+    if (dbError && !isKnownEnvUsername) {
+      return res.status(503).json({
+        status: 'error',
+        message: 'Database service is currently unavailable. Please verify the database connection configuration.',
+        dbStatus: 'disconnected',
+      });
+    }
+
+    return res.status(401).json({
       status: 'error',
-      message: 'Database service is currently unavailable. Please verify the database connection configuration.',
-      dbStatus: 'disconnected',
+      message: 'Invalid admin username or password',
+    });
+  } catch (err: any) {
+    const rawMsg = String(err?.message || '');
+    if (rawMsg.includes('FATAL_SECURITY_CONFIG') || authStage === 'jwt_config_check' || authStage === 'jwt_signing') {
+      console.error('[Admin Auth Config Error]:', {
+        stage: authStage,
+        code: 'BACKEND_AUTH_CONFIG_ERROR',
+      });
+      return res.status(503).json({
+        status: 'error',
+        code: 'BACKEND_AUTH_CONFIG_ERROR',
+        message: 'Server authentication configuration error. Please contact the administrator to verify ADMIN_JWT_SECRET and STUDENT_JWT_SECRET.',
+      });
+    }
+
+    console.error('[Admin Auth Unexpected Error]:', {
+      stage: authStage,
+      code: err?.code || null,
+    });
+    return res.status(500).json({
+      status: 'error',
+      code: 'ADMIN_LOGIN_INTERNAL_ERROR',
+      message: 'An unexpected server error occurred during admin authentication. Please try again.',
     });
   }
-
-  return res.status(401).json({
-    status: 'error',
-    message: 'Invalid admin username or password',
-  });
 });
 
 /**

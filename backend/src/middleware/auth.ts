@@ -121,7 +121,12 @@ function getJwtSecret(): string {
   const configured = (process.env.ADMIN_JWT_SECRET || '').trim();
   const studentConfigured = (process.env.STUDENT_JWT_SECRET || '').trim();
   if (isProdEnv) {
-    if (!configured || configured.length < MIN_PROD_SECRET_LENGTH || configured === LEGACY_DEV_ADMIN_SECRET) {
+    if (
+      !configured ||
+      configured.length < MIN_PROD_SECRET_LENGTH ||
+      configured === LEGACY_DEV_ADMIN_SECRET ||
+      configured === LEGACY_DEV_STUDENT_SECRET
+    ) {
       throw new Error('FATAL_SECURITY_CONFIG: ADMIN_JWT_SECRET must be explicitly configured (>= 32 chars) in production.');
     }
     if (studentConfigured && configured === studentConfigured) {
@@ -130,6 +135,10 @@ function getJwtSecret(): string {
     return configured;
   }
   return configured || LEGACY_DEV_ADMIN_SECRET;
+}
+
+export function assertAdminJwtSecretReady(): void {
+  getJwtSecret();
 }
 
 export interface AdminPayload {
@@ -325,7 +334,12 @@ function getStudentJwtSecret(): string {
   const configured = (process.env.STUDENT_JWT_SECRET || '').trim();
   const adminConfigured = (process.env.ADMIN_JWT_SECRET || '').trim();
   if (isProdEnv) {
-    if (!configured || configured.length < MIN_PROD_SECRET_LENGTH || configured === LEGACY_DEV_STUDENT_SECRET) {
+    if (
+      !configured ||
+      configured.length < MIN_PROD_SECRET_LENGTH ||
+      configured === LEGACY_DEV_STUDENT_SECRET ||
+      configured === LEGACY_DEV_ADMIN_SECRET
+    ) {
       throw new Error('FATAL_SECURITY_CONFIG: STUDENT_JWT_SECRET must be explicitly configured (>= 32 chars) in production.');
     }
     if (adminConfigured && configured === adminConfigured) {
