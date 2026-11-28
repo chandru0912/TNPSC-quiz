@@ -10,6 +10,7 @@ import {
 import { StudyManagementService } from '../services/studyManagementService';
 import { CACHE_MIDDLEWARE_PRESETS } from '../middleware/cacheMiddleware';
 import {
+  assertStudentJwtSecretReady,
   generateStudentToken,
   verifyStudentToken,
   requireStudentAuth,
@@ -363,8 +364,9 @@ export async function upsertVerifiedGoogleStudent(
              google_id, auth_provider, avatar_url, email_verified, onboarding_completed, role, token_version, last_login_at
            )
            VALUES ($1, $2, NULL, NULL, 'group4', $3, 'google', $4, true, false, 'student', 1, CURRENT_TIMESTAMP)
-           RETURNING id, full_name, email, mobile, target_group, district, google_id, auth_provider,
-                     avatar_url, email_verified, onboarding_completed, role, token_version, created_at, updated_at`,
+           RETURNING id, full_name, username, email, mobile, target_group, district, google_id, auth_provider,
+                     avatar_url, email_verified, onboarding_completed, subscription_tier, subscription_status,
+                     role, token_version, created_at, updated_at`,
           [googleProfile.fullName, googleProfile.email, googleProfile.googleId, googleProfile.avatarUrl]
         );
         studentRow = inserted.rows[0];
@@ -423,6 +425,7 @@ export async function upsertVerifiedGoogleStudent(
 // 0B. GOOGLE OAUTH LOGIN / AUTO-REGISTER / ACCOUNT LINKING
 // ====================================================
 router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Response) => {
+  let authStage: 'origin_check' | 'jwt_config_check' | 'google_verification' | 'student_db_upsert' | 'session_creation' | 'jwt_signing' = 'origin_check';
   try {
     if (!isTrustedAuthOrigin(req)) {
       return res.status(403).json({
@@ -431,6 +434,10 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
         message: 'Cross-origin authentication request rejected.',
       });
     }
+
+    // Fail fast if STUDENT_JWT_SECRET is missing/invalid in production BEFORE mutating DB or revoking sessions
+    authStage = 'jwt_config_check';
+    assertStudentJwtSecretReady();
 
     // Never trust email, name, or emailVerified from req.body — ONLY accept Google OAuth code or ID token
     const { code, idToken, redirectUri, codeVerifier } = req.body || {};
@@ -443,19 +450,24 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
       });
     }
 
+    authStage = 'google_verification';
     const googleProfile = await verifyGoogleCredentialOrCode({ code, idToken, redirectUri, codeVerifier });
+
+    authStage = 'student_db_upsert';
     const { studentRow, isNewUser, linkedAccount } = await upsertVerifiedGoogleStudent(
       googleProfile,
       req.headers['user-agent'] || null
     );
 
     // Enforce Single Active Device Session (atomically revokes any previous device)
+    authStage = 'session_creation';
     const activeSession = await createSingleActiveStudentSession({
       studentId: Number(studentRow.id),
       authMethod: 'google',
       userAgent: req.headers['user-agent'] || null,
     });
 
+    authStage = 'jwt_signing';
     const token = generateStudentToken(
       studentRow.id,
       studentRow.email,
@@ -494,16 +506,49 @@ router.post('/auth/google', studentLoginLimiter, async (req: Request, res: Respo
     });
   } catch (err: any) {
     if (err instanceof GoogleAuthError) {
+      console.warn('[Student Google Auth Rejected]:', {
+        stage: authStage,
+        code: err.code,
+        statusCode: err.statusCode,
+      });
       return res.status(err.statusCode).json({
         status: 'error',
         code: err.code,
         message: err.message,
       });
     }
-    console.error('[Student Google Auth Error]:', err);
+
+    const rawMsg = String(err?.message || '');
+    if (rawMsg.includes('FATAL_SECURITY_CONFIG') || authStage === 'jwt_config_check' || authStage === 'jwt_signing') {
+      console.error('[Student Google Auth Config Error]:', {
+        stage: authStage,
+        code: 'BACKEND_AUTH_CONFIG_ERROR',
+      });
+      return res.status(503).json({
+        status: 'error',
+        code: 'BACKEND_AUTH_CONFIG_ERROR',
+        message: 'Backend authentication configuration error. Please contact the administrator.',
+      });
+    }
+
+    console.error('[Student Google Auth Server Error]:', {
+      stage: authStage,
+      pgCode: err?.code || null,
+      constraint: err?.constraint || null,
+    });
+
+    if (authStage === 'student_db_upsert') {
+      return res.status(500).json({
+        status: 'error',
+        code: 'STUDENT_ACCOUNT_ERROR',
+        message: 'Unable to load or create student account. Please try again.',
+      });
+    }
+
     return res.status(500).json({
       status: 'error',
-      message: GOOGLE_AUTH_REQUIRED_MESSAGE,
+      code: 'STUDENT_SESSION_FAILED',
+      message: 'Student session creation failed. Please try again.',
     });
   }
 });

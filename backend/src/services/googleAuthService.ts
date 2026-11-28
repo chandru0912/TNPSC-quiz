@@ -4,7 +4,6 @@ import { executeWithCircuitBreaker } from './circuitBreakerService';
 export const GOOGLE_AUTH_REQUIRED_MESSAGE = 'Please sign in using a verified Google Account.';
 
 const VALID_GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
-const TRUSTED_GMAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
 
 export interface VerifiedGoogleProfile {
   googleId: string;
@@ -99,24 +98,21 @@ export function validateGoogleOAuthStartupConfig(): { valid: boolean; warnings: 
 }
 
 /**
- * Strictly validates a decoded Google ID Token payload.
+ * Strictly validates a decoded Google ID Token payload (after cryptographic verification via OAuth2Client.verifyIdToken).
  * Enforces:
  * - Valid Google subject ID (sub)
  * - Exact audience match (aud === GOOGLE_CLIENT_ID)
  * - Valid Google issuer (accounts.google.com or https://accounts.google.com)
  * - Non-expired token (exp > now)
- * - email_verified === true
- * - Email ownership assurance:
- *   - Gmail accounts (gmail.com / googlemail.com) verified by Google
- *   - Google Workspace accounts ONLY when verified AND hosted-domain claim (hd) matches email domain
- *   - Rejects untrusted external email identities without verified Google Workspace hd claim
+ * - Valid email address
+ * - email_verified === true (authoritative claim from Google's signed ID token)
  */
 export function validateVerifiedGoogleTokenPayload(
   payload: TokenPayload | undefined | null,
   expectedClientId: string
 ): VerifiedGoogleProfile {
   if (!payload || typeof payload !== 'object') {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_ID_TOKEN');
+    throw new GoogleAuthError('Invalid or expired Google credential. Please sign in again.', 401, 'INVALID_ID_TOKEN');
   }
 
   const sub = typeof payload.sub === 'string' ? payload.sub.trim() : '';
@@ -126,41 +122,49 @@ export function validateVerifiedGoogleTokenPayload(
   const exp = typeof payload.exp === 'number' ? payload.exp : 0;
 
   if (!sub) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_SUBJECT');
+    throw new GoogleAuthError('Google account verification failed: missing Google user identifier.', 401, 'INVALID_SUBJECT');
   }
 
   if (!VALID_GOOGLE_ISSUERS.has(iss)) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_ISSUER');
+    throw new GoogleAuthError('Google account verification failed: unrecognized token issuer.', 401, 'INVALID_ISSUER');
   }
 
   const audMatches = Array.isArray(aud)
     ? aud.includes(expectedClientId)
     : typeof aud === 'string' && aud === expectedClientId;
   if (!expectedClientId || !audMatches) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_AUDIENCE');
+    console.error('[Google OAuth Audience Mismatch]:', {
+      hasExpectedClientId: Boolean(expectedClientId),
+      audMatches: false,
+    });
+    throw new GoogleAuthError(
+      'OAuth Client ID mismatch. Please contact the administrator to verify Google OAuth configuration.',
+      401,
+      'INVALID_AUDIENCE'
+    );
   }
 
   if (!exp || exp * 1000 <= Date.now()) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'TOKEN_EXPIRED');
+    throw new GoogleAuthError(
+      'Invalid or expired Google credential. Please click Continue with Google again.',
+      401,
+      'TOKEN_EXPIRED'
+    );
   }
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 401, 'INVALID_EMAIL');
+    throw new GoogleAuthError('Google account verification failed: invalid email address.', 401, 'INVALID_EMAIL');
   }
 
   if (payload.email_verified !== true) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 403, 'EMAIL_NOT_VERIFIED');
+    throw new GoogleAuthError(
+      'Your Google Account email is not verified. Please verify your email with Google and try again.',
+      403,
+      'EMAIL_NOT_VERIFIED'
+    );
   }
 
-  const domain = email.split('@')[1] || '';
   const hostedDomain = typeof payload.hd === 'string' && payload.hd.trim() ? payload.hd.trim().toLowerCase() : null;
-
-  const isVerifiedGmail = TRUSTED_GMAIL_DOMAINS.has(domain);
-  const isVerifiedWorkspace = Boolean(hostedDomain && hostedDomain === domain);
-
-  if (!isVerifiedGmail && !isVerifiedWorkspace) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 403, 'UNTRUSTED_EMAIL_DOMAIN');
-  }
 
   return {
     googleId: sub,
@@ -301,21 +305,21 @@ export async function verifyGoogleCredentialOrCode(params: {
       }
       if (googleErrorCode === 'invalid_grant' || combined.includes('invalid_grant') || combined.includes('malformed auth code')) {
         throw new GoogleAuthError(
-          GOOGLE_AUTH_REQUIRED_MESSAGE,
+          'Invalid or expired Google credential. Please click Continue with Google again.',
           401,
           'INVALID_GRANT'
         );
       }
       if (googleErrorCode === 'invalid_request') {
         throw new GoogleAuthError(
-          GOOGLE_AUTH_REQUIRED_MESSAGE,
+          'Google authentication request was invalid. Please refresh the page and try again.',
           400,
           'INVALID_OAUTH_REQUEST'
         );
       }
       throw new GoogleAuthError(
-        GOOGLE_AUTH_REQUIRED_MESSAGE,
-        401,
+        'Backend authentication service could not verify your Google sign-in right now. Please try again.',
+        502,
         'TOKEN_EXCHANGE_FAILED'
       );
     }
@@ -326,7 +330,11 @@ export async function verifyGoogleCredentialOrCode(params: {
   }
 
   if (!rawIdToken) {
-    throw new GoogleAuthError(GOOGLE_AUTH_REQUIRED_MESSAGE, 400, 'MISSING_GOOGLE_CREDENTIAL');
+    throw new GoogleAuthError(
+      'Google did not return a verifiable ID token. Please try signing in again.',
+      400,
+      'MISSING_GOOGLE_CREDENTIAL'
+    );
   }
 
   let payload: TokenPayload | undefined;
@@ -337,9 +345,31 @@ export async function verifyGoogleCredentialOrCode(params: {
     });
     payload = ticket.getPayload();
   } catch (err: any) {
-    console.error('[Google verifyIdToken Error]:', err?.message || err);
+    const msg = String(err?.message || '').toLowerCase();
+    console.error('[Google verifyIdToken Error]:', {
+      stage: 'verify_id_token',
+      reason: msg.includes('used too late') || msg.includes('expired')
+        ? 'token_expired'
+        : msg.includes('wrong recipient') || msg.includes('audience')
+          ? 'audience_mismatch'
+          : 'verification_failed',
+    });
+    if (msg.includes('used too late') || msg.includes('expired')) {
+      throw new GoogleAuthError(
+        'Invalid or expired Google credential. Please click Continue with Google again.',
+        401,
+        'TOKEN_EXPIRED'
+      );
+    }
+    if (msg.includes('wrong recipient') || msg.includes('audience')) {
+      throw new GoogleAuthError(
+        'OAuth Client ID mismatch. Please contact the administrator to verify Google OAuth configuration.',
+        401,
+        'INVALID_AUDIENCE'
+      );
+    }
     throw new GoogleAuthError(
-      GOOGLE_AUTH_REQUIRED_MESSAGE,
+      'Google account verification failed. Please sign in again.',
       401,
       'INVALID_ID_TOKEN'
     );

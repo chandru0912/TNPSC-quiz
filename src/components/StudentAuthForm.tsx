@@ -14,8 +14,6 @@ import { resolvePostLoginRedirect, clearPostLoginRedirect } from '../utils/authR
 
 export type AuthMode = 'login' | 'register'
 
-const GOOGLE_REQUIRED_ERROR = 'Please sign in using a verified Google Account.'
-
 interface StudentAuthFormProps {
   initialMode?: AuthMode
   variant?: 'page' | 'modal'
@@ -116,14 +114,18 @@ export const StudentAuthForm = ({
 
       if (res.ok && json.status === 'success' && json.token && json.student) {
         completeStudentSession(json.token, json.student)
+      } else if (json.message) {
+        setServerError(json.message)
+      } else if (res.status >= 500 || res.status === 0) {
+        setServerError('Backend authentication service unavailable. Please try again.')
       } else {
-        setServerError(json.message || GOOGLE_REQUIRED_ERROR)
+        setServerError('Google account verification failed. Please try again.')
       }
     } catch (err: any) {
       if (err instanceof GoogleSignInCancelledError) {
         setInfoBanner(err.message)
       } else {
-        setServerError(err?.message || GOOGLE_REQUIRED_ERROR)
+        setServerError(err?.message || 'Google account verification failed. Please try again.')
       }
     } finally {
       setIsGoogleLoading(false)

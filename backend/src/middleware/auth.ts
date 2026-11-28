@@ -349,6 +349,10 @@ export interface StudentPayload {
   isPreview?: boolean;
 }
 
+export function assertStudentJwtSecretReady(): void {
+  getStudentJwtSecret();
+}
+
 export function generateStudentToken(
   studentId: number,
   email: string,
