@@ -16,7 +16,7 @@ import { isTrustedOrigin } from './config/trustedOrigins';
 import { normalizePayloadUnicode } from './utils/tamilUnicode';
 import questionsRouter from './routes/questions';
 import authRouter, { getConfiguredAdminCount } from './routes/auth';
-import { generateAdminToken, verifyAdminToken, requireStudentAuth, StudentAuthenticatedRequest } from './middleware/auth';
+import { assertStudentJwtSecretReady, generateAdminToken, verifyAdminToken, requireStudentAuth, StudentAuthenticatedRequest } from './middleware/auth';
 import notesRouter from './routes/notes';
 import textbooksRouter from './routes/textbooks';
 import studyMaterialQuestionsRouter from './routes/studyMaterialQuestions';
@@ -444,8 +444,16 @@ app.get('/api/health', async (_req: Request, res: Response) => {
     jwtOk = false;
   }
 
+  let studentJwtOk = false;
+  try {
+    assertStudentJwtSecretReady();
+    studentJwtOk = true;
+  } catch {
+    studentJwtOk = false;
+  }
+
   const configuredAdmins = getConfiguredAdminCount();
-  const authReady = jwtOk && configuredAdmins > 0;
+  const authReady = jwtOk && studentJwtOk && configuredAdmins > 0;
 
   res.status(200).json({
     status: 'ok',
@@ -463,6 +471,7 @@ app.get('/api/health', async (_req: Request, res: Response) => {
       authentication: {
         status: authReady ? 'ready' : 'degraded',
         jwtVerification: jwtOk ? 'ok' : 'error',
+        studentJwtVerification: studentJwtOk ? 'ok' : 'error',
         configuredAdminAccounts: configuredAdmins,
       },
       rateLimiting: getRateLimiterHealth(),
